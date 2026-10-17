@@ -298,6 +298,29 @@ export declare function createActivationResourceLoader(sdk: PiSdk, options: {
     extensionPaths?: string[];
 }): PiResourceLoaderLike;
 /**
+ * Lease admission for the native session's reconstructed tools (SPECIALISTS-4294).
+ *
+ * Phase-1 permission-guard carve-out: every bash call in a guard-loaded session runs
+ * through the guard's `tool_call` wrapper first (block or bwrap-sandbox), and the
+ * sandbox boundary (`--ro-bind / /`, private /tmp+/run, no net) cannot mutate the
+ * workspace — so the lease, which exists to stop unleased MUTATION, has nothing to
+ * refuse. Without the guard loaded, bash stays a lease refusal like any other
+ * mutator (and granted-but-unloaded bash is already a dispatch refusal).
+ *
+ * `guardLoaded` (the guard IS in this session's extension set) is the load-bearing
+ * fact, not the tier that caused it: the curated set admits the guard for READ_ONLY
+ * only, so writers never satisfy it and their admission is unchanged, as is every
+ * non-bash tool.
+ */
+export declare function createNativeToolAdmission(input: {
+    guardLoaded: boolean;
+    workspace: WorkspaceIdentity;
+    activationId: string;
+}): (toolName: string) => {
+    allow: boolean;
+    reason?: string;
+};
+/**
  * Sink for activation forensics.
  *
  * Native activations write the SAME `observability.db` as the legacy runner — there is no
@@ -774,6 +797,12 @@ export declare class NativeActivationHost {
      */
     resume(activationId: string, prompt: string): Promise<ActivationHandle>;
 }
+/**
+ * Default title for an issue auto-created from an inline contract (XT-108): the
+ * Specialist that will do the work, then the contract's first PROBLEM line.
+ * An explicit `title` always wins; this is only the default. Exported for tests.
+ */
+export declare function defaultInlineTitle(specialist: string, contract: string): string;
 /** Render a structured work contract back to the 7-section layout the prompt surface reads. */
 export declare function contractToMarkdown(contract: unknown): string;
 /**

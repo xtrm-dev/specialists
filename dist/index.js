@@ -57321,6 +57321,9 @@ function openSubstrateDb(dbPath) {
   }
   throw new Error(`work-item store: cannot open the sqlite store at ${dbPath} ` + `(bun:sqlite and node:sqlite both unavailable: ${failures.join("; ")})`);
 }
+function defaultKindForOutputType(outputType) {
+  return outputType === "research" || outputType === "analysis" ? "research" : "task";
+}
 function attemptOfEntry(entry) {
   return entry.executionContext?.specialist?.attemptId ?? entry.attemptId ?? null;
 }
@@ -57333,6 +57336,7 @@ function createWorkItemBoundary(ports) {
       issueId: v.issue.id,
       revision: v.issue.currentRevision,
       contractHash: v.issue.currentContractHash,
+      lifecycleState: v.issue.lifecycleState,
       title: v.issue.title,
       contract: v.contract,
       readinessState: v.readinessState,
@@ -57440,15 +57444,20 @@ function createWorkItemBoundary(ports) {
         validation: splitLines(sections.get("VALIDATION")).map((check) => ({ check })),
         output: splitLines(sections.get("OUTPUT")).map((artifact) => ({ artifact }))
       };
+      const kind = opts.kind ?? "task";
+      if (!INLINE_ISSUE_KINDS.includes(kind)) {
+        throw new Error(`inline contract kind '${kind}' is not creatable \u2014 an ad hoc dispatch creates one of ${INLINE_ISSUE_KINDS.join(", ")}, never epic`);
+      }
       const holder = opts.holder ?? "adapter::specialists";
       const { projectId } = issues.resolveProject({ gitRoot: process.cwd() });
       const issue = issues.createIssue({
         projectId,
         title: opts.title ?? (firstLine ?? "Specialist dispatch contract").slice(0, 72),
-        kind: "task",
+        kind,
         contract: contractObj,
         scrutiny,
-        authoredBy: holder
+        authoredBy: holder,
+        ...opts.parentId ? { parentId: opts.parentId } : {}
       });
       const { claim } = issues.claimReady(issue.id, holder, { outcome: "ready", policy: "default", attestedBy: holder }, { activationId: opts.activationId });
       return { ref: issues.resolveRef(issue.id).humanRef, issueId: issue.id, claimId: claim.id };
@@ -57464,7 +57473,18 @@ function createWorkItemBoundary(ports) {
       return released !== null;
     },
     journal(ref, kind, opts = {}) {
-      store.addJournal(ref, kind, opts);
+      if (opts.summary !== undefined && journalService) {
+        const issueId = issues.resolveRef(ref).id;
+        journalService.appendEntry(issueId, {
+          kind,
+          semantic: { summary: opts.summary },
+          ...opts.participantId ? { participantId: opts.participantId } : {},
+          ...opts.activationId ? { activationId: opts.activationId } : {}
+        });
+        return;
+      }
+      const { summary: _evidence, ...storeOpts } = opts;
+      store.addJournal(ref, kind, storeOpts);
     },
     ...journalService || provenanceService ? {
       appendResult(ref, input) {
@@ -57639,13 +57659,15 @@ async function openWorkItemBoundary(opts = {}) {
     provenanceService: provenance
   });
 }
-var require5, SUBSTRATE_PACKAGE = "@jaggerxtrm/substrate", SATISFIED_BLOCKER_STATES, SUBSTRATE_REQUIRED_MODULES;
+var require5, SUBSTRATE_PACKAGE = "@jaggerxtrm/substrate", SATISFIED_BLOCKER_STATES, INLINE_PARENT_TERMINAL_STATES, INLINE_ISSUE_KINDS, SUBSTRATE_REQUIRED_MODULES;
 var init_workitem_store = __esm(() => {
   init_session();
   init_contract_sections();
   init_authority_store();
   require5 = createRequire6(import.meta.url);
   SATISFIED_BLOCKER_STATES = new Set(["done", "archived"]);
+  INLINE_PARENT_TERMINAL_STATES = new Set(["done", "cancelled", "archived"]);
+  INLINE_ISSUE_KINDS = ["task", "bug", "research", "decision", "followup"];
   SUBSTRATE_REQUIRED_MODULES = [
     "src/store/migrations/runner.ts",
     "src/service/issue-service.ts",
@@ -89404,11 +89426,33 @@ function createSpecialistDispatchTool(getHost, getPusher) {
         const beadIdAlias = (input.bead_id ?? "").trim();
         const issueRefValue = issueRef || beadIdAlias;
         const contract = (input.contract ?? "").trim();
+        const parentRef = (input.parent_ref ?? "").trim();
+        const kind = (input.kind ?? "").trim();
         const supplied = [
           ...issueRef ? ["issue_ref"] : [],
           ...beadIdAlias ? ["bead_id"] : [],
           ...contract ? ["contract"] : []
         ];
+        if (parentRef && issueRefValue) {
+          return renderRejection({
+            reason: "parent_ref and issue_ref/bead_id were both provided \u2014 parent_ref only " + "parents an issue created from an inline contract; provide exactly one of " + "issue_ref, bead_id or contract"
+          }, build());
+        }
+        if (kind && issueRefValue) {
+          return renderRejection({
+            reason: "kind and issue_ref/bead_id were both provided \u2014 kind only flavours an " + "issue created from an inline contract"
+          }, build());
+        }
+        if (parentRef && !contract) {
+          return renderRejection({
+            reason: "parent_ref was provided without contract \u2014 it only parents the issue " + "created from an inline contract"
+          }, build());
+        }
+        if (kind && !contract) {
+          return renderRejection({
+            reason: "kind was provided without contract \u2014 it only flavours the issue " + "created from an inline contract"
+          }, build());
+        }
         if (supplied.length > 1) {
           return renderRejection({
             reason: `both ${supplied.join(" and ")} were provided \u2014 provide exactly one of ` + "issue_ref, bead_id or contract; silently preferring one would dispatch against a " + "contract the coordinator did not mean"
@@ -89435,8 +89479,14 @@ function createSpecialistDispatchTool(getHost, getPusher) {
         const handle = await getHost().start({
           specialist: input.specialist,
           ...issueRefValue ? { issueRef: issueRefValue } : {},
-          ...inline ? { contract: inline, ...input.title ? { title: input.title } : {} } : {},
-          ...epicContextDepth !== undefined && !inline ? { epicContextDepth } : {},
+          ...inline ? {
+            contract: inline,
+            ...input.title ? { title: input.title } : {},
+            ...parentRef ? { parentRef } : {},
+            ...kind ? { kind } : {}
+          } : {},
+          ...epicContextDepth !== undefined && (!inline || parentRef) ? { epicContextDepth } : {},
+          surface: "mcp",
           ...input.model_override ? { modelOverride: input.model_override } : {},
           ...input.thinking_override ? { thinkingOverride: input.thinking_override } : {},
           requestedByParticipantId: input.requested_by ?? "adapter::specialists-mcp",
@@ -89607,8 +89657,10 @@ var init_activation_tool = __esm(() => {
     issue_ref: stringType().optional().describe("The Substrate Issue locator for this activation's task contract \u2014 XTRM-227, XTRM-184.2.3, " + "iss_..., a historical locator, or an imported Beads alias. It does NOT address the live bd " + "board: Substrate and bd are separate stores, so a bd id is refused as unresolvable. The " + "issue must be READY: a COMPLETE 7-section contract (PROBLEM, SUCCESS, SCOPE, NON_GOALS, " + "CONSTRAINTS, VALIDATION, OUTPUT) plus a SCRUTINY level, which must be exactly one of LOW, " + "MEDIUM, HIGH or CRITICAL. That is EIGHT required parts, not seven; SCRUTINY is the one most " + "often left out. Write each section as a heading: either the section name on its own line " + "with its body beneath, or `PROBLEM: the body` on one line. Both forms are accepted. " + "A draft or incomplete issue is refused before any model turn. No free-form task text is " + "accepted: a task that needs more definition belongs in the Issue (see the planning skill). " + "Supply EXACTLY ONE of issue_ref, bead_id or contract."),
     bead_id: stringType().optional().describe("Permanent compatibility alias for issue_ref \u2014 the same Substrate Issue locator, resolved at " + "this tool boundary to the same value. Both names are accepted forever and behave identically; " + "prefer issue_ref in new calls. Do not read the name as an address on the live bd board: it " + "carries a Substrate Issue locator, and a bd id is refused as unresolvable. Supply EXACTLY ONE " + "of issue_ref, bead_id or contract."),
     contract: stringType().optional().describe("An INLINE task contract, used instead of issue_ref: the SAME readiness gate " + "runs first, then a Substrate Issue is created from it and dispatched. The contract " + "must contain all seven sections \u2014 PROBLEM, SUCCESS, SCOPE, NON_GOALS, " + "CONSTRAINTS, VALIDATION, OUTPUT \u2014 plus a SCRUTINY level, which must be exactly " + "one of LOW, MEDIUM, HIGH or CRITICAL. Note that this is EIGHT required parts, " + "not seven; SCRUTINY is the one most often left out. Write each section as a " + "heading: either the section name on its own line with its body beneath, or " + "`PROBLEM: the body` on one line. Both forms are accepted. " + "A contract missing any section is refused and nothing is created."),
-    title: stringType().optional().describe("Optional title for the Substrate Issue created from `contract` (default: derived from PROBLEM). " + "Ignored when issue_ref (or its bead_id alias) is given."),
-    epic_context_depth: numberType().optional().describe("Walk Substrate parent_child edges UP this many hops (1 = immediate parent Issue, " + "2 = parent + grandparent) and render each ancestor contract into the turn-1 prompt as an '" + "'## Epic lineage' section. Must be 1 or 2; anything else is refused. Omit for " + "a single-Issue dispatch with no lineage. Dropped for Issues auto-created from an " + "inline contract (a fresh Issue has no parent)."),
+    title: stringType().optional().describe("Optional title for the Substrate Issue created from `contract` (default: `<specialist>: <first PROBLEM line>`). " + "An explicit title wins; blank counts as absent. Ignored when issue_ref (or its bead_id alias) is given."),
+    parent_ref: stringType().optional().describe("Parent locator for the Substrate Issue created from `contract` \u2014 any locator the shared " + "work boundary resolves. ONLY with contract: refused alongside issue_ref/bead_id, and " + "refused without contract. The parent must exist and not be terminal " + "(done/cancelled/archived; deferred is accepted); the check runs BEFORE anything is " + "created, and creation-with-parent is one atomic step."),
+    kind: enumType(["task", "bug", "research", "decision", "followup"]).optional().describe("Substrate kind for the Substrate Issue created from `contract` (never epic \u2014 refused " + "structurally). ONLY with contract: refused alongside issue_ref/bead_id, and refused " + "without contract. Absent means the default from the Specialist output_type " + "(research/analysis give research, everything else gives task)."),
+    epic_context_depth: numberType().optional().describe("Walk Substrate parent_child edges UP this many hops (1 = immediate parent Issue, " + "2 = parent + grandparent) and render each ancestor contract into the turn-1 prompt as an '" + "'## Epic lineage' section. Must be 1 or 2; anything else is refused. Omit for " + "a single-Issue dispatch with no lineage. Honoured for an inline contract ONLY when " + "parent_ref is given (a parentless auto-created Issue has no lineage); still dropped " + "for parentless inline creates."),
     model_override: stringType().optional().describe("Override the configured model for THIS activation only. An unavailable model is refused before the session is created, never silently replaced."),
     thinking_override: enumType(THINKING_LEVELS).optional().describe("Override the definition thinking_level for THIS activation only. Absent means the definition level. An unknown value is refused before the session is created."),
     requested_by: stringType().optional().describe("ParticipantId of the requesting coordinator. Defaults to the MCP gateway participant."),
@@ -92240,6 +92292,13 @@ function createActivationResourceLoader(sdk, options) {
     noThemes: true
   });
 }
+function createNativeToolAdmission(input) {
+  return (toolName) => {
+    if (toolName.trim().toLowerCase() === "bash" && input.guardLoaded)
+      return { allow: true };
+    return admitToolCall({ toolName, workspace: input.workspace, activationId: input.activationId });
+  };
+}
 function withFleetWake(base, wake) {
   const emit = base.emit.bind(base);
   return {
@@ -92362,6 +92421,28 @@ class NativeActivationHost {
       });
     }
     const inlineContract = (request.contract ?? "").trim();
+    const parentRef = (request.parentRef ?? "").trim();
+    const kindParam = (request.kind ?? "").trim();
+    if (request.issueRef && parentRef) {
+      return reject("parent_ref_and_ref", {
+        note: "parent_ref and issueRef were both provided \u2014 parent_ref only parents an issue created from an inline contract; provide exactly one of issueRef, contract"
+      });
+    }
+    if (request.issueRef && kindParam) {
+      return reject("kind_and_ref", {
+        note: "kind and issueRef were both provided \u2014 kind only flavours an issue created from an inline contract"
+      });
+    }
+    if (parentRef && !inlineContract) {
+      return reject("parent_ref_without_contract", {
+        note: "parent_ref was provided without contract \u2014 it only parents the issue created from an inline contract"
+      });
+    }
+    if (kindParam && !inlineContract) {
+      return reject("kind_without_contract", {
+        note: "kind was provided without contract \u2014 it only flavours the issue created from an inline contract"
+      });
+    }
     let autoCreatedRef;
     if (inlineContract) {
       if (request.issueRef) {
@@ -92369,9 +92450,37 @@ class NativeActivationHost {
           note: "contract and issueRef were both provided \u2014 provide exactly one"
         });
       }
+      if (kindParam && !INLINE_ISSUE_KINDS.includes(kindParam)) {
+        return reject("unknown_kind", {
+          note: `kind '${kindParam}' is not creatable \u2014 an ad hoc dispatch creates one of ${INLINE_ISSUE_KINDS.join(", ")}, never epic`
+        });
+      }
+      let parentId;
+      if (parentRef) {
+        let parentView;
+        try {
+          parentView = workItems.view(parentRef);
+        } catch (error) {
+          return reject("parent_unresolvable", {
+            note: `parent_ref '${parentRef}' resolves to no Substrate issue: ${error instanceof Error ? error.message : String(error)}`
+          });
+        }
+        if (INLINE_PARENT_TERMINAL_STATES.has(parentView.lifecycleState)) {
+          return reject("parent_terminal", {
+            note: `parent_ref '${parentRef}' is lifecycle '${parentView.lifecycleState}' \u2014 a child cannot be parented under a done/cancelled/archived issue`
+          });
+        }
+        parentId = parentView.issueId;
+      }
+      const explicitTitle = (request.title ?? "").trim() || undefined;
+      const titleSource = explicitTitle ? "explicit" : "default";
+      const title = explicitTitle ?? defaultInlineTitle(request.specialist, inlineContract);
+      const kind = kindParam || defaultKindForOutputType(execution.output_type);
       try {
         const created = workItems.inlineCreate(inlineContract, {
-          ...request.title ? { title: request.title } : {},
+          title,
+          kind,
+          ...parentId ? { parentId } : {},
           holder: participantId,
           activationId
         });
@@ -92382,6 +92491,13 @@ class NativeActivationHost {
             workItems.releaseInlineClaim?.(created.ref, { activationId });
           } catch {}
         };
+        try {
+          workItems.journal(created.ref, "note", {
+            participantId,
+            activationId,
+            summary: "ad-hoc dispatch evidence: " + `surface=${request.surface ?? "unknown"} ` + `specialist=${request.specialist} ` + `requested_by=${request.requestedByParticipantId} ` + `parent_ref=${parentRef || "none"} ` + `issue_kind=${kind} title=${titleSource}`
+          });
+        } catch {}
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.startsWith("inline contract is not a usable task contract")) {
@@ -92724,7 +92840,11 @@ class NativeActivationHost {
     const guardedTools = createGuardedTools(sdk, {
       toolNames: effectiveToolContract.toolsList,
       cwd: workspace.worktreePath,
-      admit: (toolName) => admitToolCall({ toolName, workspace, activationId })
+      admit: createNativeToolAdmission({
+        guardLoaded: curatedExtensions.all.includes(getPermissionGuardExtensionPath() ?? ""),
+        workspace,
+        activationId
+      })
     });
     if (guardedTools.unguardable.length > 0) {
       emit("lease_denied", {
@@ -92739,6 +92859,10 @@ class NativeActivationHost {
       return reject("permission_guard_unavailable", {
         note: "the resolved contract grants READ_ONLY bash but the permission guard is not in the " + "loaded extension set; refusing rather than running unsandboxed"
       });
+    }
+    const nativeGuard = resolvePermissionGuardForSpawn(tier);
+    if (nativeGuard && curatedExtensions.all.includes(nativeGuard.path)) {
+      Object.assign(process.env, nativeGuard.tierEnv);
     }
     const resourceLoader = createActivationResourceLoader(sdk, {
       cwd: workspace.worktreePath,
@@ -93716,6 +93840,12 @@ function workItemAsRecord(view) {
 }
 function workAncestorAsRecord(ancestor) {
   return { id: ancestor.ref, title: ancestor.title, ...ancestor.description ? { description: ancestor.description } : {} };
+}
+function defaultInlineTitle(specialist, contract) {
+  const problem = extractSections(contract ?? "").get("PROBLEM") ?? "";
+  const firstLine = problem.split(`
+`).map((s) => s.trim()).find(Boolean) ?? "";
+  return `${specialist}: ${firstLine}`.trim();
 }
 function purposeExcerptFromContract(contract) {
   if (contract !== null && typeof contract === "object") {

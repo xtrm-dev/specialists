@@ -61,8 +61,11 @@ import {
 import { getPermissionGuardExtensionPath, resolvePermissionGuardForSpawn } from '../pi/permission-guard-extension.js';
 import { formatResolvedToolContract, withDiscoveredExtensionTools, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 import { resolveModelChain } from '../specialist/model-chain.js';
-import { extractPurposeExcerpt } from './contract-sections.js';
+import { extractPurposeExcerpt, extractSections } from './contract-sections.js';
 import {
+  defaultKindForOutputType,
+  INLINE_ISSUE_KINDS,
+  INLINE_PARENT_TERMINAL_STATES,
   openWorkItemBoundary,
   resolveWorkItemDbPath,
   type EpicAncestor,
@@ -1225,6 +1228,31 @@ export class NativeActivationHost {
     // exists and claims WITH this activation's id, satisfying the strict
     // claim-activation equality the bind path enforces.
     const inlineContract = (request.contract ?? '').trim();
+    const parentRef = (request.parentRef ?? '').trim();
+    const kindParam = (request.kind ?? '').trim();
+    // parent_ref and kind only parent/flavour an issue created from an inline
+    // contract — alongside an existing issue they are conflicting, without a
+    // contract there is nothing to parent or flavour.
+    if (request.issueRef && parentRef) {
+      return reject('parent_ref_and_ref', {
+        note: 'parent_ref and issueRef were both provided — parent_ref only parents an issue created from an inline contract; provide exactly one of issueRef, contract',
+      });
+    }
+    if (request.issueRef && kindParam) {
+      return reject('kind_and_ref', {
+        note: 'kind and issueRef were both provided — kind only flavours an issue created from an inline contract',
+      });
+    }
+    if (parentRef && !inlineContract) {
+      return reject('parent_ref_without_contract', {
+        note: 'parent_ref was provided without contract — it only parents the issue created from an inline contract',
+      });
+    }
+    if (kindParam && !inlineContract) {
+      return reject('kind_without_contract', {
+        note: 'kind was provided without contract — it only flavours the issue created from an inline contract',
+      });
+    }
     let autoCreatedRef: string | undefined;
     if (inlineContract) {
       if (request.issueRef) {
@@ -1232,9 +1260,45 @@ export class NativeActivationHost {
           note: 'contract and issueRef were both provided — provide exactly one',
         });
       }
+      // Adapters exclude epic structurally (zod enum); this authoritative guard
+      // holds for programmatic callers that bypass them.
+      if (kindParam && !(INLINE_ISSUE_KINDS as readonly string[]).includes(kindParam)) {
+        return reject('unknown_kind', {
+          note: `kind '${kindParam}' is not creatable — an ad hoc dispatch creates one of ${INLINE_ISSUE_KINDS.join(', ')}, never epic`,
+        });
+      }
+      // Parent existence + openness BEFORE anything is created: a refused parent
+      // leaves the board unchanged. Readiness is NEVER consulted — openness is
+      // lifecycle only (`deferred` is accepted), dispatchability is not the test.
+      let parentId: string | undefined;
+      if (parentRef) {
+        let parentView: WorkItemView;
+        try {
+          parentView = workItems.view(parentRef);
+        } catch (error) {
+          return reject('parent_unresolvable', {
+            note: `parent_ref '${parentRef}' resolves to no Substrate issue: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
+        if (INLINE_PARENT_TERMINAL_STATES.has(parentView.lifecycleState)) {
+          return reject('parent_terminal', {
+            note: `parent_ref '${parentRef}' is lifecycle '${parentView.lifecycleState}' — a child cannot be parented under a done/cancelled/archived issue`,
+          });
+        }
+        // Machine id: the producer's existence check keys on it, not on the locator.
+        parentId = parentView.issueId;
+      }
+      // A blank explicit title is absence, not a title: Substrate rejects it, and
+      // the default (which always names the specialist) is the honest fallback.
+      const explicitTitle = (request.title ?? '').trim() || undefined;
+      const titleSource = explicitTitle ? 'explicit' : 'default';
+      const title = explicitTitle ?? defaultInlineTitle(request.specialist, inlineContract);
+      const kind = kindParam || defaultKindForOutputType(execution.output_type);
       try {
         const created = workItems.inlineCreate(inlineContract, {
-          ...(request.title ? { title: request.title } : {}),
+          title,
+          kind,
+          ...(parentId ? { parentId } : {}),
           holder: participantId,
           activationId,
         });
@@ -1249,6 +1313,25 @@ export class NativeActivationHost {
             // Cleanup must not change the outcome: the refusal is still a refusal.
           }
         };
+        // Creation evidence (XT-108): surface, specialist, requester, parent, kind
+        // and title-source, written at creation so the auto-created issue records that
+        // it came from an ad hoc dispatch. Degrades like the rest of the boundary —
+        // a surface inert without Substrate never fails the dispatch.
+        try {
+          workItems.journal(created.ref, 'note', {
+            participantId,
+            activationId,
+            summary:
+              'ad-hoc dispatch evidence: '
+              + `surface=${request.surface ?? 'unknown'} `
+              + `specialist=${request.specialist} `
+              + `requested_by=${request.requestedByParticipantId} `
+              + `parent_ref=${parentRef || 'none'} `
+              + `issue_kind=${kind} title=${titleSource}`,
+          });
+        } catch {
+          // Evidence is best-effort; the dispatch stands without it.
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.startsWith('inline contract is not a usable task contract')) {
@@ -3313,6 +3396,17 @@ function workItemAsRecord(view: WorkItemView): { id: string; title: string; desc
 
 function workAncestorAsRecord(ancestor: EpicAncestor): { id: string; title: string; description?: string } {
   return { id: ancestor.ref, title: ancestor.title, ...(ancestor.description ? { description: ancestor.description } : {}) };
+}
+
+/**
+ * Default title for an issue auto-created from an inline contract (XT-108): the
+ * Specialist that will do the work, then the contract's first PROBLEM line.
+ * An explicit `title` always wins; this is only the default. Exported for tests.
+ */
+export function defaultInlineTitle(specialist: string, contract: string): string {
+  const problem = extractSections(contract ?? '').get('PROBLEM') ?? '';
+  const firstLine = problem.split('\n').map((s) => s.trim()).find(Boolean) ?? '';
+  return `${specialist}: ${firstLine}`.trim();
 }
 
 /** Capture the same one-line purpose projection as the legacy path, without markdown bullets. */

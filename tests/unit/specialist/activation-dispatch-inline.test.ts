@@ -145,9 +145,15 @@ describe('specialist_dispatch schema — contract/title/epic_context_depth mirro
     expect(shape.contract.isOptional()).toBe(true);
     expect(shape.title.isOptional()).toBe(true);
     expect(shape.epic_context_depth.isOptional()).toBe(true);
+    expect(shape.parent_ref.isOptional()).toBe(true);
+    expect(shape.kind.isOptional()).toBe(true);
     expect(String(shape.contract.description)).toContain('SAME readiness gate');
-    expect(String(shape.title.description)).toContain('derived from PROBLEM');
+    expect(String(shape.title.description)).toContain('<specialist>: <first PROBLEM line>');
     expect(String(shape.epic_context_depth.description)).toContain('## Epic lineage');
+    // Lineage for an inline contract needs a parent to walk from.
+    expect(String(shape.epic_context_depth.description)).toContain('ONLY when');
+    expect(String(shape.parent_ref.description)).toContain('ONLY with contract');
+    expect(String(shape.kind.description)).toContain('never epic');
     // issue_ref is primary and bead_id is its permanent alias (SPECIALISTS-20); both say
     // that exactly one of the three may be supplied.
     expect(String(shape.issue_ref.description)).toContain('Supply EXACTLY ONE of issue_ref, bead_id or contract');
@@ -271,6 +277,76 @@ describe('specialist_dispatch inline path — one gate, create only after it pas
     expect(events.slice(admitted).map(e => `${e.name}=${e.beadId}`)).toEqual(events.slice(admitted).map(e => `${e.name}=bd-inline-1`));
   });
 
+  it('refuses parent_ref alongside an existing issue ref', async () => {
+    const { host, sessionsCreated, workItems } = hostWith();
+    const tool = createSpecialistDispatchTool(() => host);
+
+    const out = await tool.execute({
+      specialist: 'researcher', bead_id: 'ISSUE-1', parent_ref: 'THEME-1',
+    }) as Record<string, unknown>;
+
+    expect(out.status).toBe('rejected');
+    expect(String(out.reason)).toContain('parent_ref and issue_ref/bead_id were both provided');
+    expect(workItems.inlineCreate).not.toHaveBeenCalled();
+    expect(sessionsCreated.count).toBe(0);
+  });
+
+  it('refuses kind alongside an existing issue ref', async () => {
+    const { host, sessionsCreated, workItems } = hostWith();
+    const tool = createSpecialistDispatchTool(() => host);
+
+    const out = await tool.execute({
+      specialist: 'researcher', bead_id: 'ISSUE-1', kind: 'bug',
+    }) as Record<string, unknown>;
+
+    expect(out.status).toBe('rejected');
+    expect(String(out.reason)).toContain('kind and issue_ref/bead_id were both provided');
+    expect(workItems.inlineCreate).not.toHaveBeenCalled();
+    expect(sessionsCreated.count).toBe(0);
+  });
+
+  it('refuses parent_ref and kind without a contract', async () => {
+    const { host, sessionsCreated, workItems } = hostWith();
+    const tool = createSpecialistDispatchTool(() => host);
+
+    const noContract = await tool.execute({
+      specialist: 'researcher', parent_ref: 'THEME-1',
+    }) as Record<string, unknown>;
+    expect(noContract.status).toBe('rejected');
+    expect(String(noContract.reason)).toContain('parent_ref was provided without contract');
+
+    const kindAlone = await tool.execute({
+      specialist: 'researcher', kind: 'bug',
+    }) as Record<string, unknown>;
+    expect(kindAlone.status).toBe('rejected');
+    expect(String(kindAlone.reason)).toContain('kind was provided without contract');
+    expect(workItems.inlineCreate).not.toHaveBeenCalled();
+    expect(sessionsCreated.count).toBe(0);
+  });
+
+  it('refuses kind=epic structurally at the schema', () => {
+    // Never epic: excluded from the zod enum so no caller can smuggle it past the adapter.
+    expect(() => specialistDispatchSchema.parse({
+      specialist: 'researcher', contract: INLINE_CONTRACT, kind: 'epic',
+    })).toThrow();
+    expect(specialistDispatchSchema.parse({
+      specialist: 'researcher', contract: INLINE_CONTRACT, kind: 'bug',
+    }).kind).toBe('bug');
+  });
+
+  it('defaults the title to <specialist>: <first PROBLEM line> (XT-108)', async () => {
+    const { host, workItems } = hostWith();
+    const tool = createSpecialistDispatchTool(() => host);
+
+    const out = await tool.execute({
+      specialist: 'researcher', contract: INLINE_CONTRACT,
+    }) as Record<string, unknown>;
+
+    expect(out.status).toBe('dispatched');
+    const [, createdOpts] = (workItems.inlineCreate as unknown as { mock: { calls: unknown[][] } }).mock.calls[0];
+    expect(createdOpts).toMatchObject({ title: 'researcher: Prove the inline-dispatch path.' });
+  });
+
   it('passes title through to issue creation', async () => {
     const { host, workItems } = hostWith();
     const tool = createSpecialistDispatchTool(() => host);
@@ -295,6 +371,19 @@ describe('specialist_dispatch inline path — one gate, create only after it pas
 
     expect(out.status).toBe('dispatched');
     expect(startSpy.mock.calls[0][0]).not.toHaveProperty('epicContextDepth');
+  });
+
+  it('passes epic_context_depth through when parent_ref parents the inline issue (XT-108)', async () => {
+    const { host } = hostWith();
+    const startSpy = vi.spyOn(host, 'start');
+    const tool = createSpecialistDispatchTool(() => host);
+
+    const out = await tool.execute({
+      specialist: 'researcher', contract: INLINE_CONTRACT, parent_ref: 'THEME-1', epic_context_depth: 2,
+    }) as Record<string, unknown>;
+
+    expect(out.status).toBe('dispatched');
+    expect(startSpy.mock.calls[0][0]).toMatchObject({ parentRef: 'THEME-1', epicContextDepth: 2 });
   });
 
   it('passes epic_context_depth through on bead_id dispatch, omitted by default', async () => {

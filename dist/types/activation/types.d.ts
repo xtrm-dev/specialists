@@ -100,6 +100,30 @@ export interface ActivationRequest {
     contract?: string;
     /** Optional title for the issue created from `contract`. Ignored with issueRef. */
     title?: string;
+    /**
+     * Parent locator for the issue created from `contract` (XT-108): any locator the
+     * shared WorkItemStore resolves. Only meaningful WITH `contract` — refused as
+     * conflicting alongside `issueRef`, and refused without `contract` (nothing to parent).
+     * The parent must exist and its lifecycleState must not be terminal
+     * (done/cancelled/archived; deferred is accepted). Checked BEFORE any issue is
+     * created; creation-with-parent is one atomic step (Substrate checks existence +
+     * writes the link), never a later setParent.
+     */
+    parentRef?: string;
+    /**
+     * Substrate kind for the issue created from `contract`
+     * (task|bug|research|decision|followup — never epic). Only meaningful WITH
+     * `contract`; refused alongside `issueRef`. Absent means the default derived from
+     * the Specialist's `output_type` (research/analysis → research, else task).
+     */
+    kind?: string;
+    /**
+     * Dispatch surface that admitted this request ('mcp' for the Claude plugin tool,
+     * 'pi-extension' for the Pi native tool). INTERNAL, never a public tool param:
+     * adapters set it so the creation-evidence journal note can record where an ad hoc
+     * dispatch came from. Absent for programmatic callers.
+     */
+    surface?: string;
 }
 /** Presentation state. Not necessarily durable workflow state. */
 export type ActivationState = 'starting' | 'running' | 'waiting' | 'needs_reply' | 'escalated' | 'settled' | 'stopping' | 'stopped' | 'failed' | 'uncertain';

@@ -368,8 +368,21 @@ export const specialistDispatchSchema = z.object({
     'A contract missing any section is refused and nothing is created.',
   ),
   title: z.string().optional().describe(
-    'Optional title for the Substrate Issue created from `contract` (default: derived from PROBLEM). ' +
-    'Ignored when issue_ref (or its bead_id alias) is given.',
+    'Optional title for the Substrate Issue created from `contract` (default: `<specialist>: <first PROBLEM line>`). ' +
+    'An explicit title wins; blank counts as absent. Ignored when issue_ref (or its bead_id alias) is given.',
+  ),
+  parent_ref: z.string().optional().describe(
+    'Parent locator for the Substrate Issue created from `contract` — any locator the shared ' +
+    'work boundary resolves. ONLY with contract: refused alongside issue_ref/bead_id, and ' +
+    'refused without contract. The parent must exist and not be terminal ' +
+    '(done/cancelled/archived; deferred is accepted); the check runs BEFORE anything is ' +
+    'created, and creation-with-parent is one atomic step.',
+  ),
+  kind: z.enum(['task', 'bug', 'research', 'decision', 'followup']).optional().describe(
+    'Substrate kind for the Substrate Issue created from `contract` (never epic — refused ' +
+    'structurally). ONLY with contract: refused alongside issue_ref/bead_id, and refused ' +
+    'without contract. Absent means the default from the Specialist output_type ' +
+    '(research/analysis give research, everything else gives task).',
   ),
   // Deliberately a bare number, not min(1).max(2): out-of-range values must reach
   // execute and come back as a structured refusal via the shared renderer, not as a
@@ -378,8 +391,9 @@ export const specialistDispatchSchema = z.object({
     'Walk Substrate parent_child edges UP this many hops (1 = immediate parent Issue, ' +
     "2 = parent + grandparent) and render each ancestor contract into the turn-1 prompt as an '" +
     "'## Epic lineage' section. Must be 1 or 2; anything else is refused. Omit for " +
-    'a single-Issue dispatch with no lineage. Dropped for Issues auto-created from an ' +
-    'inline contract (a fresh Issue has no parent).',
+    'a single-Issue dispatch with no lineage. Honoured for an inline contract ONLY when ' +
+    'parent_ref is given (a parentless auto-created Issue has no lineage); still dropped ' +
+    'for parentless inline creates.',
   ),
   model_override: z.string().optional().describe(
     'Override the configured model for THIS activation only. An unavailable model is refused before the session is created, never silently replaced.',
@@ -448,11 +462,38 @@ export function createSpecialistDispatchTool(
         const beadIdAlias = (input.bead_id ?? '').trim();
         const issueRefValue = issueRef || beadIdAlias;
         const contract = (input.contract ?? '').trim();
+        const parentRef = (input.parent_ref ?? '').trim();
+        const kind = (input.kind ?? '').trim();
         const supplied = [
           ...(issueRef ? ['issue_ref'] : []),
           ...(beadIdAlias ? ['bead_id'] : []),
           ...(contract ? ['contract'] : []),
         ];
+        if (parentRef && issueRefValue) {
+          return renderRejection({
+            reason: 'parent_ref and issue_ref/bead_id were both provided — parent_ref only ' +
+              'parents an issue created from an inline contract; provide exactly one of ' +
+              'issue_ref, bead_id or contract',
+          }, build());
+        }
+        if (kind && issueRefValue) {
+          return renderRejection({
+            reason: 'kind and issue_ref/bead_id were both provided — kind only flavours an ' +
+              'issue created from an inline contract',
+          }, build());
+        }
+        if (parentRef && !contract) {
+          return renderRejection({
+            reason: 'parent_ref was provided without contract — it only parents the issue ' +
+              'created from an inline contract',
+          }, build());
+        }
+        if (kind && !contract) {
+          return renderRejection({
+            reason: 'kind was provided without contract — it only flavours the issue ' +
+              'created from an inline contract',
+          }, build());
+        }
         if (supplied.length > 1) {
           // Never silently resolved by preference order: a coordinator that passed two is
           // ambiguous, and guessing which one it meant is how work runs against the wrong contract.
@@ -469,7 +510,8 @@ export function createSpecialistDispatchTool(
               '2 also includes the grand-epic',
           }, build());
         }
-        // Inline-contract dispatch creates a fresh issue with no parent: no lineage.
+        // Lineage needs a parent: an inline contract honours epic_context_depth only
+        // when parent_ref parents the created issue under an existing ancestor chain.
         const inline = !issueRefValue && contract ? contract : undefined;
         if (!issueRefValue && !inline) {
           return renderRejection({
@@ -493,9 +535,17 @@ export function createSpecialistDispatchTool(
           // The host owns creation: validate → create → attest → claim through
           // the work boundary, claiming WITH this activation's id.
           ...(inline
-            ? { contract: inline, ...(input.title ? { title: input.title } : {}) }
+            ? {
+              contract: inline,
+              ...(input.title ? { title: input.title } : {}),
+              ...(parentRef ? { parentRef } : {}),
+              ...(kind ? { kind } : {}),
+            }
             : {}),
-          ...(epicContextDepth !== undefined && !inline ? { epicContextDepth } : {}),
+          // Honoured for an existing issue always; for an inline contract only when
+          // parent_ref gives the created issue a lineage to walk.
+          ...(epicContextDepth !== undefined && (!inline || parentRef) ? { epicContextDepth } : {}),
+          surface: 'mcp',
           ...(input.model_override ? { modelOverride: input.model_override } : {}),
           ...(input.thinking_override ? { thinkingOverride: input.thinking_override } : {}),
           requestedByParticipantId: input.requested_by ?? 'adapter::specialists-mcp',

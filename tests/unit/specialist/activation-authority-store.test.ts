@@ -327,7 +327,7 @@ function fakeWorkItems(): SpecialistWorkItemBoundary {
     output: [{ artifact: 'A finding.' }],
   };
   return {
-    view(ref: string): WorkItemView { return { ref, issueId: `iss_${ref}`, revision: 1, contractHash: 'hash', title: 'Investigate the thing', contract, readinessState: 'claimed', dispatchable: true, reasons: [] }; },
+    view(ref: string): WorkItemView { return { ref, issueId: `iss_${ref}`, revision: 1, contractHash: 'hash', lifecycleState: 'open', title: 'Investigate the thing', contract, readinessState: 'claimed', dispatchable: true, reasons: [] }; },
     epicAncestors: () => [],
     completedBlockers: () => [],
     check: () => ({ issueId: 'iss_ISSUE-1', revision: 1, contractHash: 'hash', report: {} as never }),

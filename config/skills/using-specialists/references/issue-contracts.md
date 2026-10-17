@@ -12,3 +12,24 @@ A draft or title-only Issue is not dispatchable. Repair it through `/planning`: 
 Do not use `--prompt` or another private message to supply requirements that belong in the
 durable contract. A fresh worker should be able to execute from the Issue (pinned revision) plus referenced
 artifacts and current repository state.
+
+## Ad hoc dispatch under a parent (XT-108)
+
+An inline contract can name a parent: pass `parent_ref` (any locator the work boundary
+resolves) alongside `contract`, and the created Issue becomes a child of that parent in
+one atomic step. The parent must exist and must not be terminal
+(done/cancelled/archived; deferred is accepted) — the check runs BEFORE anything is
+created, so a bad parent refuses with the board unchanged. `parent_ref` is refused
+with `issue_ref` (an existing Issue already has its place) and without `contract`
+(nothing to parent).
+
+- `kind` (task|bug|research|decision|followup, never epic) flavours the created Issue.
+  Absent it defaults from the Specialist's `output_type` (research/analysis give
+  research, everything else gives task). Refused with `issue_ref`, like `parent_ref`.
+- The default title names the worker and the work (`<specialist>: <first PROBLEM line>`);
+  an explicit `title` still wins.
+- `epic_context_depth` works for an inline contract ONLY when `parent_ref` is given
+  (a parentless auto-created Issue has no lineage); still dropped otherwise.
+- Creation writes a journal `note` recording surface, specialist, requested_by,
+  parent_ref, kind and title-source — the auto-created Issue carries its ad hoc
+  provenance instead of sitting parentless and unexplained.
