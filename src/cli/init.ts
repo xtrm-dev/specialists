@@ -728,6 +728,79 @@ export interface InitOptions {
   global?: boolean;
 }
 
+// Older `sp init` runs symlinked .claude/hooks/specialists-*.mjs into .xtrm/hooks/specialists/ and
+// wired them in .claude/settings.json. Init no longer does either (the Substrate plugin owns
+// SessionStart), so remove what those runs left behind. Only specialists-*.mjs symlinks that
+// dangle or point into the managed dir are touched, and only settings hooks whose file is gone.
+const LEGACY_HOOK_NAME = /^specialists-[\w.-]+\.mjs$/;
+const LEGACY_HOOK_COMMAND = /\.claude\/hooks\/(specialists-[\w.-]+\.mjs)/;
+
+function cleanupLegacyHookLinks(cwd: string): string[] {
+  const hooksDir = join(cwd, '.claude', 'hooks');
+  if (!existsSync(hooksDir)) return [];
+  const managedDir = join(cwd, '.xtrm', 'hooks', 'specialists');
+  const removed: string[] = [];
+  for (const name of readdirSync(hooksDir).filter(entry => LEGACY_HOOK_NAME.test(entry))) {
+    const linkPath = join(hooksDir, name);
+    if (!lstatSync(linkPath).isSymbolicLink()) continue;
+    const target = resolve(hooksDir, readlinkSync(linkPath));
+    if (existsSync(linkPath) && !target.startsWith(managedDir + '/')) continue;
+    unlinkSync(linkPath);
+    removed.push(name);
+  }
+  return removed;
+}
+
+type HookEntry = { hooks?: Array<{ command?: unknown }> };
+
+function isStaleLegacyCommand(cwd: string, command: unknown): boolean {
+  if (typeof command !== 'string') return false;
+  const match = LEGACY_HOOK_COMMAND.exec(command);
+  return match !== null && !existsSync(join(cwd, '.claude', 'hooks', match[1]));
+}
+
+function cleanupLegacySettingsHooks(cwd: string): number {
+  const settingsPath = join(cwd, '.claude', 'settings.json');
+  if (!existsSync(settingsPath)) return 0;
+  const raw = readFileSync(settingsPath, 'utf-8');
+  let settings: { hooks?: Record<string, HookEntry[]> };
+  try {
+    settings = JSON.parse(raw);
+  } catch {
+    warn('.claude/settings.json is not valid JSON; skipped legacy hook cleanup');
+    return 0;
+  }
+  if (!settings.hooks || typeof settings.hooks !== 'object') return 0;
+
+  let dropped = 0;
+  for (const [event, entries] of Object.entries(settings.hooks)) {
+    if (!Array.isArray(entries)) continue;
+    const kept = entries.filter(entry => {
+      const before = entry.hooks?.length ?? 0;
+      if (!Array.isArray(entry.hooks)) return true;
+      entry.hooks = entry.hooks.filter(hook => !isStaleLegacyCommand(cwd, hook.command));
+      dropped += before - entry.hooks.length;
+      return entry.hooks.length > 0 || before === 0;
+    });
+    if (kept.length === entries.length && dropped === 0) continue;
+    if (kept.length > 0) settings.hooks[event] = kept;
+    else delete settings.hooks[event];
+  }
+  if (dropped === 0) return 0;
+
+  if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
+  const indent = /^([ \t]+)"/m.exec(raw)?.[1] ?? 2;
+  writeFileSync(settingsPath, JSON.stringify(settings, null, indent) + (raw.endsWith('\n') ? '\n' : ''), 'utf-8');
+  return dropped;
+}
+
+function cleanupLegacyClaudeHooks(cwd: string): void {
+  const links = cleanupLegacyHookLinks(cwd);
+  const entries = cleanupLegacySettingsHooks(cwd);
+  if (links.length > 0) ok(`removed legacy .claude/hooks links: ${links.join(', ')}`);
+  if (entries > 0) ok(`removed ${entries} stale specialists hook entr${entries === 1 ? 'y' : 'ies'} from .claude/settings.json`);
+}
+
 /**
  * Generate / extend the global ~/.config/specialists/user.json override layer.
  * Idempotent: seeds every shipped specialist with null/[] defaults on first run;
@@ -854,6 +927,9 @@ export async function run(opts: InitOptions = {}): Promise<void> {
 
   // ── 4. Register MCP at project scope ──────────────────────────────────────
   ensureProjectMcp(cwd);
+
+  // ── 4b. Remove hook wiring left by older init runs ────────────────────────
+  cleanupLegacyClaudeHooks(cwd);
 
   // ── 5. Install skills via .xtrm default + active symlink roots ────────────
   installProjectSkills(cwd, syncSkills);

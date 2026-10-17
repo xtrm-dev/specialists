@@ -73,12 +73,11 @@ describe('init CLI — run()', () => {
     const count = (content.match(/## Specialists/g) ?? []).length;
     expect(count).toBe(1);
   });
-  it('does not overwrite existing AGENTS.md that already has ## Specialists', async () => {
+  it('refreshes an existing ## Specialists section without duplicating it', async () => {
     const existing = '# Project\n\n## Specialists\n\nCustom text here.\n';
     await writeFile(join(tempDir, 'AGENTS.md'), existing, 'utf-8');
     await runInit(tempDir);
     const content = await readFile(join(tempDir, 'AGENTS.md'), 'utf-8');
-    expect(content).toContain('Custom text here.');
     expect((content.match(/## Specialists/g) ?? []).length).toBe(1);
   });
   it('creates project .mcp.json with specialists registration', async () => {
@@ -206,31 +205,11 @@ describe('init CLI — run()', () => {
     const files = await readdir(specialistsDir);
     expect(files).toEqual(['custom.specialist.json']); // no additions
   });
-  it('installs specialists hooks to .xtrm/hooks/specialists/ and symlinks .claude/hooks/', async () => {
+  it('does not install or wire the deprecated specialists hooks (the Substrate plugin owns SessionStart)', async () => {
     await runInit(tempDir);
-    const xtrmHooksDir = join(tempDir, '.xtrm', 'hooks', 'specialists');
-    const xtrmHooks = await readdir(xtrmHooksDir).catch(() => []);
-    expect(xtrmHooks).not.toContain('specialists-complete.mjs');
-    expect(xtrmHooks).toContain('specialists-session-start.mjs');
-    expect(xtrmHooks).not.toContain('specialists-memory-cache-sync.mjs');
-    const claudeHookPath = join(tempDir, '.claude', 'hooks', 'specialists-session-start.mjs');
-    expect(lstatSync(claudeHookPath).isSymbolicLink()).toBe(true);
-    const resolvedTarget = join(dirname(claudeHookPath), readlinkSync(claudeHookPath));
-    expect(resolvedTarget).toBe(join(tempDir, '.xtrm', 'hooks', 'specialists', 'specialists-session-start.mjs'));
-  });
-  it('wires hooks in .claude/settings.json with symlinked .claude/hooks paths', async () => {
-    await runInit(tempDir);
-    const settingsPath = join(tempDir, '.claude', 'settings.json');
-    const settings = JSON.parse(await readFile(settingsPath, 'utf-8'));
-    expect(settings.hooks).toBeDefined();
-    expect(settings.hooks.SessionStart).toBeDefined();
-    const sessionStartCommands = settings.hooks.SessionStart.flatMap((entry: any) => entry.hooks.map((hook: any) => hook.command));
-    expect(sessionStartCommands).toContain('node .claude/hooks/specialists-session-start.mjs');
-    const submitCommands = (settings.hooks.UserPromptSubmit ?? []).flatMap((entry: any) => entry.hooks.map((hook: any) => hook.command));
-    const postToolUseCommands = (settings.hooks.PostToolUse ?? []).flatMap((entry: any) => entry.hooks.map((hook: any) => hook.command));
-    expect(submitCommands).not.toContain('node .claude/hooks/specialists-complete.mjs');
-    expect(postToolUseCommands).not.toContain('node .claude/hooks/specialists-complete.mjs');
-    expect(postToolUseCommands).not.toContain('node .claude/hooks/specialists-memory-cache-sync.mjs');
+    expect(existsSync(join(tempDir, '.xtrm', 'hooks', 'specialists'))).toBe(false);
+    expect(existsSync(join(tempDir, '.claude', 'hooks', 'specialists-session-start.mjs'))).toBe(false);
+    expect(existsSync(join(tempDir, '.claude', 'settings.json'))).toBe(false);
   });
   it('installs skills to .claude/skills/ (project-local for Claude)', async () => {
     await runInit(tempDir);
@@ -238,7 +217,6 @@ describe('init CLI — run()', () => {
     const dirs = await readdir(skillsDir).catch(() => []);
     
     expect(dirs.length).toBeGreaterThan(0);
-    expect(dirs).toContain('specialists-creator');
     expect(dirs).toContain('using-specialists');
   });
   it('installs skills to .pi/skills/ (project-local for pi)', async () => {
@@ -247,7 +225,6 @@ describe('init CLI — run()', () => {
     const dirs = await readdir(skillsDir).catch(() => []);
     
     expect(dirs.length).toBeGreaterThan(0);
-    expect(dirs).toContain('specialists-creator');
     expect(dirs).toContain('using-specialists');
   });
   it('prunes retired managed skills during --sync-skills without removing user-owned active content', async () => {
@@ -292,14 +269,6 @@ describe('init CLI — run()', () => {
     expect(gitignore).toContain('.specialists/db/*.db-wal');
     expect(gitignore).toContain('.specialists/db/*.db-shm');
   });
-  it('does not overwrite existing .xtrm hook files', async () => {
-    const hooksDir = join(tempDir, '.xtrm', 'hooks', 'specialists');
-    await mkdir(hooksDir, { recursive: true });
-    await writeFile(join(hooksDir, 'specialists-session-start.mjs'), '// custom hook', 'utf-8');
-    await runInit(tempDir);
-    const content = await readFile(join(hooksDir, 'specialists-session-start.mjs'), 'utf-8');
-    expect(content).toBe('// custom hook');
-  });
   it('does not install skills to .specialists/default/skills/ (deprecated location)', async () => {
     await runInit(tempDir);
     // Skills should NOT be in .specialists/default/skills/
@@ -312,15 +281,68 @@ describe('init CLI — run()', () => {
     const oldHooksDir = join(tempDir, '.specialists', 'default', 'hooks');
     expect(existsSync(oldHooksDir)).toBe(false);
   });
-  it('rewires copied legacy hook files in .claude/hooks to canonical symlinks', async () => {
-    const hooksDir = join(tempDir, '.claude', 'hooks');
-    await mkdir(hooksDir, { recursive: true });
-    await writeFile(join(hooksDir, 'specialists-session-start.mjs'), '// stale copy', 'utf-8');
-    await runInit(tempDir);
-    const hookPath = join(hooksDir, 'specialists-session-start.mjs');
-    expect(lstatSync(hookPath).isSymbolicLink()).toBe(true);
-    const resolvedTarget = join(dirname(hookPath), readlinkSync(hookPath));
-    expect(resolvedTarget).toBe(join(tempDir, '.xtrm', 'hooks', 'specialists', 'specialists-session-start.mjs'));
+  describe('legacy specialists hook cleanup', () => {
+    const settingsPath = () => join(tempDir, '.claude', 'settings.json');
+    const hooksDir = () => join(tempDir, '.claude', 'hooks');
+
+    async function writeSettings(settings: unknown, indent: number | string = 2): Promise<string> {
+      await mkdir(dirname(settingsPath()), { recursive: true });
+      const raw = JSON.stringify(settings, null, indent) + '\n';
+      await writeFile(settingsPath(), raw, 'utf-8');
+      return raw;
+    }
+
+    it('removes dangling specialists-*.mjs symlinks and leaves other hook files alone', async () => {
+      await mkdir(hooksDir(), { recursive: true });
+      for (const name of ['specialists-complete.mjs', 'specialists-memory-cache-sync.mjs', 'specialists-session-start.mjs']) {
+        symlinkSync(join(tempDir, '.xtrm', 'hooks', 'specialists', name), join(hooksDir(), name));
+      }
+      const userTarget = join(tempDir, 'user-hook.mjs');
+      await writeFile(userTarget, '// mine', 'utf-8');
+      symlinkSync(userTarget, join(hooksDir(), 'specialists-custom.mjs')); // live, outside .xtrm
+      symlinkSync(join(tempDir, 'gone.mjs'), join(hooksDir(), 'other-dangling.mjs')); // not specialists-*
+      await writeFile(join(hooksDir(), 'specialists-real-file.mjs'), '// regular file', 'utf-8');
+
+      await runInit(tempDir);
+
+      expect((await readdir(hooksDir())).sort()).toEqual(['other-dangling.mjs', 'specialists-custom.mjs', 'specialists-real-file.mjs']);
+      expect(await readFile(join(hooksDir(), 'specialists-real-file.mjs'), 'utf-8')).toBe('// regular file');
+    });
+
+    it('drops only settings hook entries that target a missing specialists hook, preserving the rest byte-for-byte', async () => {
+      await mkdir(hooksDir(), { recursive: true });
+      await writeFile(join(hooksDir(), 'specialists-live.mjs'), '// regular file', 'utf-8');
+      const userHooks = {
+        PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'node .claude/hooks/guard.mjs' }] }],
+        SessionStart: [
+          { hooks: [{ type: 'command', command: 'node .claude/hooks/specialists-session-start.mjs' }] },
+          { hooks: [
+            { type: 'command', command: 'node .claude/hooks/specialists-live.mjs' },
+            { type: 'command', command: 'node .claude/hooks/specialists-complete.mjs' },
+          ] },
+        ],
+      };
+      await writeSettings({ model: 'opus', hooks: userHooks, permissions: { allow: ['Bash(ls)'] } }, '\t');
+
+      await runInit(tempDir);
+
+      const expected = await (async () => {
+        const hooks = structuredClone(userHooks) as any;
+        hooks.SessionStart = [{ hooks: [{ type: 'command', command: 'node .claude/hooks/specialists-live.mjs' }] }];
+        return JSON.stringify({ model: 'opus', hooks, permissions: { allow: ['Bash(ls)'] } }, null, '\t') + '\n';
+      })();
+      expect(await readFile(settingsPath(), 'utf-8')).toBe(expected);
+    });
+
+    it('removes an emptied hooks key and leaves a settings file without stale entries untouched', async () => {
+      await writeSettings({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'node .claude/hooks/specialists-session-start.mjs' }] }] }, model: 'opus' });
+      await runInit(tempDir);
+      expect(JSON.parse(await readFile(settingsPath(), 'utf-8'))).toEqual({ model: 'opus' });
+
+      const untouched = await writeSettings({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo   done' }] }] } }, 4);
+      await runInit(tempDir);
+      expect(await readFile(settingsPath(), 'utf-8')).toBe(untouched);
+    });
   });
   it('does not attempt memory FTS sync during init (retired)', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});

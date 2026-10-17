@@ -25,7 +25,6 @@ jobs:
               - config/specialists/**
               - config/mandatory-rules/**
               - config/catalog/**
-              - config/hooks/**
               - config/nodes/**
               - package.json
               - dist/index.js
