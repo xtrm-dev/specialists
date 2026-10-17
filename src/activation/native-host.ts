@@ -54,7 +54,7 @@ import {
   resolveCuratedExtensionPaths,
   resolveExecutionExtensionSelection,
   deduplicateExtensionSources,
-  resolveGlobalNodeModulesDir,
+  resolveGlobalNodeModulesDirs,
   resolvePiVersion,
   BUILTIN_CODEMODE_EXTENSION,
 } from '../pi/session.js';
@@ -232,7 +232,7 @@ export function isNonLocalExtensionSource(source: string): boolean {
  * machine has installed (the same discipline `resolveCuratedExtensionPaths` follows).
  */
 export interface ExtensionSourceResolutionEnv {
-  globalNodeModulesDir: () => string | undefined;
+  globalNodeModulesDirs: () => string[];
   manifestExists: (packagePath: string) => boolean;
   /**
    * pi's agent directory (`sdk.getAgentDir()` in production, fixture-pinned in tests).
@@ -245,7 +245,7 @@ export interface ExtensionSourceResolutionEnv {
 }
 
 export const defaultExtensionSourceResolutionEnv: ExtensionSourceResolutionEnv = {
-  globalNodeModulesDir: resolveGlobalNodeModulesDir,
+  globalNodeModulesDirs: resolveGlobalNodeModulesDirs,
   manifestExists: (packagePath) => existsSync(join(packagePath, 'package.json')),
   piAgentDir: () => undefined,
 };
@@ -256,10 +256,10 @@ export function resolveNpmExtensionSource(
 ): string | null {
   const packageName = parseNpmSourceName(source);
   if (!packageName) return null;
-  const globalDir = env.globalNodeModulesDir();
-  if (!globalDir) return null;
-  const packagePath = join(globalDir, packageName);
-  return env.manifestExists(packagePath) ? packagePath : null;
+  // First root that actually holds the package, not merely the first root that exists.
+  return env.globalNodeModulesDirs()
+    .map(root => join(root, packageName))
+    .find(env.manifestExists) ?? null;
 }
 
 /**

@@ -279,6 +279,12 @@ export declare function resolveGlobalNodeModulesDirs(deps?: GlobalNodeModulesDep
  * unresolvable to another (the Specialists Claude plugin spawns its MCP server with `bun`).
  */
 export declare function resolveGlobalNodeModulesDir(deps?: GlobalNodeModulesDeps): string | undefined;
+/**
+ * Directory of the highest-precedence global root that actually contains `packageName`
+ * (judged by its `package.json`), or undefined. The package-aware sibling of
+ * {@link resolveGlobalNodeModulesDir}: use it for any lookup of a specific package.
+ */
+export declare function resolveGlobalPackageDir(packageName: string, deps?: GlobalNodeModulesDeps): string | undefined;
 export declare function validateWriteToolPathAgainstBoundary(toolName: string, toolArgs: Record<string, unknown> | undefined, worktreeBoundary: string | undefined): string | undefined;
 export declare class PiAgentSession {
     private options;

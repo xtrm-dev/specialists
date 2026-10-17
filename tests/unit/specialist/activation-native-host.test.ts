@@ -2736,7 +2736,7 @@ describe('pre-scripts and curated extensions (SPECIALISTS-6)', () => {
    */
   describe('declared extension sources: npm resolution (unitAI-rx1bu)', () => {
     const env = (dir: string | undefined, installed: string[]) => ({
-      globalNodeModulesDir: () => dir,
+      globalNodeModulesDirs: () => (dir ? [dir] : []),
       manifestExists: (packagePath: string) => installed.includes(packagePath),
     });
 
@@ -2750,6 +2750,11 @@ describe('pre-scripts and curated extensions (SPECIALISTS-6)', () => {
         .toBe('/nm/@scope/pkg');
       expect(resolveNpmExtensionSource('npm:pi-ast-grep@0.1.0', env('/nm', ['/nm/pi-ast-grep'])))
         .toBe('/nm/pi-ast-grep');
+    });
+
+    it('finds a package in a later root when the first root does not hold it (SPECIALISTS-4308)', () => {
+      const laterRoot = { globalNodeModulesDirs: () => ['/bun', '/nvm'], manifestExists: (p: string) => p === '/nvm/pi-ast-grep' };
+      expect(resolveNpmExtensionSource('npm:pi-ast-grep', laterRoot)).toBe('/nvm/pi-ast-grep');
     });
 
     it('returns null for an uninstalled package, a non-npm source, and a missing root', () => {
@@ -2779,7 +2784,7 @@ describe('pre-scripts and curated extensions (SPECIALISTS-6)', () => {
     const GIT_SPEC = 'github.com/alonw0/pi-claude-link';
     const GIT_SOURCE = `git:${GIT_SPEC}`;
     const gitEnv = (agentDir: string | undefined, installed: string[]) => ({
-      globalNodeModulesDir: () => undefined,
+      globalNodeModulesDirs: () => [],
       manifestExists: (packagePath: string) => installed.includes(packagePath),
       piAgentDir: () => agentDir,
     });

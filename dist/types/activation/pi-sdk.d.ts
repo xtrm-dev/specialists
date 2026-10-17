@@ -6,7 +6,7 @@
  * version; hard-depending here would version-couple the two and force a Specialists
  * release for every pi release. Instead we resolve the SDK at runtime, preferring a
  * normal module resolution and falling back to the global install — the same precedent
- * `resolveGlobalNodeModulesDir()` (src/pi/session.ts) already sets for locating pi assets.
+ * `resolveGlobalNodeModulesDirs()` (src/pi/session.ts) already sets for locating pi assets.
  *
  * The legacy `sp run` path spawns the `pi` binary and speaks RPC to it, so it needs none
  * of this. Only the native activation host, which hosts an `AgentSession` inside this
@@ -17,6 +17,7 @@
  * extension and the Claude Code MCP server to host children directly rather than shelling
  * out.
  */
+import { type GlobalNodeModulesDeps } from '../pi/session.js';
 export declare const PI_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
 /**
  * The subset of the Pi SDK the native activation host uses.
@@ -189,7 +190,7 @@ export declare class PiSdkUnavailableError extends Error {
     constructor(attempted: string[], cause?: unknown);
 }
 /** Candidate specifiers, most-preferred first. Exported for diagnostics and tests. */
-export declare function piSdkCandidates(): string[];
+export declare function piSdkCandidates(deps?: GlobalNodeModulesDeps): string[];
 /**
  * Load the Pi SDK, preferring normal resolution and falling back to the global install.
  *

@@ -70,7 +70,7 @@ export declare function isNonLocalExtensionSource(source: string): boolean;
  * machine has installed (the same discipline `resolveCuratedExtensionPaths` follows).
  */
 export interface ExtensionSourceResolutionEnv {
-    globalNodeModulesDir: () => string | undefined;
+    globalNodeModulesDirs: () => string[];
     manifestExists: (packagePath: string) => boolean;
     /**
      * pi's agent directory (`sdk.getAgentDir()` in production, fixture-pinned in tests).
