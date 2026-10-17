@@ -79,8 +79,9 @@ export function missingPromisedTools(activeTools, requiredEnv) {
 const TOOL_GUIDANCE = {
   ast_grep: "prefer ast_grep for structural code-shape queries (AST patterns/rules) over text grep",
   python: "prefer python for repeated parse/aggregate/decision loops and persistent probes",
-  intercom: "prefer intercom to coordinate with other local pi sessions",
-  "claude-link": "prefer claude-link to message Claude Code sessions on this machine",
+  // NOTE (CORE-2443 M1): pi-intercom / pi-claude-link guidance removed with
+  // the retired packages. Specialist sessions expose no first-party
+  // coordination equivalent, so no replacement keys are added here.
 };
 
 /**
