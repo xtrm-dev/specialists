@@ -15,36 +15,25 @@
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { homedir } from 'node:os';
+import { resolveGlobalNodeModulesDirs } from './session.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_DIR = join('@jaggerxtrm', 'pi-extensions');
 const EXT_REL = join('extensions', 'python-kernel', 'index.ts');
 
-function resolveGlobalNodeModulesDir(): string | undefined {
-  const candidates = [
-    process.env.PI_NPM_GLOBAL_DIR,
-    process.env.NPM_CONFIG_PREFIX ? join(process.env.NPM_CONFIG_PREFIX, 'lib', 'node_modules') : undefined,
-    process.env.npm_config_prefix ? join(process.env.npm_config_prefix, 'lib', 'node_modules') : undefined,
-    process.env.NVM_BIN ? join(dirname(process.env.NVM_BIN), 'lib', 'node_modules') : undefined,
-    join(homedir(), '.nvm/versions/node', process.version, 'lib', 'node_modules'),
-  ].filter((candidate): candidate is string => Boolean(candidate));
-  return candidates.find((candidate) => existsSync(candidate));
+/** First entry file found across every global root (not just the first root that exists). */
+function findGlobalEntry(...segments: string[]): string | null {
+  const found = resolveGlobalNodeModulesDirs()
+    .map((root) => join(root, ...segments))
+    .find((candidate) => existsSync(candidate));
+  return found ? resolve(found) : null;
 }
 
 let cached: string | null | undefined;
 
 export function getPiExtensionsPythonKernelPath(): string | null {
   if (cached !== undefined) return cached;
-  const globalDir = resolveGlobalNodeModulesDir();
-  if (globalDir) {
-    const candidate = join(globalDir, PACKAGE_DIR, EXT_REL);
-    if (existsSync(candidate)) {
-      cached = resolve(candidate);
-      return cached;
-    }
-  }
-  cached = null;
+  cached = findGlobalEntry(PACKAGE_DIR, EXT_REL);
   return cached;
 }
 
@@ -69,15 +58,7 @@ let skCached: string | null | undefined;
 
 export function getServiceKnowledgeExtensionPath(): string | null {
   if (skCached !== undefined) return skCached;
-  const globalDir = resolveGlobalNodeModulesDir();
-  if (globalDir) {
-    const candidate = join(globalDir, SK_PACKAGE_DIR, 'index.ts');
-    if (existsSync(candidate)) {
-      skCached = resolve(candidate);
-      return skCached;
-    }
-  }
-  skCached = null;
+  skCached = findGlobalEntry(SK_PACKAGE_DIR, 'index.ts');
   return skCached;
 }
 

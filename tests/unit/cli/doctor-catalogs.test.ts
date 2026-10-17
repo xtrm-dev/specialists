@@ -8,6 +8,15 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+// Roots beyond PI_NPM_GLOBAL_DIR (the interpreter's prefix, bun, every nvm version) are scanned in
+// production; pin the scan to the fixture root so the machine's own installs stay out.
+vi.mock('../../../src/pi/session.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/pi/session.js')>();
+  const pinnedLookup = (packageName: string) =>
+    actual.resolveGlobalPackageDir(packageName, { home: '/nonexistent', execPath: '/nonexistent/bin/node', readDir: () => [] });
+  return { ...actual, resolveGlobalPackageDir: pinnedLookup };
+});
+
 const catalog = JSON.parse(readFileSync(join(process.cwd(), 'config/catalog/index.json'), 'utf8')) as {
   catalogs: Array<{ catalog: string; package?: string; version: string }>;
 };

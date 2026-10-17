@@ -6,7 +6,7 @@
  * version; hard-depending here would version-couple the two and force a Specialists
  * release for every pi release. Instead we resolve the SDK at runtime, preferring a
  * normal module resolution and falling back to the global install — the same precedent
- * `resolveGlobalNodeModulesDir()` (src/pi/session.ts) already sets for locating pi assets.
+ * `resolveGlobalNodeModulesDirs()` (src/pi/session.ts) already sets for locating pi assets.
  *
  * The legacy `sp run` path spawns the `pi` binary and speaks RPC to it, so it needs none
  * of this. Only the native activation host, which hosts an `AgentSession` inside this
@@ -21,7 +21,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { resolveGlobalNodeModulesDir } from '../pi/session.js';
+import { type GlobalNodeModulesDeps, resolveGlobalNodeModulesDirs } from '../pi/session.js';
 
 export const PI_SDK_PACKAGE = '@earendil-works/pi-coding-agent';
 
@@ -201,12 +201,12 @@ export class PiSdkUnavailableError extends Error {
 let cached: PiSdk | undefined;
 
 /** Candidate specifiers, most-preferred first. Exported for diagnostics and tests. */
-export function piSdkCandidates(): string[] {
+export function piSdkCandidates(deps: GlobalNodeModulesDeps = {}): string[] {
+  const exists = deps.exists ?? existsSync;
   const candidates = [PI_SDK_PACKAGE];
-  const globalDir = resolveGlobalNodeModulesDir();
-  if (globalDir) {
-    const entry = join(globalDir, PI_SDK_PACKAGE, 'dist', 'index.js');
-    if (existsSync(entry)) candidates.push(pathToFileURL(entry).href);
+  for (const root of resolveGlobalNodeModulesDirs(deps)) {
+    const entry = join(root, PI_SDK_PACKAGE, 'dist', 'index.js');
+    if (exists(entry)) candidates.push(pathToFileURL(entry).href);
   }
   return candidates;
 }

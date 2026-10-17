@@ -17,7 +17,7 @@ import { SpecialistLoader } from '../specialist/loader.js';
 import { analyzeGlobalUserConfigDrift, buildGlobalUserConfigTemplate, readValidatedGlobalUserConfig } from '../specialist/global-config.js';
 import { runChannelDoctorChecks, type ChannelDoctorInputs } from '../specialist/channel-doctor.js';
 import { describeCatalogCompatibility } from '../specialist/tool-catalog.js';
-import { loadSharedToolCatalogIndex, readPackageVersion, resolveGlobalNodeModulesDir } from '../pi/session.js';
+import { loadSharedToolCatalogIndex, readPackageVersion, resolveGlobalPackageDir } from '../pi/session.js';
 import { resolveSubstrateDir, resolveSubstrateModule, resolveWorkItemDbPath, SUBSTRATE_REQUIRED_MODULES } from '../activation/workitem-store.js';
 import { formatVersionCheckNudge, getVersionCheckResult, localVersion, readCachedVersionCheck } from './version-check.js';
 
@@ -266,7 +266,7 @@ function checkChannels(): boolean {
  *
  * `requireInstalled` exists for the scheduled CI job (SPECIALISTS-47). That job installs the
  * extensions on purpose, so an `absent` catalog there means the install went somewhere the runtime
- * does not look (`resolveGlobalNodeModulesDir`), and the section would otherwise pass while having
+ * does not look (`resolveGlobalPackageDir`), and the section would otherwise pass while having
  * verified nothing, which is the silent pass the job exists to remove. Interactive doctor runs keep
  * treating `absent` as information: a machine without an extension is not broken.
  */
@@ -275,14 +275,13 @@ function checkCatalogs(options: { requireInstalled?: boolean } = {}): boolean {
   let entries: ReturnType<typeof describeCatalogCompatibility>;
   try {
     const index = loadSharedToolCatalogIndex(process.cwd());
-    const globalDir = resolveGlobalNodeModulesDir();
     entries = describeCatalogCompatibility({
       catalogs: index.catalogs,
       // The runtime's own lookup, not a second copy of it: the doctor must describe the version
       // the gate actually compares (SPECIALISTS-42 (d) review).
       resolveInstalledVersion: (packageName) => {
-        if (!globalDir) return undefined;
-        return readPackageVersion(join(globalDir, packageName, 'package.json'));
+        const packageDir = resolveGlobalPackageDir(packageName);
+        return packageDir ? readPackageVersion(join(packageDir, 'package.json')) : undefined;
       },
     });
   } catch (error) {

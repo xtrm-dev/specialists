@@ -279,22 +279,14 @@ function resolveGitnexusRuntime(options: { catalogIndex: ToolCatalogIndex; exclu
     };
   }
 
-  const globalDir = resolveGlobalNodeModulesDir();
-  if (!globalDir) {
+  const packagePath = resolveGlobalPackageDir(packageName);
+  if (!packagePath) {
     return {
       packageName,
       extensionState: { enabled: true, health: 'not_installed', catalogCompatible: false },
     };
   }
-
-  const packagePath = join(globalDir, packageName);
   const packageJsonPath = join(packagePath, 'package.json');
-  if (!existsSync(packageJsonPath)) {
-    return {
-      packageName,
-      extensionState: { enabled: true, health: 'not_installed', catalogCompatible: false },
-    };
-  }
 
   const installedVersion = readPackageVersion(packageJsonPath);
   if (!installedVersion) {
@@ -339,22 +331,14 @@ function resolvePiExtensionsPythonKernelRuntime(options: { catalogIndex: ToolCat
     };
   }
 
-  const globalDir = resolveGlobalNodeModulesDir();
-  if (!globalDir) {
+  const packagePath = resolveGlobalPackageDir(packageName);
+  if (!packagePath) {
     return {
       packageName,
       extensionState: { enabled: true, health: 'not_installed', catalogCompatible: false },
     };
   }
-
-  const packagePath = join(globalDir, packageName);
   const packageJsonPath = join(packagePath, 'package.json');
-  if (!existsSync(packageJsonPath)) {
-    return {
-      packageName,
-      extensionState: { enabled: true, health: 'not_installed', catalogCompatible: false },
-    };
-  }
 
   const installedVersion = readPackageVersion(packageJsonPath);
   const extPath = join(packagePath, 'extensions', 'python-kernel', 'index.ts');
@@ -787,15 +771,12 @@ export function resolvePiVersion(): string | undefined {
     // Binary absent or unreadable; fall through to the SDK package.
   }
   try {
-    const globalDir = resolveGlobalNodeModulesDir();
-    if (globalDir) {
-      const pkgPath = join(globalDir, '@earendil-works', 'pi-coding-agent', 'package.json');
-      if (existsSync(pkgPath)) {
-        const parsed = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version?: unknown };
-        if (typeof parsed.version === 'string' && parsed.version.length > 0) {
-          cachedPiVersion = parsed.version;
-          return cachedPiVersion;
-        }
+    const packageDir = resolveGlobalPackageDir('@earendil-works/pi-coding-agent');
+    if (packageDir) {
+      const parsed = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf-8')) as { version?: unknown };
+      if (typeof parsed.version === 'string' && parsed.version.length > 0) {
+        cachedPiVersion = parsed.version;
+        return cachedPiVersion;
       }
     }
   } catch {
@@ -867,6 +848,18 @@ export function resolveGlobalNodeModulesDirs(deps: GlobalNodeModulesDeps = {}): 
  */
 export function resolveGlobalNodeModulesDir(deps: GlobalNodeModulesDeps = {}): string | undefined {
   return resolveGlobalNodeModulesDirs(deps)[0];
+}
+
+/**
+ * Directory of the highest-precedence global root that actually contains `packageName`
+ * (judged by its `package.json`), or undefined. The package-aware sibling of
+ * {@link resolveGlobalNodeModulesDir}: use it for any lookup of a specific package.
+ */
+export function resolveGlobalPackageDir(packageName: string, deps: GlobalNodeModulesDeps = {}): string | undefined {
+  const exists = deps.exists ?? existsSync;
+  return resolveGlobalNodeModulesDirs(deps)
+    .map(root => join(root, packageName))
+    .find(dir => exists(join(dir, 'package.json')));
 }
 
 /** `~/.nvm/versions/node/<version>/lib/node_modules`, newest version first. */
