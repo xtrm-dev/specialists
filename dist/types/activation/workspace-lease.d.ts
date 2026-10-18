@@ -97,6 +97,30 @@ import { type ActivationId, type AttemptId, type WorkspaceIdentity } from './typ
  */
 export declare function workspaceIdentityFor(cwd: string): WorkspaceIdentity;
 /**
+ * The isolated worktree a write-capable activation runs in (SPECIALISTS-4310).
+ *
+ * Run-in-place assumed the dispatcher already sat in an isolated worktree. Over MCP the host's
+ * cwd is whatever checkout the coordinator was launched in, and an executor dispatched from a
+ * main checkout checked out its branch and ran `npm ci` there. A writer therefore never gets
+ * the dispatcher's checkout: it gets `<main checkout>/.worktrees/<issue>` on branch
+ * `sp/<issue>`, created from the dispatcher's HEAD on first use and reused by every later
+ * writer on the same Issue, so a fix loop lands on the same tree and its PR is the merge path.
+ *
+ * `repositoryRoot` stays the dispatcher's checkout so leases keep living where
+ * `leaseScopeFor(process.cwd())` reconciles them. A directory that is not a git checkout
+ * cannot be isolated and is refused rather than written in place.
+ */
+export type ProvisionedWorkspace = WorkspaceIdentity & {
+    /** True when this call created the worktree, so a refused dispatch may remove it again. */
+    created?: boolean;
+};
+export declare function provisionWriterWorkspace(cwd: string, issueRef: string): ProvisionedWorkspace;
+/**
+ * Undo a `provisionWriterWorkspace` that created a fresh worktree and branch for a dispatch that
+ * was then refused. Best effort: a refusal stays a refusal even when cleanup cannot run.
+ */
+export declare function removeWriterWorkspace(cwd: string, workspace: WorkspaceIdentity): void;
+/**
  * What the lease store believes about a workspace.
  *
  * `uncertain` is not a degraded `free`. It is the state in which acquisition is refused

@@ -87,6 +87,7 @@
  * discipline is what closes.
  */
 
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -102,6 +103,68 @@ import { DispatchRejectedError, type ActivationId, type AttemptId, type Workspac
  */
 export function workspaceIdentityFor(cwd: string): WorkspaceIdentity {
   return { repositoryRoot: cwd, worktreePath: cwd };
+}
+
+/**
+ * The isolated worktree a write-capable activation runs in (SPECIALISTS-4310).
+ *
+ * Run-in-place assumed the dispatcher already sat in an isolated worktree. Over MCP the host's
+ * cwd is whatever checkout the coordinator was launched in, and an executor dispatched from a
+ * main checkout checked out its branch and ran `npm ci` there. A writer therefore never gets
+ * the dispatcher's checkout: it gets `<main checkout>/.worktrees/<issue>` on branch
+ * `sp/<issue>`, created from the dispatcher's HEAD on first use and reused by every later
+ * writer on the same Issue, so a fix loop lands on the same tree and its PR is the merge path.
+ *
+ * `repositoryRoot` stays the dispatcher's checkout so leases keep living where
+ * `leaseScopeFor(process.cwd())` reconciles them. A directory that is not a git checkout
+ * cannot be isolated and is refused rather than written in place.
+ */
+export type ProvisionedWorkspace = WorkspaceIdentity & {
+  /** True when this call created the worktree, so a refused dispatch may remove it again. */
+  created?: boolean;
+};
+
+export function provisionWriterWorkspace(cwd: string, issueRef: string): ProvisionedWorkspace {
+  const git = (...args: string[]): string =>
+    execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const slug = issueRef.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const branch = `sp/${slug}`;
+  try {
+    const existing = git('worktree', 'list', '--porcelain')
+      .split('\n\n')
+      .find((entry) => entry.split('\n').includes(`branch refs/heads/${branch}`));
+    let worktreePath = existing?.match(/^worktree (.+)$/m)?.[1];
+    let created = false;
+    if (!worktreePath) {
+      const mainRoot = dirname(git('rev-parse', '--path-format=absolute', '--git-common-dir'));
+      worktreePath = join(mainRoot, '.worktrees', slug);
+      // An unignored nested worktree would show up as `?? .worktrees/` in the dispatcher's status.
+      if (spawnSync('git', ['check-ignore', '-q', join(worktreePath, 'x')], { cwd: mainRoot }).status !== 0) {
+        appendFileSync(git('rev-parse', '--path-format=absolute', '--git-path', 'info/exclude'), '\n/.worktrees/\n');
+      }
+      const branchExists = spawnSync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], { cwd }).status === 0;
+      git('worktree', 'add', ...(branchExists ? [worktreePath, branch] : ['-b', branch, worktreePath, 'HEAD']));
+      created = !branchExists;
+    }
+    return { repositoryRoot: cwd, worktreePath, branch, created };
+  } catch (error) {
+    const stderr = (error as { stderr?: unknown }).stderr;
+    throw new DispatchRejectedError('workspace_isolation_unavailable', {
+      issueRef,
+      workspace: cwd,
+      note: `a write-capable activation needs its own git worktree and none could be created for ${cwd}: `
+        + (String(stderr ?? '').trim() || (error instanceof Error ? error.message : String(error))),
+    });
+  }
+}
+
+/**
+ * Undo a `provisionWriterWorkspace` that created a fresh worktree and branch for a dispatch that
+ * was then refused. Best effort: a refusal stays a refusal even when cleanup cannot run.
+ */
+export function removeWriterWorkspace(cwd: string, workspace: WorkspaceIdentity): void {
+  spawnSync('git', ['worktree', 'remove', '--force', workspace.worktreePath], { cwd, stdio: 'ignore' });
+  if (workspace.branch) spawnSync('git', ['branch', '-D', workspace.branch], { cwd, stdio: 'ignore' });
 }
 
 /**

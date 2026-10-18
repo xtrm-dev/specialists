@@ -323,7 +323,7 @@ export async function captureNativeSessionStats(
  */
 export { accumulateTokenUsage } from './session-metrics-contract.js';
 
-function resultContent(result: unknown): string | undefined {
+export function resultContent(result: unknown): string | undefined {
   if (typeof result === 'string') return result;
   const resultRecord = record(result);
   const content = resultRecord?.content;

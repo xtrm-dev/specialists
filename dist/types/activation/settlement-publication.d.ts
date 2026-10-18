@@ -203,7 +203,7 @@ export declare function publishSettlement(opts: {
     boundary: SpecialistWorkItemBoundary;
     store: SettlementStore;
     subject: SettlementSubject;
-    status: 'completed' | 'failed';
+    status: SettlementRecord['status'];
     output: unknown;
     validation: {
         valid: boolean;

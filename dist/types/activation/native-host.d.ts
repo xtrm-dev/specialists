@@ -37,6 +37,7 @@ import { type ResolvedToolContract } from '../specialist/resolved-tool-contract.
 import { type SpecialistWorkItemBoundary } from './workitem-store.js';
 import { type InteractionMessage, type PendingAsk } from './interaction.js';
 import { PeerAdapter, type TransportForensicEvent } from './transport/peer-adapter.js';
+import { type ProvisionedWorkspace } from './workspace-lease.js';
 import { type PiSdk, type PiAgentSessionEvent, type PiResourceLoaderLike } from './pi-sdk.js';
 import { type SettlementStore } from './settlement-store.js';
 import { type AuthorityWriter } from './authority-store.js';
@@ -268,28 +269,18 @@ export declare function discoverDynamicExtensionTools(input: {
  * passes none yet, while `noExtensions: true` already fences ambient ones.
  */
 /**
- * The workspace a native activation runs in: the coordinator's own working
- * directory. ONE source for it, because the rendered Runtime Boundary Rules block,
- * the session `cwd`, the guarded-tool `cwd` and the workspace lease all key on this
- * value — two derivations that happen to agree today is exactly how they stop
- * agreeing tomorrow (SPECIALISTS-21).
+ * The workspace a READ activation runs in: the coordinator's own working directory.
+ * ONE source for it, because the rendered Runtime Boundary Rules block, the session
+ * `cwd`, the guarded-tool `cwd` and the workspace lease all key on this value — two
+ * derivations that happen to agree today is exactly how they stop agreeing tomorrow
+ * (SPECIALISTS-21).
  *
- * RUN-IN-PLACE IS THE DELIBERATE DESIGN, recorded here rather than in a document
- * because the next reader of this function is the one who will wonder whether it is
- * an omission:
- *   - `xt claude` / `xt pi` already launch the coordinator into an isolated worktree,
- *     so a per-activation worktree is isolation inside isolation.
- *   - The workspace LEASE is what provides the single-writer guarantee. That was the
- *     deliberate design, and a worktree would not add a guarantee the lease lacks.
- *   - Provisioning would drag the legacy handoff protocol into the native runtime: a
- *     `worktree_owner_job_id` reuse so a reviewer can read the writer's tree, plus a
- *     merge back per activation, on a merge path CLAUDE.md declares prohibited and
- *     known broken pending a separate rework epic.
- *   - The known cost, accepted: the coordinator is not a lease participant, so a
- *     coordinator edit and a write-tier activation can interleave. That hazard is
- *     tracked separately (the coordinator edit warning), and it is not a reason to
- *     provision worktrees.
- * Anyone reopening worktree provisioning must first answer the merge-path problem.
+ * A WRITE activation replaces it with `provisionWriterWorkspace` before the dispatch
+ * check (SPECIALISTS-4310). Run-in-place for writers assumed the coordinator was
+ * already in an isolated `xt` worktree; over MCP the host cwd is whatever checkout the
+ * coordinator started in, and an executor dispatched from a main checkout switched its
+ * branch and installed into it. The per-Issue worktree's branch is pushed as a PR, so
+ * the merge path is the ordinary PR path, not the legacy per-activation merge-back.
  */
 export declare function resolveWorkspace(cwd: string): WorkspaceIdentity;
 export declare function createActivationResourceLoader(sdk: PiSdk, options: {
@@ -388,6 +379,12 @@ export interface NativeActivationHostDeps {
     loadSdk?: () => Promise<PiSdk>;
     /** Defaults to `process.cwd()`. */
     cwd?: string;
+    /** The isolated worktree a writer runs in. Defaults to `provisionWriterWorkspace` (git). */
+    provisionWriterWorkspace?: (cwd: string, issueRef: string) => ProvisionedWorkspace;
+    /** Background tasks this activation started that are still running; see `liveBackgroundTasks`. */
+    backgroundTaskAlive?: (pid: number) => boolean;
+    /** How often a lease held over running background tasks re-checks them. Defaults to 5s. */
+    backgroundPollMs?: number;
     now?: () => number;
     /**
      * S1 runtime result storage. Defaults to the file store under
@@ -480,6 +477,13 @@ export declare class NativeActivationHost {
     private readonly forensics;
     private readonly loadSdk;
     private readonly cwd;
+    private readonly provisionWriterWorkspace;
+    private readonly backgroundTaskAlive;
+    /** Per activation: background tasks its tools reported as started, by PID. */
+    private readonly backgroundTasks;
+    /** Per activation: the poll that releases a lease held over running background tasks. */
+    private readonly backgroundWatch;
+    private readonly backgroundPollMs;
     private readonly now;
     private readonly sessionStatsTimeoutMs?;
     private readonly piVersion?;
@@ -604,6 +608,20 @@ export declare class NativeActivationHost {
      * timer is per activation and is created lazily, so tool-less activations never tick.
      */
     private noteToolStart;
+    /**
+     * Record a background task a tool reported as started (SPECIALISTS-4310). pi-background-tasks
+     * (`bg_run` and its siblings) answers with `Status: running` and `PID: <n>` and lets the turn
+     * end while the task runs; the host must not read that idle turn as a finished activation.
+     */
+    private noteBackgroundTask;
+    /**
+     * Release the held lease once the background tasks exit, if the activation is still idle.
+     * A resumed turn holds the lease itself and re-checks on its own settle.
+     */
+    private watchBackgroundTasks;
+    private forgetBackgroundTasks;
+    /** This activation's background tasks that are still alive; dead ones are forgotten. */
+    private liveBackgroundTasks;
     /** Clear the watch when the tool call ends; a stray end never kills a live call. */
     private noteToolEnd;
     /**

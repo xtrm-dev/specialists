@@ -56,8 +56,12 @@ export interface SettlementRecord {
   issueRevision: number;
   contractHash: string;
   executionBindingId: string;
-  /** Terminal status of the attempt. Failed attempts are stored (queryable) but never published. */
-  status: 'completed' | 'failed';
+  /**
+   * Terminal status of the attempt. Failed and `uncertain` attempts are stored (queryable) but
+   * never published; `uncertain` is an idle, resumable writer whose own background tasks still
+   * run (SPECIALISTS-4310), so its `validation.errors` names them.
+   */
+  status: 'completed' | 'failed' | 'uncertain';
   /** Full raw output. Bounded publication keeps this OUT of the Journal body. */
   output: unknown;
   validation: { valid: boolean; errors?: string[] };
