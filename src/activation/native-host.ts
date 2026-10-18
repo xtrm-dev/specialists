@@ -80,13 +80,14 @@ import { PeerAdapter, type TransportForensicEvent } from './transport/peer-adapt
 import {
   acquire as acquireLease,
   admitToolCall,
+  provisionWriterWorkspace,
   release as releaseLease,
   workspaceIdentityFor,
 } from './workspace-lease.js';
 import { createGuardedTools } from './guarded-tools.js';
 import { createAskTools, ASK_TOOL, ESCALATE_TOOL } from './ask-tool.js';
 import { loadPiSdk, type PiSdk, type PiAgentSessionLike, type PiAgentSessionEvent, type PiModelRuntimeLike, type PiResourceLoaderLike } from './pi-sdk.js';
-import { nativeSessionTokenUsage, nativeEventTokenUsage, isNativeUsageEvent, accumulateTokenUsage, captureNativeSessionStats } from '../specialist/native-activation-observability.js';
+import { nativeSessionTokenUsage, nativeEventTokenUsage, isNativeUsageEvent, accumulateTokenUsage, captureNativeSessionStats, resultContent } from '../specialist/native-activation-observability.js';
 import { SESSION_STATS_TIMEOUT_MS } from '../specialist/session-metrics-contract.js';
 import { createGateModelRuntime, validateModelAvailable } from './model-gate.js';
 import { FleetRegistry, RESUMABLE_STATES, RETRYABLE_STATES, nextAttemptId, type ActivationRecord } from './registry.js';
@@ -665,31 +666,31 @@ export async function discoverDynamicExtensionTools(input: {
  * passes none yet, while `noExtensions: true` already fences ambient ones.
  */
 /**
- * The workspace a native activation runs in: the coordinator's own working
- * directory. ONE source for it, because the rendered Runtime Boundary Rules block,
- * the session `cwd`, the guarded-tool `cwd` and the workspace lease all key on this
- * value — two derivations that happen to agree today is exactly how they stop
- * agreeing tomorrow (SPECIALISTS-21).
+ * The workspace a READ activation runs in: the coordinator's own working directory.
+ * ONE source for it, because the rendered Runtime Boundary Rules block, the session
+ * `cwd`, the guarded-tool `cwd` and the workspace lease all key on this value — two
+ * derivations that happen to agree today is exactly how they stop agreeing tomorrow
+ * (SPECIALISTS-21).
  *
- * RUN-IN-PLACE IS THE DELIBERATE DESIGN, recorded here rather than in a document
- * because the next reader of this function is the one who will wonder whether it is
- * an omission:
- *   - `xt claude` / `xt pi` already launch the coordinator into an isolated worktree,
- *     so a per-activation worktree is isolation inside isolation.
- *   - The workspace LEASE is what provides the single-writer guarantee. That was the
- *     deliberate design, and a worktree would not add a guarantee the lease lacks.
- *   - Provisioning would drag the legacy handoff protocol into the native runtime: a
- *     `worktree_owner_job_id` reuse so a reviewer can read the writer's tree, plus a
- *     merge back per activation, on a merge path CLAUDE.md declares prohibited and
- *     known broken pending a separate rework epic.
- *   - The known cost, accepted: the coordinator is not a lease participant, so a
- *     coordinator edit and a write-tier activation can interleave. That hazard is
- *     tracked separately (the coordinator edit warning), and it is not a reason to
- *     provision worktrees.
- * Anyone reopening worktree provisioning must first answer the merge-path problem.
+ * A WRITE activation replaces it with `provisionWriterWorkspace` before the dispatch
+ * check (SPECIALISTS-4310). Run-in-place for writers assumed the coordinator was
+ * already in an isolated `xt` worktree; over MCP the host cwd is whatever checkout the
+ * coordinator started in, and an executor dispatched from a main checkout switched its
+ * branch and installed into it. The per-Issue worktree's branch is pushed as a PR, so
+ * the merge path is the ordinary PR path, not the legacy per-activation merge-back.
  */
 export function resolveWorkspace(cwd: string): WorkspaceIdentity {
   return workspaceIdentityFor(cwd);
+}
+
+/** Signal 0 probes existence; EPERM means alive under another uid. */
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
 }
 
 export function createActivationResourceLoader(
@@ -870,6 +871,10 @@ export interface NativeActivationHostDeps {
   loadSdk?: () => Promise<PiSdk>;
   /** Defaults to `process.cwd()`. */
   cwd?: string;
+  /** The isolated worktree a writer runs in. Defaults to `provisionWriterWorkspace` (git). */
+  provisionWriterWorkspace?: (cwd: string, issueRef: string) => WorkspaceIdentity;
+  /** Background tasks this activation started that are still running; see `liveBackgroundTasks`. */
+  backgroundTaskAlive?: (pid: number) => boolean;
   now?: () => number;
   /**
    * S1 runtime result storage. Defaults to the file store under
@@ -965,6 +970,10 @@ export class NativeActivationHost {
   private readonly forensics: ActivationForensicSink;
   private readonly loadSdk: () => Promise<PiSdk>;
   private readonly cwd: string;
+  private readonly provisionWriterWorkspace: (cwd: string, issueRef: string) => WorkspaceIdentity;
+  private readonly backgroundTaskAlive: (pid: number) => boolean;
+  /** Per activation: background tasks its tools reported as started, by PID. */
+  private readonly backgroundTasks = new Map<string, Map<number, string>>();
   private readonly now: () => number;
   private readonly sessionStatsTimeoutMs?: number;
   private readonly piVersion?: string;
@@ -1040,6 +1049,8 @@ export class NativeActivationHost {
 
   constructor(deps: NativeActivationHostDeps = {}) {
     this.cwd = deps.cwd ?? process.cwd();
+    this.provisionWriterWorkspace = deps.provisionWriterWorkspace ?? provisionWriterWorkspace;
+    this.backgroundTaskAlive = deps.backgroundTaskAlive ?? processAlive;
     this.interactions = new InteractionTransport(
       deps.peer ? { deliver: this.wirePeerDelivery(deps.peer) } : {},
     );
@@ -1206,7 +1217,7 @@ export class NativeActivationHost {
     // The workspace is resolved BEFORE the work gate: the dispatch gate binds
     // workspace into its verdict, and it is available without the model or tool
     // contracts that follow.
-    const workspace: WorkspaceIdentity = resolveWorkspace(this.cwd);
+    let workspace: WorkspaceIdentity = resolveWorkspace(this.cwd);
 
     // Shared Substrate work boundary (§8-§12). No Beads client, no bd
     // subprocess, no second readiness derivation: the gate lives in the
@@ -1361,6 +1372,17 @@ export class NativeActivationHost {
       return reject('issue_unresolvable', {
         note: error instanceof Error ? error.message : String(error),
       });
+    }
+
+    // A writer never mutates the dispatcher's checkout (SPECIALISTS-4310). Resolved before the
+    // dispatch check so the gate, the bind, the lease and the session all see one workspace.
+    if (access === 'write') {
+      try {
+        workspace = this.provisionWriterWorkspace(this.cwd, issueRef);
+      } catch (error) {
+        if (error instanceof DispatchRejectedError) return reject(error.reason, { workspace: this.cwd, note: error.detail.note });
+        throw error;
+      }
     }
 
     // `--issue` is the prompt. An Issue that is not dispatchable (draft,
@@ -2316,6 +2338,7 @@ export class NativeActivationHost {
         break;
       case 'tool_execution_end':
         this.noteToolEnd(snapshot.activationId, event);
+        this.noteBackgroundTask(snapshot.activationId, event);
         break;
       default:
         break;
@@ -2370,6 +2393,28 @@ export class NativeActivationHost {
     const timer = setInterval(() => this.checkToolDuration(snapshot.activationId), TOOL_DURATION_CHECK_INTERVAL_MS);
     timer.unref();
     this.toolDurationWatch.set(snapshot.activationId, { tool, toolCallId, startMs: this.now(), warned: false, timer });
+  }
+
+  /**
+   * Record a background task a tool reported as started (SPECIALISTS-4310). pi-background-tasks
+   * (`bg_run` and its siblings) answers with `Status: running` and `PID: <n>` and lets the turn
+   * end while the task runs; the host must not read that idle turn as a finished activation.
+   */
+  private noteBackgroundTask(activationId: string, event: PiAgentSessionEvent): void {
+    const text = resultContent(event.result);
+    const pid = Number(text?.match(/^PID: (\d+)$/m)?.[1]);
+    if (!text || !/^Status: running$/m.test(text) || !Number.isInteger(pid) || pid <= 0) return;
+    const tasks = this.backgroundTasks.get(activationId) ?? new Map<number, string>();
+    tasks.set(pid, text.split('\n')[0].trim());
+    this.backgroundTasks.set(activationId, tasks);
+  }
+
+  /** This activation's background tasks that are still alive; dead ones are forgotten. */
+  private liveBackgroundTasks(activationId: string): string[] {
+    const tasks = this.backgroundTasks.get(activationId);
+    if (!tasks) return [];
+    for (const pid of tasks.keys()) if (!this.backgroundTaskAlive(pid)) tasks.delete(pid);
+    return [...tasks].map(([pid, label]) => `${label} (pid ${pid})`);
   }
 
   /** Clear the watch when the tool call ends; a stray end never kills a live call. */
@@ -2510,7 +2555,12 @@ export class NativeActivationHost {
       // regardless: a specialist that produced no output has not delivered, whitespace
       // included — so empty/whitespace-only output fails validation on an otherwise
       // settled (not failed) activation.
-      const validation = output.trim().length > 0
+      // An idle session whose own background tasks still run has not finished: it is waiting on
+      // them (SPECIALISTS-4310). Settled and resumable, but `uncertain`, never `completed`.
+      const pendingTasks = this.liveBackgroundTasks(snapshot.activationId);
+      const validation = pendingTasks.length > 0
+        ? { valid: false as const, errors: [`background tasks still running: ${pendingTasks.join(', ')}; resume the activation after they finish`] }
+        : output.trim().length > 0
         ? { valid: true as const }
         : { valid: false as const, errors: ['empty output: specialist produced no output'] };
       if (validation.valid) {
@@ -2533,7 +2583,7 @@ export class NativeActivationHost {
         issueRevision: snapshot.issueRevision,
         contractHash: snapshot.contractHash,
         executionBindingId: snapshot.executionBindingId,
-        status: 'completed',
+        status: pendingTasks.length > 0 ? 'uncertain' : 'completed',
         output,
         validation,
         piSessionId: session.sessionId,

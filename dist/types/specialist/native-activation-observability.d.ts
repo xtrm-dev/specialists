@@ -151,6 +151,7 @@ export declare function captureNativeSessionStats(session: Pick<PiAgentSessionLi
  * pi-sdk -> pi/session` cycle. Re-exported here so existing importers are unchanged.
  */
 export { accumulateTokenUsage } from './session-metrics-contract.js';
+export declare function resultContent(result: unknown): string | undefined;
 /** Parse the stable trailing sequence from `att:<activation>:N`. */
 export declare function nativeAttemptNo(attemptId: string): number;
 /** Advance a runtime-owned attempt ID without replacing its identity namespace. */

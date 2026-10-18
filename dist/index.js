@@ -56459,11 +56459,43 @@ ${detail.missing.map((m) => `  - ${m}`).join(`
 });
 
 // src/activation/workspace-lease.ts
+import { execFileSync as execFileSync5, spawnSync as spawnSync26 } from "child_process";
 import { createHash as createHash8 } from "crypto";
 import { appendFileSync as appendFileSync6, existsSync as existsSync47, linkSync, mkdirSync as mkdirSync18, readFileSync as readFileSync38, realpathSync as realpathSync5, renameSync as renameSync6, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync21 } from "fs";
 import { dirname as dirname23, join as join49 } from "path";
 function workspaceIdentityFor(cwd) {
   return { repositoryRoot: cwd, worktreePath: cwd };
+}
+function provisionWriterWorkspace(cwd, issueRef) {
+  const git = (...args) => execFileSync5("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  const slug = issueRef.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const branch = `sp/${slug}`;
+  try {
+    const existing = git("worktree", "list", "--porcelain").split(`
+
+`).find((entry) => entry.split(`
+`).includes(`branch refs/heads/${branch}`));
+    let worktreePath = existing?.match(/^worktree (.+)$/m)?.[1];
+    if (!worktreePath) {
+      const mainRoot = dirname23(git("rev-parse", "--path-format=absolute", "--git-common-dir"));
+      worktreePath = join49(mainRoot, ".worktrees", slug);
+      if (spawnSync26("git", ["check-ignore", "-q", join49(worktreePath, "x")], { cwd: mainRoot }).status !== 0) {
+        appendFileSync6(git("rev-parse", "--path-format=absolute", "--git-path", "info/exclude"), `
+/.worktrees/
+`);
+      }
+      const branchExists = spawnSync26("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd }).status === 0;
+      git("worktree", "add", ...branchExists ? [worktreePath, branch] : ["-b", branch, worktreePath, "HEAD"]);
+    }
+    return { repositoryRoot: cwd, worktreePath, branch };
+  } catch (error) {
+    const stderr = error.stderr;
+    throw new DispatchRejectedError("workspace_isolation_unavailable", {
+      issueRef,
+      workspace: cwd,
+      note: `a write-capable activation needs its own git worktree and none could be created for ${cwd}: ` + (String(stderr ?? "").trim() || (error instanceof Error ? error.message : String(error)))
+    });
+  }
 }
 function procLeaseProbe() {
   return {
@@ -57726,7 +57758,7 @@ var init_workitem_store = __esm(() => {
 
 // src/cli/doctor.ts
 import { createHash as createHash10 } from "crypto";
-import { spawnSync as spawnSync26 } from "child_process";
+import { spawnSync as spawnSync27 } from "child_process";
 import { existsSync as existsSync51, mkdirSync as mkdirSync20, readdirSync as readdirSync22, readFileSync as readFileSync41, writeFileSync as writeFileSync22 } from "fs";
 import { homedir as homedir13 } from "os";
 import { join as join52, relative as relative5, resolve as resolve23 } from "path";
@@ -57752,11 +57784,11 @@ function section3(label) {
 ${bold12(`\u2500\u2500 ${label} ${line}`)}`);
 }
 function sp(bin, args) {
-  const r = spawnSync26(bin, args, { encoding: "utf8", stdio: "pipe", timeout: 5000 });
+  const r = spawnSync27(bin, args, { encoding: "utf8", stdio: "pipe", timeout: 5000 });
   return { ok: r.status === 0 && !r.error, stdout: (r.stdout ?? "").trim() };
 }
 function isInstalled3(bin) {
-  return spawnSync26("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
+  return spawnSync27("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
 function loadJson2(path) {
   if (!existsSync51(path))
@@ -58154,7 +58186,7 @@ function checkClaudeMdFragments() {
     hint("install xtrm-tools to enable: xt claude-sync --check");
     return true;
   }
-  const result = spawnSync26("xt", ["claude-sync", "--check", "--json", "--cwd", projectRoot], {
+  const result = spawnSync27("xt", ["claude-sync", "--check", "--json", "--cwd", projectRoot], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -59110,7 +59142,7 @@ var init_model_probes = __esm(() => {
 });
 
 // src/cli/setup.ts
-import { spawnSync as spawnSync27 } from "child_process";
+import { spawnSync as spawnSync28 } from "child_process";
 import { readFileSync as readFileSync44 } from "fs";
 function usage4() {
   return [
@@ -59278,7 +59310,7 @@ async function collectDiscoveryState() {
   };
 }
 function parsePiModels2() {
-  const result = spawnSync27("pi", ["--list-models"], { encoding: "utf8", stdio: "pipe", timeout: 8000 });
+  const result = spawnSync28("pi", ["--list-models"], { encoding: "utf8", stdio: "pipe", timeout: 8000 });
   if (result.status !== 0 || result.error)
     return [];
   return result.stdout.split(`
@@ -59429,7 +59461,7 @@ function collectPlannedChanges(writes) {
   return changes;
 }
 function readGlobalField(key) {
-  const getResult = spawnSync27("sp", ["edit", "--global", "--get", key], {
+  const getResult = spawnSync28("sp", ["edit", "--global", "--get", key], {
     encoding: "utf8",
     stdio: "pipe"
   });
@@ -59463,7 +59495,7 @@ function rollbackChanges(applied) {
   return failed;
 }
 function setGlobalField(key, value) {
-  return spawnSync27("sp", ["edit", "--global", "--set", key, value], {
+  return spawnSync28("sp", ["edit", "--global", "--set", key, value], {
     encoding: "utf8",
     stdio: "pipe"
   });
@@ -59712,7 +59744,7 @@ var init_serve_hot_reload = () => {};
 import { createServer } from "http";
 import { randomUUID as randomUUID6 } from "crypto";
 import { once } from "events";
-import { spawnSync as spawnSync28 } from "child_process";
+import { spawnSync as spawnSync29 } from "child_process";
 import { access, readdir as readdir2, readFile as readFile4, constants as constants3 } from "fs/promises";
 import { existsSync as existsSync54 } from "fs";
 import { homedir as homedir16 } from "os";
@@ -59852,7 +59884,7 @@ function parseArgs18(argv) {
   return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, dbPath, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, reloadPollMs, readinessCanaryMode, readinessRequiredPiFlags, readinessCanarySpecialist, readinessCanaryTimeoutMs, logLevel };
 }
 function checkPiHelpForFlags(flags = DEFAULT_REQUIRED_PI_FLAGS) {
-  const result = spawnSync28("pi", ["--help"], { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+  const result = spawnSync29("pi", ["--help"], { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
   if (result.error || result.status === 127)
     return "pi_binary_missing";
   const help = `${result.stdout ?? ""}
@@ -60127,7 +60159,7 @@ var init_serve = __esm(() => {
 });
 
 // src/cli/script.ts
-import { spawnSync as spawnSync29 } from "child_process";
+import { spawnSync as spawnSync30 } from "child_process";
 function parseVar(entry) {
   const index = entry.indexOf("=");
   if (index <= 0)
@@ -60257,7 +60289,7 @@ function printResult(result, json) {
   console.error(result.error);
 }
 function runUnderLock(lockPath, argv) {
-  const flock = spawnSync29("flock", ["-n", lockPath, "env", "SP_SCRIPT_NO_LOCK=1", process.execPath, process.argv[1], "script", ...argv], {
+  const flock = spawnSync30("flock", ["-n", lockPath, "env", "SP_SCRIPT_NO_LOCK=1", process.execPath, process.argv[1], "script", ...argv], {
     encoding: "utf-8",
     stdio: "inherit"
   });
@@ -92315,6 +92347,14 @@ async function discoverDynamicExtensionTools(input) {
 function resolveWorkspace(cwd) {
   return workspaceIdentityFor(cwd);
 }
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
 function createActivationResourceLoader(sdk, options) {
   const wantsCodemode = (options.extensionPaths ?? []).includes(BUILTIN_CODEMODE_EXTENSION);
   const codemodeFactory = wantsCodemode && typeof sdk.createCodemodeExtension === "function" ? sdk.createCodemodeExtension() : undefined;
@@ -92357,6 +92397,9 @@ class NativeActivationHost {
   forensics;
   loadSdk;
   cwd;
+  provisionWriterWorkspace;
+  backgroundTaskAlive;
+  backgroundTasks = new Map;
   now;
   sessionStatsTimeoutMs;
   piVersion;
@@ -92376,6 +92419,8 @@ class NativeActivationHost {
   interactions;
   constructor(deps = {}) {
     this.cwd = deps.cwd ?? process.cwd();
+    this.provisionWriterWorkspace = deps.provisionWriterWorkspace ?? provisionWriterWorkspace;
+    this.backgroundTaskAlive = deps.backgroundTaskAlive ?? processAlive;
     this.interactions = new InteractionTransport(deps.peer ? { deliver: this.wirePeerDelivery(deps.peer) } : {});
     this.loader = deps.loader ?? new SpecialistLoader({ projectDir: this.cwd });
     this.workItemsInjected = deps.workItems;
@@ -92451,7 +92496,7 @@ class NativeActivationHost {
     const specToolDurationWarnMs = specialist.specialist.stall_detection?.tool_duration_warn_ms;
     this.toolDurationWarnMsByActivation.set(activationId, this.toolDurationWarnMsByDep ?? normalizeToolDurationWarnMs(specToolDurationWarnMs) ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms);
     const access = WRITE_TIERS.has(tier) ? "write" : "read";
-    const workspace = resolveWorkspace(this.cwd);
+    let workspace = resolveWorkspace(this.cwd);
     let workItems;
     try {
       workItems = await this.resolveWorkItems();
@@ -92565,6 +92610,15 @@ class NativeActivationHost {
       return reject("issue_unresolvable", {
         note: error instanceof Error ? error.message : String(error)
       });
+    }
+    if (access === "write") {
+      try {
+        workspace = this.provisionWriterWorkspace(this.cwd, issueRef);
+      } catch (error) {
+        if (error instanceof DispatchRejectedError)
+          return reject(error.reason, { workspace: this.cwd, note: error.detail.note });
+        throw error;
+      }
     }
     let dispatchCheck;
     try {
@@ -93140,6 +93194,7 @@ class NativeActivationHost {
         break;
       case "tool_execution_end":
         this.noteToolEnd(snapshot.activationId, event);
+        this.noteBackgroundTask(snapshot.activationId, event);
         break;
       default:
         break;
@@ -93175,6 +93230,25 @@ class NativeActivationHost {
     const timer = setInterval(() => this.checkToolDuration(snapshot.activationId), TOOL_DURATION_CHECK_INTERVAL_MS);
     timer.unref();
     this.toolDurationWatch.set(snapshot.activationId, { tool, toolCallId, startMs: this.now(), warned: false, timer });
+  }
+  noteBackgroundTask(activationId, event) {
+    const text = resultContent(event.result);
+    const pid = Number(text?.match(/^PID: (\d+)$/m)?.[1]);
+    if (!text || !/^Status: running$/m.test(text) || !Number.isInteger(pid) || pid <= 0)
+      return;
+    const tasks = this.backgroundTasks.get(activationId) ?? new Map;
+    tasks.set(pid, text.split(`
+`)[0].trim());
+    this.backgroundTasks.set(activationId, tasks);
+  }
+  liveBackgroundTasks(activationId) {
+    const tasks = this.backgroundTasks.get(activationId);
+    if (!tasks)
+      return [];
+    for (const pid of tasks.keys())
+      if (!this.backgroundTaskAlive(pid))
+        tasks.delete(pid);
+    return [...tasks].map(([pid, label]) => `${label} (pid ${pid})`);
   }
   noteToolEnd(activationId, event) {
     const watch = this.toolDurationWatch.get(activationId);
@@ -93269,7 +93343,8 @@ class NativeActivationHost {
       const output = textOf(last);
       emit("activation_settled");
       emit("output_validation_started");
-      const validation = output.trim().length > 0 ? { valid: true } : { valid: false, errors: ["empty output: specialist produced no output"] };
+      const pendingTasks = this.liveBackgroundTasks(snapshot.activationId);
+      const validation = pendingTasks.length > 0 ? { valid: false, errors: [`background tasks still running: ${pendingTasks.join(", ")}; resume the activation after they finish`] } : output.trim().length > 0 ? { valid: true } : { valid: false, errors: ["empty output: specialist produced no output"] };
       if (validation.valid) {
         emit("output_validation_passed");
       } else {
@@ -93288,7 +93363,7 @@ class NativeActivationHost {
         issueRevision: snapshot.issueRevision,
         contractHash: snapshot.contractHash,
         executionBindingId: snapshot.executionBindingId,
-        status: "completed",
+        status: pendingTasks.length > 0 ? "uncertain" : "completed",
         output,
         validation,
         piSessionId: session.sessionId,
@@ -95204,7 +95279,7 @@ var init_v2_server = __esm(() => {
 
 // src/index.ts
 init_logger();
-import { spawnSync as spawnSync30 } from "child_process";
+import { spawnSync as spawnSync31 } from "child_process";
 process.on("uncaughtException", (err) => {
   if (err.code === "EBADF" && err.syscall === "close")
     return;
@@ -96630,7 +96705,7 @@ ${LEASE_USAGE}
   }
   if (sub === "release") {
     console.error("Deprecated. Use `xt release prepare/publish`. This alias will be removed in v4.0.");
-    const result = spawnSync30("xt", ["release", ...process.argv.slice(3)], { stdio: "inherit" });
+    const result = spawnSync31("xt", ["release", ...process.argv.slice(3)], { stdio: "inherit" });
     if (result.error) {
       console.error(`Failed to run xt release: ${result.error.message}`);
       process.exit(1);

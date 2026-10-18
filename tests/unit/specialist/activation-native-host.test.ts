@@ -50,6 +50,7 @@ import { ASK_TOOL, ESCALATE_TOOL } from '../../../src/activation/ask-tool.js';
 import { buildSystemPrompt } from '../../../src/specialist/system-prompt.js';
 import { resolveOutputContractSchema } from '../../../src/specialist/runner.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
+// Writers here run in their non-git temp dir; worktree isolation has its own test (SPECIALISTS-4310).
 import { acquire as acquireLease, leasePath, release as releaseLease, workspaceIdentityFor } from '../../../src/activation/workspace-lease.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
 import { createSpecialistStatusTool } from '../../../src/tools/specialist/specialist_status.tool.js';
@@ -399,6 +400,7 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
     const sink = collectingSink();
 
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -425,6 +427,7 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
     const session = fakeSession({ record });
 
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
@@ -452,6 +455,7 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
     const session = fakeSession({ record });
 
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
@@ -478,6 +482,7 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
     const sink = collectingSink();
 
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -504,6 +509,7 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
     (spec.specialist.execution as Record<string, unknown>).permission_required = 'HIGH';
 
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -526,6 +532,7 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
 
     // Contention is now the real refusal, and it names the holder rather than a phase.
     const second = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -554,6 +561,7 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
     });
 
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -577,6 +585,7 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
     const session = fakeSession({ record, assistantText: 'the answer' });
 
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec({ thinking_level: 'low' })),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
@@ -604,6 +613,7 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
     const session = fakeSession({ record, assistantText: 'the answer' });
 
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec({ thinking_level: 'low' })),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
@@ -631,6 +641,7 @@ describe('NativeActivationHost — Phase 1 read-only', () => {
     const sink = collectingSink();
 
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec({ thinking_level: 'low' })),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -724,6 +735,7 @@ describe('NativeActivationHost — defects found by the live smoke', () => {
     const session = fakeSession({ record });
     const sink = collectingSink();
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
@@ -749,6 +761,7 @@ describe('NativeActivationHost — defects found by the live smoke', () => {
     const session = fakeSession({ record });
     const sink = collectingSink();
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
@@ -777,6 +790,7 @@ describe('NativeActivationHost — defects found by the live smoke', () => {
     const record: { createArgs?: Record<string, unknown> } = {};
     const session = fakeSession({ record });
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
@@ -806,6 +820,7 @@ describe('NativeActivationHost — defects found by the live smoke', () => {
     });
     const sink = collectingSink();
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
@@ -844,6 +859,7 @@ describe('NativeActivationHost — defects found by the live smoke', () => {
 
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
@@ -877,6 +893,7 @@ describe('NativeActivationHost — defects found by the live smoke', () => {
 
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
@@ -923,6 +940,7 @@ describe('NativeActivationHost — defects found by the live smoke', () => {
     });
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
@@ -954,6 +972,7 @@ describe('NativeActivationHost — defects found by the live smoke', () => {
     const session = fakeSession({ record, assistantText });
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
@@ -980,6 +999,7 @@ describe('NativeActivationHost — defects found by the live smoke', () => {
     const session = fakeSession({ record, assistantText: 'the answer' });
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
@@ -1017,6 +1037,7 @@ describe('NativeActivationHost — raw session event hook', () => {
     };
 
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
@@ -1046,6 +1067,7 @@ describe('NativeActivationHost — raw session event hook', () => {
     const session = fakeSession({ record });
     const seen: Array<Record<string, unknown>> = [];
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
@@ -1073,6 +1095,7 @@ describe('NativeActivationHost — raw session event hook', () => {
     const record: { createArgs?: Record<string, unknown> } = {};
     const session = fakeSession({ record });
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
@@ -1095,6 +1118,7 @@ describe('snapshot tokenUsage (unitAI-crjh7)', () => {
     const record: { createArgs?: Record<string, unknown> } = {};
     const session = fakeSession({ record, holdOpen: true });
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
@@ -1141,6 +1165,7 @@ describe('snapshot tokenUsage (unitAI-crjh7)', () => {
     const record: { createArgs?: Record<string, unknown> } = {};
     const session = fakeSession({ record, holdOpen: true });
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, session),
@@ -1191,6 +1216,7 @@ describe('snapshot tokenUsage (unitAI-crjh7)', () => {
       const record: { createArgs?: Record<string, unknown> } = {};
       const session = fakeSession({ record, holdOpen: true });
       const host = new NativeActivationHost({
+                provisionWriterWorkspace: workspaceIdentityFor,
                 loader: loaderFor(readOnlySpec()),
         workItems: fakeWorkItems(),
         loadSdk: async () => makeSdk(record, session),
@@ -1262,6 +1288,7 @@ describe('dispatch refusals carry their explanation', () => {
   it('names the draft state when a contract:draft bead is refused', async () => {
     const spec = readOnlySpec();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(spec),
       workItems: fakeWorkItems({ state: 'draft' }),
       loadSdk: async () => makeSdk({}, fakeSession({ record: {} })),
@@ -1281,6 +1308,7 @@ describe('dispatch refusals carry their explanation', () => {
   it('renders the provider explanation when a model cannot be resolved', async () => {
     const spec = readOnlySpec();
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       loadSdk: async () => ({
@@ -1321,6 +1349,7 @@ describe('per-call mutation admission', () => {
     const sink = collectingSink();
 
     const writerHost = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(writerSpec),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -1339,6 +1368,7 @@ describe('per-call mutation admission', () => {
     // A READER in the same workspace holds no lease, because it is not entitled to one.
     // Refusing it is the capability grant being enforced, not an error state.
     const readerHost = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -1360,6 +1390,7 @@ describe('per-call mutation admission', () => {
 
   it('refuses an unknown activation rather than defaulting to allow', async () => {
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk({}, fakeSession({ record: {} })),
@@ -1387,6 +1418,7 @@ describe('ask tools reach the child', () => {
   it('names both ask tools in the allowlist without widening it', async () => {
     const record: { createArgs?: Record<string, unknown> } = {};
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       loadSdk: async () => makeSdk(record, fakeSession({ record })),
@@ -1428,6 +1460,7 @@ describe('PRD acceptance Z — a resume conflict is refused (unitAI-rrdnt.36)', 
     const shared = hostWorkspace();
 
     const hostA = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -1444,6 +1477,7 @@ describe('PRD acceptance Z — a resume conflict is refused (unitAI-rrdnt.36)', 
     // which is precisely why Z could never occur.
     const sinkB = collectingSink();
     const hostB = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: sinkB,
@@ -1570,6 +1604,7 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
     const spec = readOnlySpec({ model: 'primaryprov/primary-model', ...(opts.executionExtra ?? {}) });
     if (opts.permission) (spec.specialist.execution as Record<string, unknown>).permission_required = opts.permission;
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -1780,6 +1815,7 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
       specialist: 'other-specialist',
     });
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -1801,6 +1837,7 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
   it('keeps the claim when the inline dispatch is admitted', async () => {
     // The release is for refusals only: an admitted activation holds its claim for real work.
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -1830,6 +1867,7 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
       specialist: 'other-specialist',
     });
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -1855,6 +1893,7 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
     const boundary = fakeWorkItems();
     (boundary as { bind: () => never }).bind = () => { throw new Error('bind blew up'); };
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(readOnlySpec()),
       workItems: boundary,
       forensics: collectingSink(),
@@ -1883,6 +1922,7 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
     const spec = readOnlySpec({ model: 'primaryprov/primary-model' });
     (spec.specialist.execution as Record<string, unknown>).permission_required = 'HIGH';
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -1919,6 +1959,7 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
     (spec.specialist.execution as Record<string, unknown>).permission_required = 'HIGH';
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -1970,6 +2011,7 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
 
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -2047,6 +2089,7 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
   it('refuses retry for live and unknown activations with the right pointer', async () => {
     const record: { createArgs?: Record<string, unknown> } = {};
     const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
             loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -2213,6 +2256,7 @@ describe('native resource isolation (SPECIALISTS-4)', () => {
 
   async function dispatch(spec: Record<string, unknown>, session: PiAgentSessionLike, record: { createArgs?: Record<string, unknown> }) {
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -2280,6 +2324,7 @@ describe('native resource isolation (SPECIALISTS-4)', () => {
     const sdk = makeSdk(record, session) as unknown as Record<string, unknown>;
     delete sdk.DefaultResourceLoader;
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -2317,6 +2362,7 @@ describe('permission-guard native surface', () => {
 
   async function dispatchReadOnly(record: { createArgs?: Record<string, unknown> }, session: PiAgentSessionLike) {
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -2380,6 +2426,7 @@ describe('permission-guard native surface', () => {
       const record: { createArgs?: Record<string, unknown> } = {};
       const session = fakeSession({ record });
       const host = new NativeActivationHost({
+        provisionWriterWorkspace: workspaceIdentityFor,
         loader: loaderFor(spec),
         workItems: fakeWorkItems(),
         forensics: collectingSink(),
@@ -2490,6 +2537,7 @@ describe('output contract schema parity (SPECIALISTS-5)', () => {
     const record: { createArgs?: Record<string, unknown> } = {};
     const session = fakeSession({ record });
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithSchema()),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -2574,6 +2622,7 @@ describe('pre-scripts and curated extensions (SPECIALISTS-6)', () => {
     };
     spec.specialist.prompt.task_template = 'Do: $bead_id\nPre: $pre_script_output';
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -2593,6 +2642,7 @@ describe('pre-scripts and curated extensions (SPECIALISTS-6)', () => {
     const workspace = hostWorkspace();
     const script = preScriptFile(workspace, 'pre-fail', 'exit 7');
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithScripts([
         { phase: 'pre', run: script, inject_output: false, required: true },
       ])),
@@ -2613,6 +2663,7 @@ describe('pre-scripts and curated extensions (SPECIALISTS-6)', () => {
     const record: { createArgs?: Record<string, unknown> } = {};
     const session = fakeSession({ record });
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithScripts([], {
         permission_required: 'HIGH',
         extensions: { 'npm:pi-mcp-adapter': true, [PY_KERNEL]: true },
@@ -2653,6 +2704,7 @@ describe('pre-scripts and curated extensions (SPECIALISTS-6)', () => {
     process.env.PI_NPM_GLOBAL_DIR = fakeNodeModules;
     try {
       const host = new NativeActivationHost({
+        provisionWriterWorkspace: workspaceIdentityFor,
         loader: loaderFor(specWithScripts([], {
           permission_required: 'HIGH',
           extensions: { 'npm:pi-mcp-adapter': true },
@@ -2690,6 +2742,7 @@ describe('pre-scripts and curated extensions (SPECIALISTS-6)', () => {
     );
     const sdk = { ...makeSdk(record, session), getAgentDir: () => fakeAgentDir };
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithScripts([], {
         permission_required: 'READ_ONLY',
         extensions: { 'git:github.com/alonw0/pi-claude-link': true },
@@ -2713,6 +2766,7 @@ describe('pre-scripts and curated extensions (SPECIALISTS-6)', () => {
     const record: { createArgs?: Record<string, unknown> } = {};
     const session = fakeSession({ record });
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithScripts([])),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -2863,6 +2917,7 @@ describe('task-prompt composition parity (SPECIALISTS-22)', () => {
     const session = fakeSession({ record });
     const sink = options.sink ?? collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems({ blockers: options.blockers }),
       forensics: sink,
@@ -2890,6 +2945,7 @@ describe('task-prompt composition parity (SPECIALISTS-22)', () => {
     // The reviewer hook keys on the RESOLVED definition's name, as the legacy path does.
     spec.specialist.metadata.name = options.specialist ?? 'researcher';
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(spec),
       workItems: fakeWorkItems({ blockers: options.blockers }),
       forensics: sink,
@@ -2945,6 +3001,7 @@ describe('task-prompt composition parity (SPECIALISTS-22)', () => {
     };
     const firstSink = collectingSink();
     const firstHost = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: firstSink,
@@ -2962,6 +3019,7 @@ describe('task-prompt composition parity (SPECIALISTS-22)', () => {
     const secondSession = fakeSession({ record: secondRecord, holdOpen: true });
     const secondSink = collectingSink();
     const secondHost = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: secondSink,
@@ -2994,6 +3052,7 @@ describe('task-prompt composition parity (SPECIALISTS-22)', () => {
       return created;
     };
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -3020,6 +3079,7 @@ describe('task-prompt composition parity (SPECIALISTS-22)', () => {
     spec.specialist.metadata.name = 'researcher';
     spec.specialist.prompt.task_template = 'Do: $prompt\n\n$resolved_tool_contract';
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -3085,6 +3145,7 @@ describe('run-in-place workspace semantics (SPECIALISTS-21)', () => {
     const spec = readOnlySpec() as { specialist: { prompt: Record<string, unknown> } };
     spec.specialist.prompt.task_template = 'Do: $prompt';
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -3127,6 +3188,7 @@ describe('NativeActivationHost — admission defaults to the real pre-flight gat
       scripts: [],
     };
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -3154,6 +3216,7 @@ describe('NativeActivationHost — admission defaults to the real pre-flight gat
     const spec = readOnlySpec();
     (spec.specialist as Record<string, unknown>).capabilities = { required_tools: ['edit'] };
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -3351,6 +3414,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
       });
       const sink = collectingSink();
       const host = new NativeActivationHost({
+        provisionWriterWorkspace: workspaceIdentityFor,
         loader: loaderFor(specWithExtensions({ [GIT_SOURCE]: true })),
         workItems: fakeWorkItems(),
         forensics: sink,
@@ -3381,6 +3445,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
       });
       const sink = collectingSink();
       const host = new NativeActivationHost({
+        provisionWriterWorkspace: workspaceIdentityFor,
         loader: loaderFor(specWithExtensions({ [GIT_SOURCE]: true })),
         workItems: fakeWorkItems(),
         forensics: sink,
@@ -3409,6 +3474,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
         registryExtra: [{ name: 'read', source: GIT_SOURCE }],
       });
       const host = new NativeActivationHost({
+        provisionWriterWorkspace: workspaceIdentityFor,
         loader: loaderFor(specWithExtensions({ [GIT_SOURCE]: true })),
         workItems: fakeWorkItems(),
         forensics: collectingSink(),
@@ -3437,6 +3503,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     });
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -3470,6 +3537,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
   it('leaves options and contract byte-identical when no dynamic sources are enabled', async () => {
     const { sdk, calls, realRecord, realSession } = discoverySdk({ discoveredActive: [] });
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -3581,6 +3649,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
       createPowerShellTool: () => ({ name: 'powershell', execute: async () => 'ran' }),
     } as unknown as PiSdk;
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(readOnlySpec({
         model: 'primaryprov/primary-model',
         fallback_models: ['fallbackprov/fallback-model'],
@@ -3606,6 +3675,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     const { sdk, calls, disposed } = discoverySdk({ failDiscovery: 'throw' });
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -3634,6 +3704,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     });
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -3659,6 +3730,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     });
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -3680,6 +3752,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     const { sdk, realRecord, realSession } = discoverySdk({ failDiscovery: 'empty' });
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithExtensions({ '/nonexistent/path-xyz': true })),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -3723,6 +3796,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
         provenance: { ext_tool_a: 'cli', grep: 'cli' },
       });
       const host = new NativeActivationHost({
+        provisionWriterWorkspace: workspaceIdentityFor,
         loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
         workItems: fakeWorkItems(),
         forensics: collectingSink(),
@@ -3801,6 +3875,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     } as unknown as PiSdk;
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -3870,6 +3945,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     } as unknown as PiSdk;
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -3899,6 +3975,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     };
     spec.specialist.capabilities = { required_tools: ['ext_tool_a'] };
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -3924,6 +4001,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     };
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -3942,6 +4020,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
   it('is byte-exact with no dynamic sources: tools, fence, loader and contract string (F5c)', async () => {
     const { sdk, calls, realRecord, realSession } = discoverySdk({ discoveredActive: [] });
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -4054,6 +4133,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
       createPowerShellTool: () => ({ name: 'powershell', execute: async () => 'ran' }),
     } as unknown as PiSdk;
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -4084,6 +4164,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
       provenance: { ext_tool_a: 'cli' },
     });
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),
@@ -4108,6 +4189,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     });
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -4137,6 +4219,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     });
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -4175,6 +4258,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     });
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -4212,6 +4296,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     const sink = collectingSink();
     const workspace = hostWorkspace();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(spec),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -4243,6 +4328,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     });
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -4277,6 +4363,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     });
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -4307,6 +4394,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
     const { sdk, calls } = discoverySdk({ discoveredActive: [] });
     const sink = collectingSink();
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(readOnlySpec()),
       workItems: fakeWorkItems(),
       forensics: sink,
@@ -4333,6 +4421,7 @@ describe('NativeActivationHost — discover-then-pin (unitAI-1pqtl.2)', () => {
       provenance: { ext_tool_a: 'cli' },
     });
     const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(specWithExtensions({ '/fake/ext-a': true })),
       workItems: fakeWorkItems(),
       forensics: collectingSink(),

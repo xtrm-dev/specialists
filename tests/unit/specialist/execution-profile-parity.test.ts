@@ -121,6 +121,8 @@ import {
   type ActivationForensicSink,
 } from '../../../src/activation/native-host.js';
 import { ASK_TOOL, ESCALATE_TOOL } from '../../../src/activation/ask-tool.js';
+// Writers here run in their non-git temp dir; worktree isolation has its own test (SPECIALISTS-4310).
+import { workspaceIdentityFor } from '../../../src/activation/workspace-lease.js';
 import { GUARDED_TOOL_NAMES } from '../../../src/activation/guarded-tools.js';
 
 /**
@@ -603,6 +605,7 @@ async function compileNativeProfile(
   const record: { createArgs?: Record<string, unknown> } = {};
   const session = recordingSession();
   const host = new NativeActivationHost({
+    provisionWriterWorkspace: workspaceIdentityFor,
     loader: { get: async () => spec } as never,
     workItems: testWorkItems({ blockers: BLOCKERS }),
     forensics: forensics(),

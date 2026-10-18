@@ -37,6 +37,8 @@ import { createSpecialistStatusTool } from '../../../src/tools/specialist/specia
 import { createSpecialistListTool } from '../../../src/tools/specialist/specialist_list.tool.js';
 import { createSpecialistResumeTool } from '../../../src/mcp/resume-tool.js';
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
+// Writers here run in their non-git temp dir; worktree isolation has its own test (SPECIALISTS-4310).
+import { workspaceIdentityFor } from '../../../src/activation/workspace-lease.js';
 import { REQUIRED_SECTIONS } from '../../../src/activation/contract-sections.js';
 import { CircuitBreaker } from '../../../src/utils/circuitBreaker.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
@@ -193,6 +195,7 @@ function hostWith(fixture: HostFixture = {}) {
   } as unknown as PiSdk;
   const events: string[] = [];
   const host = new NativeActivationHost({
+    provisionWriterWorkspace: workspaceIdentityFor,
     loader: { get: async () => ({
       specialist: {
         metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },

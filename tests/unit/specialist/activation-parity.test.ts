@@ -22,6 +22,8 @@ vi.mock('../../../src/pi/python-kernel-extension.js', () => ({
 }));
 
 import { NativeActivationHost, resolveWorkspace, contractToMarkdown, resolveDeclaredExtensionSources, type ActivationForensicSink } from '../../../src/activation/native-host.js';
+// Writers here run in their non-git temp dir; worktree isolation has its own test (SPECIALISTS-4310).
+import { workspaceIdentityFor } from '../../../src/activation/workspace-lease.js';
 import { ASK_TOOL, ESCALATE_TOOL } from '../../../src/activation/ask-tool.js';
 import { deriveSkillName, renderTaskPrompt } from '../../../src/specialist/task-prompt.js';
 import { buildSystemPrompt, buildOutputContractInstruction } from '../../../src/specialist/system-prompt.js';
@@ -205,6 +207,7 @@ async function nativeAssembly(root: string, opts: ProbeOptions, overrides: { nam
   const session = recordingSession(record);
   const forensics = sink();
   const host = new NativeActivationHost({
+    provisionWriterWorkspace: workspaceIdentityFor,
     loader: { get: async () => definition(root, opts) } as never,
     workItems: testWorkItems({ blockers: BLOCKERS }),
     forensics,

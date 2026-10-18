@@ -21981,6 +21981,7 @@ function isDeliveredStatus(status) {
 }
 
 // src/activation/workspace-lease.ts
+import { execFileSync as execFileSync2, spawnSync as spawnSync4 } from "node:child_process";
 import { createHash as createHash5 } from "node:crypto";
 import { appendFileSync, existsSync as existsSync19, linkSync, mkdirSync as mkdirSync6, readFileSync as readFileSync11, realpathSync as realpathSync4, renameSync as renameSync3, rmSync as rmSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "node:fs";
 import { dirname as dirname11, join as join17 } from "node:path";
@@ -22031,6 +22032,37 @@ ${detail.missing.map((m) => `  - ${m}`).join(`
 // src/activation/workspace-lease.ts
 function workspaceIdentityFor(cwd) {
   return { repositoryRoot: cwd, worktreePath: cwd };
+}
+function provisionWriterWorkspace(cwd, issueRef) {
+  const git = (...args) => execFileSync2("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  const slug = issueRef.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const branch = `sp/${slug}`;
+  try {
+    const existing = git("worktree", "list", "--porcelain").split(`
+
+`).find((entry) => entry.split(`
+`).includes(`branch refs/heads/${branch}`));
+    let worktreePath = existing?.match(/^worktree (.+)$/m)?.[1];
+    if (!worktreePath) {
+      const mainRoot = dirname11(git("rev-parse", "--path-format=absolute", "--git-common-dir"));
+      worktreePath = join17(mainRoot, ".worktrees", slug);
+      if (spawnSync4("git", ["check-ignore", "-q", join17(worktreePath, "x")], { cwd: mainRoot }).status !== 0) {
+        appendFileSync(git("rev-parse", "--path-format=absolute", "--git-path", "info/exclude"), `
+/.worktrees/
+`);
+      }
+      const branchExists = spawnSync4("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd }).status === 0;
+      git("worktree", "add", ...branchExists ? [worktreePath, branch] : ["-b", branch, worktreePath, "HEAD"]);
+    }
+    return { repositoryRoot: cwd, worktreePath, branch };
+  } catch (error) {
+    const stderr = error.stderr;
+    throw new DispatchRejectedError("workspace_isolation_unavailable", {
+      issueRef,
+      workspace: cwd,
+      note: `a write-capable activation needs its own git worktree and none could be created for ${cwd}: ` + (String(stderr ?? "").trim() || (error instanceof Error ? error.message : String(error)))
+    });
+  }
 }
 function procLeaseProbe() {
   return {
@@ -23795,6 +23827,14 @@ async function discoverDynamicExtensionTools(input) {
 function resolveWorkspace(cwd) {
   return workspaceIdentityFor(cwd);
 }
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
 function createActivationResourceLoader(sdk, options) {
   const wantsCodemode = (options.extensionPaths ?? []).includes(BUILTIN_CODEMODE_EXTENSION);
   const codemodeFactory = wantsCodemode && typeof sdk.createCodemodeExtension === "function" ? sdk.createCodemodeExtension() : undefined;
@@ -23839,6 +23879,9 @@ class NativeActivationHost {
   forensics;
   loadSdk;
   cwd;
+  provisionWriterWorkspace;
+  backgroundTaskAlive;
+  backgroundTasks = new Map;
   now;
   sessionStatsTimeoutMs;
   piVersion;
@@ -23858,6 +23901,8 @@ class NativeActivationHost {
   interactions;
   constructor(deps = {}) {
     this.cwd = deps.cwd ?? process.cwd();
+    this.provisionWriterWorkspace = deps.provisionWriterWorkspace ?? provisionWriterWorkspace;
+    this.backgroundTaskAlive = deps.backgroundTaskAlive ?? processAlive;
     this.interactions = new InteractionTransport(deps.peer ? { deliver: this.wirePeerDelivery(deps.peer) } : {});
     this.loader = deps.loader ?? new SpecialistLoader({ projectDir: this.cwd });
     this.workItemsInjected = deps.workItems;
@@ -23933,7 +23978,7 @@ class NativeActivationHost {
     const specToolDurationWarnMs = specialist.specialist.stall_detection?.tool_duration_warn_ms;
     this.toolDurationWarnMsByActivation.set(activationId, this.toolDurationWarnMsByDep ?? normalizeToolDurationWarnMs(specToolDurationWarnMs) ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms);
     const access = WRITE_TIERS.has(tier) ? "write" : "read";
-    const workspace = resolveWorkspace(this.cwd);
+    let workspace = resolveWorkspace(this.cwd);
     let workItems;
     try {
       workItems = await this.resolveWorkItems();
@@ -24047,6 +24092,15 @@ class NativeActivationHost {
       return reject("issue_unresolvable", {
         note: error instanceof Error ? error.message : String(error)
       });
+    }
+    if (access === "write") {
+      try {
+        workspace = this.provisionWriterWorkspace(this.cwd, issueRef);
+      } catch (error) {
+        if (error instanceof DispatchRejectedError)
+          return reject(error.reason, { workspace: this.cwd, note: error.detail.note });
+        throw error;
+      }
     }
     let dispatchCheck;
     try {
@@ -24622,6 +24676,7 @@ class NativeActivationHost {
         break;
       case "tool_execution_end":
         this.noteToolEnd(snapshot.activationId, event);
+        this.noteBackgroundTask(snapshot.activationId, event);
         break;
       default:
         break;
@@ -24657,6 +24712,25 @@ class NativeActivationHost {
     const timer = setInterval(() => this.checkToolDuration(snapshot.activationId), TOOL_DURATION_CHECK_INTERVAL_MS);
     timer.unref();
     this.toolDurationWatch.set(snapshot.activationId, { tool, toolCallId, startMs: this.now(), warned: false, timer });
+  }
+  noteBackgroundTask(activationId, event) {
+    const text = resultContent(event.result);
+    const pid = Number(text?.match(/^PID: (\d+)$/m)?.[1]);
+    if (!text || !/^Status: running$/m.test(text) || !Number.isInteger(pid) || pid <= 0)
+      return;
+    const tasks = this.backgroundTasks.get(activationId) ?? new Map;
+    tasks.set(pid, text.split(`
+`)[0].trim());
+    this.backgroundTasks.set(activationId, tasks);
+  }
+  liveBackgroundTasks(activationId) {
+    const tasks = this.backgroundTasks.get(activationId);
+    if (!tasks)
+      return [];
+    for (const pid of tasks.keys())
+      if (!this.backgroundTaskAlive(pid))
+        tasks.delete(pid);
+    return [...tasks].map(([pid, label]) => `${label} (pid ${pid})`);
   }
   noteToolEnd(activationId, event) {
     const watch = this.toolDurationWatch.get(activationId);
@@ -24751,7 +24825,8 @@ class NativeActivationHost {
       const output = textOf(last);
       emit("activation_settled");
       emit("output_validation_started");
-      const validation = output.trim().length > 0 ? { valid: true } : { valid: false, errors: ["empty output: specialist produced no output"] };
+      const pendingTasks = this.liveBackgroundTasks(snapshot.activationId);
+      const validation = pendingTasks.length > 0 ? { valid: false, errors: [`background tasks still running: ${pendingTasks.join(", ")}; resume the activation after they finish`] } : output.trim().length > 0 ? { valid: true } : { valid: false, errors: ["empty output: specialist produced no output"] };
       if (validation.valid) {
         emit("output_validation_passed");
       } else {
@@ -24770,7 +24845,7 @@ class NativeActivationHost {
         issueRevision: snapshot.issueRevision,
         contractHash: snapshot.contractHash,
         executionBindingId: snapshot.executionBindingId,
-        status: "completed",
+        status: pendingTasks.length > 0 ? "uncertain" : "completed",
         output,
         validation,
         piSessionId: session.sessionId,
@@ -26117,10 +26192,10 @@ function createSpecialistFeedTool(getHost, openObservability = () => createObser
   };
 }
 // src/specialist/bead-gate.ts
-import { spawnSync as spawnSync4 } from "node:child_process";
+import { spawnSync as spawnSync5 } from "node:child_process";
 var NON_DISPATCHABLE_STATUSES = new Set(["closed", "deferred"]);
 function readContractState(beadId) {
-  const result = spawnSync4("bd", ["state", beadId, "contract"], {
+  const result = spawnSync5("bd", ["state", beadId, "contract"], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "ignore"],
     timeout: 5000
