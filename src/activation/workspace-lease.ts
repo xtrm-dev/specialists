@@ -119,7 +119,12 @@ export function workspaceIdentityFor(cwd: string): WorkspaceIdentity {
  * `leaseScopeFor(process.cwd())` reconciles them. A directory that is not a git checkout
  * cannot be isolated and is refused rather than written in place.
  */
-export function provisionWriterWorkspace(cwd: string, issueRef: string): WorkspaceIdentity {
+export type ProvisionedWorkspace = WorkspaceIdentity & {
+  /** True when this call created the worktree, so a refused dispatch may remove it again. */
+  created?: boolean;
+};
+
+export function provisionWriterWorkspace(cwd: string, issueRef: string): ProvisionedWorkspace {
   const git = (...args: string[]): string =>
     execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   const slug = issueRef.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -129,6 +134,7 @@ export function provisionWriterWorkspace(cwd: string, issueRef: string): Workspa
       .split('\n\n')
       .find((entry) => entry.split('\n').includes(`branch refs/heads/${branch}`));
     let worktreePath = existing?.match(/^worktree (.+)$/m)?.[1];
+    let created = false;
     if (!worktreePath) {
       const mainRoot = dirname(git('rev-parse', '--path-format=absolute', '--git-common-dir'));
       worktreePath = join(mainRoot, '.worktrees', slug);
@@ -138,8 +144,9 @@ export function provisionWriterWorkspace(cwd: string, issueRef: string): Workspa
       }
       const branchExists = spawnSync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], { cwd }).status === 0;
       git('worktree', 'add', ...(branchExists ? [worktreePath, branch] : ['-b', branch, worktreePath, 'HEAD']));
+      created = !branchExists;
     }
-    return { repositoryRoot: cwd, worktreePath, branch };
+    return { repositoryRoot: cwd, worktreePath, branch, created };
   } catch (error) {
     const stderr = (error as { stderr?: unknown }).stderr;
     throw new DispatchRejectedError('workspace_isolation_unavailable', {
@@ -149,6 +156,15 @@ export function provisionWriterWorkspace(cwd: string, issueRef: string): Workspa
         + (String(stderr ?? '').trim() || (error instanceof Error ? error.message : String(error))),
     });
   }
+}
+
+/**
+ * Undo a `provisionWriterWorkspace` that created a fresh worktree and branch for a dispatch that
+ * was then refused. Best effort: a refusal stays a refusal even when cleanup cannot run.
+ */
+export function removeWriterWorkspace(cwd: string, workspace: WorkspaceIdentity): void {
+  spawnSync('git', ['worktree', 'remove', '--force', workspace.worktreePath], { cwd, stdio: 'ignore' });
+  if (workspace.branch) spawnSync('git', ['branch', '-D', workspace.branch], { cwd, stdio: 'ignore' });
 }
 
 /**

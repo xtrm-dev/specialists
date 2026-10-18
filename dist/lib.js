@@ -22043,6 +22043,7 @@ function provisionWriterWorkspace(cwd, issueRef) {
 `).find((entry) => entry.split(`
 `).includes(`branch refs/heads/${branch}`));
     let worktreePath = existing?.match(/^worktree (.+)$/m)?.[1];
+    let created = false;
     if (!worktreePath) {
       const mainRoot = dirname11(git("rev-parse", "--path-format=absolute", "--git-common-dir"));
       worktreePath = join17(mainRoot, ".worktrees", slug);
@@ -22053,8 +22054,9 @@ function provisionWriterWorkspace(cwd, issueRef) {
       }
       const branchExists = spawnSync4("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd }).status === 0;
       git("worktree", "add", ...branchExists ? [worktreePath, branch] : ["-b", branch, worktreePath, "HEAD"]);
+      created = !branchExists;
     }
-    return { repositoryRoot: cwd, worktreePath, branch };
+    return { repositoryRoot: cwd, worktreePath, branch, created };
   } catch (error) {
     const stderr = error.stderr;
     throw new DispatchRejectedError("workspace_isolation_unavailable", {
@@ -22063,6 +22065,11 @@ function provisionWriterWorkspace(cwd, issueRef) {
       note: `a write-capable activation needs its own git worktree and none could be created for ${cwd}: ` + (String(stderr ?? "").trim() || (error instanceof Error ? error.message : String(error)))
     });
   }
+}
+function removeWriterWorkspace(cwd, workspace) {
+  spawnSync4("git", ["worktree", "remove", "--force", workspace.worktreePath], { cwd, stdio: "ignore" });
+  if (workspace.branch)
+    spawnSync4("git", ["branch", "-D", workspace.branch], { cwd, stdio: "ignore" });
 }
 function procLeaseProbe() {
   return {
@@ -23882,6 +23889,8 @@ class NativeActivationHost {
   provisionWriterWorkspace;
   backgroundTaskAlive;
   backgroundTasks = new Map;
+  backgroundWatch = new Map;
+  backgroundPollMs;
   now;
   sessionStatsTimeoutMs;
   piVersion;
@@ -23903,6 +23912,7 @@ class NativeActivationHost {
     this.cwd = deps.cwd ?? process.cwd();
     this.provisionWriterWorkspace = deps.provisionWriterWorkspace ?? provisionWriterWorkspace;
     this.backgroundTaskAlive = deps.backgroundTaskAlive ?? processAlive;
+    this.backgroundPollMs = deps.backgroundPollMs ?? 5000;
     this.interactions = new InteractionTransport(deps.peer ? { deliver: this.wirePeerDelivery(deps.peer) } : {});
     this.loader = deps.loader ?? new SpecialistLoader({ projectDir: this.cwd });
     this.workItemsInjected = deps.workItems;
@@ -23938,6 +23948,12 @@ class NativeActivationHost {
       thinking_override: request.thinkingOverride ?? null
     });
     let releaseOwnLease = null;
+    let removeFreshWorkspace = null;
+    const removeWorkspaceOnRefusal = () => {
+      const remove = removeFreshWorkspace;
+      removeFreshWorkspace = null;
+      remove?.();
+    };
     const releaseLeaseOnRefusal = () => {
       if (!releaseOwnLease)
         return;
@@ -23957,6 +23973,7 @@ class NativeActivationHost {
     const reject = (reason, detail = {}) => {
       releaseLeaseOnRefusal();
       releaseClaimForRefusal();
+      removeWorkspaceOnRefusal();
       emit("activation_rejected", { reason, ...detail });
       throw new DispatchRejectedError(reason, {
         specialist: request.specialist,
@@ -24095,7 +24112,10 @@ class NativeActivationHost {
     }
     if (access === "write") {
       try {
-        workspace = this.provisionWriterWorkspace(this.cwd, issueRef);
+        const { created, ...provisioned } = this.provisionWriterWorkspace(this.cwd, issueRef);
+        workspace = provisioned;
+        if (created)
+          removeFreshWorkspace = () => removeWriterWorkspace(this.cwd, provisioned);
       } catch (error) {
         if (error instanceof DispatchRejectedError)
           return reject(error.reason, { workspace: this.cwd, note: error.detail.note });
@@ -24266,6 +24286,7 @@ class NativeActivationHost {
         }
         emit("activation_rejected", { reason: "workspace_lease_unavailable" });
         releaseClaimForRefusal();
+        removeWorkspaceOnRefusal();
         if (error instanceof DispatchRejectedError && createdRefForRefusals) {
           throw new DispatchRejectedError(error.reason, {
             ...error.detail,
@@ -24723,6 +24744,24 @@ class NativeActivationHost {
 `)[0].trim());
     this.backgroundTasks.set(activationId, tasks);
   }
+  watchBackgroundTasks(snapshot) {
+    if (this.backgroundWatch.has(snapshot.activationId))
+      return;
+    const timer = setInterval(() => {
+      if (this.liveBackgroundTasks(snapshot.activationId).length > 0)
+        return;
+      this.forgetBackgroundTasks(snapshot.activationId);
+      if (snapshot.state === "settled")
+        this.releaseIfWriter(snapshot, "background_tasks_exited");
+    }, this.backgroundPollMs);
+    timer.unref();
+    this.backgroundWatch.set(snapshot.activationId, timer);
+  }
+  forgetBackgroundTasks(activationId) {
+    clearInterval(this.backgroundWatch.get(activationId));
+    this.backgroundWatch.delete(activationId);
+    this.backgroundTasks.delete(activationId);
+  }
   liveBackgroundTasks(activationId) {
     const tasks = this.backgroundTasks.get(activationId);
     if (!tasks)
@@ -24914,7 +24953,7 @@ class NativeActivationHost {
         boundary: record.workItems,
         store: this.settlements,
         subject,
-        status: result.status === "completed" ? "completed" : "failed",
+        status: result.status,
         output: result.output,
         validation: result.validation,
         coordinator: {
@@ -24927,6 +24966,8 @@ class NativeActivationHost {
       });
     } catch {}
     this.stopToolDurationWatch(snapshot.activationId);
+    if (result.status !== "uncertain")
+      this.forgetBackgroundTasks(snapshot.activationId);
   }
   async runWithFallback(record, ctx) {
     let index = ctx.modelIndex;
@@ -25192,6 +25233,10 @@ class NativeActivationHost {
   releaseIfWriter(snapshot, reason) {
     if (snapshot.access !== "write")
       return;
+    if ((reason === "settled" || reason === "completed") && this.liveBackgroundTasks(snapshot.activationId).length > 0) {
+      this.watchBackgroundTasks(snapshot);
+      return;
+    }
     try {
       release(snapshot.workspace, snapshot.activationId);
       this.forensics.emit({
@@ -25309,6 +25354,7 @@ class NativeActivationHost {
     } finally {
       this.stopToolDurationWatch(activationId);
       this.toolDurationWarnMsByActivation.delete(activationId);
+      this.forgetBackgroundTasks(activationId);
       record.unsubscribe();
       record.session.dispose();
       record.snapshot.state = "stopped";

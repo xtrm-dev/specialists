@@ -110,7 +110,16 @@ export declare function workspaceIdentityFor(cwd: string): WorkspaceIdentity;
  * `leaseScopeFor(process.cwd())` reconciles them. A directory that is not a git checkout
  * cannot be isolated and is refused rather than written in place.
  */
-export declare function provisionWriterWorkspace(cwd: string, issueRef: string): WorkspaceIdentity;
+export type ProvisionedWorkspace = WorkspaceIdentity & {
+    /** True when this call created the worktree, so a refused dispatch may remove it again. */
+    created?: boolean;
+};
+export declare function provisionWriterWorkspace(cwd: string, issueRef: string): ProvisionedWorkspace;
+/**
+ * Undo a `provisionWriterWorkspace` that created a fresh worktree and branch for a dispatch that
+ * was then refused. Best effort: a refusal stays a refusal even when cleanup cannot run.
+ */
+export declare function removeWriterWorkspace(cwd: string, workspace: WorkspaceIdentity): void;
 /**
  * What the lease store believes about a workspace.
  *

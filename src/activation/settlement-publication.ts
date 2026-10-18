@@ -516,7 +516,7 @@ export function publishSettlement(opts: {
   boundary: SpecialistWorkItemBoundary;
   store: SettlementStore;
   subject: SettlementSubject;
-  status: 'completed' | 'failed';
+  status: SettlementRecord['status'];
   output: unknown;
   validation: { valid: boolean; errors?: string[] };
   coordinator?: { participantId?: string; sessionId?: string };

@@ -82,7 +82,9 @@ import {
   admitToolCall,
   provisionWriterWorkspace,
   release as releaseLease,
+  removeWriterWorkspace,
   workspaceIdentityFor,
+  type ProvisionedWorkspace,
 } from './workspace-lease.js';
 import { createGuardedTools } from './guarded-tools.js';
 import { createAskTools, ASK_TOOL, ESCALATE_TOOL } from './ask-tool.js';
@@ -872,9 +874,11 @@ export interface NativeActivationHostDeps {
   /** Defaults to `process.cwd()`. */
   cwd?: string;
   /** The isolated worktree a writer runs in. Defaults to `provisionWriterWorkspace` (git). */
-  provisionWriterWorkspace?: (cwd: string, issueRef: string) => WorkspaceIdentity;
+  provisionWriterWorkspace?: (cwd: string, issueRef: string) => ProvisionedWorkspace;
   /** Background tasks this activation started that are still running; see `liveBackgroundTasks`. */
   backgroundTaskAlive?: (pid: number) => boolean;
+  /** How often a lease held over running background tasks re-checks them. Defaults to 5s. */
+  backgroundPollMs?: number;
   now?: () => number;
   /**
    * S1 runtime result storage. Defaults to the file store under
@@ -970,10 +974,13 @@ export class NativeActivationHost {
   private readonly forensics: ActivationForensicSink;
   private readonly loadSdk: () => Promise<PiSdk>;
   private readonly cwd: string;
-  private readonly provisionWriterWorkspace: (cwd: string, issueRef: string) => WorkspaceIdentity;
+  private readonly provisionWriterWorkspace: (cwd: string, issueRef: string) => ProvisionedWorkspace;
   private readonly backgroundTaskAlive: (pid: number) => boolean;
   /** Per activation: background tasks its tools reported as started, by PID. */
   private readonly backgroundTasks = new Map<string, Map<number, string>>();
+  /** Per activation: the poll that releases a lease held over running background tasks. */
+  private readonly backgroundWatch = new Map<string, ReturnType<typeof setInterval>>();
+  private readonly backgroundPollMs: number;
   private readonly now: () => number;
   private readonly sessionStatsTimeoutMs?: number;
   private readonly piVersion?: string;
@@ -1051,6 +1058,7 @@ export class NativeActivationHost {
     this.cwd = deps.cwd ?? process.cwd();
     this.provisionWriterWorkspace = deps.provisionWriterWorkspace ?? provisionWriterWorkspace;
     this.backgroundTaskAlive = deps.backgroundTaskAlive ?? processAlive;
+    this.backgroundPollMs = deps.backgroundPollMs ?? 5_000;
     this.interactions = new InteractionTransport(
       deps.peer ? { deliver: this.wirePeerDelivery(deps.peer) } : {},
     );
@@ -1131,6 +1139,14 @@ export class NativeActivationHost {
      * carrying the wrong lifecycle assumptions.
      */
     let releaseOwnLease: (() => void) | null = null;
+    // A worktree THIS dispatch created is removed again when the dispatch is refused, so a refused
+    // writer leaves no `.worktrees/<issue>` or `sp/<issue>` behind (SPECIALISTS-4310). A reused one stays.
+    let removeFreshWorkspace: (() => void) | null = null;
+    const removeWorkspaceOnRefusal = (): void => {
+      const remove = removeFreshWorkspace;
+      removeFreshWorkspace = null;
+      remove?.();
+    };
     const releaseLeaseOnRefusal = (): void => {
       if (!releaseOwnLease) return;
       const release = releaseOwnLease;
@@ -1168,6 +1184,7 @@ export class NativeActivationHost {
       // All first, so no refusal path can forget any of them.
       releaseLeaseOnRefusal();
       releaseClaimForRefusal();
+      removeWorkspaceOnRefusal();
       emit('activation_rejected', { reason, ...detail });
       throw new DispatchRejectedError(reason, {
         specialist: request.specialist,
@@ -1378,7 +1395,9 @@ export class NativeActivationHost {
     // dispatch check so the gate, the bind, the lease and the session all see one workspace.
     if (access === 'write') {
       try {
-        workspace = this.provisionWriterWorkspace(this.cwd, issueRef);
+        const { created, ...provisioned } = this.provisionWriterWorkspace(this.cwd, issueRef);
+        workspace = provisioned;
+        if (created) removeFreshWorkspace = () => removeWriterWorkspace(this.cwd, provisioned);
       } catch (error) {
         if (error instanceof DispatchRejectedError) return reject(error.reason, { workspace: this.cwd, note: error.detail.note });
         throw error;
@@ -1669,6 +1688,7 @@ export class NativeActivationHost {
         // than going through reject(), so routing the release only through reject would leave the
         // claim held on exactly the path where the workspace was the problem (SPECIALISTS-53).
         releaseClaimForRefusal();
+        removeWorkspaceOnRefusal();
         if (error instanceof DispatchRejectedError && createdRefForRefusals) {
           throw new DispatchRejectedError(error.reason, {
             ...error.detail,
@@ -2409,6 +2429,27 @@ export class NativeActivationHost {
     this.backgroundTasks.set(activationId, tasks);
   }
 
+  /**
+   * Release the held lease once the background tasks exit, if the activation is still idle.
+   * A resumed turn holds the lease itself and re-checks on its own settle.
+   */
+  private watchBackgroundTasks(snapshot: ActivationSnapshot): void {
+    if (this.backgroundWatch.has(snapshot.activationId)) return;
+    const timer = setInterval(() => {
+      if (this.liveBackgroundTasks(snapshot.activationId).length > 0) return;
+      this.forgetBackgroundTasks(snapshot.activationId);
+      if (snapshot.state === 'settled') this.releaseIfWriter(snapshot, 'background_tasks_exited');
+    }, this.backgroundPollMs);
+    timer.unref();
+    this.backgroundWatch.set(snapshot.activationId, timer);
+  }
+
+  private forgetBackgroundTasks(activationId: string): void {
+    clearInterval(this.backgroundWatch.get(activationId));
+    this.backgroundWatch.delete(activationId);
+    this.backgroundTasks.delete(activationId);
+  }
+
   /** This activation's background tasks that are still alive; dead ones are forgotten. */
   private liveBackgroundTasks(activationId: string): string[] {
     const tasks = this.backgroundTasks.get(activationId);
@@ -2684,7 +2725,7 @@ export class NativeActivationHost {
         boundary: record.workItems,
         store: this.settlements,
         subject,
-        status: result.status === 'completed' ? 'completed' : 'failed',
+        status: result.status,
         output: result.output,
         validation: result.validation,
         coordinator: {
@@ -2705,6 +2746,8 @@ export class NativeActivationHost {
     // Intermediate fallback failures also land here; the walk restarts the watch
     // lazily on the next tool start, which is a NEW call and warns at most once.
     this.stopToolDurationWatch(snapshot.activationId);
+    // An `uncertain` settle still needs its tasks: the lease watch forgets them when they exit.
+    if (result.status !== 'uncertain') this.forgetBackgroundTasks(snapshot.activationId);
   }
 
   /**
@@ -3100,6 +3143,13 @@ export class NativeActivationHost {
    */
   private releaseIfWriter(snapshot: ActivationSnapshot, reason: string): void {
     if (snapshot.access !== 'write') return;
+    // An idle writer whose own background tasks still run keeps the lease: the tasks still
+    // write its worktree, and the next writer on the Issue reuses that worktree
+    // (SPECIALISTS-4310). Stop, failure and refusal paths release regardless.
+    if ((reason === 'settled' || reason === 'completed') && this.liveBackgroundTasks(snapshot.activationId).length > 0) {
+      this.watchBackgroundTasks(snapshot);
+      return;
+    }
     try {
       releaseLease(snapshot.workspace, snapshot.activationId);
       this.forensics.emit({
@@ -3277,6 +3327,7 @@ export class NativeActivationHost {
       // The per-activation threshold dies with the registry entry (same lifetime).
       this.stopToolDurationWatch(activationId);
       this.toolDurationWarnMsByActivation.delete(activationId);
+      this.forgetBackgroundTasks(activationId);
       record.unsubscribe();
       record.session.dispose();
       record.snapshot.state = 'stopped';

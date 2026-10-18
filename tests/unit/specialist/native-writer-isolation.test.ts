@@ -132,6 +132,22 @@ describe('write-capable native activation workspace (SPECIALISTS-4310)', () => {
     expect(again.workspace.worktreePath).toBe(expected);
   });
 
+  it('removes the worktree and branch it created when the dispatch is then refused', async () => {
+    const repo = gitRepo();
+    const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf-8' }).trim();
+    const items = testWorkItems({ ref: 'CORE-2412' });
+    const refusing = { ...items, check: () => { throw new Error('issue not dispatchable: draft'); } };
+
+    const refusal = await host(repo, scriptedSession(), { workItems: refusing })
+      .start(dispatch)
+      .catch((caught: unknown) => caught);
+
+    expect(refusal).toBeInstanceOf(DispatchRejectedError);
+    expect(git('worktree', 'list', '--porcelain')).not.toContain('.worktrees/core-2412');
+    expect(git('branch', '--list', 'sp/core-2412')).toBe('');
+    expect(git('status', '--porcelain')).toBe('');
+  });
+
   it('refuses a writer with a structured reason when no worktree can be created', async () => {
     const refusal = await host(scratch('writer-isolation-nogit-'), scriptedSession())
       .start(dispatch)
@@ -150,20 +166,65 @@ describe('settlement with own background tasks (SPECIALISTS-4310)', () => {
     result: { content: [{ type: 'text', text: 'Started background task full CLI suite run (b0c0403f1)\nStatus: running\nPID: 3208325\nTerminal notification: enabled.' }] },
   };
 
-  async function settle(alive: boolean) {
-    const ws = scratch('writer-isolation-bg-');
-    const handle = await host(ws, scriptedSession(bgRun), {
+  function bgHost(ws: string, alive: { value: boolean }, ref = 'CORE-2412') {
+    return host(ws, scriptedSession(bgRun), {
+      workItems: testWorkItems({ ref }),
       provisionWriterWorkspace: workspaceIdentityFor,
-      backgroundTaskAlive: () => alive,
-    }).start(dispatch);
-    return handle.result;
+      backgroundTaskAlive: () => alive.value,
+      backgroundPollMs: 5,
+    });
+  }
+
+  async function settle(alive: boolean) {
+    return (await bgHost(scratch('writer-isolation-bg-'), { value: alive }).start(dispatch)).result;
   }
 
   it('does not report completed while a background task it started is running', async () => {
-    const result = await settle(true);
-    expect(result.status).not.toBe('completed');
+    const settlements = createMemorySettlementStore();
+    const handle = await host(scratch('writer-isolation-bg-'), scriptedSession(bgRun), {
+      provisionWriterWorkspace: workspaceIdentityFor,
+      backgroundTaskAlive: () => true,
+      settlements,
+    }).start(dispatch);
+    const result = await handle.result;
+    expect(result.status).toBe('uncertain');
+    // The stored settlement says `uncertain`, not `failed`.
+    expect(settlements.listAttempts(handle.activationId).map((r) => r.status)).toEqual(['uncertain']);
     expect(result.validation.valid).toBe(false);
     expect(result.validation.errors?.[0]).toContain('full CLI suite run (b0c0403f1) (pid 3208325)');
+  });
+
+  it('keeps the writer lease while its background task runs and releases it when the task exits', async () => {
+    const ws = scratch('writer-isolation-lease-');
+    const alive = { value: true };
+    const first = await bgHost(ws, alive).start(dispatch);
+    expect((await first.result).status).toBe('uncertain');
+
+    const next = { specialist: 'executor', issueRef: 'CORE-2413', requestedByParticipantId: 'coordinator' };
+    const refusal = await host(ws, scriptedSession(), {
+      workItems: testWorkItems({ ref: 'CORE-2413' }),
+      provisionWriterWorkspace: workspaceIdentityFor,
+    }).start(next).catch((caught: unknown) => caught);
+    expect((refusal as DispatchRejectedError).reason).toBe('workspace_held_by_another_writer');
+
+    alive.value = false;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const admitted = await host(ws, scriptedSession(), {
+      workItems: testWorkItems({ ref: 'CORE-2413' }),
+      provisionWriterWorkspace: workspaceIdentityFor,
+    }).start(next);
+    expect((await admitted.result).status).toBe('completed');
+  });
+
+  it('forgets the background tasks of a stopped activation', async () => {
+    const h = bgHost(scratch('writer-isolation-stop-'), { value: true });
+    const handle = await h.start(dispatch);
+    await handle.result;
+    const internals = h as unknown as { backgroundTasks: Map<string, unknown>; backgroundWatch: Map<string, unknown> };
+    expect(internals.backgroundTasks.has(handle.activationId)).toBe(true);
+    await h.stop(handle.activationId);
+    expect(internals.backgroundTasks.has(handle.activationId)).toBe(false);
+    expect(internals.backgroundWatch.has(handle.activationId)).toBe(false);
   });
 
   it('completes once that background task has exited', async () => {

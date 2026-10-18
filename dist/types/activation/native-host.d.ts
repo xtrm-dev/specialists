@@ -37,6 +37,7 @@ import { type ResolvedToolContract } from '../specialist/resolved-tool-contract.
 import { type SpecialistWorkItemBoundary } from './workitem-store.js';
 import { type InteractionMessage, type PendingAsk } from './interaction.js';
 import { PeerAdapter, type TransportForensicEvent } from './transport/peer-adapter.js';
+import { type ProvisionedWorkspace } from './workspace-lease.js';
 import { type PiSdk, type PiAgentSessionEvent, type PiResourceLoaderLike } from './pi-sdk.js';
 import { type SettlementStore } from './settlement-store.js';
 import { type AuthorityWriter } from './authority-store.js';
@@ -379,9 +380,11 @@ export interface NativeActivationHostDeps {
     /** Defaults to `process.cwd()`. */
     cwd?: string;
     /** The isolated worktree a writer runs in. Defaults to `provisionWriterWorkspace` (git). */
-    provisionWriterWorkspace?: (cwd: string, issueRef: string) => WorkspaceIdentity;
+    provisionWriterWorkspace?: (cwd: string, issueRef: string) => ProvisionedWorkspace;
     /** Background tasks this activation started that are still running; see `liveBackgroundTasks`. */
     backgroundTaskAlive?: (pid: number) => boolean;
+    /** How often a lease held over running background tasks re-checks them. Defaults to 5s. */
+    backgroundPollMs?: number;
     now?: () => number;
     /**
      * S1 runtime result storage. Defaults to the file store under
@@ -478,6 +481,9 @@ export declare class NativeActivationHost {
     private readonly backgroundTaskAlive;
     /** Per activation: background tasks its tools reported as started, by PID. */
     private readonly backgroundTasks;
+    /** Per activation: the poll that releases a lease held over running background tasks. */
+    private readonly backgroundWatch;
+    private readonly backgroundPollMs;
     private readonly now;
     private readonly sessionStatsTimeoutMs?;
     private readonly piVersion?;
@@ -608,6 +614,12 @@ export declare class NativeActivationHost {
      * end while the task runs; the host must not read that idle turn as a finished activation.
      */
     private noteBackgroundTask;
+    /**
+     * Release the held lease once the background tasks exit, if the activation is still idle.
+     * A resumed turn holds the lease itself and re-checks on its own settle.
+     */
+    private watchBackgroundTasks;
+    private forgetBackgroundTasks;
     /** This activation's background tasks that are still alive; dead ones are forgotten. */
     private liveBackgroundTasks;
     /** Clear the watch when the tool call ends; a stray end never kills a live call. */
