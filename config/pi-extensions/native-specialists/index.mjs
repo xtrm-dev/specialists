@@ -2113,8 +2113,8 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       'unique short prefix (with or without the act: lead). Lookup reads the in-memory results ' +
       'of this process (the same result specialist_status projects); a result from before ' +
       'a restart is not available here. An activation that exists but has no result yet is answered with its ' +
-      'state and the tool that owns it (steer while running, reply while blocked, retry ' +
-      'after failure). An unknown or ambiguous id is a structured error naming the candidates.',
+      'state and the tool that owns it (next: running→specialist_steer, blocked→specialist_reply, ' +
+      'failed→specialist_retry, settled→specialist_resume). An unknown or ambiguous id is a structured error naming the candidates.',
     promptSnippet: 'Read one Specialist result (specialist_result: activation_id)',
     renderResult: humanResultOf(),
     outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_result,
@@ -2479,8 +2479,9 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     name: 'specialist_lease_reconcile',
     label: 'Workspace lease reconcile',
     description:
-      'List uncertain writer leases, or resolve one, from inside the session. The coordinator ' +
-      'needs this because a held or uncertain lease fences its own writes and a dead holder ' +
+      'List uncertain writer leases, or resolve one, from inside the session. Use it only ' +
+      'when a coordinator write was refused or warned as fenced by a lease whose holder looks gone: ' +
+      'the coordinator needs this because a held or uncertain lease fences its own writes and a dead holder ' +
       'is only recoverable by an operator out of band. The caller states the outcome; it is ' +
       'never inferred, and a refusal returns its refusal_reason. Normally unnecessary: a lease ' +
       'whose holder is verifiably gone now heals on its own.',
