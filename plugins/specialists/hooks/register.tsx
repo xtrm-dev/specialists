@@ -645,8 +645,8 @@ export function register(on: On) {
     return (
       <Box flexDirection="column">
         <Box>
-          <Text dimColor>╰─</Text>
-          <Text inverse bold> SPECIALISTS </Text>
+          <Text>  </Text>
+          <Text bold>specialists</Text>
           <Text> {headerOf(s.fleet)}</Text>
           {isFolded ? (
             <Button plain key="open" hotkey="o" onPress={() => void (s.paneOpen ? closePane($, s) : openPane($, s))}>

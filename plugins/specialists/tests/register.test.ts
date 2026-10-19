@@ -139,7 +139,7 @@ describe('register', () => {
     await clock.advance(POLL_MS)
 
     const drawn = textOf(await $.ui.render(BAND))
-    expect(drawn).toContain('SPECIALISTS')
+    expect(drawn).toContain('specialists')
     expect(drawn).toContain('1 running')
     expect(drawn).toContain('executor:4245711d')
     expect(drawn).toContain('XTRM-464')
@@ -271,7 +271,7 @@ describe('register', () => {
     expect(textOf(await $.ui.render(BAND))).toBe('engine band')
 
     await $.command.run(command('show'))
-    expect(textOf(await $.ui.render(BAND))).toContain('SPECIALISTS')
+    expect(textOf(await $.ui.render(BAND))).toContain('specialists')
   })
 
   test('a survey keeps the band', async ($, on) => {

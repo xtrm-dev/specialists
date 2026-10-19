@@ -1228,7 +1228,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     // discoverable through /specialists help and its argument completions.
     expect(header).not.toContain('/specialists:reply');
     expect(header).not.toContain('/specialists');
-    expect(header).toContain('SPECIALISTS');
+    expect(header).toContain('specialists');
     expect(header).toContain('! 1 blocked');
   });
 
@@ -1419,7 +1419,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     const render = sections.get('specialist-fleet');
     // Before selection: rows with no detail and no select hint.
     const before = render().map(plain).join('\n');
-    expect(before).toContain('SPECIALISTS');
+    expect(before).toContain('specialists');
     expect(before).not.toContain('select a row');
     // Select via command: the section shows the feed under the rows.
     const cmds = pi2.getCommands();
@@ -1442,7 +1442,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     const { pi, host, ctx, command } = await boot({ hasUI: true, mode: 'tui' });
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     await command('fleet').handler('inspect', ctx);
-    expect(ctx.painted.notices.at(-1)[0]).toContain('SPECIALISTS');
+    expect(ctx.painted.notices.at(-1)[0]).toContain('specialists');
     const fleetReply = pi.getCommands().find((c) => c.name === 'fleet:reply');
     host.answer.mockResolvedValueOnce({ messageId: 'msg:1', activationId: 'act:aaaa' });
     await fleetReply.handler('msg:1 alias answer', ctx);
@@ -1475,7 +1475,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(ctx.painted.widgets['specialist-fleet']).toBeUndefined();
     expect(ctx.painted.statuses['specialist-fleet']).toBeUndefined();
     const lines = sections.get('specialist-fleet')(80);
-    expect(lines[0]).toContain('SPECIALISTS');
+    expect(lines[0]).toContain('specialists');
     expect(lines[0]).toContain('! 1 blocked');
   });
 
@@ -1491,7 +1491,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
       expect(ctx.painted.widgets['specialist-fleet']).toBeUndefined();
       expect(ctx.painted.statuses['specialist-fleet']).toBeUndefined();
       const lines = sections.get('specialist-fleet')(80);
-      expect(lines[0]).toContain('SPECIALISTS');
+      expect(lines[0]).toContain('specialists');
       expect(lines[0]).toContain('! 1 blocked');
     } finally {
       if (prev === undefined) delete (globalThis as any).__registerFooterSection;
@@ -1514,8 +1514,8 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
   it('header counts the Fleet, and every row is a two-line unit with no forensic ids (unitAI-rrdnt.65)', async () => {
     const { mod } = await boot();
     const idle = mod.renderFleetHeader({ activations: [], asks: [] });
-    expect(mod.SECTION_LABEL).toBe('SPECIALISTS');
-    expect(idle).toContain('SPECIALISTS');
+    expect(mod.SECTION_LABEL).toBe('specialists');
+    expect(idle).toContain('specialists');
     expect(idle).toContain('idle');
     expect(idle).not.toContain('/specialists');
     // unitAI-4n9of: no arrow promise of any kind.
@@ -1569,7 +1569,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     const { command, ctx } = await boot({ hasUI: true, mode: 'tui' });
     ctx.ui.custom = undefined;
     await command('specialists').handler('inspect', ctx);
-    expect(ctx.painted.notices.at(-1)[0]).toContain('SPECIALISTS');
+    expect(ctx.painted.notices.at(-1)[0]).toContain('specialists');
   });
 
   it('clears the widget when the Fleet is empty rather than painting a bare header', async () => {
@@ -1587,10 +1587,10 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     await command('specialists').handler('hide', ctx);
     expect(ctx.painted.widgets['specialist-fleet']).toBeUndefined();
-    expect(ctx.painted.notices.at(-1)[0]).toContain('SPECIALISTS');
+    expect(ctx.painted.notices.at(-1)[0]).toContain('specialists');
     await command('specialists').handler('show', ctx);
     expect(ctx.painted.widgets['specialist-fleet']).toBeUndefined();
-    expect(ctx.painted.notices.at(-1)[0]).toContain('SPECIALISTS');
+    expect(ctx.painted.notices.at(-1)[0]).toContain('specialists');
   });
 
   it('/specialists inspect prints the expanded text report and never mounts ui.custom (unitAI-nmxhg)', async () => {
@@ -1601,7 +1601,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     await command('specialists').handler('inspect', ctx);
     expect(custom).not.toHaveBeenCalled(); // no custom-pane mount anywhere on the specialists path
     const text = ctx.painted.notices.at(-1)[0];
-    expect(text).toContain('SPECIALISTS');
+    expect(text).toContain('specialists');
     expect(text).toContain('explorer'); // expanded rows, not the header alone
   });
 
@@ -1621,7 +1621,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     };
     const lines = mod.renderSectionLines(fleet, { nowMs: SPIN_CLOCK });
     expect(lines).toHaveLength(3); // header + the entry's two lines
-    expect(plain(lines[0])).toBe('╰─ SPECIALISTS  1 running');
+    expect(plain(lines[0])).toBe('  specialists 1 running');
     // Line 1: glyph, bold name, dim work id, italic-dim purpose.
     expect(plain(lines[1])).toBe('    ◐ researcher:aaaa  ISSUE-92  inspect native wake transport');
     expect(lines[1]).toContain('\x1b[1mresearcher:aaaa\x1b[22m');
@@ -1760,7 +1760,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
       }],
     };
     const lines = mod.renderSectionLines(fleet, { nowMs: now }).map(plain);
-    expect(lines[0]).toBe('╰─ SPECIALISTS  2 running • ! 1 blocked');
+    expect(lines[0]).toBe('  specialists 2 running • ! 1 blocked');
     expect(lines[1]).toBe('    ! reviewer:ask  ISSUE-92');
     expect(lines[2]).toBe('       gpt-5.6-sol · high  • asked 31s');
     expect(lines[3]).toMatch(/^ {4}[◐◓◑◒] researcher:idle {2}ISSUE-92$/);
@@ -1774,7 +1774,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     const { pi, ctx, command } = await boot();
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     await command('specialists').handler('', ctx);
-    expect(ctx.painted.notices.at(-1)[0]).toContain('SPECIALISTS');
+    expect(ctx.painted.notices.at(-1)[0]).toContain('specialists');
   });
 
   it('/specialists:reply answers by message_id and reports an unknown id instead of silently passing', async () => {

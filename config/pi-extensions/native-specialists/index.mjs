@@ -175,16 +175,12 @@ const SUCCESS = (text) => `\x1b[2m\x1b[32m${text}\x1b[39m\x1b[22m`;
 const FAILURE = (text) => `\x1b[31m${text}\x1b[39m`;
 
 /**
- * Section label chip: light neutral background, dark bold foreground — the ONLY element on
- * the line that carries a background, and the padding is literal spaces inside the escape
- * run rather than a terminal-dependent pad. No brand colour: the accent is reserved for the
- * thinking level and the live spinner, so a label that also glowed would flatten both.
+ * Section label: bold lowercase, no background. The line keeps the two-space
+ * indent where the retired `╰─` tree glyph was.
  */
-const SECTION_LABEL_BG = '\x1b[48;2;208;208;214m';
-const SECTION_LABEL_FG = '\x1b[38;2;22;22;26m';
-export const SECTION_LABEL = 'SPECIALISTS';
-/** Tree connector under the XTRM statusline: `╰─`. Dim, never the chip. */
-export const SECTION_TREE = '\x1b[2m╰─\x1b[22m';
+export const SECTION_LABEL = 'specialists';
+/** Two-space indent preserved from the retired `╰─` tree connector. */
+export const SECTION_INDENT = '  ';
 
 /** Header counts. `running` is live work, `blocked` is outstanding coordinator asks, and
  * `waiting` is everything else the Fleet is holding for the operator — buckets are
@@ -212,14 +208,14 @@ export function fleetSummaryOf({ activations, asks }) {
  */
 export function renderFleetHeader({ activations, asks }) {
   const { running, waiting, blocked, total } = fleetSummaryOf({ activations, asks });
-  const label = `${SECTION_LABEL_BG}${SECTION_LABEL_FG}${BOLD(` ${SECTION_LABEL} `)}\x1b[0m`;
-  // One separator space plus the chip's own trailing pad: `╰─ SPECIALISTS  2 running`.
-  if (total === 0 && blocked === 0) return `${SECTION_TREE}${label} idle`;
+  const label = BOLD(SECTION_LABEL);
+  // Indent plus one separator space: `  specialists 2 running`.
+  if (total === 0 && blocked === 0) return `${SECTION_INDENT}${label} idle`;
   const parts = [];
   if (running > 0) parts.push(`${running} running`);
   if (waiting > 0) parts.push(`${waiting} waiting`);
   if (blocked > 0) parts.push(`! ${blocked} blocked`);
-  return `${SECTION_TREE}${label} ${parts.join(' • ')}`;
+  return `${SECTION_INDENT}${label} ${parts.join(' • ')}`;
 }
 
 /**
