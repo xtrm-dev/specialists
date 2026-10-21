@@ -2981,4 +2981,41 @@ describe('/specialists overlay (SPECIALISTS-4325)', () => {
     expect(mod.matchOverlayKey('S', 's')).toBe(true);
     expect(mod.matchOverlayKey('x', 's')).toBe(false);
   });
+
+  it('issue titles resolve from state.db read-only and fail open (SPECIALISTS-4325)', async () => {
+    const mod = await loadExtension();
+    expect(mod.parseIssueRef('SPECIALISTS-4325')).toEqual({ prefix: 'SPECIALISTS', number: 4325 });
+    expect(mod.parseIssueRef('specialists-7')).toEqual({ prefix: 'SPECIALISTS', number: 7 });
+    expect(mod.parseIssueRef('act:aaaa')).toBeNull();
+    expect(mod.parseIssueRef('')).toBeNull();
+    expect(mod.parseIssueRef(null)).toBeNull();
+    const db = {
+      prepare: (sql) => {
+        expect(sql).toContain('JOIN projects');
+        return { get: (prefix, number) => (prefix === 'SPECIALISTS' && number === 4325 ? { title: 'Fleet epic' } : undefined) };
+      },
+      close: () => {},
+    };
+    const deps = { dbPath: '/tmp/never-created-state.db', existsSync: () => true, openDb: () => db };
+    expect(mod.readIssueTitle('SPECIALISTS-4325', deps)).toBe('Fleet epic');
+    expect(mod.readIssueTitle('SPECIALISTS-1', deps)).toBeNull();
+    expect(mod.readIssueTitle('not-a-ref', deps)).toBeNull();
+    expect(mod.readIssueTitle('SPECIALISTS-4325', { ...deps, existsSync: () => false })).toBeNull();
+    expect(mod.readIssueTitle('SPECIALISTS-4325', { ...deps, openDb: () => null })).toBeNull();
+    expect(mod.readIssueTitle('SPECIALISTS-4325', { ...deps, openDb: () => { throw new Error('locked'); } })).toBeNull();
+    // Path resolution mirrors the owner: SUBSTRATE_DB, then XTRM_STATE_DB, then home.
+    expect(mod.resolveSubstrateDbPath({ SUBSTRATE_DB: '/a.db', XTRM_STATE_DB: '/b.db', HOME: '/h' })).toBe('/a.db');
+    expect(mod.resolveSubstrateDbPath({ SUBSTRATE_DB: '', XTRM_STATE_DB: '/b.db', HOME: '/h' })).toBe('/b.db');
+    expect(mod.resolveSubstrateDbPath({ HOME: '/h' }).endsWith('.xtrm/state.db')).toBe(true);
+  });
+
+  it('detail head leads with the full title when known', async () => {
+    const mod = await loadExtension();
+    const view = { issue_ref: 'SPECIALISTS-4325', resolved_model: 'm', thinking_level: 'high', purpose: 'slim the fleet', elapsed_s: 47, turn_count: 3, token_usage: { input_tokens: 1500, output_tokens: 600 }, last_activity_at: SPIN_CLOCK };
+    const head = mod.buildOverlayDetailHead(view, null, 'result', SPIN_CLOCK, 'Specialist fleet one-line + /specialist overlay (Pi)');
+    expect(head[0]).toBe('Specialist fleet one-line + /specialist overlay (Pi)');
+    expect(head[1]).toContain('SPECIALISTS-4325');
+    const untitled = mod.buildOverlayDetailHead(view, null, 'result', SPIN_CLOCK, null);
+    expect(untitled[0]).toContain('SPECIALISTS-4325');
+  });
 });

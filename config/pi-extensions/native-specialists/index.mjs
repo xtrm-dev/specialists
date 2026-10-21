@@ -32,6 +32,10 @@
 // budget >= 3 minutes of polling before concluding an activation is stuck.
 
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { Type } from 'typebox';
 import {
   createActivationForensicSink,
@@ -496,12 +500,15 @@ export function buildOverlayRows(fleet, nowMs = Date.now()) {
 }
 
 /**
- * Detail head for one activation: issue ref, purpose, model facts, run cost or
- * the wait reason, and the ask body when blocked. Full titles and bodies live
- * here, never truncated to row budget.
+ * Detail head for one activation: the sb issue title in full when known,
+ * then issue ref, purpose, model facts, run cost or the wait reason, and the
+ * ask body when blocked. Full titles and bodies live here, never truncated
+ * to row budget.
  */
-export function buildOverlayDetailHead(view, ask, kind, nowMs = Date.now()) {
+export function buildOverlayDetailHead(view, ask, kind, nowMs = Date.now(), issueTitle = null) {
   const head = [];
+  const title = typeof issueTitle === 'string' && issueTitle.trim() ? issueTitle.trim() : '';
+  if (title) head.push(title);
   head.push(`issue ${view?.issue_ref ?? view?.issue_id ?? '—'} · ${view?.resolved_model ?? '?model'}${view?.thinking_level ? ` · ${view.thinking_level}` : ''}`);
   if (view?.purpose) head.push(`purpose: ${String(view.purpose).replace(/\s+/g, ' ').trim()}`);
   head.push(rowMetrics({ view: view ?? {}, ask: ask ?? null, nowMs }));
@@ -671,8 +678,7 @@ export class SpecialistOverlay {
       else if (row) this.setStatus('nothing waiting on you · resume via /specialists:resume <id> <prompt>');
       return;
     }
-  }
-  render(width) {
+  }  render(width) {
     const safe = Math.max(20, Math.floor(width) || 80);
     const cut = (line) => fitOverlayWidth(line, safe);
     if (this.mode === 'result' || this.mode === 'feed') {
@@ -714,6 +720,91 @@ export class SpecialistOverlay {
     if (this.status) out.push(cut(DIM(this.status)));
     out.push(cut(DIM('enter result · f feed · s stop · r retry · y reply · esc closes')));
     return out;
+  }
+}
+
+// ── Substrate issue titles (SPECIALISTS-4325) ─────────────────────────────────
+//
+// The overlay detail head shows the sb issue title in full. Titles come from
+// the operator's own state.db over a short-lived synchronous sqlite open —
+// no subprocess (VALIDATION 2 asserts on the process table; a file read opens
+// no process), no writes (`PRAGMA query_only = ON`, connection closed per
+// read). Path resolution mirrors the owner's rule (SUBSTRATE_DB, then the
+// legacy XTRM_STATE_DB, then ~/.xtrm/state.db). Everything fails open to
+// null: a missing driver, file, or row renders the issue ref as before.
+
+/** Canonical store path. Blank env values fall through, never become a path. */
+export function resolveSubstrateDbPath(env = process.env) {
+  const direct = String(env?.SUBSTRATE_DB ?? '').trim();
+  if (direct) return direct;
+  const legacy = String(env?.XTRM_STATE_DB ?? '').trim();
+  if (legacy) return legacy;
+  return join(homedir(), '.xtrm', 'state.db');
+}
+
+/** `PREFIX-number` into `{ prefix, number }`, or null when not a locator. */
+export function parseIssueRef(ref) {
+  const m = /^([A-Za-z][A-Za-z0-9]*)-(\d+)$/.exec(String(ref ?? '').trim());
+  if (!m) return null;
+  return { prefix: m[1].toUpperCase(), number: Number(m[2]) };
+}
+
+/** One indexed join over an already-open db. Never throws: null when no row. */
+export function queryIssueTitle(db, prefix, number) {
+  try {
+    const row = db.prepare(
+      'SELECT i.title FROM issues i JOIN projects p ON p.id = i.project_id WHERE p.prefix = ? AND i.human_number = ?',
+    ).get(prefix, number);
+    const title = row?.title;
+    return typeof title === 'string' && title.trim() ? title : null;
+  } catch {
+    return null;
+  }
+}
+
+const substrateRequire = createRequire(import.meta.url);
+
+/** Read-only open across both drivers (`bun:sqlite` under bun, `node:sqlite`
+ * otherwise). The existsSync guard matters: opening a missing path would
+ * CREATE an empty database file. Null when no driver loads. */
+export function openSubstrateDb(dbPath) {
+  try {
+    const bun = substrateRequire('bun:sqlite');
+    if (bun?.Database) {
+      const db = new bun.Database(dbPath);
+      db.exec('PRAGMA query_only = ON');
+      return db;
+    }
+  } catch { /* fall through to node:sqlite */ }
+  try {
+    const node = substrateRequire('node:sqlite');
+    if (node?.DatabaseSync) {
+      const db = new node.DatabaseSync(dbPath);
+      db.exec('PRAGMA query_only = ON');
+      return db;
+    }
+  } catch { /* no driver: fail open */ }
+  return null;
+}
+
+/** Full issue title for a locator, or null. Seams (`deps`) keep tests hermetic. */
+export function readIssueTitle(ref, deps = {}) {
+  try {
+    const parsed = parseIssueRef(ref);
+    if (!parsed) return null;
+    const exists = deps.existsSync ?? existsSync;
+    const dbPath = deps.dbPath ?? resolveSubstrateDbPath(deps.env ?? process.env);
+    if (!exists(dbPath)) return null;
+    const open = deps.openDb ?? openSubstrateDb;
+    const db = open(dbPath);
+    if (!db) return null;
+    try {
+      return queryIssueTitle(db, parsed.prefix, parsed.number);
+    } finally {
+      try { db.close(); } catch { /* already gone */ }
+    }
+  } catch {
+    return null;
   }
 }
 
@@ -3230,10 +3321,11 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       const resolvedId = payload.activation_id ?? id;
       const view = fleet.activations.find((a) => a.activation_id === resolvedId);
       const ask = fleet.asks.find((a) => a.activation_id === resolvedId);
+      const issueTitle = readIssueTitle(view?.issue_ref ?? payload.issue_ref ?? id);
       if (payload.status === 'error') {
-        return { head: buildOverlayDetailHead(view, ask, 'result'), lines: [`result unavailable · ${payload.error ?? 'unknown error'}`], lastSeq: null, running: false, settled: true };
+        return { head: buildOverlayDetailHead(view, ask, 'result', Date.now(), issueTitle), lines: [`result unavailable · ${payload.error ?? 'unknown error'}`], lastSeq: null, running: false, settled: true };
       }
-      return { head: buildOverlayDetailHead(view, ask, 'result'), lines: resultCommandLines(payload), lastSeq: null, running: false, settled: true };
+      return { head: buildOverlayDetailHead(view, ask, 'result', Date.now(), issueTitle), lines: resultCommandLines(payload), lastSeq: null, running: false, settled: true };
     };
     const readFeed = async (id, since = null) => {
       const input = { activation_id: id, limit: FEED_COMMAND_LINES };
@@ -3244,11 +3336,12 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       const resolvedId = payload.activation_id ?? id;
       const view = fleet.activations.find((a) => a.activation_id === resolvedId);
       const ask = fleet.asks.find((a) => a.activation_id === resolvedId);
+      const issueTitle = readIssueTitle(view?.issue_ref ?? payload.issue_ref ?? id);
       if (payload.status === 'error') {
-        return { head: buildOverlayDetailHead(view, ask, 'feed'), lines: [`feed unavailable · ${payload.error ?? 'unknown error'}`], lastSeq: null, running: false, settled: true };
+        return { head: buildOverlayDetailHead(view, ask, 'feed', Date.now(), issueTitle), lines: [`feed unavailable · ${payload.error ?? 'unknown error'}`], lastSeq: null, running: false, settled: true };
       }
       const running = fleet.activations.some((a) => a.activation_id === resolvedId && isActiveStateFor(a.state));
-      return { head: buildOverlayDetailHead(view, ask, 'feed'), lines: feedCommandLines(payload), lastSeq: payload.last_seq ?? null, running, settled: !running };
+      return { head: buildOverlayDetailHead(view, ask, 'feed', Date.now(), issueTitle), lines: feedCommandLines(payload), lastSeq: payload.last_seq ?? null, running, settled: !running };
     };
     let overlay = null;
     let mounted = false;
