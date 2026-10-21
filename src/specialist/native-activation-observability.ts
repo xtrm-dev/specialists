@@ -72,7 +72,7 @@ export const NATIVE_LIFECYCLE_OBSERVABILITY_GAPS = Object.freeze({
   activation_starting: 'Session construction has no legacy timeline event; run_start follows once construction succeeds.',
   output_validation_started: 'Native result validation has no legacy timeline event kind.',
   output_validation_passed: 'Native result validation has no legacy timeline event kind.',
-  output_validation_failed: 'Native result validation has no legacy timeline event kind; terminal failure is run_complete.',
+  output_validation_failed: 'Native result validation has no legacy timeline event kind; it is a mid-settle signal, not a terminal failure, so it leaves no timeline row and moves no status — the outcome rides on the run_complete the settle emits next and on the settlement validation.',
   activation_disposed: 'In-memory session disposal after a terminal event has no legacy timeline event.',
   lease_released: 'Workspace-lease teardown has no legacy timeline event.',
   lease_reconciled: 'Lease reconciliation has no legacy timeline event.',
