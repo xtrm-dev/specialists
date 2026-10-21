@@ -1730,7 +1730,13 @@ export class NativeActivationHost {
     // reconciliation decides what happened (`workspace-reconcile.ts`).
     if (access === 'write' || leaseWaiver) {
       try {
-        acquireLease({ workspace, activationId, attemptId, specialist: request.specialist });
+        acquireLease({
+          workspace,
+          activationId,
+          attemptId,
+          specialist: request.specialist,
+          ...(leaseWaiver ? { leaseWaiver: true } : {}),
+        });
       } catch (error) {
         if (error instanceof DispatchRejectedError) {
           emit('lease_denied', {
@@ -3001,6 +3007,7 @@ export class NativeActivationHost {
             activationId: record.snapshot.activationId,
             attemptId: record.snapshot.attemptId,
             specialist: record.snapshot.specialist,
+            ...(record.snapshot.leaseWaiver ? { leaseWaiver: true } : {}),
           });
         } catch (error) {
           // Contention ends the walk with a reason that names the lease. A silent

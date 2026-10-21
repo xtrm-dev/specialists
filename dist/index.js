@@ -56587,6 +56587,7 @@ function acquire(request, probe = procLeaseProbe()) {
     activationId,
     attemptId,
     specialist: request.specialist,
+    ...request.leaseWaiver ? { leaseWaiver: true } : {},
     holder: selfHolder(probe),
     acquiredAtMs: Date.now()
   };
@@ -92801,7 +92802,13 @@ class NativeActivationHost {
     }
     if (access === "write" || leaseWaiver) {
       try {
-        acquire({ workspace, activationId, attemptId, specialist: request.specialist });
+        acquire({
+          workspace,
+          activationId,
+          attemptId,
+          specialist: request.specialist,
+          ...leaseWaiver ? { leaseWaiver: true } : {}
+        });
       } catch (error) {
         if (error instanceof DispatchRejectedError) {
           emit("lease_denied", {
@@ -93610,7 +93617,8 @@ class NativeActivationHost {
             workspace: record.snapshot.workspace,
             activationId: record.snapshot.activationId,
             attemptId: record.snapshot.attemptId,
-            specialist: record.snapshot.specialist
+            specialist: record.snapshot.specialist,
+            ...record.snapshot.leaseWaiver ? { leaseWaiver: true } : {}
           });
         } catch (error) {
           if (error instanceof DispatchRejectedError) {
