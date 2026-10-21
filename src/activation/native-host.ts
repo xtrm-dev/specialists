@@ -2137,7 +2137,10 @@ export class NativeActivationHost {
       contractHash: binding.contractHash,
       executionBindingId: binding.id,
       state: 'starting',
-      access, workspace, leaseWaiver,
+      access, workspace,
+      // Absent unless true: the projection's key set is a pinned contract, and an
+      // always-present `false` would change every snapshot's shape to say nothing.
+      ...(leaseWaiver ? { leaseWaiver: true as const } : {}),
       piSessionId: session.sessionId,
       configuredModel,
       // What the CALLER asked for, recorded even when it equals what resolved. Without the
