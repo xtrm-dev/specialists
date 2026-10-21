@@ -2996,13 +2996,27 @@ describe('/specialists overlay (SPECIALISTS-4325)', () => {
       },
       close: () => {},
     };
-    const deps = { dbPath: '/tmp/never-created-state.db', existsSync: () => true, openDb: () => db };
-    expect(mod.readIssueTitle('SPECIALISTS-4325', deps)).toBe('Fleet epic');
-    expect(mod.readIssueTitle('SPECIALISTS-1', deps)).toBeNull();
-    expect(mod.readIssueTitle('not-a-ref', deps)).toBeNull();
-    expect(mod.readIssueTitle('SPECIALISTS-4325', { ...deps, existsSync: () => false })).toBeNull();
-    expect(mod.readIssueTitle('SPECIALISTS-4325', { ...deps, openDb: () => null })).toBeNull();
-    expect(mod.readIssueTitle('SPECIALISTS-4325', { ...deps, openDb: () => { throw new Error('locked'); } })).toBeNull();
+    let opens = 0;
+    const deps = (path) => ({ dbPath: path, existsSync: () => true, openDb: () => { opens += 1; return db; } });
+    expect(mod.readIssueTitle('SPECIALISTS-4325', deps('/tmp/titles-a.db'))).toBe('Fleet epic');
+    expect(mod.readIssueTitle('SPECIALISTS-1', deps('/tmp/titles-b.db'))).toBeNull();
+    expect(mod.readIssueTitle('not-a-ref', deps('/tmp/titles-c.db'))).toBeNull();
+    expect(mod.readIssueTitle('SPECIALISTS-4325', { ...deps('/tmp/titles-d.db'), existsSync: () => false })).toBeNull();
+    expect(mod.readIssueTitle('SPECIALISTS-4325', { ...deps('/tmp/titles-e.db'), openDb: () => null })).toBeNull();
+    expect(mod.readIssueTitle('SPECIALISTS-4325', { ...deps('/tmp/titles-f.db'), openDb: () => { throw new Error('locked'); } })).toBeNull();
+    // One handle per path: the second read reuses the open, never reopens.
+    const before = opens;
+    expect(mod.readIssueTitle('SPECIALISTS-4325', deps('/tmp/titles-a.db'))).toBe('Fleet epic');
+    expect(opens).toBe(before);
+    mod.closeAllSubstrateDb();
+    // A broken handle reopens once, then fails open and evicts.
+    let broken = true;
+    const flaky = { prepare: () => { if (broken) throw new Error('io'); return { get: () => ({ title: 'back' }) }; }, close: () => {} };
+    const g = (path) => ({ dbPath: path, existsSync: () => true, openDb: () => flaky });
+    expect(mod.readIssueTitle('SPECIALISTS-1', g('/tmp/titles-g.db'))).toBeNull();
+    broken = false;
+    expect(mod.readIssueTitle('SPECIALISTS-1', g('/tmp/titles-g.db'))).toBe('back');
+    mod.closeAllSubstrateDb();
     // Path resolution mirrors the owner: SUBSTRATE_DB, then XTRM_STATE_DB, then home.
     expect(mod.resolveSubstrateDbPath({ SUBSTRATE_DB: '/a.db', XTRM_STATE_DB: '/b.db', HOME: '/h' })).toBe('/a.db');
     expect(mod.resolveSubstrateDbPath({ SUBSTRATE_DB: '', XTRM_STATE_DB: '/b.db', HOME: '/h' })).toBe('/b.db');

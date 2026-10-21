@@ -751,14 +751,19 @@ export function parseIssueRef(ref) {
 
 /** One indexed join over an already-open db. Never throws: null when no row. */
 export function queryIssueTitle(db, prefix, number) {
+  let stmt = null;
   try {
-    const row = db.prepare(
+    stmt = db.prepare(
       'SELECT i.title FROM issues i JOIN projects p ON p.id = i.project_id WHERE p.prefix = ? AND i.human_number = ?',
-    ).get(prefix, number);
+    );
+    const row = stmt.get(prefix, number);
     const title = row?.title;
     return typeof title === 'string' && title.trim() ? title : null;
   } catch {
     return null;
+  } finally {
+    // Unfinalized statements pin native memory until GC notices; release eagerly.
+    try { stmt?.finalize?.(); } catch { /* already gone */ }
   }
 }
 
@@ -787,6 +792,37 @@ export function openSubstrateDb(dbPath) {
   return null;
 }
 
+/** Process-lifetime read-only handles, keyed by path. Opening per read is
+ * out: `bun:sqlite` open/query/close retains ~190KB per cycle, linearly and
+ * without plateau (measured 95MB per 500 cycles), so one handle serves every
+ * read and `closeSubstrateDb` resets it. */
+const substrateDbCache = new Map();
+
+export function closeSubstrateDb(dbPath) {
+  const db = substrateDbCache.get(dbPath);
+  substrateDbCache.delete(dbPath);
+  if (db) {
+    try { db.close(); } catch { /* already gone */ }
+  }
+}
+
+export function closeAllSubstrateDb() {
+  for (const path of [...substrateDbCache.keys()]) closeSubstrateDb(path);
+}
+
+function getSubstrateDb(dbPath, open) {
+  if (!substrateDbCache.has(dbPath)) {
+    let db = null;
+    try {
+      db = open(dbPath);
+    } catch {
+      db = null;
+    }
+    substrateDbCache.set(dbPath, db);
+  }
+  return substrateDbCache.get(dbPath);
+}
+
 /** Full issue title for a locator, or null. Seams (`deps`) keep tests hermetic. */
 export function readIssueTitle(ref, deps = {}) {
   try {
@@ -796,12 +832,21 @@ export function readIssueTitle(ref, deps = {}) {
     const dbPath = deps.dbPath ?? resolveSubstrateDbPath(deps.env ?? process.env);
     if (!exists(dbPath)) return null;
     const open = deps.openDb ?? openSubstrateDb;
-    const db = open(dbPath);
+    let db = getSubstrateDb(dbPath, open);
     if (!db) return null;
     try {
       return queryIssueTitle(db, parsed.prefix, parsed.number);
-    } finally {
-      try { db.close(); } catch { /* already gone */ }
+    } catch {
+      // A broken handle (replaced file, lost lock) reopens once, then gives up.
+      closeSubstrateDb(dbPath);
+      db = getSubstrateDb(dbPath, open);
+      if (!db) return null;
+      try {
+        return queryIssueTitle(db, parsed.prefix, parsed.number);
+      } catch {
+        closeSubstrateDb(dbPath);
+        return null;
+      }
     }
   } catch {
     return null;
@@ -3617,6 +3662,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     // Stop the follow loop first: no parked waiter or in-flight refresh may
     // touch the host while its activations are being disposed below.
     followStopped = true;
+    closeAllSubstrateDb();
     try { fleetUnregister?.(); } catch {}
     fleetUnregister = null;
     if (!host) return;
