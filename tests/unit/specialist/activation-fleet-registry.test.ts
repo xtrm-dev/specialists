@@ -181,14 +181,17 @@ describe('NativeActivationHost — Fleet registry projection', () => {
     // list is pinned rather than sampled, so ADDING a field fails here on purpose: a new
     // snapshot field is a change to what every coordinator reads, and it should require a
     // deliberate edit. `requestedModel` arrived that way (unitAI-rrdnt.35) and this caught
-    // it, which is the assertion working. `turnCount` arrived the same way (unitAI-rrdnt.65),
-    // and `toolContractNotes` arrived with SPECIALISTS-42. The global module dir is pinned above
-    // so this list describes the projection, not the extensions installed on the host.
+    // it, which is the assertion working. `turnCount` arrived the same way (unitAI-rrdnt.65).
+    // `toolContractNotes` is deliberately absent from the pin: it is added only when the
+    // resolved contract produced notes (SPECIALISTS-42), so it is environment-dependent and
+    // cannot be part of a key set that must hold everywhere; its own test covers when it appears.
+    // The global module dir is pinned above so this list describes the projection, not the
+    // extensions installed on the host.
     const keys = Object.keys(projected[0]).sort();
     expect(keys).toEqual([
       'access', 'activationId', 'attemptId', 'issueId', 'issueRef', 'issueRevision', 'contractHash', 'executionBindingId', 'configuredModel', 'lastActivityAt',
       'modelOverride', 'participantId', 'piSessionId', 'purpose', 'requestedModel', 'resolvedModel',
-      'specialist', 'startedAt', 'state', 'thinkingOverride', 'toolContractNotes', 'turnCount', 'workspace',
+      'specialist', 'startedAt', 'state', 'thinkingOverride', 'turnCount', 'workspace',
     ].sort());
   });
 

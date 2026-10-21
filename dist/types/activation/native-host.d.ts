@@ -485,7 +485,12 @@ export declare class NativeActivationHost {
     private readonly cwd;
     private readonly provisionWriterWorkspace;
     private readonly backgroundTaskAlive;
-    /** Per activation: background tasks its tools reported as started, by PID. */
+    /**
+     * Per activation: background tasks its tools reported as started, by the identity the
+     * extension reported. Keyed by task id (current `xtrm-background`) or `pid:<n>` (the
+     * retired `pi-background-tasks` text contract), because only one of the two shapes can
+     * prove liveness per task and the host must not confuse them.
+     */
     private readonly backgroundTasks;
     /** Per activation: the poll that releases a lease held over running background tasks. */
     private readonly backgroundWatch;
@@ -615,11 +620,27 @@ export declare class NativeActivationHost {
      */
     private noteToolStart;
     /**
-     * Record a background task a tool reported as started (SPECIALISTS-4310). pi-background-tasks
-     * (`bg_run` and its siblings) answers with `Status: running` and `PID: <n>` and lets the turn
-     * end while the task runs; the host must not read that idle turn as a finished activation.
+     * Record a background task a tool reported as started, and forget one it reported as ended
+     * (SPECIALISTS-4310, SPECIALISTS-4320). A tool that starts work in the background lets the
+     * turn end while the task runs; the host must not read that idle turn as a finished
+     * activation, because the task still uses the workspace and the wake it produces belongs to
+     * this activation.
+     *
+     * Two result shapes exist and both are accepted, because the fleet still has sessions on the
+     * retired one:
+     * - `xtrm-background` (`BashBackground`/`Monitor`) reports the identity in tool-result
+     *   `details` (`task_id` with status `running` or `armed`) and never prints a pid;
+     * - `pi-background-tasks` (`bg_run`) prints `Status: running` and `PID: <n>` in the text.
+     * Reading only the text is what broke long watches: the details-only shape recorded nothing,
+     * so the settle carve-out never applied and a waking activation found its lease gone.
      */
     private noteBackgroundTask;
+    /**
+     * A background notification that reaches the session ends the task it names. The wake itself
+     * is how a settled activation resumes, so this is the same channel that proves the task is
+     * over; anything the extension sends with a terminal status retires the record.
+     */
+    private noteBackgroundEnd;
     /**
      * Release the held lease once the background tasks exit, if the activation is still idle.
      * A resumed turn holds the lease itself and re-checks on its own settle.

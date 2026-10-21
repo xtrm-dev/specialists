@@ -23649,6 +23649,9 @@ function extractTokenUsage(event) {
 }
 var WRITE_TIERS = new Set(["MEDIUM", "HIGH"]);
 var TOOL_DURATION_CHECK_INTERVAL_MS = 1e4;
+var LIVE_BACKGROUND_STATUSES = new Set(["running", "armed", "started"]);
+var TERMINAL_BACKGROUND_STATUSES = new Set(["completed", "failed", "stopped", "expired", "timed_out", "killed"]);
+var BACKGROUND_TASK_MAX_HOLD_MS = 2 * 60 * 60 * 1000 + 60000;
 function normalizeToolDurationWarnMs(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
@@ -24706,6 +24709,10 @@ class NativeActivationHost {
         this.noteToolEnd(snapshot.activationId, event);
         this.noteBackgroundTask(snapshot.activationId, event);
         break;
+      case "message_start":
+      case "message_end":
+        this.noteBackgroundEnd(snapshot.activationId, event);
+        break;
       default:
         break;
     }
@@ -24742,14 +24749,51 @@ class NativeActivationHost {
     this.toolDurationWatch.set(snapshot.activationId, { tool, toolCallId, startMs: this.now(), warned: false, timer });
   }
   noteBackgroundTask(activationId, event) {
+    const details = resultDetails(event.result);
+    const taskId = typeof details?.task_id === "string" && details.task_id.length > 0 ? details.task_id : undefined;
+    const status = typeof details?.status === "string" ? details.status.toLowerCase() : undefined;
     const text = resultContent(event.result);
+    const label = text?.split(`
+`)[0]?.trim() || (typeof details?.summary === "string" ? details.summary : undefined);
+    if (taskId) {
+      const tasks = this.backgroundTasks.get(activationId) ?? new Map;
+      if (status !== undefined && TERMINAL_BACKGROUND_STATUSES.has(status)) {
+        const existing = tasks.get(taskId);
+        if (existing)
+          existing.live = false;
+        this.backgroundTasks.set(activationId, tasks);
+        return;
+      }
+      if (status === undefined || !LIVE_BACKGROUND_STATUSES.has(status))
+        return;
+      tasks.set(taskId, {
+        id: taskId,
+        label: label ?? taskId,
+        deadlineMs: this.now() + BACKGROUND_TASK_MAX_HOLD_MS,
+        live: true
+      });
+      this.backgroundTasks.set(activationId, tasks);
+      return;
+    }
     const pid = Number(text?.match(/^PID: (\d+)$/m)?.[1]);
     if (!text || !/^Status: running$/m.test(text) || !Number.isInteger(pid) || pid <= 0)
       return;
     const tasks = this.backgroundTasks.get(activationId) ?? new Map;
-    tasks.set(pid, text.split(`
-`)[0].trim());
+    tasks.set(`pid:${pid}`, { id: `pid:${pid}`, label: label ?? `pid ${pid}`, pid, live: true });
     this.backgroundTasks.set(activationId, tasks);
+  }
+  noteBackgroundEnd(activationId, event) {
+    const message = recordOf(event.message);
+    const details = recordOf(message?.details);
+    const taskId = typeof details?.task_id === "string" && details.task_id.length > 0 ? details.task_id : undefined;
+    if (!taskId)
+      return;
+    const status = typeof details?.status === "string" ? details.status.toLowerCase() : undefined;
+    if (status !== undefined && LIVE_BACKGROUND_STATUSES.has(status))
+      return;
+    const existing = this.backgroundTasks.get(activationId)?.get(taskId);
+    if (existing)
+      existing.live = false;
   }
   watchBackgroundTasks(snapshot) {
     if (this.backgroundWatch.has(snapshot.activationId))
@@ -24773,10 +24817,21 @@ class NativeActivationHost {
     const tasks = this.backgroundTasks.get(activationId);
     if (!tasks)
       return [];
-    for (const pid of tasks.keys())
-      if (!this.backgroundTaskAlive(pid))
-        tasks.delete(pid);
-    return [...tasks].map(([pid, label]) => `${label} (pid ${pid})`);
+    const nowMs = this.now();
+    for (const [key, ref] of tasks) {
+      if (!ref.live) {
+        tasks.delete(key);
+        continue;
+      }
+      if (ref.pid !== undefined) {
+        if (!this.backgroundTaskAlive(ref.pid))
+          tasks.delete(key);
+        continue;
+      }
+      if (ref.deadlineMs !== undefined && nowMs > ref.deadlineMs)
+        tasks.delete(key);
+    }
+    return [...tasks.values()].map((ref) => ref.pid !== undefined ? `${ref.label} (pid ${ref.pid})` : `${ref.label} (${ref.id})`);
   }
   noteToolEnd(activationId, event) {
     const watch = this.toolDurationWatch.get(activationId);
@@ -25496,6 +25551,12 @@ function defaultInlineTitle(specialist, contract) {
   const firstLine = problem.split(`
 `).map((s) => s.trim()).find(Boolean) ?? "";
   return `${specialist}: ${firstLine}`.trim();
+}
+function recordOf(value) {
+  return value !== null && typeof value === "object" ? value : undefined;
+}
+function resultDetails(result) {
+  return recordOf(recordOf(result)?.details);
 }
 function purposeExcerptFromContract(contract) {
   if (contract !== null && typeof contract === "object") {

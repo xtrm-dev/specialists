@@ -171,6 +171,43 @@ const WRITE_TIERS = new Set(['MEDIUM', 'HIGH']);
 const TOOL_DURATION_CHECK_INTERVAL_MS = 10_000;
 
 /**
+ * Statuses an `xtrm-background` result uses for work that is still in flight: a started command
+ * (`running`) and an armed monitor (`armed`, which wakes the session per matching line).
+ */
+const LIVE_BACKGROUND_STATUSES = new Set(['running', 'armed', 'started']);
+
+/**
+ * Statuses that mean the task or monitor is over. `timed_out` is the extension's own kill at
+ * `timeout_ms`, so reaching it also proves the child is gone.
+ */
+const TERMINAL_BACKGROUND_STATUSES = new Set(['completed', 'failed', 'stopped', 'expired', 'timed_out', 'killed']);
+
+/**
+ * Fail-closed ceiling for a task whose liveness cannot be probed (SPECIALISTS-4320).
+ * `xtrm-background` reports `task_id` but no pid, so the host cannot ask the OS; it proves the
+ * task ended through the extension's own exit notification. If that notification never reaches
+ * the session (extension gone, delivery dropped) the record must still expire, or a lease would
+ * be held forever on evidence nobody can re-check. Two hours is the extension's maximum task
+ * timeout plus its kill grace; past that a task cannot still be running.
+ */
+const BACKGROUND_TASK_MAX_HOLD_MS = 2 * 60 * 60 * 1000 + 60_000;
+
+/**
+ * One background task an activation started, with whatever can prove it is still alive.
+ * `pid` comes from the retired text contract; `deadlineMs` is the notification-plus-ceiling
+ * model used by `xtrm-background`, which reports an id but never a pid.
+ */
+interface BackgroundTaskRef {
+  /** Identity the extension reported (`task_id`) or `pid:<n>` for the legacy contract. */
+  id: string;
+  label: string;
+  pid?: number;
+  deadlineMs?: number;
+  /** False once a stop result or an exit notification retires the record. */
+  live: boolean;
+}
+
+/**
  * Legacy-faithful threshold normalization (Target 2, PR #387 review).
  *
  * Legacy spreads the configured value straight through (`{...DEFAULTS,
@@ -982,8 +1019,13 @@ export class NativeActivationHost {
   private readonly cwd: string;
   private readonly provisionWriterWorkspace: (cwd: string, issueRef: string) => ProvisionedWorkspace;
   private readonly backgroundTaskAlive: (pid: number) => boolean;
-  /** Per activation: background tasks its tools reported as started, by PID. */
-  private readonly backgroundTasks = new Map<string, Map<number, string>>();
+  /**
+   * Per activation: background tasks its tools reported as started, by the identity the
+   * extension reported. Keyed by task id (current `xtrm-background`) or `pid:<n>` (the
+   * retired `pi-background-tasks` text contract), because only one of the two shapes can
+   * prove liveness per task and the host must not confuse them.
+   */
+  private readonly backgroundTasks = new Map<string, Map<string, BackgroundTaskRef>>();
   /** Per activation: the poll that releases a lease held over running background tasks. */
   private readonly backgroundWatch = new Map<string, ReturnType<typeof setInterval>>();
   private readonly backgroundPollMs: number;
@@ -2380,6 +2422,12 @@ export class NativeActivationHost {
         this.noteToolEnd(snapshot.activationId, event);
         this.noteBackgroundTask(snapshot.activationId, event);
         break;
+      case 'message_start':
+      case 'message_end':
+        // A background task's exit notification arrives as a session message carrying the
+        // task id in its details; that is the evidence the task is over (SPECIALISTS-4320).
+        this.noteBackgroundEnd(snapshot.activationId, event);
+        break;
       default:
         break;
     }
@@ -2436,17 +2484,72 @@ export class NativeActivationHost {
   }
 
   /**
-   * Record a background task a tool reported as started (SPECIALISTS-4310). pi-background-tasks
-   * (`bg_run` and its siblings) answers with `Status: running` and `PID: <n>` and lets the turn
-   * end while the task runs; the host must not read that idle turn as a finished activation.
+   * Record a background task a tool reported as started, and forget one it reported as ended
+   * (SPECIALISTS-4310, SPECIALISTS-4320). A tool that starts work in the background lets the
+   * turn end while the task runs; the host must not read that idle turn as a finished
+   * activation, because the task still uses the workspace and the wake it produces belongs to
+   * this activation.
+   *
+   * Two result shapes exist and both are accepted, because the fleet still has sessions on the
+   * retired one:
+   * - `xtrm-background` (`BashBackground`/`Monitor`) reports the identity in tool-result
+   *   `details` (`task_id` with status `running` or `armed`) and never prints a pid;
+   * - `pi-background-tasks` (`bg_run`) prints `Status: running` and `PID: <n>` in the text.
+   * Reading only the text is what broke long watches: the details-only shape recorded nothing,
+   * so the settle carve-out never applied and a waking activation found its lease gone.
    */
   private noteBackgroundTask(activationId: string, event: PiAgentSessionEvent): void {
+    const details = resultDetails(event.result);
+    const taskId = typeof details?.task_id === 'string' && details.task_id.length > 0 ? details.task_id : undefined;
+    const status = typeof details?.status === 'string' ? details.status.toLowerCase() : undefined;
     const text = resultContent(event.result);
+    const label = text?.split('\n')[0]?.trim() || (typeof details?.summary === 'string' ? details.summary : undefined);
+
+    if (taskId) {
+      const tasks = this.backgroundTasks.get(activationId) ?? new Map<string, BackgroundTaskRef>();
+      if (status !== undefined && TERMINAL_BACKGROUND_STATUSES.has(status)) {
+        // A task or monitor the tool just reported as finished (BackgroundStop, or an
+        // immediate exit) is dead now; keep the map so `liveBackgroundTasks` can prune.
+        const existing = tasks.get(taskId);
+        if (existing) existing.live = false;
+        this.backgroundTasks.set(activationId, tasks);
+        return;
+      }
+      if (status === undefined || !LIVE_BACKGROUND_STATUSES.has(status)) return;
+      tasks.set(taskId, {
+        id: taskId,
+        label: label ?? taskId,
+        // No pid is reported, so liveness is proved by the end notification (noteBackgroundEnd)
+        // with this ceiling as the fail-closed backstop: past it the task cannot still be
+        // running, because the extension kills it at its own maximum timeout.
+        deadlineMs: this.now() + BACKGROUND_TASK_MAX_HOLD_MS,
+        live: true,
+      });
+      this.backgroundTasks.set(activationId, tasks);
+      return;
+    }
+
     const pid = Number(text?.match(/^PID: (\d+)$/m)?.[1]);
     if (!text || !/^Status: running$/m.test(text) || !Number.isInteger(pid) || pid <= 0) return;
-    const tasks = this.backgroundTasks.get(activationId) ?? new Map<number, string>();
-    tasks.set(pid, text.split('\n')[0].trim());
+    const tasks = this.backgroundTasks.get(activationId) ?? new Map<string, BackgroundTaskRef>();
+    tasks.set(`pid:${pid}`, { id: `pid:${pid}`, label: label ?? `pid ${pid}`, pid, live: true });
     this.backgroundTasks.set(activationId, tasks);
+  }
+
+  /**
+   * A background notification that reaches the session ends the task it names. The wake itself
+   * is how a settled activation resumes, so this is the same channel that proves the task is
+   * over; anything the extension sends with a terminal status retires the record.
+   */
+  private noteBackgroundEnd(activationId: string, event: PiAgentSessionEvent): void {
+    const message = recordOf(event.message);
+    const details = recordOf(message?.details);
+    const taskId = typeof details?.task_id === 'string' && details.task_id.length > 0 ? details.task_id : undefined;
+    if (!taskId) return;
+    const status = typeof details?.status === 'string' ? details.status.toLowerCase() : undefined;
+    if (status !== undefined && LIVE_BACKGROUND_STATUSES.has(status)) return;
+    const existing = this.backgroundTasks.get(activationId)?.get(taskId);
+    if (existing) existing.live = false;
   }
 
   /**
@@ -2474,8 +2577,21 @@ export class NativeActivationHost {
   private liveBackgroundTasks(activationId: string): string[] {
     const tasks = this.backgroundTasks.get(activationId);
     if (!tasks) return [];
-    for (const pid of tasks.keys()) if (!this.backgroundTaskAlive(pid)) tasks.delete(pid);
-    return [...tasks].map(([pid, label]) => `${label} (pid ${pid})`);
+    const nowMs = this.now();
+    for (const [key, ref] of tasks) {
+      if (!ref.live) {
+        tasks.delete(key);
+        continue;
+      }
+      if (ref.pid !== undefined) {
+        if (!this.backgroundTaskAlive(ref.pid)) tasks.delete(key);
+        continue;
+      }
+      if (ref.deadlineMs !== undefined && nowMs > ref.deadlineMs) tasks.delete(key);
+    }
+    return [...tasks.values()].map((ref) =>
+      ref.pid !== undefined ? `${ref.label} (pid ${ref.pid})` : `${ref.label} (${ref.id})`,
+    );
   }
 
   /** Clear the watch when the tool call ends; a stray end never kills a live call. */
@@ -3531,6 +3647,19 @@ export function defaultInlineTitle(specialist: string, contract: string): string
 }
 
 /** Capture the same one-line purpose projection as the legacy path, without markdown bullets. */
+/** Narrow an unknown tool result / message to its record view, or undefined. */
+function recordOf(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
+}
+
+/**
+ * The `details` a tool attached to its result. This is where `xtrm-background` reports the
+ * task identity (`task_id`, `status`); the text content never carries it (SPECIALISTS-4320).
+ */
+function resultDetails(result: unknown): Record<string, unknown> | undefined {
+  return recordOf(recordOf(result)?.details);
+}
+
 function purposeExcerptFromContract(contract: unknown): string {
   if (contract !== null && typeof contract === 'object') {
     const c = contract as Record<string, unknown>;

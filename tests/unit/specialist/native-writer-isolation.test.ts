@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import { createMemorySettlementStore } from '../../../src/activation/settlement-store.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
+import type { ActivationForensicSink } from '../../../src/activation/native-host.js';
 import { workspaceIdentityFor } from '../../../src/activation/workspace-lease.js';
 import type { PiAgentSessionEvent, PiAgentSessionLike, PiSdk } from '../../../src/activation/pi-sdk.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
@@ -25,8 +26,21 @@ afterEach(() => {
 
 function scratch(prefix: string): string {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
-  dirs.push(dir);
-  return dir;
+  dirs.push(dir);  return dir;
+}
+
+/** Records the forensic rows one activation emitted, so lease lifecycle is observable. */
+function collectingSink(): ActivationForensicSink & { names: string[]; events: Array<Record<string, unknown>> } {
+  const names: string[] = [];
+  const events: Array<Record<string, unknown>> = [];
+  return {
+    names,
+    events,
+    emit(event) {
+      names.push(event.name);
+      events.push(event as unknown as Record<string, unknown>);
+    },
+  };
 }
 
 function gitRepo(): string {
@@ -38,7 +52,7 @@ function gitRepo(): string {
 }
 
 /** One turn that optionally reports a started background task, then settles. */
-function scriptedSession(toolEnd?: PiAgentSessionEvent): PiAgentSessionLike & { cwd?: string } {
+function scriptedSession(toolEnd?: PiAgentSessionEvent) {
   const listeners: Array<(event: PiAgentSessionEvent) => void> = [];
   let activeTools: string[] = [];
   const messages: unknown[] = [];
@@ -47,6 +61,8 @@ function scriptedSession(toolEnd?: PiAgentSessionEvent): PiAgentSessionLike & { 
     sessionId: 'pi-sess-iso',
     messages,
     isIdle: true,
+    /** Deliver an event after the turn, the way a background notification wakes a session. */
+    emit,
     async prompt() {
       emit({ type: 'agent_start' });
       if (toolEnd) emit(toolEnd);
@@ -65,7 +81,7 @@ function scriptedSession(toolEnd?: PiAgentSessionEvent): PiAgentSessionLike & { 
     getActiveToolNames: () => activeTools,
     setActiveToolsByName(names: string[]) { activeTools = names; },
     async waitForIdle() {},
-  };
+  } as PiAgentSessionLike & { cwd?: string; emit: (event: PiAgentSessionEvent) => void };
 }
 
 function sdkFor(session: PiAgentSessionLike & { cwd?: string }): PiSdk {
@@ -234,6 +250,95 @@ describe('settlement with own background tasks (SPECIALISTS-4310)', () => {
   });
 });
 
+describe('lease held over the current background extension (SPECIALISTS-4320)', () => {
+  // The shipped xtrm-background extension reports the task identity in result DETAILS and
+  // prints no pid. Reading only the text recorded nothing, so the settle carve-out never
+  // applied and a waking activation found its lease released.
+  const longWatchText =
+    'Background command "sleep 600" started (bg_abc123).\nCommand: sleep 600\nOutput file: /tmp/bg_abc123.log\n' +
+    'Do not poll; end the turn. The notification wakes you when the task exits.';
+
+  const bashBackground: PiAgentSessionEvent = {
+    type: 'tool_execution_end',
+    toolName: 'BashBackground',
+    toolCallId: 'call-bg',
+    isError: false,
+    result: {
+      content: [{ type: 'text', text: longWatchText }],
+      details: { task_id: 'bg_abc123', output_file: '/tmp/bg_abc123.log', status: 'running', message_id: 'msg-1' },
+    },
+  };
+
+  const exitNotification = (status: string): PiAgentSessionEvent => ({
+    type: 'message_end',
+    message: {
+      role: 'user',
+      customType: 'background-task-notification',
+      content: `Background command "sleep 600" ${status}`,
+      details: { task_id: 'bg_abc123', status, output_file: '/tmp/bg_abc123.log', exit_code: 0 },
+    },
+  });
+
+  async function secondWriterAdmitted(ws: string): Promise<boolean> {
+    const next = { specialist: 'executor', issueRef: 'CORE-2413', requestedByParticipantId: 'coordinator' };
+    const outcome = await host(ws, scriptedSession(), {
+      workItems: testWorkItems({ ref: 'CORE-2413' }),
+      provisionWriterWorkspace: workspaceIdentityFor,
+    }).start(next).catch((caught: unknown) => caught);
+    return !(outcome instanceof DispatchRejectedError);
+  }
+
+  it('keeps the writer lease while a details-reported task runs, and releases it on the exit notification', async () => {
+    const ws = scratch('writer-isolation-bg-details-');
+    const session = scriptedSession(bashBackground);
+    const handle = await host(ws, session, { provisionWriterWorkspace: workspaceIdentityFor, backgroundPollMs: 5 }).start(dispatch);
+
+    expect((await handle.result).status).toBe('uncertain');
+    expect(await secondWriterAdmitted(ws)).toBe(false);
+
+    session.emit(exitNotification('completed'));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    expect(await secondWriterAdmitted(ws)).toBe(true);
+  });
+
+  it('releases immediately when the same call stops the task', async () => {
+    const ws = scratch('writer-isolation-bg-stop-');
+    const stopped: PiAgentSessionEvent = {
+      type: 'tool_execution_end',
+      toolName: 'BackgroundStop',
+      toolCallId: 'call-stop',
+      isError: false,
+      result: { content: [{ type: 'text', text: 'Background command "sleep 600" stopped (exit code 143)' }], details: { task_id: 'bg_abc123', status: 'stopped' } },
+    };
+    const result = await host(ws, scriptedSession(stopped), { provisionWriterWorkspace: workspaceIdentityFor }).start(dispatch).then((h) => h.result);
+
+    expect(result.status).toBe('completed');
+    expect(await secondWriterAdmitted(ws)).toBe(true);
+  });
+
+  it('stops holding the lease when no exit notification ever arrives', async () => {
+    const ws = scratch('writer-isolation-bg-ceiling-');
+    let nowMs = Date.now();
+    const session = scriptedSession(bashBackground);
+    const handle = await host(ws, session, {
+      provisionWriterWorkspace: workspaceIdentityFor,
+      backgroundPollMs: 5,
+      now: () => nowMs,
+    }).start(dispatch);
+
+    expect((await handle.result).status).toBe('uncertain');
+    expect(await secondWriterAdmitted(ws)).toBe(false);
+
+    // Past the extension's maximum timeout plus grace: the task cannot still be running, so a
+    // lost notification must not hold the workspace forever.
+    nowMs += 2 * 60 * 60 * 1000 + 61_000;
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    expect(await secondWriterAdmitted(ws)).toBe(true);
+  });
+});
+
 describe('lease-waived read-tier activation workspace', () => {
   function waiverSpec(waiver: boolean) {
     return {
@@ -249,13 +354,14 @@ describe('lease-waived read-tier activation workspace', () => {
     };
   }
 
-  function waiverHost(cwd: string, session: PiAgentSessionLike, waiver: boolean) {
+  function waiverHost(cwd: string, session: PiAgentSessionLike, waiver: boolean, extra: Record<string, unknown> = {}) {
     return new NativeActivationHost({
       loader: { get: async () => waiverSpec(waiver) } as never,
       workItems: testWorkItems({ ref: 'CORE-2412' }),
       loadSdk: async () => sdkFor(session),
       settlements: createMemorySettlementStore(),
       cwd,
+      ...extra,
     });
   }
 
@@ -285,5 +391,37 @@ describe('lease-waived read-tier activation workspace', () => {
 
     expect(handle.workspace.worktreePath).toBe(repo);
     expect(session.cwd).toBe(repo);
+  });
+
+  it('keeps its lease across a settle while its own background watch runs, then releases it on the wake', async () => {
+    const repo = gitRepo();
+    const sink = collectingSink();
+    const session = scriptedSession({
+      type: 'tool_execution_end',
+      toolName: 'BashBackground',
+      toolCallId: 'call-watch',
+      isError: false,
+      result: {
+        content: [{ type: 'text', text: 'Background command "sleep 600" started (bg_watch1).\nDo not poll; end the turn.' }],
+        details: { task_id: 'bg_watch1', status: 'running', output_file: '/tmp/bg_watch1.log' },
+      },
+    });
+    const handle = await waiverHost(repo, session, true, { backgroundPollMs: 5, forensics: sink }).start(watcherDispatch);
+
+    // The watch is still running, so the activation is uncertain rather than finished, and the
+    // lease it needs for the wake turn is still held (SPECIALISTS-4320).
+    expect((await handle.result).status).toBe('uncertain');
+    expect(handle.workspace.worktreePath).toBe(join(repo, '.worktrees', 'core-2412'));
+    expect(sink.names).not.toContain('lease_released');
+
+    session.emit({
+      type: 'message_end',
+      message: { role: 'user', customType: 'background-task-notification', details: { task_id: 'bg_watch1', status: 'completed' } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    expect(sink.names).toContain('lease_released');
+    const released = sink.events.find((e) => e.name === 'lease_released');
+    expect((released?.payload as Record<string, unknown> | undefined)?.reason).toBe('background_tasks_exited');
   });
 });
