@@ -19651,7 +19651,7 @@ function isAuthFailureMessage(message) {
 // src/specialist/loader.ts
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename as basename3, join as join12 } from "node:path";
-import { existsSync as existsSync15 } from "node:fs";
+import { existsSync as existsSync15, realpathSync as realpathSync4 } from "node:fs";
 import { homedir as homedir6 } from "node:os";
 
 // node_modules/yaml/dist/index.js
@@ -20413,6 +20413,13 @@ class SpecialistExtensionSourceCollisionError extends Error {
     this.name = "SpecialistExtensionSourceCollisionError";
   }
 }
+function realpathOr(path) {
+  try {
+    return realpathSync4(path);
+  } catch {
+    return path;
+  }
+}
 function resolveHomeDir() {
   try {
     const home = process.env.HOME?.trim() || homedir6();
@@ -20595,7 +20602,7 @@ class SpecialistLoader {
       return null;
     const homeHit = hits.find((h) => h.dir.scope === "home");
     const repoHit = hits.find((h) => h.dir.scope === "user");
-    if (homeHit && repoHit) {
+    if (homeHit && repoHit && realpathOr(repoHit.resolved.filePath) !== realpathOr(homeHit.resolved.filePath)) {
       process.stderr.write(`[specialists] warning: '${name}' resolved from repo '${repoHit.resolved.filePath}' shadows home '${homeHit.resolved.filePath}'
 `);
     }
@@ -22014,7 +22021,7 @@ function isDeliveredStatus(status) {
 // src/activation/workspace-lease.ts
 import { execFileSync as execFileSync2, spawnSync as spawnSync4 } from "node:child_process";
 import { createHash as createHash5 } from "node:crypto";
-import { appendFileSync, existsSync as existsSync19, linkSync, mkdirSync as mkdirSync6, readFileSync as readFileSync11, realpathSync as realpathSync4, renameSync as renameSync3, rmSync as rmSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "node:fs";
+import { appendFileSync, existsSync as existsSync19, linkSync, mkdirSync as mkdirSync6, readFileSync as readFileSync11, realpathSync as realpathSync5, renameSync as renameSync3, rmSync as rmSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "node:fs";
 import { dirname as dirname11, join as join17 } from "node:path";
 
 // src/activation/types.ts
@@ -22127,7 +22134,7 @@ function selfHolder(probe = procLeaseProbe()) {
 function workspaceKey(workspace) {
   let resolved = workspace.worktreePath;
   try {
-    resolved = realpathSync4(workspace.worktreePath);
+    resolved = realpathSync5(workspace.worktreePath);
   } catch {}
   return createHash5("sha256").update(resolved).digest("hex").slice(0, 16);
 }

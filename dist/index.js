@@ -12195,7 +12195,7 @@ var init_project_pack_skill_resolver = __esm(() => {
 // src/specialist/loader.ts
 import { readdir, readFile, stat } from "fs/promises";
 import { basename, join as join5 } from "path";
-import { existsSync as existsSync6 } from "fs";
+import { existsSync as existsSync6, realpathSync as realpathSync2 } from "fs";
 import { homedir as homedir3 } from "os";
 async function checkStaleness(summary) {
   if (!summary.filestoWatch?.length || !summary.updated)
@@ -12214,6 +12214,13 @@ async function checkStaleness(summary) {
     }
   }
   return "OK";
+}
+function realpathOr(path) {
+  try {
+    return realpathSync2(path);
+  } catch {
+    return path;
+  }
 }
 function resolveHomeDir() {
   try {
@@ -12397,7 +12404,7 @@ class SpecialistLoader {
       return null;
     const homeHit = hits.find((h) => h.dir.scope === "home");
     const repoHit = hits.find((h) => h.dir.scope === "user");
-    if (homeHit && repoHit) {
+    if (homeHit && repoHit && realpathOr(repoHit.resolved.filePath) !== realpathOr(homeHit.resolved.filePath)) {
       process.stderr.write(`[specialists] warning: '${name}' resolved from repo '${repoHit.resolved.filePath}' shadows home '${homeHit.resolved.filePath}'
 `);
     }
@@ -24766,7 +24773,7 @@ var init_session_metrics_contract = __esm(() => {
 // src/pi/session.ts
 import { createHash as createHash3 } from "crypto";
 import { spawn as spawn2, execFileSync as execFileSync2 } from "child_process";
-import { existsSync as existsSync20, lstatSync as lstatSync3, mkdirSync as mkdirSync10, readdirSync as readdirSync7, readFileSync as readFileSync15, realpathSync as realpathSync2, statSync as statSync4, writeFileSync as writeFileSync9 } from "fs";
+import { existsSync as existsSync20, lstatSync as lstatSync3, mkdirSync as mkdirSync10, readdirSync as readdirSync7, readFileSync as readFileSync15, realpathSync as realpathSync3, statSync as statSync4, writeFileSync as writeFileSync9 } from "fs";
 import { homedir as homedir5, tmpdir } from "os";
 import { isAbsolute as isAbsolute2, resolve as resolve13, sep as sep3, join as join21, dirname as dirname14 } from "path";
 function toRuntimeToolCatalogs(catalogIndex) {
@@ -24997,7 +25004,7 @@ function canonicalizeLocalExtensionIdentity(source) {
     return null;
   }
   try {
-    return realpathSync2(candidate);
+    return realpathSync3(candidate);
   } catch {
     try {
       return resolve13(candidate);
@@ -27889,7 +27896,7 @@ import {
   lstatSync as lstatSync4,
   openSync as openSync2,
   readFileSync as readFileSync17,
-  realpathSync as realpathSync3
+  realpathSync as realpathSync4
 } from "fs";
 import { homedir as homedir7 } from "os";
 import { isAbsolute as isAbsolute3, join as join22, relative as relative3, resolve as resolve16 } from "path";
@@ -27906,7 +27913,7 @@ function canonicalizeSkillRoot(root, baseDir) {
   try {
     const normalized = normalizePath(root, baseDir);
     lstatSync4(normalized);
-    const canonical = realpathSync3(normalized);
+    const canonical = realpathSync4(normalized);
     const stat = lstatSync4(canonical);
     if (!stat.isDirectory())
       throw new Error("not a directory");
@@ -27920,7 +27927,7 @@ function canonicalizeSkillPath(field, path, baseDir) {
   try {
     const normalized = normalizePath(path, baseDir);
     lstatSync4(normalized);
-    const canonical = realpathSync3(normalized);
+    const canonical = realpathSync4(normalized);
     const stat = lstatSync4(canonical);
     if (!stat.isFile() && !stat.isDirectory())
       throw new Error("not a file or directory");
@@ -28001,13 +28008,13 @@ function requireNoFollowFlag() {
   return constants2.O_NOFOLLOW;
 }
 function readSkillSourceBytes(path, noFollowFlag) {
-  if (realpathSync3(path) !== path)
+  if (realpathSync4(path) !== path)
     throw new Error("skill source canonical path changed");
   const declaredStat = lstatSync4(path);
   if (declaredStat.isSymbolicLink())
     throw new Error("symlinked skill source");
   const sourcePath = declaredStat.isDirectory() ? join22(path, "SKILL.md") : path;
-  if (realpathSync3(sourcePath) !== sourcePath)
+  if (realpathSync4(sourcePath) !== sourcePath)
     throw new Error("skill file canonical path changed");
   const sourceStat = lstatSync4(sourcePath);
   if (sourceStat.isSymbolicLink() || !sourceStat.isFile())
@@ -44269,7 +44276,7 @@ function createPiJsonProjector(context) {
 
 // src/cli/run.ts
 import { dirname as dirname21, join as join37, resolve as resolve18, sep as sep4 } from "path";
-import { constants as fsConstants, existsSync as existsSync35, fstatSync as fstatSync2, openSync as openSync4, readFileSync as readFileSync28, readSync, readdirSync as readdirSync13, realpathSync as realpathSync4, statSync as statSync10, closeSync as closeSync3 } from "fs";
+import { constants as fsConstants, existsSync as existsSync35, fstatSync as fstatSync2, openSync as openSync4, readFileSync as readFileSync28, readSync, readdirSync as readdirSync13, realpathSync as realpathSync5, statSync as statSync10, closeSync as closeSync3 } from "fs";
 import { randomBytes } from "crypto";
 import { spawn as cpSpawn, execFileSync as execFileSync4, execSync as execSync5 } from "child_process";
 function formatBackgroundLaunchLine(opts) {
@@ -45873,7 +45880,7 @@ var init_run = __esm(() => {
     fstatSync: fstatSync2,
     readSync,
     closeSync: closeSync3,
-    realpathSync: realpathSync4,
+    realpathSync: realpathSync5,
     constants: fsConstants
   };
   OBLIGATION_MARKER_REGEX = /\b(TODO|FIXME|HACK|XXX|TEMP|WIP|NOTE\(release\))(?![\w-])/;
@@ -56492,7 +56499,7 @@ ${detail.missing.map((m) => `  - ${m}`).join(`
 // src/activation/workspace-lease.ts
 import { execFileSync as execFileSync5, spawnSync as spawnSync26 } from "child_process";
 import { createHash as createHash8 } from "crypto";
-import { appendFileSync as appendFileSync6, existsSync as existsSync47, linkSync, mkdirSync as mkdirSync18, readFileSync as readFileSync38, realpathSync as realpathSync5, renameSync as renameSync6, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync21 } from "fs";
+import { appendFileSync as appendFileSync6, existsSync as existsSync47, linkSync, mkdirSync as mkdirSync18, readFileSync as readFileSync38, realpathSync as realpathSync6, renameSync as renameSync6, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync21 } from "fs";
 import { dirname as dirname23, join as join49 } from "path";
 function workspaceIdentityFor(cwd) {
   return { repositoryRoot: cwd, worktreePath: cwd };
@@ -56560,7 +56567,7 @@ function selfHolder(probe = procLeaseProbe()) {
 function workspaceKey(workspace) {
   let resolved = workspace.worktreePath;
   try {
-    resolved = realpathSync5(workspace.worktreePath);
+    resolved = realpathSync6(workspace.worktreePath);
   } catch {}
   return createHash8("sha256").update(resolved).digest("hex").slice(0, 16);
 }

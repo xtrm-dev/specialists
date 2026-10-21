@@ -1,8 +1,9 @@
 // tests/unit/specialist/loader.test.ts
 // ISSUE: xtrm-wiy5n.4.11 — static skip remains tracked.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, writeFile, mkdir, utimes } from 'node:fs/promises';
+import { mkdtemp, writeFile, mkdir, utimes, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
+import { realpathSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { rm } from 'node:fs/promises';
 import { SpecialistExtensionSourceCollisionError, SpecialistLoader, checkStaleness, type SpecialistSummary } from '../../../src/specialist/loader.js';
@@ -1547,6 +1548,33 @@ describe('home layer ~/.specialists/user/ (SPECIALISTS-4323)', () => {
     expect(output).toContain("'shared'");
     expect(output).toContain(homePath);
     expect(output).toContain(repoPath);
+  });
+
+  it('does not warn when the repo layer is a symlink to the home layer (same file)', async () => {
+    // Four repos on this machine reach the home layer this way:
+    // `<repo>/.specialists/user -> ~/.specialists/user`. Both layers then hold the SAME file,
+    // so there is no shadowing to report and warning would be noise on every `sp list`.
+    const homePath = await writeHomeSpec('shared');
+    await mkdir(join(tmpProject, '.specialists'), { recursive: true });
+    await symlink(join(tmpHome, '.specialists', 'user'), join(tmpProject, '.specialists', 'user'), 'dir');
+
+    const loader = new SpecialistLoader({ projectDir: tmpProject });
+    const chunks: string[] = [];
+    const orig = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: unknown, ...args: unknown[]) => {
+      chunks.push(String(chunk));
+      return orig(chunk as never, ...(args as []));
+    }) as typeof process.stderr.write;
+    let spec;
+    try {
+      spec = await loader.get('shared');
+    } finally {
+      process.stderr.write = orig;
+    }
+    expect(chunks.join('')).not.toContain('shadows home');
+    // And the file really is the same one, so the resolved content is the home content.
+    expect(realpathSync(homePath)).toBe(realpathSync(join(tmpProject, '.specialists', 'user', 'shared.specialist.json')));
+    expect(spec.specialist.metadata.name).toBe('shared');
   });
 
   it('emits no duplicate row for a colliding name and keeps package-only behaviour', async () => {
