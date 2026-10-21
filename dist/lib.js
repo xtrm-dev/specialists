@@ -19727,6 +19727,7 @@ var ExecutionSchema = objectType({
   output_type: enumType(["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]).default("custom"),
   permission_required: enumType(["READ_ONLY", "LOW", "MEDIUM", "HIGH"]).default("READ_ONLY"),
   requires_worktree: booleanType().default(true),
+  lease_waiver: booleanType().optional().default(false),
   bare: booleanType().default(false),
   thinking_level: enumType(["off", "minimal", "low", "medium", "high", "xhigh"]).optional(),
   auto_commit: enumType(["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]).default("never"),
@@ -19812,6 +19813,7 @@ var OVERRIDE_ALLOWED_EXECUTION_FIELDS = [
   "stall_timeout_ms",
   "interactive",
   "thinking_level",
+  "lease_waiver",
   "max_retries",
   "prompt_limit_bytes",
   "stdout_limit_bytes"
@@ -19958,6 +19960,7 @@ var OverrideExecutionSchema = objectType({
   interactive: booleanType().nullable().optional(),
   thinking_level: enumType(["off", "minimal", "low", "medium", "high", "xhigh"]).nullable(),
   max_retries: numberType().int().min(0).nullable(),
+  lease_waiver: booleanType().nullable().optional(),
   prompt_limit_bytes: numberType().int().positive().nullable().optional(),
   stdout_limit_bytes: numberType().int().positive().nullable().optional(),
   extensions: OverrideExtensionsSchema.optional()
@@ -20661,6 +20664,7 @@ class SpecialistLoader {
             version,
             model: merged.spec.specialist.execution.model ?? "",
             permission_required: merged.spec.specialist.execution.permission_required,
+            ...merged.spec.specialist.execution.lease_waiver === true ? { lease_waiver: true } : {},
             interactive: merged.spec.specialist.execution.interactive,
             thinking_level: merged.spec.specialist.execution.thinking_level,
             skills: merged.spec.specialist.skills?.paths ?? [],
@@ -23992,6 +23996,7 @@ class NativeActivationHost {
       return reject("unknown_specialist");
     const execution = specialist.specialist.execution;
     const tier = execution.permission_required ?? "READ_ONLY";
+    const leaseWaiver = execution.lease_waiver === true;
     const specToolDurationWarnMs = specialist.specialist.stall_detection?.tool_duration_warn_ms;
     this.toolDurationWarnMsByActivation.set(activationId, this.toolDurationWarnMsByDep ?? normalizeToolDurationWarnMs(specToolDurationWarnMs) ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms);
     const access = WRITE_TIERS.has(tier) ? "write" : "read";
@@ -24110,7 +24115,7 @@ class NativeActivationHost {
         note: error instanceof Error ? error.message : String(error)
       });
     }
-    if (access === "write") {
+    if (access === "write" || leaseWaiver) {
       try {
         const { created, ...provisioned } = this.provisionWriterWorkspace(this.cwd, issueRef);
         workspace = provisioned;
@@ -24273,7 +24278,7 @@ class NativeActivationHost {
         sources: dynamicExtensions.join(",")
       });
     }
-    if (access === "write") {
+    if (access === "write" || leaseWaiver) {
       try {
         acquire({ workspace, activationId, attemptId, specialist: request.specialist });
       } catch (error) {
@@ -24295,7 +24300,7 @@ class NativeActivationHost {
         }
         throw error;
       }
-      emit("lease_acquired", { workspace: workspace.worktreePath });
+      emit("lease_acquired", { workspace: workspace.worktreePath, lease_waiver: leaseWaiver });
       releaseOwnLease = () => {
         try {
           release(workspace, activationId);
@@ -24400,6 +24405,7 @@ class NativeActivationHost {
     emit("activation_admitted", {
       tier,
       access,
+      lease_waiver: leaseWaiver,
       configured_model: configuredModel ?? null,
       requested_model: requestedModel,
       resolved_model: resolvedModel,
@@ -24542,6 +24548,7 @@ class NativeActivationHost {
       state: "starting",
       access,
       workspace,
+      leaseWaiver,
       piSessionId: session.sessionId,
       configuredModel,
       requestedModel,
@@ -25024,7 +25031,7 @@ class NativeActivationHost {
         attempt_n: index + 2,
         resolved_model: check.resolvedModel ?? nextModel
       });
-      if (record.snapshot.access === "write") {
+      if (record.snapshot.access === "write" || record.snapshot.leaseWaiver) {
         try {
           acquire({
             workspace: record.snapshot.workspace,
@@ -25120,7 +25127,7 @@ class NativeActivationHost {
       overrideResolved = check.resolvedModel ?? overrideName;
     }
     const attemptId = nextAttemptId(record.snapshot.attemptId);
-    if (record.snapshot.access === "write") {
+    if (record.snapshot.access === "write" || record.snapshot.leaseWaiver) {
       try {
         acquire({
           workspace: record.snapshot.workspace,
@@ -25231,7 +25238,7 @@ class NativeActivationHost {
     } catch {}
   }
   releaseIfWriter(snapshot, reason) {
-    if (snapshot.access !== "write")
+    if (snapshot.access !== "write" && !snapshot.leaseWaiver)
       return;
     if ((reason === "settled" || reason === "completed") && this.liveBackgroundTasks(snapshot.activationId).length > 0) {
       this.watchBackgroundTasks(snapshot);
@@ -25417,7 +25424,7 @@ class NativeActivationHost {
       });
     }
     const attemptId = nextAttemptId(record.snapshot.attemptId);
-    if (record.snapshot.access === "write") {
+    if (record.snapshot.access === "write" || record.snapshot.leaseWaiver) {
       try {
         acquire({
           workspace: record.snapshot.workspace,

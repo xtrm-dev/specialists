@@ -32,6 +32,8 @@ export declare const GlobalSpecialistOverrideSchema: z.ZodObject<{
         interactive: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
         thinking_level: z.ZodNullable<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
         max_retries: z.ZodNullable<z.ZodNumber>;
+        /** Workspace-lease waiver for read-tier observers (mirrors specialist `execution.lease_waiver`). */
+        lease_waiver: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
         prompt_limit_bytes: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
         stdout_limit_bytes: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
         extensions: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNullable<z.ZodBoolean>>>;
@@ -46,6 +48,7 @@ export declare const GlobalSpecialistOverrideSchema: z.ZodObject<{
         interactive?: boolean | null | undefined;
         stdout_limit_bytes?: number | null | undefined;
         prompt_limit_bytes?: number | null | undefined;
+        lease_waiver?: boolean | null | undefined;
         extensions?: Record<string, boolean | null> | undefined;
     }, {
         model: string | null;
@@ -58,6 +61,7 @@ export declare const GlobalSpecialistOverrideSchema: z.ZodObject<{
         interactive?: boolean | null | undefined;
         stdout_limit_bytes?: number | null | undefined;
         prompt_limit_bytes?: number | null | undefined;
+        lease_waiver?: boolean | null | undefined;
         extensions?: Record<string, boolean | null> | undefined;
     }>;
     prompt: z.ZodOptional<z.ZodObject<{
@@ -104,6 +108,7 @@ export declare const GlobalSpecialistOverrideSchema: z.ZodObject<{
         interactive?: boolean | null | undefined;
         stdout_limit_bytes?: number | null | undefined;
         prompt_limit_bytes?: number | null | undefined;
+        lease_waiver?: boolean | null | undefined;
         extensions?: Record<string, boolean | null> | undefined;
     };
     skills: {
@@ -133,6 +138,7 @@ export declare const GlobalSpecialistOverrideSchema: z.ZodObject<{
         interactive?: boolean | null | undefined;
         stdout_limit_bytes?: number | null | undefined;
         prompt_limit_bytes?: number | null | undefined;
+        lease_waiver?: boolean | null | undefined;
         extensions?: Record<string, boolean | null> | undefined;
     };
     skills: {
@@ -164,6 +170,8 @@ export declare const GlobalUserConfigSchema: z.ZodEffects<z.ZodRecord<z.ZodStrin
         interactive: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
         thinking_level: z.ZodNullable<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
         max_retries: z.ZodNullable<z.ZodNumber>;
+        /** Workspace-lease waiver for read-tier observers (mirrors specialist `execution.lease_waiver`). */
+        lease_waiver: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
         prompt_limit_bytes: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
         stdout_limit_bytes: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
         extensions: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNullable<z.ZodBoolean>>>;
@@ -178,6 +186,7 @@ export declare const GlobalUserConfigSchema: z.ZodEffects<z.ZodRecord<z.ZodStrin
         interactive?: boolean | null | undefined;
         stdout_limit_bytes?: number | null | undefined;
         prompt_limit_bytes?: number | null | undefined;
+        lease_waiver?: boolean | null | undefined;
         extensions?: Record<string, boolean | null> | undefined;
     }, {
         model: string | null;
@@ -190,6 +199,7 @@ export declare const GlobalUserConfigSchema: z.ZodEffects<z.ZodRecord<z.ZodStrin
         interactive?: boolean | null | undefined;
         stdout_limit_bytes?: number | null | undefined;
         prompt_limit_bytes?: number | null | undefined;
+        lease_waiver?: boolean | null | undefined;
         extensions?: Record<string, boolean | null> | undefined;
     }>;
     prompt: z.ZodOptional<z.ZodObject<{
@@ -236,6 +246,7 @@ export declare const GlobalUserConfigSchema: z.ZodEffects<z.ZodRecord<z.ZodStrin
         interactive?: boolean | null | undefined;
         stdout_limit_bytes?: number | null | undefined;
         prompt_limit_bytes?: number | null | undefined;
+        lease_waiver?: boolean | null | undefined;
         extensions?: Record<string, boolean | null> | undefined;
     };
     skills: {
@@ -265,6 +276,7 @@ export declare const GlobalUserConfigSchema: z.ZodEffects<z.ZodRecord<z.ZodStrin
         interactive?: boolean | null | undefined;
         stdout_limit_bytes?: number | null | undefined;
         prompt_limit_bytes?: number | null | undefined;
+        lease_waiver?: boolean | null | undefined;
         extensions?: Record<string, boolean | null> | undefined;
     };
     skills: {
@@ -294,6 +306,7 @@ export declare const GlobalUserConfigSchema: z.ZodEffects<z.ZodRecord<z.ZodStrin
         interactive?: boolean | null | undefined;
         stdout_limit_bytes?: number | null | undefined;
         prompt_limit_bytes?: number | null | undefined;
+        lease_waiver?: boolean | null | undefined;
         extensions?: Record<string, boolean | null> | undefined;
     };
     skills: {

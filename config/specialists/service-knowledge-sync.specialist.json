@@ -23,6 +23,7 @@
       "response_format": "markdown",
       "output_type": "workflow",
       "permission_required": "MEDIUM",
+      "lease_waiver": false,
       "interactive": false,
       "max_retries": 0,
       "requires_worktree": true,

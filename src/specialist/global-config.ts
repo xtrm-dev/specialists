@@ -95,6 +95,8 @@ const OverrideExecutionSchema = z.object({
     .enum(['off', 'minimal', 'low', 'medium', 'high', 'xhigh'])
     .nullable(),
   max_retries: z.number().int().min(0).nullable(),
+  /** Workspace-lease waiver for read-tier observers (mirrors specialist `execution.lease_waiver`). */
+  lease_waiver: z.boolean().nullable().optional(),
   prompt_limit_bytes: z.number().int().positive().nullable().optional(),
   stdout_limit_bytes: z.number().int().positive().nullable().optional(),
   extensions: OverrideExtensionsSchema.optional(),
@@ -184,6 +186,7 @@ export function buildSpecialistOverrideTemplate(): GlobalSpecialistOverride {
       stall_timeout_ms: null,
       interactive: null,
       thinking_level: null,
+      lease_waiver: null,
       max_retries: null,
       prompt_limit_bytes: null,
       stdout_limit_bytes: null,

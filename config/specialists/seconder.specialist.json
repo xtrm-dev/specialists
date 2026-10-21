@@ -25,6 +25,7 @@
       "response_format": "markdown",
       "output_type": "review",
       "permission_required": "READ_ONLY",
+      "lease_waiver": false,
       "interactive": false,
       "thinking_level": "low",
       "max_retries": 0,

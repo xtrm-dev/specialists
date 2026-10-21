@@ -14,6 +14,7 @@ export declare const specialistListSchema: z.ZodObject<{
     detail?: "full" | "compact" | undefined;
 }>;
 declare function specialistSummaryView(summary: SpecialistSummary): {
+    lease_waiver?: true | undefined;
     name: string;
     category: string;
     description: string;
@@ -75,6 +76,7 @@ export declare function createSpecialistListTool(loader: SpecialistLoader): {
             reason?: string | undefined;
             dispatchable: boolean;
             category?: string | undefined;
+            lease_waiver?: true | undefined;
             name: string;
             tier: "READ_ONLY" | "LOW" | "MEDIUM" | "HIGH";
             access: "read" | "write";

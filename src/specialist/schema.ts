@@ -40,6 +40,13 @@ const ExecutionSchema = z.object({
   permission_required: z.enum(['READ_ONLY', 'LOW', 'MEDIUM', 'HIGH']).default('READ_ONLY'),
   /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
   requires_worktree: z.boolean().default(true),
+  /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+   *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+   *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+   *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+   *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+   *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+  lease_waiver: z.boolean().optional().default(false),
   bare: z.boolean().default(false),
   /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
   thinking_level: z.enum(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']).optional(),
@@ -178,6 +185,7 @@ export const OVERRIDE_ALLOWED_EXECUTION_FIELDS = [
   'stall_timeout_ms',
   'interactive',
   'thinking_level',
+  'lease_waiver',
   'max_retries',
   'prompt_limit_bytes',
   'stdout_limit_bytes',

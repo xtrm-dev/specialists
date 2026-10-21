@@ -409,7 +409,7 @@ export async function run(): Promise<void> {
     const model = dim(s.model);
     const desc = args.compact && s.description.length > 80 ? s.description.slice(0, 79) + '…' : s.description;
     const chainPosition = args.full ? getChainPositionBadge(s.name) : null;
-    const worktreeTag = args.full ? (s.permission_required === 'MEDIUM' || s.permission_required === 'HIGH' ? '[worktree:auto]' : '[worktree:none]') : '';
+    const worktreeTag = args.full ? ((s.permission_required === 'MEDIUM' || s.permission_required === 'HIGH') ? '[worktree:auto]' : (s.lease_waiver ? '[worktree:auto+waiver]' : '[worktree:none]')) : '';
     const runtimeStats = args.full ? formatRuntimeStats(runtimeStatsBySpecialist[s.name] ?? {}) : null;
 
     console.log(`  ${cyan(s.name)} ${dim(`[v${s.version}]`)}  ${scopeTag}  ${permission}${keepAliveTag}${thinkingTag}  ${model}${worktreeTag ? `  ${worktreeTag}` : ''}${chainPosition ? `  ${chainPosition}` : ''}${runtimeStats ? `  ${runtimeStats}` : ''}`);

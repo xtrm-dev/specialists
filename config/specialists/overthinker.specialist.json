@@ -23,6 +23,7 @@
       "response_format": "markdown",
       "output_type": "synthesis",
       "permission_required": "READ_ONLY",
+      "lease_waiver": false,
       "interactive": true,
       "max_retries": 0,
       "bare": false

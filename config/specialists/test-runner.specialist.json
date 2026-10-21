@@ -21,6 +21,7 @@
       "response_format": "markdown",
       "output_type": "workflow",
       "permission_required": "LOW",
+      "lease_waiver": false,
       "max_retries": 0,
       "interactive": false,
       "bare": false

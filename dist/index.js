@@ -4418,6 +4418,7 @@ var init_schema = __esm(() => {
     output_type: enumType(["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]).default("custom"),
     permission_required: enumType(["READ_ONLY", "LOW", "MEDIUM", "HIGH"]).default("READ_ONLY"),
     requires_worktree: booleanType().default(true),
+    lease_waiver: booleanType().optional().default(false),
     bare: booleanType().default(false),
     thinking_level: enumType(["off", "minimal", "low", "medium", "high", "xhigh"]).optional(),
     auto_commit: enumType(["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]).default("never"),
@@ -4503,6 +4504,7 @@ var init_schema = __esm(() => {
     "stall_timeout_ms",
     "interactive",
     "thinking_level",
+    "lease_waiver",
     "max_retries",
     "prompt_limit_bytes",
     "stdout_limit_bytes"
@@ -4575,6 +4577,7 @@ function buildSpecialistOverrideTemplate() {
       stall_timeout_ms: null,
       interactive: null,
       thinking_level: null,
+      lease_waiver: null,
       max_retries: null,
       prompt_limit_bytes: null,
       stdout_limit_bytes: null,
@@ -4781,6 +4784,7 @@ var init_global_config = __esm(() => {
     interactive: booleanType().nullable().optional(),
     thinking_level: enumType(["off", "minimal", "low", "medium", "high", "xhigh"]).nullable(),
     max_retries: numberType().int().min(0).nullable(),
+    lease_waiver: booleanType().nullable().optional(),
     prompt_limit_bytes: numberType().int().positive().nullable().optional(),
     stdout_limit_bytes: numberType().int().positive().nullable().optional(),
     extensions: OverrideExtensionsSchema.optional()
@@ -12463,6 +12467,7 @@ class SpecialistLoader {
             version,
             model: merged.spec.specialist.execution.model ?? "",
             permission_required: merged.spec.specialist.execution.permission_required,
+            ...merged.spec.specialist.execution.lease_waiver === true ? { lease_waiver: true } : {},
             interactive: merged.spec.specialist.execution.interactive,
             thinking_level: merged.spec.specialist.execution.thinking_level,
             skills: merged.spec.specialist.skills?.paths ?? [],
@@ -20695,7 +20700,7 @@ ${bold2(`Specialists (${specialists.length})`)}  ${dim2(`specialists v${localVer
     const model = dim2(s.model);
     const desc = args.compact && s.description.length > 80 ? s.description.slice(0, 79) + "\u2026" : s.description;
     const chainPosition = args.full ? getChainPositionBadge(s.name) : null;
-    const worktreeTag = args.full ? s.permission_required === "MEDIUM" || s.permission_required === "HIGH" ? "[worktree:auto]" : "[worktree:none]" : "";
+    const worktreeTag = args.full ? s.permission_required === "MEDIUM" || s.permission_required === "HIGH" ? "[worktree:auto]" : s.lease_waiver ? "[worktree:auto+waiver]" : "[worktree:none]" : "";
     const runtimeStats = args.full ? formatRuntimeStats(runtimeStatsBySpecialist[s.name] ?? {}) : null;
     console.log(`  ${cyan(s.name)} ${dim2(`[v${s.version}]`)}  ${scopeTag}  ${permission}${keepAliveTag}${thinkingTag}  ${model}${worktreeTag ? `  ${worktreeTag}` : ""}${chainPosition ? `  ${chainPosition}` : ""}${runtimeStats ? `  ${runtimeStats}` : ""}`);
     console.log(`  ${dim2(desc)}`);
@@ -92510,6 +92515,7 @@ class NativeActivationHost {
       return reject("unknown_specialist");
     const execution = specialist.specialist.execution;
     const tier = execution.permission_required ?? "READ_ONLY";
+    const leaseWaiver = execution.lease_waiver === true;
     const specToolDurationWarnMs = specialist.specialist.stall_detection?.tool_duration_warn_ms;
     this.toolDurationWarnMsByActivation.set(activationId, this.toolDurationWarnMsByDep ?? normalizeToolDurationWarnMs(specToolDurationWarnMs) ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms);
     const access = WRITE_TIERS.has(tier) ? "write" : "read";
@@ -92628,7 +92634,7 @@ class NativeActivationHost {
         note: error instanceof Error ? error.message : String(error)
       });
     }
-    if (access === "write") {
+    if (access === "write" || leaseWaiver) {
       try {
         const { created, ...provisioned } = this.provisionWriterWorkspace(this.cwd, issueRef);
         workspace = provisioned;
@@ -92791,7 +92797,7 @@ class NativeActivationHost {
         sources: dynamicExtensions.join(",")
       });
     }
-    if (access === "write") {
+    if (access === "write" || leaseWaiver) {
       try {
         acquire({ workspace, activationId, attemptId, specialist: request.specialist });
       } catch (error) {
@@ -92813,7 +92819,7 @@ class NativeActivationHost {
         }
         throw error;
       }
-      emit("lease_acquired", { workspace: workspace.worktreePath });
+      emit("lease_acquired", { workspace: workspace.worktreePath, lease_waiver: leaseWaiver });
       releaseOwnLease = () => {
         try {
           release(workspace, activationId);
@@ -92918,6 +92924,7 @@ class NativeActivationHost {
     emit("activation_admitted", {
       tier,
       access,
+      lease_waiver: leaseWaiver,
       configured_model: configuredModel ?? null,
       requested_model: requestedModel,
       resolved_model: resolvedModel,
@@ -93060,6 +93067,7 @@ class NativeActivationHost {
       state: "starting",
       access,
       workspace,
+      leaseWaiver,
       piSessionId: session.sessionId,
       configuredModel,
       requestedModel,
@@ -93542,7 +93550,7 @@ class NativeActivationHost {
         attempt_n: index + 2,
         resolved_model: check.resolvedModel ?? nextModel
       });
-      if (record.snapshot.access === "write") {
+      if (record.snapshot.access === "write" || record.snapshot.leaseWaiver) {
         try {
           acquire({
             workspace: record.snapshot.workspace,
@@ -93638,7 +93646,7 @@ class NativeActivationHost {
       overrideResolved = check.resolvedModel ?? overrideName;
     }
     const attemptId = nextAttemptId(record.snapshot.attemptId);
-    if (record.snapshot.access === "write") {
+    if (record.snapshot.access === "write" || record.snapshot.leaseWaiver) {
       try {
         acquire({
           workspace: record.snapshot.workspace,
@@ -93749,7 +93757,7 @@ class NativeActivationHost {
     } catch {}
   }
   releaseIfWriter(snapshot, reason) {
-    if (snapshot.access !== "write")
+    if (snapshot.access !== "write" && !snapshot.leaseWaiver)
       return;
     if ((reason === "settled" || reason === "completed") && this.liveBackgroundTasks(snapshot.activationId).length > 0) {
       this.watchBackgroundTasks(snapshot);
@@ -93935,7 +93943,7 @@ class NativeActivationHost {
       });
     }
     const attemptId = nextAttemptId(record.snapshot.attemptId);
-    if (record.snapshot.access === "write") {
+    if (record.snapshot.access === "write" || record.snapshot.leaseWaiver) {
       try {
         acquire({
           workspace: record.snapshot.workspace,
@@ -94484,7 +94492,8 @@ function specialistSummaryView(summary) {
     scope: summary.scope,
     source: summary.source,
     version: summary.version,
-    permission_required: summary.permission_required
+    permission_required: summary.permission_required,
+    ...summary.lease_waiver ? { lease_waiver: true } : {}
   };
 }
 function shortReason(reason) {
@@ -94529,7 +94538,7 @@ async function dispatchability(spec) {
 function createSpecialistListTool(loader) {
   return {
     name: "specialist_list",
-    description: "List the resolved Specialist registry after repo and user layer overrides. " + "Returns a COMPACT line per specialist by default \u2014 name, permission tier, " + "category, and a reason only where the native runtime cannot dispatch it. " + "Pass `name` for one specialist's full record including its description, or " + 'detail:"full" for every field of every specialist (large \u2014 prefer `name`). ' + "Write-capable tiers (MEDIUM/HIGH) still need the workspace lease at dispatch " + "time.",
+    description: "List the resolved Specialist registry after repo and user layer overrides. " + "Returns a COMPACT line per specialist by default \u2014 name, permission tier, " + "category, and a reason only where the native runtime cannot dispatch it. " + "Pass `name` for one specialist's full record including its description, or " + 'detail:"full" for every field of every specialist (large \u2014 prefer `name`). ' + "Write-capable tiers (MEDIUM/HIGH) still need the workspace lease at dispatch " + "time; a read-tier specialist with `lease_waiver: true` is provisioned an isolated " + "worktree and holds its lease instead of running in place.",
     inputSchema: specialistListSchema,
     async execute(input) {
       const summaries = await loader.list();
@@ -94570,6 +94579,7 @@ function createSpecialistListTool(loader) {
         name: r.name,
         tier: r.permission_required ?? "READ_ONLY",
         access: r.access,
+        ...r.lease_waiver ? { lease_waiver: true } : {},
         ...r.category ? { category: r.category } : {},
         dispatchable: r.dispatchable !== false,
         ...r.dispatchable === false ? { reason: shortReason(r.reason) } : {}
