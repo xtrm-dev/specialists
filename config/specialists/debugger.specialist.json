@@ -28,6 +28,7 @@
       "response_format": "markdown",
       "output_type": "analysis",
       "permission_required": "HIGH",
+      "lease_waiver": false,
       "thinking_level": "low",
       "auto_commit": "checkpoint_on_waiting",
       "max_retries": 0,

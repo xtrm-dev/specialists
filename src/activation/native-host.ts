@@ -20,6 +20,12 @@
  *     when another writer already holds the workspace the resume fails with `lease_denied`
  *     naming the holder. A settled writer is resumable, not lease-holding — a caller must not
  *     read "the activation is settled" as "the workspace is still mine".
+ *   - A read tier with `execution.lease_waiver: true` is provisioned an isolated per-Issue
+ *     worktree and acquires its lease like a writer. The one-writer invariant holds per
+ *     workspace: no other activation ever uses that worktree. This is how self-sampling
+ *     observers (watchers, durable monitors) run bash without contending with writers —
+ *     never by bypassing admission, which the guard carve-out alone may do because bwrap
+ *     proves harmlessness per call and raw bash cannot.
  *   The lease guards the LLM TOOL PATH ONLY. `pi.exec` and `AgentSession.executeBash` do not
  *   fire the tool_call handler (`unitAI-rrdnt.6`, unclosed), so a child reaching the
  *   filesystem that way is not fenced. Do not describe writers as "fenced" without that
@@ -1209,6 +1215,13 @@ export class NativeActivationHost {
 
     const execution = specialist.specialist.execution;
     const tier = execution.permission_required ?? 'READ_ONLY';
+    // Lease waiver (specialist `execution.lease_waiver`): a read-tier observer that must run
+    // bash (docker, mcpq, gh) holds a lease on an ISOLATED per-Issue worktree instead of
+    // bypassing admission. The one-writer invariant holds per workspace: no other activation
+    // ever uses that worktree. Deliberately not an admission carve-out (unlike the guard):
+    // bwrap proves harmlessness per call, raw bash cannot, so the waiver provisions
+    // isolation and the lease follows it.
+    const leaseWaiver = execution.lease_waiver === true;
 
     // SPECIALISTS-102 parity follow-up: honour the specialist's configured threshold
     // exactly like legacy `sp run` (launch.ts:96 passes spec stall_detection to the
@@ -1391,9 +1404,11 @@ export class NativeActivationHost {
       });
     }
 
-    // A writer never mutates the dispatcher's checkout (SPECIALISTS-4310). Resolved before the
+    // A writer never mutates the dispatcher's checkout (SPECIALISTS-4310). A waived reader
+    // gets the same isolation for the opposite reason: not to protect the checkout from its
+    // writes, but to give its bash a workspace whose lease it may hold. Resolved before the
     // dispatch check so the gate, the bind, the lease and the session all see one workspace.
-    if (access === 'write') {
+    if (access === 'write' || leaseWaiver) {
       try {
         const { created, ...provisioned } = this.provisionWriterWorkspace(this.cwd, issueRef);
         workspace = provisioned;
@@ -1664,12 +1679,14 @@ export class NativeActivationHost {
     // is refused without spending a model turn, and so a refused writer never reaches the
     // point where it could mutate anything. A reader takes nothing: it is not entitled to
     // the lease, and `admitToolCall` refuses it every mutating call for that reason.
+    // A WAIVED reader takes the lease on its isolated worktree (provisioned above): the only
+    // lease a read tier may ever hold, and only there.
     //
     // `acquire` throws DispatchRejectedError on contention and on an uncertain lease, and
     // both are correct refusals rather than errors — an uncertain workspace is never
     // stolen, because a holder whose liveness is unknown may still be mutating it and only
     // reconciliation decides what happened (`workspace-reconcile.ts`).
-    if (access === 'write') {
+    if (access === 'write' || leaseWaiver) {
       try {
         acquireLease({ workspace, activationId, attemptId, specialist: request.specialist });
       } catch (error) {
@@ -1697,7 +1714,7 @@ export class NativeActivationHost {
         }
         throw error;
       }
-      emit('lease_acquired', { workspace: workspace.worktreePath });
+      emit('lease_acquired', { workspace: workspace.worktreePath, lease_waiver: leaseWaiver });
       releaseOwnLease = () => {
         try {
           releaseLease(workspace, activationId);
@@ -1868,7 +1885,7 @@ export class NativeActivationHost {
     }
 
     emit('activation_admitted', {
-      tier, access,
+      tier, access, lease_waiver: leaseWaiver,
       configured_model: configuredModel ?? null,
       requested_model: requestedModel,
       resolved_model: resolvedModel,
@@ -2120,7 +2137,7 @@ export class NativeActivationHost {
       contractHash: binding.contractHash,
       executionBindingId: binding.id,
       state: 'starting',
-      access, workspace,
+      access, workspace, leaseWaiver,
       piSessionId: session.sessionId,
       configuredModel,
       // What the CALLER asked for, recorded even when it equals what resolved. Without the
@@ -2858,7 +2875,7 @@ export class NativeActivationHost {
       // admitToolCall. The result was a full model turn spent on writes that could not happen,
       // reported as the model's outcome rather than as "fallback could not proceed".
       // The SAME attempt id: a fallback is a new model under one attempt, not a new attempt.
-      if (record.snapshot.access === 'write') {
+      if (record.snapshot.access === 'write' || record.snapshot.leaseWaiver) {
         try {
           acquireLease({
             workspace: record.snapshot.workspace,
@@ -2990,7 +3007,7 @@ export class NativeActivationHost {
     }
 
     const attemptId = nextAttemptId(record.snapshot.attemptId);
-    if (record.snapshot.access === 'write') {
+    if (record.snapshot.access === 'write' || record.snapshot.leaseWaiver) {
       try {
         acquireLease({
           workspace: record.snapshot.workspace,
@@ -3142,7 +3159,7 @@ export class NativeActivationHost {
    * Teardown is never failed by this. A stop that could not release is still a stop.
    */
   private releaseIfWriter(snapshot: ActivationSnapshot, reason: string): void {
-    if (snapshot.access !== 'write') return;
+    if (snapshot.access !== 'write' && !snapshot.leaseWaiver) return;
     // An idle writer whose own background tasks still run keeps the lease: the tasks still
     // write its worktree, and the next writer on the Issue reuses that worktree
     // (SPECIALISTS-4310). Stop, failure and refusal paths release regardless.
@@ -3428,7 +3445,7 @@ export class NativeActivationHost {
     }
 
     const attemptId = nextAttemptId(record.snapshot.attemptId);
-    if (record.snapshot.access === 'write') {
+    if (record.snapshot.access === 'write' || record.snapshot.leaseWaiver) {
       try {
         acquireLease({
           workspace: record.snapshot.workspace,

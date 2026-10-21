@@ -24,6 +24,7 @@
       "stall_timeout_ms": 120000,
       "response_format": "markdown",
       "permission_required": "MEDIUM",
+      "lease_waiver": false,
       "max_retries": 0,
       "interactive": false,
       "output_type": "custom",

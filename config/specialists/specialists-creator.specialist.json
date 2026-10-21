@@ -23,6 +23,7 @@
       "response_format": "markdown",
       "output_type": "codegen",
       "permission_required": "HIGH",
+      "lease_waiver": false,
       "max_retries": 0,
       "interactive": false,
       "bare": false

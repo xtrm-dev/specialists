@@ -175,6 +175,10 @@ export interface ActivationSnapshot {
   executionBindingId: string;
   state: ActivationState;
   access: WorkspaceAccess;
+  /** Lease-waiver flag (specialist `execution.lease_waiver`): this activation holds a lease on
+   *  its isolated per-Issue worktree despite a read tier. Absent/false for writers (implied by
+   *  access) and for ordinary readers (no lease). */
+  leaseWaiver?: boolean;
   workspace: WorkspaceIdentity;
   piSessionId?: PiSessionId;
   configuredModel?: string;

@@ -849,6 +849,7 @@ function specialistSummaryView(summary) {
     source: summary.source,
     version: summary.version,
     permission_required: summary.permission_required,
+    ...(summary.lease_waiver ? { lease_waiver: true } : {}),
   };
 }
 
@@ -1249,13 +1250,13 @@ function summarizePayload(payload) {
     const und = rows.filter((r) => r.dispatchable === false).length;
     const lines = [`Registry: ${payload.count ?? rows.length} specialist(s)${und ? `, ${und} undispatchable` : ''}`];
     for (const r of rows) {
-      lines.push(`- ${r.name ?? '?'} [${r.tier ?? r.permission_required ?? '?'}]${r.category ? ` (${r.category})` : ''}${r.dispatchable === false ? ` — not dispatchable: ${r.reason ?? 'unknown reason'}` : ''}`);
+      lines.push(`- ${r.name ?? '?'} [${r.tier ?? r.permission_required ?? '?'}]${r.category ? ` (${r.category})` : ''}${r.lease_waiver ? ' [lease:waived]' : ''}${r.dispatchable === false ? ` — not dispatchable: ${r.reason ?? 'unknown reason'}` : ''}`);
     }
     return lines;
   }
   if (payload.specialist && typeof payload.specialist === 'object') {
     const s = payload.specialist;
-    return [`${s.name ?? '?'} [${s.permission_required ?? s.tier ?? '?'}]${s.category ? ` (${s.category})` : ''}${s.dispatchable === false ? ` — not dispatchable: ${s.reason ?? 'unknown reason'}` : ''}`];
+    return [`${s.name ?? '?'} [${s.permission_required ?? s.tier ?? '?'}]${s.category ? ` (${s.category})` : ''}${s.lease_waiver ? ' [lease:waived]' : ''}${s.dispatchable === false ? ` — not dispatchable: ${s.reason ?? 'unknown reason'}` : ''}`];
   }
   // specialist_result: a settled result (has `source`) or not-settled guidance (has `next`).
   if (typeof payload.activation_id === 'string' && typeof payload.source === 'string') {
@@ -2590,6 +2591,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
         name: r.name,
         tier: r.permission_required ?? 'READ_ONLY',
         access: r.access,
+        ...(r.lease_waiver ? { lease_waiver: true } : {}),
         ...(r.category ? { category: r.category } : {}),
         // ALWAYS present, even when true. Omitting it to save bytes would make absence mean
         // "dispatchable", which is indistinguishable from the field going missing through a

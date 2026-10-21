@@ -24,6 +24,7 @@
       "response_format": "markdown",
       "output_type": "analysis",
       "permission_required": "LOW",
+      "lease_waiver": false,
       "thinking_level": "high",
       "interactive": true,
       "max_retries": 0,

@@ -24,6 +24,9 @@ export interface SpecialistSummary {
     /** Merged model after layer overrides. Empty string when no layer supplies a model. */
     model: string;
     permission_required: 'READ_ONLY' | 'LOW' | 'MEDIUM' | 'HIGH';
+    /** Present only when the spec sets `execution.lease_waiver: true`: this read-tier
+     *  specialist is provisioned an isolated per-Issue worktree and holds its lease. */
+    lease_waiver?: boolean;
     interactive: boolean;
     thinking_level?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
     skills: string[];

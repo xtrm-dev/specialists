@@ -19,6 +19,7 @@
       "stall_timeout_ms": 180000,
       "interactive": true,
       "permission_required": "LOW",
+      "lease_waiver": false,
       "requires_worktree": false,
       "thinking_level": "low",
       "max_retries": 0,

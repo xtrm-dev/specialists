@@ -39,6 +39,7 @@ function specialistSummaryView(summary: SpecialistSummary) {
     source: summary.source,
     version: summary.version,
     permission_required: summary.permission_required,
+    ...(summary.lease_waiver ? { lease_waiver: true as const } : {}),
   };
 }
 
@@ -112,7 +113,8 @@ export function createSpecialistListTool(loader: SpecialistLoader) {
       'Pass `name` for one specialist\'s full record including its description, or ' +
       'detail:"full" for every field of every specialist (large — prefer `name`). ' +
       'Write-capable tiers (MEDIUM/HIGH) still need the workspace lease at dispatch ' +
-      'time.',
+      'time; a read-tier specialist with `lease_waiver: true` is provisioned an isolated ' +
+      'worktree and holds its lease instead of running in place.',
     inputSchema: specialistListSchema,
     async execute(input: z.infer<typeof specialistListSchema>) {
       const summaries = await loader.list();
@@ -159,6 +161,7 @@ export function createSpecialistListTool(loader: SpecialistLoader) {
         name: r.name,
         tier: r.permission_required ?? 'READ_ONLY',
         access: r.access,
+        ...(r.lease_waiver ? { lease_waiver: true as const } : {}),
         ...(r.category ? { category: r.category } : {}),
         dispatchable: r.dispatchable !== false,
         ...(r.dispatchable === false ? { reason: shortReason(r.reason) } : {}),

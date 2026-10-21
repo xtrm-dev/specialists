@@ -22,6 +22,7 @@
       "response_format": "markdown",
       "output_type": "analysis",
       "permission_required": "READ_ONLY",
+      "lease_waiver": false,
       "max_retries": 0,
       "interactive": true,
       "bare": false

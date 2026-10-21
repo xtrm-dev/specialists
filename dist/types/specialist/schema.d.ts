@@ -50,6 +50,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -88,6 +95,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -126,6 +140,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -436,6 +457,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -474,6 +502,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -512,6 +547,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -822,6 +864,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -860,6 +909,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -898,6 +954,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -1210,6 +1273,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -1248,6 +1318,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -1286,6 +1363,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -1596,6 +1680,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -1634,6 +1725,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -1672,6 +1770,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -1982,6 +2087,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -2020,6 +2132,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -2058,6 +2177,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -2370,6 +2496,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -2408,6 +2541,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -2446,6 +2586,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -2756,6 +2903,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -2794,6 +2948,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -2832,6 +2993,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -3142,6 +3310,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -3180,6 +3355,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -3218,6 +3400,13 @@ export declare const SpecialistSchema: z.ZodObject<{
             permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
             /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
             requires_worktree: z.ZodDefault<z.ZodBoolean>;
+            /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+             *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+             *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+             *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+             *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+             *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+            lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -3493,7 +3682,7 @@ export type ScriptEntry = {
     label?: string;
 };
 /** Flat execution sub-fields an override layer may set. */
-export declare const OVERRIDE_ALLOWED_EXECUTION_FIELDS: readonly ["model", "fallback_model", "fallback_models", "timeout_ms", "stall_timeout_ms", "interactive", "thinking_level", "max_retries", "prompt_limit_bytes", "stdout_limit_bytes"];
+export declare const OVERRIDE_ALLOWED_EXECUTION_FIELDS: readonly ["model", "fallback_model", "fallback_models", "timeout_ms", "stall_timeout_ms", "interactive", "thinking_level", "lease_waiver", "max_retries", "prompt_limit_bytes", "stdout_limit_bytes"];
 /** Nested execution leaf paths an override layer may set. Relative to `specialist.execution`.
  *  `extensions.serena` stays allowlisted so legacy overrides keep validating; the
  *  runtime ignores it (Serena retired, unitAI-e67up.8). */

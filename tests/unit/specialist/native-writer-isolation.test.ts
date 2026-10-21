@@ -233,3 +233,57 @@ describe('settlement with own background tasks (SPECIALISTS-4310)', () => {
     expect(result.validation.valid).toBe(true);
   });
 });
+
+describe('lease-waived read-tier activation workspace', () => {
+  function waiverSpec(waiver: boolean) {
+    return {
+      specialist: {
+        metadata: { name: 'watcher', version: '1.0.0', description: 'd', category: 'c' },
+        execution: {
+          model: 'testprov/test-model', permission_required: 'LOW',
+          ...(waiver ? { lease_waiver: true } : {}),
+          response_format: 'text', output_type: 'analysis', bare: false,
+        },
+        prompt: { system: 'You watch.', task_template: 'Watch: {{bead_id}}' },
+      },
+    };
+  }
+
+  function waiverHost(cwd: string, session: PiAgentSessionLike, waiver: boolean) {
+    return new NativeActivationHost({
+      loader: { get: async () => waiverSpec(waiver) } as never,
+      workItems: testWorkItems({ ref: 'CORE-2412' }),
+      loadSdk: async () => sdkFor(session),
+      settlements: createMemorySettlementStore(),
+      cwd,
+    });
+  }
+
+  const watcherDispatch = { specialist: 'watcher', issueRef: 'CORE-2412', requestedByParticipantId: 'coordinator' };
+
+  it('provisions its own per-Issue worktree and leaves the dispatcher checkout untouched', async () => {
+    const repo = gitRepo();
+    const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf-8' }).trim();
+    const session = scriptedSession();
+
+    const handle = await waiverHost(repo, session, true).start(watcherDispatch);
+    await handle.result;
+
+    const expected = join(repo, '.worktrees', 'core-2412');
+    expect(handle.workspace.worktreePath).toBe(expected);
+    expect(session.cwd).toBe(expected);
+    expect(git('status', '--porcelain')).toBe('');
+    expect(git('branch', '--show-current')).toBe('main');
+  });
+
+  it('runs in place with no worktree when the waiver is absent', async () => {
+    const repo = gitRepo();
+    const session = scriptedSession();
+
+    const handle = await waiverHost(repo, session, false).start(watcherDispatch);
+    await handle.result;
+
+    expect(handle.workspace.worktreePath).toBe(repo);
+    expect(session.cwd).toBe(repo);
+  });
+});

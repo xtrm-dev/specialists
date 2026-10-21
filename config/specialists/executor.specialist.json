@@ -21,6 +21,7 @@
       "response_format": "markdown",
       "output_type": "codegen",
       "permission_required": "HIGH",
+      "lease_waiver": false,
       "thinking_level": "low",
       "auto_commit": "checkpoint_on_waiting",
       "interactive": true,

@@ -20,6 +20,12 @@
  *     when another writer already holds the workspace the resume fails with `lease_denied`
  *     naming the holder. A settled writer is resumable, not lease-holding — a caller must not
  *     read "the activation is settled" as "the workspace is still mine".
+ *   - A read tier with `execution.lease_waiver: true` is provisioned an isolated per-Issue
+ *     worktree and acquires its lease like a writer. The one-writer invariant holds per
+ *     workspace: no other activation ever uses that worktree. This is how self-sampling
+ *     observers (watchers, durable monitors) run bash without contending with writers —
+ *     never by bypassing admission, which the guard carve-out alone may do because bwrap
+ *     proves harmlessness per call and raw bash cannot.
  *   The lease guards the LLM TOOL PATH ONLY. `pi.exec` and `AgentSession.executeBash` do not
  *   fire the tool_call handler (`unitAI-rrdnt.6`, unclosed), so a child reaching the
  *   filesystem that way is not fenced. Do not describe writers as "fenced" without that

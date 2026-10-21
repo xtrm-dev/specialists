@@ -23,6 +23,7 @@
       "response_format": "markdown",
       "output_type": "review",
       "permission_required": "READ_ONLY",
+      "lease_waiver": false,
       "interactive": true,
       "thinking_level": "low",
       "max_retries": 0,
