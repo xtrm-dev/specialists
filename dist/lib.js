@@ -24548,7 +24548,7 @@ class NativeActivationHost {
       state: "starting",
       access,
       workspace,
-      leaseWaiver,
+      ...leaseWaiver ? { leaseWaiver: true } : {},
       piSessionId: session.sessionId,
       configuredModel,
       requestedModel,
