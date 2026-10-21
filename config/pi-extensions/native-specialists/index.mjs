@@ -410,6 +410,313 @@ export function renderDetailLines(detail, cache) {
 /** Detail lines drawn in the fleet section; the commands print more. */
 export const FEED_SECTION_LINES_EXPORTED = 12;
 
+// ── Overlay chrome (SPECIALISTS-4325) ─────────────────────────────────────────
+//
+// The /specialists overlay ports the /bg TasksOverlay pattern into this
+// extension: same bottom-drawer mount (`ui.custom` with overlay options), same
+// keyboard grammar, same text fallback when no TUI mount exists. The header
+// band is the xtrm design-system signal band, mirrored byte-identically from
+// `packages/pi-extensions/shared/suggest.ts` — if that token changes, this
+// copy changes in the same commit. Every overlay view (list, result, feed)
+// opens with the band; only the header text carries a background.
+
+/** Overlay signal band: gold #D9B06A, dark foreground — the /bg header band. */
+export const FLEET_ACCENT = [217, 176, 106];
+const FLEET_FG = [24, 20, 16];
+const bandOnFleet = () => `\x1b[48;2;${FLEET_ACCENT[0]};${FLEET_ACCENT[1]};${FLEET_ACCENT[2]}m\x1b[38;2;${FLEET_FG[0]};${FLEET_FG[1]};${FLEET_FG[2]}m`;
+const BAND_OFF_FLEET = '\x1b[49m\x1b[39m';
+
+/**
+ * Full-width panel title band: dark bold text on gold, padded to the width.
+ * Single segment: bold opens once and closes once at the end of the band
+ * (design-system SGR nesting rule). Plain text in, banded text out.
+ */
+export function fleetBandRow(text, width) {
+  const safe = Math.max(1, Math.floor(width) || 80);
+  const plain = String(text ?? '').replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '');
+  const padded = plain.length >= safe ? plain.slice(0, safe) : plain + ' '.repeat(safe - plain.length);
+  return `${bandOnFleet()}\x1b[1m${padded}\x1b[22m${BAND_OFF_FLEET}`;
+}
+
+const stripOverlayAnsi = (v) => String(v ?? '').replace(/\x1b\[[0-9;]*m/g, '');
+
+/** Width-safe cut with a `...` repair fallback (mirrors the /bg hardCut rule). */
+export function fitOverlayWidth(line, maxWidth) {
+  const width = Math.max(8, Math.floor(maxWidth) || 80);
+  const text = String(line ?? '');
+  if (stripOverlayAnsi(text).length <= width) return text;
+  const ellipsis = '...';
+  let prefix = stripOverlayAnsi(text);
+  while (prefix.length > 0 && prefix.length + ellipsis.length > width) prefix = prefix.slice(0, -1);
+  return `${prefix}${ellipsis}`;
+}
+
+/** Visible overlay rows per view (matches the /bg overlay window). */
+export const OVERLAY_VISIBLE_ROWS = 16;
+
+/**
+ * Minimal key matcher for the overlay (this file takes no pi-tui dependency).
+ * Names: `escape`, `q`, `ctrl+c`, `enter`, `up`, `down`, `pageUp`, `pageDown`,
+ * `home`, `end`, plus single characters matched case-insensitively.
+ */
+export function matchOverlayKey(data, name) {
+  const s = String(data ?? '');
+  const want = String(name ?? '').toLowerCase();
+  if (want === 'escape') return s === '\x1b';
+  if (want === 'ctrl+c') return s === '\x03';
+  if (want === 'enter') return s === '\r' || s === '\n';
+  if (want === 'up') return s === '\x1b[A';
+  if (want === 'down') return s === '\x1b[B';
+  if (want === 'pageup') return s === '\x1b[5~';
+  if (want === 'pagedown') return s === '\x1b[6~';
+  if (want === 'home') return s === '\x1b[H' || s === '\x1b[1~';
+  if (want === 'end') return s === '\x1b[F' || s === '\x1b[4~';
+  return s.length === 1 && s.toLowerCase() === want;
+}
+
+/**
+ * One overlay list row per activation, blocked-first. The line reuses the
+ * footer section's one-line row, so the overlay and the section never drift.
+ */
+export function buildOverlayRows(fleet, nowMs = Date.now()) {
+  const activations = fleet?.activations ?? [];
+  const asks = fleet?.asks ?? [];
+  const askIds = new Set(asks.map((a) => a.activation_id));
+  const askById = new Map(asks.map((a) => [a.activation_id, a]));
+  return [...activations]
+    .sort((a, b) => Number(askIds.has(b.activation_id)) - Number(askIds.has(a.activation_id)))
+    .map((view) => ({
+      activation_id: view.activation_id,
+      specialist: view.specialist,
+      state: view.state,
+      blocked: askIds.has(view.activation_id),
+      message_id: askById.get(view.activation_id)?.message_id ?? null,
+      line: renderFleetRowLines(view, asks, nowMs)[0],
+    }));
+}
+
+/**
+ * Detail head for one activation: issue ref, purpose, model facts, run cost or
+ * the wait reason, and the ask body when blocked. Full titles and bodies live
+ * here, never truncated to row budget.
+ */
+export function buildOverlayDetailHead(view, ask, kind, nowMs = Date.now()) {
+  const head = [];
+  head.push(`issue ${view?.issue_ref ?? view?.issue_id ?? '—'} · ${view?.resolved_model ?? '?model'}${view?.thinking_level ? ` · ${view.thinking_level}` : ''}`);
+  if (view?.purpose) head.push(`purpose: ${String(view.purpose).replace(/\s+/g, ' ').trim()}`);
+  head.push(rowMetrics({ view: view ?? {}, ask: ask ?? null, nowMs }));
+  if (ask?.body?.trim()) head.push(`ask ${ask.message_id ?? ''}: ${ask.body.trim()}`.trim());
+  if (kind === 'feed' && view && isActiveState(view.state) && !ask) head.push('live — new events arrive on fleet change');
+  return head;
+}
+
+/**
+ * The /specialists overlay: list + result/feed detail, ported from the /bg
+ * TasksOverlay. Presentation only — reads through `actions`, mutates through
+ * `actions.stop`/`actions.retry`, and follows live feeds through
+ * `subscribeFleetChange` (event-driven, never a timer). Text commands stay
+ * for everything needing free text (reply/resume/steer) and for scripts.
+ */
+export class SpecialistOverlay {
+  constructor(options) {
+    this.options = options;
+    this.selected = 0;
+    this.listScroll = 0;
+    this.mode = 'list';
+    this.detail = null; // { kind, id, head, lines, lastSeq, running, scroll } | null
+    this.status = '';
+    this.disposed = false;
+    this.unsubscribe = typeof options.subscribeFleetChange === 'function'
+      ? options.subscribeFleetChange(() => this.onExternalUpdate())
+      : null;
+  }
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    try { this.unsubscribe?.(); } catch { /* already gone */ }
+    this.unsubscribe = null;
+  }
+  rows() {
+    try {
+      return buildOverlayRows(this.options.readFleet(), this.options.now?.() ?? Date.now());
+    } catch {
+      return [];
+    }
+  }
+  rerender() {
+    try { this.options.requestRender?.(); } catch { /* render is best effort */ }
+  }
+  setStatus(text) {
+    this.status = text;
+    this.rerender();
+  }
+  selectedRow() {
+    return this.rows()[this.selected];
+  }
+  openDetail(row, kind) {
+    if (!row) return;
+    this.mode = kind;
+    this.detail = null;
+    this.status = `Loading ${row.activation_id}…`;
+    this.rerender();
+    const load = kind === 'result'
+      ? this.options.actions.readResult(row.activation_id)
+      : this.options.actions.readFeed(row.activation_id, null);
+    Promise.resolve(load).then(
+      (detail) => {
+        // A dispose or mode change during the async load must not paint stale
+        // lines over the new view (mirrors the /bg N2 rule).
+        if (this.disposed || this.mode !== kind) return;
+        this.detail = { kind, id: row.activation_id, scroll: 0, ...detail };
+        this.status = '';
+        this.rerender();
+      },
+      (error) => {
+        if (this.disposed || this.mode !== kind) return;
+        this.detail = null;
+        this.setStatus(error instanceof Error ? error.message : String(error));
+      },
+    );
+  }
+  runStop(row) {
+    if (!row) return;
+    Promise.resolve(this.options.actions.stop(row.activation_id)).then(
+      (text) => this.setStatus(text),
+      (error) => this.setStatus(error instanceof Error ? error.message : String(error)),
+    );
+  }
+  runRetry(row) {
+    if (!row) return;
+    if (row.state !== 'failed') {
+      this.setStatus('r retries failed runs · resume via /specialists:resume <id> <prompt>');
+      return;
+    }
+    Promise.resolve(this.options.actions.retry(row.activation_id)).then(
+      (text) => this.setStatus(text),
+      (error) => this.setStatus(error instanceof Error ? error.message : String(error)),
+    );
+  }
+  onExternalUpdate() {
+    if (this.disposed || this.mode !== 'feed' || !this.detail?.running) return;
+    Promise.resolve(this.options.actions.readFeed(this.detail.id, this.detail.lastSeq ?? null)).then(
+      (fresh) => {
+        if (this.disposed || this.mode !== 'feed' || !this.detail) return;
+        this.detail = { ...this.detail, ...fresh, scroll: 0 };
+        this.rerender();
+      },
+      () => { /* a failed refresh keeps the previous lines */ },
+    );
+  }
+  handleInput(data) {
+    if (this.mode === 'result' || this.mode === 'feed') {
+      if (matchOverlayKey(data, 'escape') || matchOverlayKey(data, 'q') || matchOverlayKey(data, 'ctrl+c')) {
+        this.mode = 'list';
+        this.detail = null;
+        this.status = '';
+        this.rerender();
+        return;
+      }
+      if (!this.detail) return;
+      const total = (this.detail.head?.length ?? 0) + (this.detail.lines?.length ?? 0);
+      const maxScroll = Math.max(0, total - OVERLAY_VISIBLE_ROWS);
+      if (matchOverlayKey(data, 'up')) this.detail.scroll = Math.min(this.detail.scroll + 1, maxScroll);
+      else if (matchOverlayKey(data, 'down')) this.detail.scroll = Math.max(0, this.detail.scroll - 1);
+      else if (matchOverlayKey(data, 'pageUp')) this.detail.scroll = Math.min(this.detail.scroll + OVERLAY_VISIBLE_ROWS, maxScroll);
+      else if (matchOverlayKey(data, 'pageDown')) this.detail.scroll = Math.max(0, this.detail.scroll - OVERLAY_VISIBLE_ROWS);
+      else if (matchOverlayKey(data, 'home')) this.detail.scroll = maxScroll;
+      else if (matchOverlayKey(data, 'end')) this.detail.scroll = 0;
+      else return;
+      this.rerender();
+      return;
+    }
+    if (matchOverlayKey(data, 'escape') || matchOverlayKey(data, 'q') || matchOverlayKey(data, 'ctrl+c')) {
+      this.dispose();
+      try { this.options.close(); } catch { /* already gone */ }
+      return;
+    }
+    const count = this.rows().length;
+    if (matchOverlayKey(data, 'up')) {
+      this.selected = count === 0 ? 0 : (this.selected + count - 1) % count;
+      this.rerender();
+      return;
+    }
+    if (matchOverlayKey(data, 'down')) {
+      this.selected = count === 0 ? 0 : (this.selected + 1) % count;
+      this.rerender();
+      return;
+    }
+    if (matchOverlayKey(data, 'enter')) {
+      const row = this.selectedRow();
+      if (row) this.openDetail(row, 'result');
+      return;
+    }
+    if (matchOverlayKey(data, 'f')) {
+      const row = this.selectedRow();
+      if (row) this.openDetail(row, 'feed');
+      return;
+    }
+    if (matchOverlayKey(data, 's')) {
+      const row = this.selectedRow();
+      if (row) this.runStop(row);
+      return;
+    }
+    if (matchOverlayKey(data, 'r')) {
+      const row = this.selectedRow();
+      if (row) this.runRetry(row);
+      return;
+    }
+    if (matchOverlayKey(data, 'y')) {
+      const row = this.selectedRow();
+      if (row?.blocked && row.message_id) this.setStatus(`reply via /specialists:reply ${row.message_id} <answer>`);
+      else if (row) this.setStatus('nothing waiting on you · resume via /specialists:resume <id> <prompt>');
+      return;
+    }
+  }
+  render(width) {
+    const safe = Math.max(20, Math.floor(width) || 80);
+    const cut = (line) => fitOverlayWidth(line, safe);
+    if (this.mode === 'result' || this.mode === 'feed') {
+      const d = this.detail;
+      const out = [fleetBandRow(`${this.mode} ${d?.id ?? ''}`.trim(), safe), ''];
+      if (!d) {
+        out.push(cut(DIM(this.status || 'Loading…')));
+      } else {
+        for (const h of d.head ?? []) out.push(cut(DIM(h)));
+        if ((d.head?.length ?? 0) > 0) out.push('');
+        const body = d.lines ?? [];
+        const total = (d.head?.length ?? 0) + body.length;
+        const maxScroll = Math.max(0, total - OVERLAY_VISIBLE_ROWS);
+        const scroll = Math.min(d.scroll ?? 0, maxScroll);
+        const visible = body.slice(Math.max(0, body.length - OVERLAY_VISIBLE_ROWS - scroll), body.length - scroll || body.length);
+        for (const line of visible) out.push(cut(line));
+        if (d.running) out.push(cut(DIM('live — new events arrive on fleet change · esc back')));
+      }
+      if (this.status && d) out.push(cut(DIM(this.status)));
+      out.push(cut(DIM('esc back · ↑↓ scroll')));
+      return out;
+    }
+    const rows = this.rows();
+    const maxOffset = Math.max(0, rows.length - OVERLAY_VISIBLE_ROWS);
+    if (this.selected < this.listScroll) this.listScroll = this.selected;
+    if (this.selected >= this.listScroll + OVERLAY_VISIBLE_ROWS) this.listScroll = this.selected - OVERLAY_VISIBLE_ROWS + 1;
+    this.listScroll = Math.min(this.listScroll, maxOffset);
+    const out = [fleetBandRow(rows.length === 1 ? 'specialists · 1' : `specialists · ${rows.length}`, safe), ''];
+    if (rows.length === 0) {
+      out.push(cut(DIM('Nothing running.')));
+    } else {
+      const visible = rows.slice(this.listScroll, this.listScroll + OVERLAY_VISIBLE_ROWS);
+      visible.forEach((row, i) => {
+        const marker = this.listScroll + i === this.selected ? '→ ' : '  ';
+        out.push(cut(`${marker}${row.line}`));
+      });
+      if (rows.length > OVERLAY_VISIBLE_ROWS) out.push(cut(DIM(`… ${rows.length - OVERLAY_VISIBLE_ROWS} more · ↑↓ move`)));
+    }
+    if (this.status) out.push(cut(DIM(this.status)));
+    out.push(cut(DIM('enter result · f feed · s stop · r retry · y reply · esc closes')));
+    return out;
+  }
+}
+
 // ── Forensic wiring (unitAI-rrdnt.37.1) ──────────────────────────────────────
 //
 // Native activations must be answerable from the SAME observability.db the legacy
@@ -1570,6 +1877,17 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
 
   const FEED_SECTION_LINES = FEED_SECTION_LINES_EXPORTED;
 
+  // Overlay live-follow fan-out: the /specialists overlay subscribes here and
+  // re-pulls its open feed on every completed detail refresh (commands, wakes,
+  // follow loop) — event-driven, never a timer. Defined before
+  // `refreshFleetDetail`, which notifies on every completion path.
+  const detailListeners = new Set();
+  const notifyDetailListeners = () => {
+    for (const cb of detailListeners) {
+      try { cb(); } catch { /* one bad subscriber never breaks the refresh */ }
+    }
+  };
+
   // Async state advances through `refreshFleetDetail`: the commands refresh the
   // selection they just opened, the two settlement/ask wakes refresh it when a
   // child settles or asks, and the fleet-change follow loop below refreshes it
@@ -1580,7 +1898,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   // polling, no execute-body wrapping.
   const refreshFleetDetail = async (followCursor = null) => {
     const sel = fleetDetail;
-    if (!sel) return;
+    if (!sel) { notifyDetailListeners(); return; }
     try {
       if (sel.kind === 'result') {
         const out = await resultToolDef('section', { activation_id: sel.id });
@@ -1617,6 +1935,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       // A failed refresh keeps the previous cache: the section degrades to
       // stale lines rather than dropping the view.
     }
+    notifyDetailListeners();
   };
   // Every settlement, ask, or Fleet change may have advanced the feed, so the
   // selected detail follows those events — the Claude pane's
@@ -2896,6 +3215,81 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     else console.log(message);
   };
 
+  // Open the /specialists overlay on a TUI, or report the plain text anywhere
+  // else. Returns true when the overlay mounted. A `ui.custom` stub that
+  // records without mounting (RPC degrade, tests) resolves without invoking
+  // the factory — the mounted flag catches that and falls back to text, so
+  // scripts and print modes never lose the report.
+  const openSpecialistsOverlay = async (ctx) => {
+    const canOverlay = ctx?.mode === 'tui' && ctx?.hasUI === true && typeof ctx?.ui?.custom === 'function';
+    if (!canOverlay) return false;
+    const readResult = async (id) => {
+      const out = await resultToolDef('overlay', { activation_id: id });
+      const payload = out?.structuredContent ?? {};
+      const fleet = readFleet();
+      const resolvedId = payload.activation_id ?? id;
+      const view = fleet.activations.find((a) => a.activation_id === resolvedId);
+      const ask = fleet.asks.find((a) => a.activation_id === resolvedId);
+      if (payload.status === 'error') {
+        return { head: buildOverlayDetailHead(view, ask, 'result'), lines: [`result unavailable · ${payload.error ?? 'unknown error'}`], lastSeq: null, running: false, settled: true };
+      }
+      return { head: buildOverlayDetailHead(view, ask, 'result'), lines: resultCommandLines(payload), lastSeq: null, running: false, settled: true };
+    };
+    const readFeed = async (id, since = null) => {
+      const input = { activation_id: id, limit: FEED_COMMAND_LINES };
+      if (since != null) input.since_seq = since;
+      const out = await feedToolDef('overlay', input);
+      const payload = out?.structuredContent ?? {};
+      const fleet = readFleet();
+      const resolvedId = payload.activation_id ?? id;
+      const view = fleet.activations.find((a) => a.activation_id === resolvedId);
+      const ask = fleet.asks.find((a) => a.activation_id === resolvedId);
+      if (payload.status === 'error') {
+        return { head: buildOverlayDetailHead(view, ask, 'feed'), lines: [`feed unavailable · ${payload.error ?? 'unknown error'}`], lastSeq: null, running: false, settled: true };
+      }
+      const running = fleet.activations.some((a) => a.activation_id === resolvedId && isActiveStateFor(a.state));
+      return { head: buildOverlayDetailHead(view, ask, 'feed'), lines: feedCommandLines(payload), lastSeq: payload.last_seq ?? null, running, settled: !running };
+    };
+    let overlay = null;
+    let mounted = false;
+    const factory = (tui, _theme, _keybindings, done) => {
+      mounted = true;
+      overlay = new SpecialistOverlay({
+        readFleet,
+        now: () => Date.now(),
+        close: () => { try { done(undefined); } catch { /* already gone */ } },
+        requestRender: () => { try { tui.requestRender(); } catch { /* best effort */ } },
+        subscribeFleetChange: (cb) => { detailListeners.add(cb); return () => { detailListeners.delete(cb); }; },
+        actions: {
+          readResult,
+          readFeed,
+          stop: async (activationId) => {
+            if (!getHost().inspect(activationId)) return `Unknown activation: ${activationId}`;
+            await disposeActivation(activationId, 'pi operator request');
+            return `Stopped ${activationId}.`;
+          },
+          retry: async (activationId) => {
+            try {
+              await getHost().retry(activationId, {});
+            } catch (err) {
+              return `Retry refused for ${activationId}: ${err?.message ?? err}`;
+            }
+            return `Retried ${activationId}.`;
+          },
+        },
+      });
+      return overlay;
+    };
+    try {
+      await ctx.ui.custom(factory, { overlay: true, overlayOptions: { width: '100%', anchor: 'bottom-center', margin: { bottom: 4 } } });
+    } catch {
+      try { overlay?.dispose(); } catch { /* already gone */ }
+      return false;
+    }
+    try { overlay?.dispose(); } catch { /* already gone */ }
+    return mounted;
+  };
+
   const specialistsHandler = async (args, ctx) => {
       const parts = args.trim().split(/\s+/);
       const action = parts[0] ?? '';
@@ -2935,6 +3329,11 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       else if (action !== '') {
         report(ctx, 'Usage: /specialists [show|hide|inspect|expand|collapse|status <activation>|result <activation>|feed <activation> [lines]]', 'warning');
         return;
+      }
+      // Bare /specialists opens the interactive overlay where a TUI mount
+      // exists; anywhere else it reports the same text as before.
+      if (action === '') {
+        if (await openSpecialistsOverlay(ctx)) return;
       }
       // The panel is only half the answer: in json/print mode there is no
       // widget at all, so the command always reports the Fleet in text too.

@@ -2828,3 +2828,157 @@ describe('native-specialists extension tool schemas are gateway-valid', () => {
     expect(members('outcome').sort()).toEqual(['manual_attention_required', 'safe_free', 'superseded']);
   });
 });
+
+describe('/specialists overlay (SPECIALISTS-4325)', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+  function makeOverlay(mod, overrides = {}) {
+    const fleet = overrides.fleet ?? {
+      activations: [{
+        activation_id: 'act:aaaa', specialist: 'explorer', issue_ref: 'SPECIALISTS-1',
+        state: 'running', resolved_model: 'm', thinking_level: 'high',
+        elapsed_s: 47, turn_count: 3, purpose: 'map the wake transport',
+        token_usage: { input_tokens: 1500, output_tokens: 600 },
+        last_activity_at: SPIN_CLOCK,
+      }],
+      asks: [],
+    };
+    const calls = { result: [], feed: [], stop: [], retry: [] };
+    const listeners = new Set();
+    const renders = [];
+    const ov = new mod.SpecialistOverlay({
+      readFleet: () => fleet,
+      now: () => SPIN_CLOCK,
+      close: () => { ov.closed = true; },
+      requestRender: () => { renders.push(true); },
+      subscribeFleetChange: (cb) => { listeners.add(cb); return () => { listeners.delete(cb); }; },
+      actions: {
+        readResult: async (id) => {
+          calls.result.push(id);
+          const view = fleet.activations.find((a) => a.activation_id === id);
+          return { head: mod.buildOverlayDetailHead(view, null, 'result', SPIN_CLOCK), lines: ['done · m', 'the result'], lastSeq: null, running: false, settled: true };
+        },
+        readFeed: async (id) => {
+          calls.feed.push(id);
+          const view = fleet.activations.find((a) => a.activation_id === id);
+          return { head: mod.buildOverlayDetailHead(view, null, 'feed', SPIN_CLOCK), lines: ['turn 1 · 100 tokens'], lastSeq: 2, running: true, settled: false };
+        },
+        stop: async (id) => { calls.stop.push(id); return `Stopped ${id}.`; },
+        retry: async (id) => { calls.retry.push(id); return `Retried ${id}.`; },
+      },
+      ...overrides.options,
+    });
+    return { ov, fleet, calls, listeners, renders };
+  }
+
+  it('every view opens with the gold band header (design-system one-band rule)', async () => {
+    const mod = await loadExtension();
+    const { ov } = makeOverlay(mod);
+    const list = ov.render(80);
+    expect(list[0]).toContain('specialists · 1');
+    expect(list[0]).toContain('\x1b[48;2;217;176;106m'); // gold bg
+    expect(list[0]).toContain('\x1b[38;2;24;20;16m'); // dark fg
+    expect(list[1]).toBe('');
+    ov.openDetail(ov.selectedRow(), 'result');
+    await vi.advanceTimersByTimeAsync(0);
+    const result = ov.render(80);
+    expect(result[0]).toContain('result act:aaaa');
+    expect(result[0]).toContain('\x1b[48;2;217;176;106m');
+    ov.handleInput('\x1b'); // back to list
+    ov.openDetail(ov.selectedRow(), 'feed');
+    await vi.advanceTimersByTimeAsync(0);
+    const feed = ov.render(80);
+    expect(feed[0]).toContain('feed act:aaaa');
+    expect(feed[0]).toContain('\x1b[48;2;217;176;106m');
+  });
+
+  it('list keys navigate, open detail, stop and retry; y names the text command', async () => {
+    const mod = await loadExtension();
+    const { ov, calls } = makeOverlay(mod);
+    ov.handleInput('\x1b[B'); // down on a one-row list stays
+    expect(ov.selected).toBe(0);
+    ov.handleInput('\r'); // enter opens the result
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.result).toEqual(['act:aaaa']);
+    expect(ov.mode).toBe('result');
+    expect(ov.render(80).join('\n')).toContain('the result');
+    ov.handleInput('\x1b'); // esc back to list
+    expect(ov.mode).toBe('list');
+    ov.handleInput('f'); // feed
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.feed).toEqual(['act:aaaa']);
+    ov.handleInput('\x1b');
+    ov.handleInput('s'); // stop runs without free text
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.stop).toEqual(['act:aaaa']);
+    ov.handleInput('r'); // running is not failed: hint, no call
+    expect(calls.retry).toEqual([]);
+    expect(ov.status).toContain('/specialists:resume');
+    ov.handleInput('y'); // nothing waiting: names the text commands
+    expect(ov.status).toContain('/specialists:resume');
+  });
+
+  it('failed rows retry from the overlay; blocked rows name the reply command', async () => {
+    const mod = await loadExtension();
+    const fleet = {
+      activations: [{
+        activation_id: 'act:dead', specialist: 'executor', issue_ref: 'SPECIALISTS-9',
+        state: 'failed', resolved_model: 'm', elapsed_s: 5, last_activity_at: SPIN_CLOCK,
+      }],
+      asks: [],
+    };
+    const { ov, calls } = makeOverlay(mod, { fleet });
+    ov.handleInput('r');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.retry).toEqual(['act:dead']);
+    const blocked = {
+      activations: [{
+        activation_id: 'act:ask', specialist: 'reviewer', issue_ref: 'SPECIALISTS-2',
+        state: 'running', resolved_model: 'm', elapsed_s: 90, last_activity_at: SPIN_CLOCK,
+      }],
+      asks: [{ message_id: 'msg:9', kind: 'question', activation_id: 'act:ask', from: 'x', body: 'Which?', asked_at: SPIN_CLOCK - 1000 }],
+    };
+    const second = makeOverlay(mod, { fleet: blocked });
+    second.ov.handleInput('y');
+    expect(second.ov.status).toBe('reply via /specialists:reply msg:9 <answer>');
+  });
+
+  it('bare /specialists mounts the overlay in TUI and reports text without a mount', async () => {
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    const { host } = makeFakeHost();
+    mod.default(pi, { createHost: () => host });
+    const ctx = makeFakeCtx({ hasUI: true, mode: 'tui' });
+    await pi.fire('session_start', { type: 'session_start' }, ctx);
+    await toolNamed(pi, 'specialist_status').execute('tc0', {});
+    const command = (name) => pi.getCommands().find((c) => c.name === name);
+    await command('specialists').handler('', ctx);
+    // The fake custom stub records without mounting: text fallback, same as before.
+    expect(ctx.painted.customs).toHaveLength(1);
+    expect(ctx.painted.customs[0][1]).toMatchObject({ overlay: true });
+    expect(ctx.painted.notices.at(-1)[0]).toContain('specialists');
+    // Drive the recorded factory like a real TUI mount: the band header paints.
+    const factory = ctx.painted.customs[0][0];
+    const tui = { requestRender: vi.fn() };
+    let doneCalled = false;
+    const overlay = factory(tui, {}, {}, () => { doneCalled = true; });
+    expect(overlay.render(80)[0]).toContain('\x1b[48;2;217;176;106m');
+    expect(overlay.render(80).join('\n')).toContain('explorer');
+    overlay.handleInput('\x1b');
+    expect(doneCalled).toBe(true);
+    overlay.dispose();
+  });
+
+  it('matchOverlayKey covers navigation, actions and close keys', async () => {
+    const mod = await loadExtension();
+    expect(mod.matchOverlayKey('\x1b', 'escape')).toBe(true);
+    expect(mod.matchOverlayKey('q', 'q')).toBe(true);
+    expect(mod.matchOverlayKey('\x03', 'ctrl+c')).toBe(true);
+    expect(mod.matchOverlayKey('\r', 'enter')).toBe(true);
+    expect(mod.matchOverlayKey('\x1b[A', 'up')).toBe(true);
+    expect(mod.matchOverlayKey('\x1b[B', 'down')).toBe(true);
+    expect(mod.matchOverlayKey('s', 's')).toBe(true);
+    expect(mod.matchOverlayKey('S', 's')).toBe(true);
+    expect(mod.matchOverlayKey('x', 's')).toBe(false);
+  });
+});
