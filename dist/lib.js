@@ -22549,7 +22549,7 @@ var NATIVE_LIFECYCLE_OBSERVABILITY_GAPS = Object.freeze({
   activation_starting: "Session construction has no legacy timeline event; run_start follows once construction succeeds.",
   output_validation_started: "Native result validation has no legacy timeline event kind.",
   output_validation_passed: "Native result validation has no legacy timeline event kind.",
-  output_validation_failed: "Native result validation has no legacy timeline event kind; terminal failure is run_complete.",
+  output_validation_failed: "Native result validation has no legacy timeline event kind; it is a mid-settle signal, not a terminal failure, so it leaves no timeline row and moves no status — the outcome rides on the run_complete the settle emits next and on the settlement validation.",
   activation_disposed: "In-memory session disposal after a terminal event has no legacy timeline event.",
   lease_released: "Workspace-lease teardown has no legacy timeline event.",
   lease_reconciled: "Lease reconciliation has no legacy timeline event.",
@@ -23932,6 +23932,10 @@ class NativeActivationHost {
   backgroundTaskAlive;
   backgroundTasks = new Map;
   backgroundWatch = new Map;
+  wakeDirty = new Set;
+  wakeFinalising = new Set;
+  wakeSettlement;
+  framedTurns = new Set;
   backgroundPollMs;
   now;
   sessionStatsTimeoutMs;
@@ -23961,6 +23965,7 @@ class NativeActivationHost {
     this.forensics = withFleetWake(deps.forensics ?? NULL_FORENSIC_SINK, () => this.wakeFleetWaiters());
     this.loadSdk = deps.loadSdk ?? loadPiSdk;
     this.now = deps.now ?? (() => Date.now());
+    this.wakeSettlement = deps.onWakeSettlement;
     this.sessionStatsTimeoutMs = deps.sessionStatsTimeoutMs;
     this.piVersion = deps.piVersion;
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
@@ -24715,7 +24720,11 @@ class NativeActivationHost {
       event
     });
     switch (event.type) {
+      case "turn_start":
+        this.noteWakeTurnStart(snapshot);
+        break;
       case "agent_start":
+        this.noteWakeTurnStart(snapshot);
         snapshot.state = "running";
         this.save(snapshot);
         emit("turn_started");
@@ -24727,9 +24736,20 @@ class NativeActivationHost {
         snapshot.turnCount = (snapshot.turnCount ?? 0) + 1;
         break;
       case "agent_settled":
+        const unframedWake = !this.framedTurns.has(snapshot.activationId) && this.wakeDirty.has(snapshot.activationId);
         snapshot.state = "settled";
         this.save(snapshot);
         this.releaseIfWriter(snapshot, "settled");
+        if (unframedWake) {
+          this.wakeDirty.delete(snapshot.activationId);
+          const record = this.registry.get(snapshot.activationId);
+          if (record && !this.wakeFinalising.has(snapshot.activationId)) {
+            this.wakeFinalising.add(snapshot.activationId);
+            this.finalizeWakeTurn(snapshot, record, emit).finally(() => {
+              this.wakeFinalising.delete(snapshot.activationId);
+            });
+          }
+        }
         break;
       case "auto_retry_start":
         emit("retry_started", { attempt: event.attempt, max_attempts: event.maxAttempts });
@@ -24922,6 +24942,7 @@ class NativeActivationHost {
     this.toolDurationWatch.delete(activationId);
   }
   async runToSettled(snapshot, session, initialPrompt, emit, record) {
+    this.framedTurns.add(snapshot.activationId);
     let settlementRecorded = false;
     const recordSettlementOnce = async () => {
       if (settlementRecorded)
@@ -25035,7 +25056,97 @@ class NativeActivationHost {
       return thrownResult;
     }
   }
+  noteWakeTurnStart(snapshot) {
+    if (snapshot.state === "settled")
+      this.wakeDirty.add(snapshot.activationId);
+  }
+  async finalizeWakeTurn(snapshot, record, emit) {
+    try {
+      const session = record.session;
+      await this.captureSessionStats(session, emit);
+      const last = lastAssistantMessage(session.messages);
+      if (last && (last.stopReason === "error" || last.stopReason === "aborted")) {
+        const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
+        snapshot.state = "failed";
+        this.save(snapshot);
+        emit("activation_failed", { error: detail, stop_reason: last.stopReason });
+        const failedResult = {
+          activationId: snapshot.activationId,
+          participantId: snapshot.participantId,
+          attemptId: snapshot.attemptId,
+          issueId: snapshot.issueId,
+          issueRef: snapshot.issueRef,
+          issueRevision: snapshot.issueRevision,
+          contractHash: snapshot.contractHash,
+          executionBindingId: snapshot.executionBindingId,
+          status: "failed",
+          output: undefined,
+          validation: { valid: false, errors: [detail] },
+          piSessionId: session.sessionId,
+          configuredModel: snapshot.configuredModel,
+          requestedModel: snapshot.requestedModel,
+          resolvedModel: snapshot.resolvedModel,
+          modelOverride: snapshot.modelOverride,
+          ...snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {},
+          thinkingOverride: snapshot.thinkingOverride,
+          fallbackUsed: false,
+          completedAt: this.now()
+        };
+        this.publishTerminalSettlement(snapshot, failedResult, record, emit);
+        this.notifyWakeSettlement(failedResult);
+        return;
+      }
+      const output = textOf(last);
+      emit("activation_settled");
+      emit("output_validation_started");
+      const pendingTasks = this.liveBackgroundTasks(snapshot.activationId);
+      const validation = pendingTasks.length > 0 ? { valid: false, errors: [`background tasks still running: ${pendingTasks.join(", ")}; resume the activation after they finish`] } : output.trim().length > 0 ? { valid: true } : { valid: false, errors: ["empty output: specialist produced no output"] };
+      if (validation.valid) {
+        emit("output_validation_passed");
+      } else {
+        emit("output_validation_failed", { errors: validation.errors });
+      }
+      snapshot.state = "settled";
+      this.save(snapshot);
+      emit("activation_completed", { pi_session_id: session.sessionId, output });
+      this.releaseIfWriter(snapshot, "completed");
+      const completedResult = {
+        activationId: snapshot.activationId,
+        participantId: snapshot.participantId,
+        attemptId: snapshot.attemptId,
+        issueId: snapshot.issueId,
+        issueRef: snapshot.issueRef,
+        issueRevision: snapshot.issueRevision,
+        contractHash: snapshot.contractHash,
+        executionBindingId: snapshot.executionBindingId,
+        status: pendingTasks.length > 0 ? "uncertain" : "completed",
+        output,
+        validation,
+        piSessionId: session.sessionId,
+        configuredModel: snapshot.configuredModel,
+        requestedModel: snapshot.requestedModel,
+        resolvedModel: snapshot.resolvedModel,
+        modelOverride: snapshot.modelOverride,
+        ...snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {},
+        thinkingOverride: snapshot.thinkingOverride,
+        fallbackUsed: false,
+        completedAt: this.now()
+      };
+      this.publishTerminalSettlement(snapshot, completedResult, record, emit);
+      this.notifyWakeSettlement(completedResult);
+    } catch {}
+  }
+  notifyWakeSettlement(result) {
+    const notify = this.wakeSettlement;
+    if (!notify)
+      return;
+    try {
+      notify(result);
+    } catch {}
+  }
   publishTerminalSettlement(snapshot, result, record, emit) {
+    this.wakeDirty.delete(snapshot.activationId);
+    this.framedTurns.delete(snapshot.activationId);
     try {
       const subject = {
         activationId: snapshot.activationId,
@@ -25459,6 +25570,9 @@ class NativeActivationHost {
       this.stopToolDurationWatch(activationId);
       this.toolDurationWarnMsByActivation.delete(activationId);
       this.forgetBackgroundTasks(activationId);
+      this.wakeDirty.delete(activationId);
+      this.wakeFinalising.delete(activationId);
+      this.framedTurns.delete(activationId);
       record.unsubscribe();
       record.session.dispose();
       record.snapshot.state = "stopped";
@@ -26000,7 +26114,6 @@ function statusForLifecycle(name, current) {
       return "done";
     case "activation_failed":
     case "activation_rejected":
-    case "output_validation_failed":
       return "error";
     default:
       return current;
@@ -26015,8 +26128,7 @@ function statusForSessionEvent(type, current) {
 }
 var ERROR_STATUS_LIFECYCLE = new Set([
   "activation_failed",
-  "activation_rejected",
-  "output_validation_failed"
+  "activation_rejected"
 ]);
 function identityOf(state) {
   return { attemptId: state.attemptId, attemptNo: state.attemptNo };
@@ -26083,14 +26195,9 @@ function createActivationForensicSink(observability) {
       observability.upsertStatus(status, identityOf(state));
     }
   };
-  const aggregatedAtTerminal = new Set;
-  const aggregateTerminalMetrics = (activationId, attemptId) => {
-    const key = `${activationId}/${attemptId}`;
-    if (aggregatedAtTerminal.has(key))
-      return;
+  const aggregateTerminalMetrics = (activationId) => {
     try {
       observability.aggregateJobMetrics(activationId);
-      aggregatedAtTerminal.add(key);
     } catch {}
   };
   return {
@@ -26147,16 +26254,12 @@ function createActivationForensicSink(observability) {
         } else {
           writeProjection(event.activationId, state, timelineEvent?.type, timelineEvent ? [timelineEvent] : [], error);
         }
-        if (event.name === "activation_completed" || event.name === "activation_failed" || event.name === "activation_rejected" || event.name === "output_validation_failed") {
-          aggregateTerminalMetrics(event.activationId, event.attemptId);
+        if (event.name === "activation_completed" || event.name === "activation_failed" || event.name === "activation_rejected") {
+          aggregateTerminalMetrics(event.activationId);
         }
         if (event.name === "activation_disposed") {
-          aggregateTerminalMetrics(event.activationId, event.attemptId);
+          aggregateTerminalMetrics(event.activationId);
           states.delete(event.activationId);
-          for (const key of [...aggregatedAtTerminal]) {
-            if (key.startsWith(`${event.activationId}/`))
-              aggregatedAtTerminal.delete(key);
-          }
         }
       } catch {}
     },
