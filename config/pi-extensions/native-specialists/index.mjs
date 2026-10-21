@@ -2525,7 +2525,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       'Write-capable tiers (MEDIUM/HIGH) still need the workspace lease at dispatch ' +
       'time; a read-tier specialist with `lease_waiver: true` is provisioned an isolated ' +
       'worktree and holds its lease instead of running in place. This extension is the dispatch surface: do not shell out to the specialists ' +
-      'CLI to run a Specialist.',,
+      'CLI to run a Specialist.',
     promptSnippet: 'List configured Specialists (specialist_list; name= for detail)',
     renderResult: humanResultOf(),
     outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_list,

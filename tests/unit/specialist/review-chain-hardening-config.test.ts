@@ -38,7 +38,7 @@ describe('review-chain hardening specialist configs', () => {
     const spec = await loadSpec('reviewer');
     const system = spec.specialist.prompt.system ?? '';
 
-    expect(spec.specialist.metadata.version).toBe('2.3.1');
+    expect(spec.specialist.metadata.version).toBe('2.4.0');
     expect(system).toContain('ocr-preflight.mjs');
     expect(system).toContain('Run the ocr lane in one codemode cell');
     expect(system).toContain('must exit 0 before you report coverage');
