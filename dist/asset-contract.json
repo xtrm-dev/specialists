@@ -40,7 +40,7 @@
     },
     {
       "path": "config/skills/using-specialists/references/specialist-definitions.md",
-      "sha256": "eccaa09e17048d9359564407854c8b79381b1c95c590ae813422d34b5bd9b1bb"
+      "sha256": "c1f4b2da3c16f7040bf53dcf7f60c4314756c41e5f590a84142a6aaabaf45143"
     },
     {
       "path": "config/skills/using-specialists/scripts/specialist-definitions/audit-spec-uniformity.mjs",
