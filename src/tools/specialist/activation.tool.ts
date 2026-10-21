@@ -70,6 +70,9 @@ export interface ActivationView {
   execution_binding_id: string;
   state: string;
   access: 'read' | 'write';
+  /** Present only when the activation runs under a lease waiver: a read-tier specialist
+   *  holding a lease on its isolated per-Issue worktree. Absent otherwise. */
+  lease_waiver?: true;
   worktree_path: string;
   branch?: string;
   pi_session_id?: string;
@@ -119,6 +122,7 @@ export function toActivationView(snapshot: ActivationSnapshot, nowMs: number = D
     execution_binding_id: snapshot.executionBindingId,
     state: snapshot.state,
     access: snapshot.access,
+    ...(snapshot.leaseWaiver ? { lease_waiver: true as const } : {}),
     worktree_path: snapshot.workspace.worktreePath,
     ...(snapshot.workspace.branch ? { branch: snapshot.workspace.branch } : {}),
     ...(snapshot.piSessionId ? { pi_session_id: snapshot.piSessionId } : {}),
@@ -167,6 +171,8 @@ export interface ActivationCompactView {
   bead_id: string;
   state: string;
   access: 'read' | 'write';
+  /** Present only when the activation runs under a lease waiver. Absent otherwise. */
+  lease_waiver?: true;
   resolved_model: string;
   thinking_level?: string;
   elapsed_s: number;
@@ -183,6 +189,7 @@ export function toActivationCompactView(snapshot: ActivationSnapshot, nowMs: num
     bead_id: snapshot.issueRef,
     state: snapshot.state,
     access: snapshot.access,
+    ...(snapshot.leaseWaiver ? { lease_waiver: true as const } : {}),
     resolved_model: snapshot.resolvedModel,
     ...(snapshot.thinkingLevel ? { thinking_level: snapshot.thinkingLevel } : {}),
     elapsed_s: Math.max(0, Math.floor((nowMs - snapshot.startedAt) / 1000)),
@@ -444,7 +451,8 @@ export function createSpecialistDispatchTool(
       'and started, not when it completes: the Channel push is the PRIMARY wake, ' +
       'specialist_status is the AUTHORITATIVE read, and polling is the degraded fallback. ' +
       'Answer a raised question with specialist_reply. Write-capable Specialists (MEDIUM/HIGH ' +
-      'tiers) activate only when they can acquire the workspace lease; otherwise dispatch is ' +
+      'tiers) activate only when they can acquire the workspace lease (as does a read-tier ' +
+      'specialist with `lease_waiver: true`, on its isolated worktree); otherwise dispatch is ' +
       'refused with a structured reason.',
     inputSchema: specialistDispatchSchema,
     async execute(input: z.infer<typeof specialistDispatchSchema>) {

@@ -71,6 +71,7 @@ export declare function createSpecialistResumeTool(getHost: () => NativeActivati
         execution_binding_id: string;
         state: string;
         access: "read" | "write";
+        lease_waiver?: true;
         worktree_path: string;
         branch?: string;
         pi_session_id?: string;
@@ -95,6 +96,7 @@ export declare function createSpecialistResumeTool(getHost: () => NativeActivati
         bead_id: string;
         state: string;
         access: "read" | "write";
+        lease_waiver?: true;
         resolved_model: string;
         thinking_level?: string;
         elapsed_s: number;

@@ -89418,6 +89418,7 @@ function toActivationView(snapshot, nowMs = Date.now()) {
     execution_binding_id: snapshot.executionBindingId,
     state: snapshot.state,
     access: snapshot.access,
+    ...snapshot.leaseWaiver ? { lease_waiver: true } : {},
     worktree_path: snapshot.workspace.worktreePath,
     ...snapshot.workspace.branch ? { branch: snapshot.workspace.branch } : {},
     ...snapshot.piSessionId ? { pi_session_id: snapshot.piSessionId } : {},
@@ -89442,6 +89443,7 @@ function toActivationCompactView(snapshot, nowMs = Date.now()) {
     bead_id: snapshot.issueRef,
     state: snapshot.state,
     access: snapshot.access,
+    ...snapshot.leaseWaiver ? { lease_waiver: true } : {},
     resolved_model: snapshot.resolvedModel,
     ...snapshot.thinkingLevel ? { thinking_level: snapshot.thinkingLevel } : {},
     elapsed_s: Math.max(0, Math.floor((nowMs - snapshot.startedAt) / 1000)),
@@ -89505,7 +89507,7 @@ function renderDispatchRejection(error) {
 function createSpecialistDispatchTool(getHost, getPusher) {
   return {
     name: "specialist_dispatch",
-    description: "Dispatch a Specialist on the native in-process runtime. No CLI process is spawned. " + "Provide EITHER issue_ref (a READY Substrate Issue locator \u2014 XTRM-227, XTRM-184.2.3, " + "iss_..., a historical locator, or an imported Beads alias; bead_id is a permanent " + "compatibility alias for the same value) OR contract (an inline 7-section contract plus " + "a SCRUTINY level). Never both. An inline contract is accepted through the SAME pipeline " + "as an existing Issue: structural validation, Substrate Issue creation, readiness " + "attestation, claim, ExecutionBinding, activation. The Issue contract IS the prompt and " + "MUST be complete \u2014 PROBLEM, SUCCESS, SCOPE, NON_GOALS, CONSTRAINTS, VALIDATION, OUTPUT " + "plus a SCRUTINY level, eight required parts, not seven; a draft or incomplete Issue is " + "refused here, before a model turn is spent guessing at scope it does not carry \u2014 fix " + "the Issue (planning skill), not the dispatch. Returns once the activation is ADMITTED " + "and started, not when it completes: the Channel push is the PRIMARY wake, " + "specialist_status is the AUTHORITATIVE read, and polling is the degraded fallback. " + "Answer a raised question with specialist_reply. Write-capable Specialists (MEDIUM/HIGH " + "tiers) activate only when they can acquire the workspace lease; otherwise dispatch is " + "refused with a structured reason.",
+    description: "Dispatch a Specialist on the native in-process runtime. No CLI process is spawned. " + "Provide EITHER issue_ref (a READY Substrate Issue locator \u2014 XTRM-227, XTRM-184.2.3, " + "iss_..., a historical locator, or an imported Beads alias; bead_id is a permanent " + "compatibility alias for the same value) OR contract (an inline 7-section contract plus " + "a SCRUTINY level). Never both. An inline contract is accepted through the SAME pipeline " + "as an existing Issue: structural validation, Substrate Issue creation, readiness " + "attestation, claim, ExecutionBinding, activation. The Issue contract IS the prompt and " + "MUST be complete \u2014 PROBLEM, SUCCESS, SCOPE, NON_GOALS, CONSTRAINTS, VALIDATION, OUTPUT " + "plus a SCRUTINY level, eight required parts, not seven; a draft or incomplete Issue is " + "refused here, before a model turn is spent guessing at scope it does not carry \u2014 fix " + "the Issue (planning skill), not the dispatch. Returns once the activation is ADMITTED " + "and started, not when it completes: the Channel push is the PRIMARY wake, " + "specialist_status is the AUTHORITATIVE read, and polling is the degraded fallback. " + "Answer a raised question with specialist_reply. Write-capable Specialists (MEDIUM/HIGH " + "tiers) activate only when they can acquire the workspace lease (as does a read-tier " + "specialist with `lease_waiver: true`, on its isolated worktree); otherwise dispatch is " + "refused with a structured reason.",
     inputSchema: specialistDispatchSchema,
     async execute(input) {
       const build = () => describeBuildIdentity(LOADED_BUILD_ID, readBuildId(DIST_LIB_PATH));

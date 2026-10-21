@@ -47,7 +47,7 @@ if (runtimePath) {
     const workspace = leaseScopeFor(cwd);
     const status = inspect(workspace);
     if (status.state === 'held' && status.lease) {
-      const specialist = status.lease.specialist ?? 'a write-tier specialist';
+      const specialist = status.lease.specialist ?? 'a specialist';
       const message =
         `native-specialists: ${specialist} (${status.lease.activationId}) holds the workspace ` +
         `lease on ${workspace.worktreePath}. Your edit still applies, but it can interleave with ` +

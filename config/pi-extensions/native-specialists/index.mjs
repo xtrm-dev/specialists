@@ -1652,7 +1652,8 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       'for continuation, and specialist_reply for questions. A draft or incomplete ' +
       'contract is refused before a model turn is spent guessing at scope — repair the ' +
       'Issue through planning, not dispatch prose. Write-capable Specialists (MEDIUM/HIGH ' +
-      'tiers) activate only when they can acquire the workspace lease. Settlement/result ' +
+      'tiers) activate only when they can acquire the workspace lease, as does a read-tier ' +
+      'specialist with `lease_waiver: true` (on its isolated worktree). Settlement/result ' +
       'is evidence and does not perform Issue Closure. Each dispatch creates a persistent ' +
       'activation YOU own: stop it with specialist_stop_activation when you are done with it.',
     promptSnippet: 'Dispatch an XTRM Specialist (specialist_dispatch: specialist, issue_ref)',
@@ -2522,8 +2523,9 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       'Pass `name` for one specialist\'s full record including its description, or ' +
       'detail:"full" for every field of every specialist (large — prefer `name`). ' +
       'Write-capable tiers (MEDIUM/HIGH) still need the workspace lease at dispatch ' +
-      'time. This extension is the dispatch surface: do not shell out to the specialists ' +
-      'CLI to run a Specialist.',
+      'time; a read-tier specialist with `lease_waiver: true` is provisioned an isolated ' +
+      'worktree and holds its lease instead of running in place. This extension is the dispatch surface: do not shell out to the specialists ' +
+      'CLI to run a Specialist.',,
     promptSnippet: 'List configured Specialists (specialist_list; name= for detail)',
     renderResult: humanResultOf(),
     outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_list,
