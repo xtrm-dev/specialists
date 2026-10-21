@@ -207,7 +207,7 @@ let the schema stay authoritative if the two ever disagree.
     "prompt": {
       "system": "You watch one window. Report the first abnormal sample; never mutate.",
       "system_prompt_mode": "append",
-      "task_template": "Watch {{bead_id}}: {{prompt}}",
+      "task_template": "Watch $bead_id: $prompt",
       "output_schema": { "type": "object" },
       "skill_inherit": "deploy-monitoring"
     },
@@ -254,7 +254,9 @@ Which fields actually change behavior:
 - `requires_worktree` — a write tier provisions its own per-Issue worktree; leave `true`.
 - `lease_waiver` — the read-tier escape valve for a role that must run its own commands.
 - `extensions` — the only way an extension-provided tool reaches the session.
-- `prompt.task_template` — required; `{{bead_id}}` and `{{prompt}}` are the usual slots.
+- `prompt.task_template` — required. Placeholders are dollar-sign tokens (`$issue_ref`
+  where supported, `$bead_id`, `$prompt`, `$cwd`); a mustache form like `{{bead_id}}` is
+  not substituted and reaches the model literally.
 - `skills.paths` — pack names or paths; a role that reads service knowledge must name the
   pack or it will not have it.
 - `capabilities.required_tools` / `external_commands` — the dispatch contract's tool gate.
