@@ -61,6 +61,7 @@ export declare function createSpecialistStatusTool(loader: SpecialistLoader, cir
             bead_id: string;
             state: string;
             access: "read" | "write";
+            lease_waiver?: true;
             resolved_model: string;
             thinking_level?: string;
             elapsed_s: number;

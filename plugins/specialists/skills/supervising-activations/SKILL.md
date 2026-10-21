@@ -93,7 +93,8 @@ Live projection of every activation. COMPACT by default — per row: `activation
 `specialist`, `bead_id` (the issue ref), `state`, `access`, `resolved_model`,
 `thinking_level` (omitted when unset — never fabricate it), `elapsed_s`, `turn_count`,
 `token_usage`, `purpose` (a one-line SCOPE-then-SUCCESS excerpt captured once at dispatch,
-omitted when absent), and `result_status` on settled rows only. Pass `full: true` for the
+omitted when absent), `lease_waiver` (present only on a running activation that holds its
+isolated worktree lease under a waiver), and `result_status` on settled rows only. Pass `full: true` for the
 verbose shape (full rows, whole validated results, health sections). Asks keep their `body`
 in both modes — it is what you answer.
 
@@ -160,7 +161,9 @@ cascade: stop each activation you are done with.
 
 ### specialist_list
 The specialist registry, one compact line per specialist with a dispatchability verdict per
-row. `name` returns one full record; `detail: "full"` (or `full: true`) returns every field.
+row and a `[lease:waived]` marker (plus `lease_waiver: true` in the record) only where the
+specialist is provisioned an isolated per-Issue worktree and holds its lease despite a read
+tier. `name` returns one full record; `detail: "full"` (or `full: true`) returns every field.
 Read this before relying on a remembered role name.
 
 ### specialist_lease_reconcile

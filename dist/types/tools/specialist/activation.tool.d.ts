@@ -25,6 +25,9 @@ export interface ActivationView {
     execution_binding_id: string;
     state: string;
     access: 'read' | 'write';
+    /** Present only when the activation runs under a lease waiver: a read-tier specialist
+     *  holding a lease on its isolated per-Issue worktree. Absent otherwise. */
+    lease_waiver?: true;
     worktree_path: string;
     branch?: string;
     pi_session_id?: string;
@@ -89,6 +92,8 @@ export interface ActivationCompactView {
     bead_id: string;
     state: string;
     access: 'read' | 'write';
+    /** Present only when the activation runs under a lease waiver. Absent otherwise. */
+    lease_waiver?: true;
     resolved_model: string;
     thinking_level?: string;
     elapsed_s: number;
@@ -287,6 +292,9 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         execution_binding_id: string;
         state: string;
         access: "read" | "write";
+        /** Present only when the activation runs under a lease waiver: a read-tier specialist
+         *  holding a lease on its isolated per-Issue worktree. Absent otherwise. */
+        lease_waiver?: true;
         worktree_path: string;
         branch?: string;
         pi_session_id?: string;
@@ -344,6 +352,9 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         execution_binding_id: string;
         state: string;
         access: "read" | "write";
+        /** Present only when the activation runs under a lease waiver: a read-tier specialist
+         *  holding a lease on its isolated per-Issue worktree. Absent otherwise. */
+        lease_waiver?: true;
         worktree_path: string;
         branch?: string;
         pi_session_id?: string;
@@ -394,6 +405,8 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         bead_id: string;
         state: string;
         access: "read" | "write";
+        /** Present only when the activation runs under a lease waiver. Absent otherwise. */
+        lease_waiver?: true;
         resolved_model: string;
         thinking_level?: string;
         elapsed_s: number;
@@ -418,6 +431,8 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         bead_id: string;
         state: string;
         access: "read" | "write";
+        /** Present only when the activation runs under a lease waiver. Absent otherwise. */
+        lease_waiver?: true;
         resolved_model: string;
         thinking_level?: string;
         elapsed_s: number;
@@ -521,6 +536,9 @@ export declare function createSpecialistSteerTool(getHost: () => NativeActivatio
         execution_binding_id: string;
         state: string;
         access: "read" | "write";
+        /** Present only when the activation runs under a lease waiver: a read-tier specialist
+         *  holding a lease on its isolated per-Issue worktree. Absent otherwise. */
+        lease_waiver?: true;
         worktree_path: string;
         branch?: string;
         pi_session_id?: string;
@@ -561,6 +579,8 @@ export declare function createSpecialistSteerTool(getHost: () => NativeActivatio
         bead_id: string;
         state: string;
         access: "read" | "write";
+        /** Present only when the activation runs under a lease waiver. Absent otherwise. */
+        lease_waiver?: true;
         resolved_model: string;
         thinking_level?: string;
         elapsed_s: number;
@@ -735,6 +755,9 @@ export declare function createSpecialistRetryTool(getHost: () => NativeActivatio
         execution_binding_id: string;
         state: string;
         access: "read" | "write";
+        /** Present only when the activation runs under a lease waiver: a read-tier specialist
+         *  holding a lease on its isolated per-Issue worktree. Absent otherwise. */
+        lease_waiver?: true;
         worktree_path: string;
         branch?: string;
         pi_session_id?: string;
@@ -775,6 +798,8 @@ export declare function createSpecialistRetryTool(getHost: () => NativeActivatio
         bead_id: string;
         state: string;
         access: "read" | "write";
+        /** Present only when the activation runs under a lease waiver. Absent otherwise. */
+        lease_waiver?: true;
         resolved_model: string;
         thinking_level?: string;
         elapsed_s: number;
