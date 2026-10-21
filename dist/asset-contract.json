@@ -32,7 +32,7 @@
     },
     {
       "path": "config/skills/using-specialists/references/registry-and-locations.md",
-      "sha256": "37ff4d9e3181b32611686a1fed680b8984153948f46715958f06882015bd77aa"
+      "sha256": "0f78245be165107514ad8c5c274ad7048da41826454ca23593eceff384b9571e"
     },
     {
       "path": "config/skills/using-specialists/references/script-class.md",
@@ -40,7 +40,7 @@
     },
     {
       "path": "config/skills/using-specialists/references/specialist-definitions.md",
-      "sha256": "c1f4b2da3c16f7040bf53dcf7f60c4314756c41e5f590a84142a6aaabaf45143"
+      "sha256": "3f29d809059c4f6d09f4fa9c1dd618c44124efa15f7caa769f9d57bd3d9d5f9e"
     },
     {
       "path": "config/skills/using-specialists/scripts/specialist-definitions/audit-spec-uniformity.mjs",

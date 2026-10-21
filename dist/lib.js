@@ -19652,6 +19652,7 @@ function isAuthFailureMessage(message) {
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename as basename3, join as join12 } from "node:path";
 import { existsSync as existsSync15 } from "node:fs";
+import { homedir as homedir6 } from "node:os";
 
 // node_modules/yaml/dist/index.js
 var composer = require_composer();
@@ -20412,17 +20413,35 @@ class SpecialistExtensionSourceCollisionError extends Error {
     this.name = "SpecialistExtensionSourceCollisionError";
   }
 }
+function resolveHomeDir() {
+  try {
+    const home = process.env.HOME?.trim() || homedir6();
+    return home ? home : null;
+  } catch {
+    return null;
+  }
+}
+
 class SpecialistLoader {
   cache = new Map;
   blockedFieldWarnings = new Map;
   projectDir;
+  homeDir;
   constructor(options = {}) {
     this.projectDir = options.projectDir ?? process.cwd();
+    this.homeDir = options.homeDir ?? resolveHomeDir();
+  }
+  getHomeUserDir() {
+    if (!this.homeDir)
+      return null;
+    return join12(this.homeDir, ".specialists", "user");
   }
   getScanDirs() {
+    const homeUserDir = this.getHomeUserDir();
     const dirs = [
       { path: join12(this.projectDir, ".specialists", "user"), scope: "user", source: "user" },
       { path: join12(this.projectDir, ".specialists", "user", "specialists"), scope: "user", source: "legacy" },
+      ...homeUserDir ? [{ path: homeUserDir, scope: "home", source: "home" }] : [],
       { path: join12(this.projectDir, "config", "specialists"), scope: "package", source: "package-fallback" },
       { path: resolveCanonicalAssetDir("specialists") ?? "", scope: "package", source: "package-live" }
     ];
@@ -20574,6 +20593,12 @@ class SpecialistLoader {
     const hits = this.findLayerHits(name);
     if (hits.length === 0)
       return null;
+    const homeHit = hits.find((h) => h.dir.scope === "home");
+    const repoHit = hits.find((h) => h.dir.scope === "user");
+    if (homeHit && repoHit) {
+      process.stderr.write(`[specialists] warning: '${name}' resolved from repo '${repoHit.resolved.filePath}' shadows home '${homeHit.resolved.filePath}'
+`);
+    }
     const baseHit = hits[0];
     const baseContent = await readFile(baseHit.resolved.filePath, "utf-8");
     const base = await parseSpecialist(this.toJson(baseContent, baseHit.resolved.deprecatedYaml));
@@ -20641,7 +20666,8 @@ class SpecialistLoader {
     const seen = new Set;
     for (const dir of this.getScanDirs()) {
       const files = await readdir(dir.path).catch(() => []);
-      for (const file of files.filter((f) => f.endsWith(".specialist.json") || f.endsWith(".specialist.yaml"))) {
+      const specFiles = files.filter((f) => f.endsWith(".specialist.json") || f.endsWith(".specialist.yaml")).sort();
+      for (const file of specFiles) {
         const specialistName = basename3(file).replace(/\.specialist\.(json|yaml)$/, "");
         if (seen.has(specialistName))
           continue;
@@ -20685,6 +20711,7 @@ class SpecialistLoader {
         }
       }
     }
+    results.sort((a, b) => a.name.localeCompare(b.name));
     return results;
   }
   async get(name) {
@@ -20855,13 +20882,13 @@ import { existsSync as existsSync21 } from "node:fs";
 // src/activation/workitem-store.ts
 import { existsSync as existsSync16 } from "node:fs";
 import { createRequire as createRequire3 } from "node:module";
-import { homedir as homedir7 } from "node:os";
+import { homedir as homedir8 } from "node:os";
 import { dirname as dirname10, join as join14 } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // src/activation/authority-store.ts
 import { createRequire as createRequire2 } from "node:module";
-import { homedir as homedir6 } from "node:os";
+import { homedir as homedir7 } from "node:os";
 import { dirname as dirname9, join as join13 } from "node:path";
 var require2 = createRequire2(import.meta.url);
 function resolveAuthorityDbPath(env = process.env) {
@@ -20871,7 +20898,7 @@ function resolveAuthorityDbPath(env = process.env) {
   const legacy = (env.XTRM_STATE_DB ?? "").trim();
   if (legacy)
     return legacy;
-  return join13(homedir6(), ".xtrm", "state.db");
+  return join13(homedir7(), ".xtrm", "state.db");
 }
 var NULL_AUTHORITY_WRITER = { record: () => {}, remove: () => {} };
 
@@ -20894,7 +20921,7 @@ function resolveSubstrateFromGlobalPrefix(libDirs) {
   const candidates = uniqueExistingLibDirs(libDirs ?? [
     ...resolveGlobalNodeModulesDirs().map((modulesDir) => dirname10(modulesDir)),
     join14(runtimePrefix, "lib"),
-    join14(homedir7(), ".bun", "install", "global")
+    join14(homedir8(), ".bun", "install", "global")
   ]);
   for (const libDir of candidates) {
     try {
@@ -21701,11 +21728,11 @@ import { connect, createServer } from "node:net";
 
 // src/activation/transport/roster.ts
 import { existsSync as existsSync18, readdirSync as readdirSync4, readFileSync as readFileSync10 } from "node:fs";
-import { homedir as homedir8 } from "node:os";
+import { homedir as homedir9 } from "node:os";
 import { join as join16 } from "node:path";
 var SUPPORTED_PEER_PROTOCOL = 1;
 function defaultRosterDir() {
-  return join16(homedir8(), ".claude", "sessions");
+  return join16(homedir9(), ".claude", "sessions");
 }
 function procProbe() {
   let bootSeconds;

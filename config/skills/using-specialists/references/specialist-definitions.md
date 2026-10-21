@@ -25,10 +25,13 @@ configuration:
   `~/.specialists/user/` is not visible to it, so verify those structurally (the bundled
   validator) and by dispatching them.
 
-Where definitions live, in override order: package `config/specialists/`, then
-`<repo>/.specialists/user/`, then `~/.specialists/user/`. Override layers may set only the
-fields listed in `OVERRIDE_ALLOWED_*` in `schema.ts`; anything else stays
-package-canonical, so a sparse override cannot quietly re-grant a capability.
+Where definitions live, lowest precedence to highest: package `config/specialists/` ->
+`~/.config/specialists/user.json` (sparse overrides) -> `~/.specialists/user/` (full spec,
+discovered in every repository) -> `<repo>/.specialists/user/` (full spec). A repo
+definition of the same name wins over the home one, and the collision warns naming both
+paths. Override layers may set only the fields listed in `OVERRIDE_ALLOWED_*` in
+`schema.ts`; anything else stays package-canonical, so a sparse override cannot quietly
+re-grant a capability.
 
 Authoring flow:
 

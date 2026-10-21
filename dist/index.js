@@ -12196,6 +12196,7 @@ var init_project_pack_skill_resolver = __esm(() => {
 import { readdir, readFile, stat } from "fs/promises";
 import { basename, join as join5 } from "path";
 import { existsSync as existsSync6 } from "fs";
+import { homedir as homedir3 } from "os";
 async function checkStaleness(summary) {
   if (!summary.filestoWatch?.length || !summary.updated)
     return "OK";
@@ -12214,18 +12215,35 @@ async function checkStaleness(summary) {
   }
   return "OK";
 }
+function resolveHomeDir() {
+  try {
+    const home = process.env.HOME?.trim() || homedir3();
+    return home ? home : null;
+  } catch {
+    return null;
+  }
+}
 
 class SpecialistLoader {
   cache = new Map;
   blockedFieldWarnings = new Map;
   projectDir;
+  homeDir;
   constructor(options = {}) {
     this.projectDir = options.projectDir ?? process.cwd();
+    this.homeDir = options.homeDir ?? resolveHomeDir();
+  }
+  getHomeUserDir() {
+    if (!this.homeDir)
+      return null;
+    return join5(this.homeDir, ".specialists", "user");
   }
   getScanDirs() {
+    const homeUserDir = this.getHomeUserDir();
     const dirs = [
       { path: join5(this.projectDir, ".specialists", "user"), scope: "user", source: "user" },
       { path: join5(this.projectDir, ".specialists", "user", "specialists"), scope: "user", source: "legacy" },
+      ...homeUserDir ? [{ path: homeUserDir, scope: "home", source: "home" }] : [],
       { path: join5(this.projectDir, "config", "specialists"), scope: "package", source: "package-fallback" },
       { path: resolveCanonicalAssetDir("specialists") ?? "", scope: "package", source: "package-live" }
     ];
@@ -12377,6 +12395,12 @@ class SpecialistLoader {
     const hits = this.findLayerHits(name);
     if (hits.length === 0)
       return null;
+    const homeHit = hits.find((h) => h.dir.scope === "home");
+    const repoHit = hits.find((h) => h.dir.scope === "user");
+    if (homeHit && repoHit) {
+      process.stderr.write(`[specialists] warning: '${name}' resolved from repo '${repoHit.resolved.filePath}' shadows home '${homeHit.resolved.filePath}'
+`);
+    }
     const baseHit = hits[0];
     const baseContent = await readFile(baseHit.resolved.filePath, "utf-8");
     const base = await parseSpecialist(this.toJson(baseContent, baseHit.resolved.deprecatedYaml));
@@ -12444,7 +12468,8 @@ class SpecialistLoader {
     const seen = new Set;
     for (const dir of this.getScanDirs()) {
       const files = await readdir(dir.path).catch(() => []);
-      for (const file of files.filter((f) => f.endsWith(".specialist.json") || f.endsWith(".specialist.yaml"))) {
+      const specFiles = files.filter((f) => f.endsWith(".specialist.json") || f.endsWith(".specialist.yaml")).sort();
+      for (const file of specFiles) {
         const specialistName = basename(file).replace(/\.specialist\.(json|yaml)$/, "");
         if (seen.has(specialistName))
           continue;
@@ -12488,6 +12513,7 @@ class SpecialistLoader {
         }
       }
     }
+    results.sort((a, b) => a.name.localeCompare(b.name));
     return results;
   }
   async get(name) {
@@ -20622,8 +20648,8 @@ function parseArgs2(argv) {
     }
     if (token === "--scope") {
       const value = argv[++i];
-      if (value !== "default" && value !== "user") {
-        throw new ArgParseError(`--scope must be "default" or "user", got: "${value ?? ""}"`);
+      if (value !== "default" && value !== "user" && value !== "home" && value !== "package") {
+        throw new ArgParseError(`--scope must be "default", "user", "home" or "package", got: "${value ?? ""}"`);
       }
       result.scope = value;
       continue;
@@ -20693,7 +20719,7 @@ async function run4() {
 ${bold2(`Specialists (${specialists.length})`)}  ${dim2(`specialists v${localVersion}`)}
 `);
   for (const s of specialists) {
-    const scopeTag = s.scope === "default" ? green("[default]") : s.scope === "package" ? blue("[package]") : yellow2("[user]");
+    const scopeTag = s.scope === "default" ? green("[default]") : s.scope === "package" ? blue("[package]") : s.scope === "home" ? cyan("[home]") : yellow2("[user]");
     const permission = permissionBadge(s.permission_required);
     const keepAliveTag = s.interactive ? `  ${yellow2("[keep-alive]")}` : "";
     const thinkingTag = s.thinking_level && s.thinking_level !== "off" ? `  ${dim2(`thinking:${s.thinking_level}`)}` : "";
@@ -21800,7 +21826,7 @@ function printGenericSection(title, color, value) {
   console.log(formatValue(value));
 }
 function printHeader(summary, model = summary.model) {
-  const scope = summary.scope === "default" ? green2("[default]") : summary.scope === "package" ? blue2("[package]") : yellow3("[user]");
+  const scope = summary.scope === "default" ? green2("[default]") : summary.scope === "package" ? blue2("[package]") : summary.scope === "home" ? cyan2("[home]") : yellow3("[user]");
   const source = dim3(summary.source);
   console.log();
   console.log(`${bold3(cyan2(summary.name))} ${scope} ${permissionBadge2(summary.permission_required)} ${source}`);
@@ -21819,7 +21845,7 @@ function printCatalog(summaries) {
   console.log(bold3(`Specialists catalog (${rows.length})`));
   console.log();
   for (const summary of rows) {
-    const scope = summary.scope === "default" ? green2("[default]") : summary.scope === "package" ? blue2("[package]") : yellow3("[user]");
+    const scope = summary.scope === "default" ? green2("[default]") : summary.scope === "package" ? blue2("[package]") : summary.scope === "home" ? cyan2("[home]") : yellow3("[user]");
     const keepAlive = summary.interactive ? yellow3("[keep-alive]") : dim3("[single-turn]");
     console.log(`${cyan2(summary.name)} ${scope} ${permissionBadge2(summary.permission_required)} ${keepAlive} ${dim3(summary.source)}`);
     console.log(`${dim3("  model:")} ${summary.model}`);
@@ -22095,7 +22121,7 @@ var init_models = __esm(() => {
 
 // src/pi/native-specialists-registration.ts
 import { existsSync as existsSync13, mkdirSync as mkdirSync7, readFileSync as readFileSync12, writeFileSync as writeFileSync6 } from "fs";
-import { homedir as homedir3 } from "os";
+import { homedir as homedir4 } from "os";
 import { dirname as dirname7, join as join14, resolve as resolve5 } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
 function getNativeSpecialistsExtensionPath() {
@@ -22107,7 +22133,7 @@ function getNativeSpecialistsExtensionPath() {
   return null;
 }
 function getPiSettingsPath(env = process.env) {
-  const agentDir = env.PI_CODING_AGENT_DIR || join14(homedir3(), ".pi", "agent");
+  const agentDir = env.PI_CODING_AGENT_DIR || join14(homedir4(), ".pi", "agent");
   return join14(agentDir, "settings.json");
 }
 function sourceOf(entry) {
@@ -24741,7 +24767,7 @@ var init_session_metrics_contract = __esm(() => {
 import { createHash as createHash3 } from "crypto";
 import { spawn as spawn2, execFileSync as execFileSync2 } from "child_process";
 import { existsSync as existsSync20, lstatSync as lstatSync3, mkdirSync as mkdirSync10, readdirSync as readdirSync7, readFileSync as readFileSync15, realpathSync as realpathSync2, statSync as statSync4, writeFileSync as writeFileSync9 } from "fs";
-import { homedir as homedir4, tmpdir } from "os";
+import { homedir as homedir5, tmpdir } from "os";
 import { isAbsolute as isAbsolute2, resolve as resolve13, sep as sep3, join as join21, dirname as dirname14 } from "path";
 function toRuntimeToolCatalogs(catalogIndex) {
   return catalogIndex.catalogs.map((catalog) => ({
@@ -25038,7 +25064,7 @@ function resolveExecutionExtensionSelection(extensions) {
 }
 function resolveCuratedExtensionPaths(options) {
   const all = [];
-  const piExtDir = join21(homedir4(), ".pi", "agent", "extensions");
+  const piExtDir = join21(homedir5(), ".pi", "agent", "extensions");
   const permLevel = (options.permissionLevel ?? "").toUpperCase();
   if (permLevel !== "READ_ONLY") {
     const qgPath = join21(piExtDir, "quality-gates");
@@ -25051,7 +25077,7 @@ function resolveCuratedExtensionPaths(options) {
   const cavemanPath = join21(piExtDir, "caveman");
   if (existsSync20(cavemanPath))
     all.push(cavemanPath);
-  const nvidiaNimPath = join21(homedir4(), ".pi", "agent", "git", "github.com", "xRyul", "pi-nvidia-nim");
+  const nvidiaNimPath = join21(homedir5(), ".pi", "agent", "git", "github.com", "xRyul", "pi-nvidia-nim");
   if (existsSync20(nvidiaNimPath))
     all.push(nvidiaNimPath);
   const gitnexusContract = options.resolvedToolContract?.extensions.gitnexus;
@@ -25098,7 +25124,7 @@ function resolvePiVersion() {
 }
 function resolveGlobalNodeModulesDirs(deps = {}) {
   const env = deps.env ?? process.env;
-  const home = deps.home ?? homedir4();
+  const home = deps.home ?? homedir5();
   const execPath = deps.execPath ?? process.execPath;
   const exists = deps.exists ?? existsSync20;
   const readDir = deps.readDir ?? ((path) => readdirSync7(path));
@@ -26593,7 +26619,7 @@ import { createHash as createHash4 } from "crypto";
 import { execSync as execSync2, spawnSync as spawnSync12 } from "child_process";
 import { existsSync as existsSync22, readFileSync as readFileSync16 } from "fs";
 import { basename as basename5, resolve as resolve15 } from "path";
-import { homedir as homedir5 } from "os";
+import { homedir as homedir6 } from "os";
 function sanitizeScriptName(name) {
   const cleaned = name.replace(/[\u0000-\u001f\u007f-\u009f"\\<>]/g, "").slice(0, 128);
   return /^[A-Za-z0-9:][A-Za-z0-9._:-]{0,127}$/.test(cleaned) ? cleaned : "unknown";
@@ -26760,7 +26786,7 @@ ${blocks}
 </pre_flight_context>`;
 }
 function resolvePath2(p) {
-  return p.startsWith("~/") ? resolve15(homedir5(), p.slice(2)) : resolve15(p);
+  return p.startsWith("~/") ? resolve15(homedir6(), p.slice(2)) : resolve15(p);
 }
 function commandExists(cmd) {
   const result = spawnSync12("which", [cmd], { stdio: "ignore" });
@@ -27865,7 +27891,7 @@ import {
   readFileSync as readFileSync17,
   realpathSync as realpathSync3
 } from "fs";
-import { homedir as homedir6 } from "os";
+import { homedir as homedir7 } from "os";
 import { isAbsolute as isAbsolute3, join as join22, relative as relative3, resolve as resolve16 } from "path";
 function normalizePath(path, baseDir) {
   if (isAbsolute3(path))
@@ -28668,7 +28694,7 @@ function appendExtensionArgs(args, spec, resolvedToolContract, extensionSources 
   const readLineNumbersPath = getReadLineNumbersExtensionPath();
   if (readLineNumbersPath)
     args.push("-e", readLineNumbersPath);
-  const piExtDir = join22(homedir6(), ".pi", "agent", "extensions");
+  const piExtDir = join22(homedir7(), ".pi", "agent", "extensions");
   if (permissionLevel !== "READ_ONLY") {
     const qualityGatesPath = join22(piExtDir, "quality-gates");
     if (existsSync23(qualityGatesPath))
@@ -39291,10 +39317,10 @@ import {
   statSync as statSync6,
   writeFileSync as writeFileSync15
 } from "fs";
-import { homedir as homedir8 } from "os";
+import { homedir as homedir9 } from "os";
 import { dirname as dirname18, join as join30 } from "path";
 function getConsoleConfigPath() {
-  const home = process.env.HOME?.trim() || homedir8();
+  const home = process.env.HOME?.trim() || homedir9();
   const xdgConfigHome = process.env.XDG_CONFIG_HOME?.trim();
   if (xdgConfigHome) {
     const xdgPath = join30(xdgConfigHome, SPECIALISTS_SUBDIR2, CONFIG_FILENAME2);
@@ -39382,10 +39408,10 @@ var init_repo_config = __esm(() => {
 
 // src/cli/console/repo-discovery.ts
 import { existsSync as existsSync30, readdirSync as readdirSync10, statSync as statSync7 } from "fs";
-import { homedir as homedir9 } from "os";
+import { homedir as homedir10 } from "os";
 import { join as join31 } from "path";
 function expandHomePath(p) {
-  const home = process.env.HOME?.trim() || homedir9();
+  const home = process.env.HOME?.trim() || homedir10();
   if (p === "~")
     return home;
   if (p.startsWith("~/"))
@@ -39479,13 +39505,13 @@ var init_repo_discovery = __esm(() => {
 });
 
 // src/cli/console/config-source.ts
-import { homedir as homedir10 } from "os";
+import { homedir as homedir11 } from "os";
 import { join as join32 } from "path";
 import { existsSync as existsSync31, readFileSync as readFileSync24, statSync as statSync8 } from "fs";
 function readGlobalConfigSnapshot(loader) {
   const location = getGlobalUserConfigPath();
   const exists = existsSync31(location.path);
-  const home = homedir10();
+  const home = homedir11();
   const displayPath = home && location.path.startsWith(home) ? location.path.replace(home, "~") : location.path;
   if (!exists) {
     return {
@@ -50295,7 +50321,7 @@ function formatActivationAge(nowMs, atMs) {
 // src/activation/authority-store.ts
 import { mkdirSync as mkdirSync17 } from "fs";
 import { createRequire as createRequire5 } from "module";
-import { homedir as homedir11 } from "os";
+import { homedir as homedir12 } from "os";
 import { dirname as dirname22, join as join41 } from "path";
 function resolveAuthorityDbPath(env = process.env) {
   const substrate = (env.SUBSTRATE_DB ?? "").trim();
@@ -50304,7 +50330,7 @@ function resolveAuthorityDbPath(env = process.env) {
   const legacy = (env.XTRM_STATE_DB ?? "").trim();
   if (legacy)
     return legacy;
-  return join41(homedir11(), ".xtrm", "state.db");
+  return join41(homedir12(), ".xtrm", "state.db");
 }
 function openAuthorityDb(dbPath) {
   try {
@@ -57332,7 +57358,7 @@ var init_channel_doctor = () => {};
 // src/activation/workitem-store.ts
 import { existsSync as existsSync50 } from "fs";
 import { createRequire as createRequire6 } from "module";
-import { homedir as homedir12 } from "os";
+import { homedir as homedir13 } from "os";
 import { dirname as dirname24, join as join51 } from "path";
 import { pathToFileURL } from "url";
 function resolveSubstrateDir(explicit, resolveInstalled) {
@@ -57351,7 +57377,7 @@ function resolveSubstrateFromGlobalPrefix(libDirs) {
   const candidates = uniqueExistingLibDirs(libDirs ?? [
     ...resolveGlobalNodeModulesDirs().map((modulesDir) => dirname24(modulesDir)),
     join51(runtimePrefix, "lib"),
-    join51(homedir12(), ".bun", "install", "global")
+    join51(homedir13(), ".bun", "install", "global")
   ]);
   for (const libDir of candidates) {
     try {
@@ -57773,7 +57799,7 @@ var init_workitem_store = __esm(() => {
 import { createHash as createHash10 } from "crypto";
 import { spawnSync as spawnSync27 } from "child_process";
 import { existsSync as existsSync51, mkdirSync as mkdirSync20, readdirSync as readdirSync22, readFileSync as readFileSync41, writeFileSync as writeFileSync22 } from "fs";
-import { homedir as homedir13 } from "os";
+import { homedir as homedir14 } from "os";
 import { join as join52, relative as relative5, resolve as resolve23 } from "path";
 import { fileURLToPath as fileURLToPath10 } from "url";
 function ok3(msg) {
@@ -57943,7 +57969,7 @@ function checkChannels() {
   section3("Claude Code channel wake  (8-gate chain, spec AM.3)");
   const report = runChannelDoctorChecks({
     managedSettingsPath: resolveManagedSettingsPath(),
-    installedPluginsPath: join52(homedir13(), ".claude", "plugins", "installed_plugins.json"),
+    installedPluginsPath: join52(homedir14(), ".claude", "plugins", "installed_plugins.json"),
     serverSourcePath: resolveServerSourcePath(),
     expectedPluginName: EXPECTED_PLUGIN_NAME,
     expectedMarketplaceName: EXPECTED_MARKETPLACE_NAME,
@@ -58075,7 +58101,7 @@ function resolvePackageAssetDir(relativePath) {
   return resolveCanonicalAssetDir(relativePath) ?? (existsSync51(join52(CWD, "config", relativePath)) ? join52(CWD, "config", relativePath) : null);
 }
 function checkSkillDrift() {
-  section3(`Skills \u2014 global default pool  (~/${relative5(homedir13(), GLOBAL_DEFAULT_SKILLS_DIR)})`);
+  section3(`Skills \u2014 global default pool  (~/${relative5(homedir14(), GLOBAL_DEFAULT_SKILLS_DIR)})`);
   const canonicalSkillsDir = resolvePackageAssetDir("skills");
   if (!canonicalSkillsDir) {
     fail9("package canonical skills source missing");
@@ -58861,14 +58887,14 @@ var init_doctor = __esm(() => {
   CWD = process.cwd();
   SPECIALISTS_DIR = join52(CWD, ".specialists");
   USER_SPECIALISTS_DIR = join52(SPECIALISTS_DIR, "user");
-  XTRM_HOME = join52(homedir13(), ".xtrm");
+  XTRM_HOME = join52(homedir14(), ".xtrm");
   GLOBAL_DEFAULT_SKILLS_DIR = join52(XTRM_HOME, "skills", "default");
 });
 
 // src/specialist/benchmarks.ts
 import { randomUUID as randomUUID4 } from "crypto";
 import { closeSync as closeSync5, existsSync as existsSync52, fsyncSync as fsyncSync2, mkdirSync as mkdirSync21, openSync as openSync6, readFileSync as readFileSync42, renameSync as renameSync7, writeFileSync as writeFileSync23 } from "fs";
-import { homedir as homedir14 } from "os";
+import { homedir as homedir15 } from "os";
 import { dirname as dirname25, join as join53 } from "path";
 async function loadBenchmarkSnapshot(options = {}) {
   const warnings = [];
@@ -58985,7 +59011,7 @@ function toSnapshot(cache) {
 function isOffline(options) {
   return options.offline === true || process.env.SPECIALISTS_OFFLINE === "1";
 }
-function getBenchmarkCachePath(source, cacheDir = join53(homedir14(), ".cache", "specialists", "benchmarks")) {
+function getBenchmarkCachePath(source, cacheDir = join53(homedir15(), ".cache", "specialists", "benchmarks")) {
   return join53(cacheDir, `${source}.json`);
 }
 function writeCache2(path, snapshot) {
@@ -59024,7 +59050,7 @@ var init_benchmarks = __esm(() => {
 // src/specialist/model-probes.ts
 import { createHash as createHash11, randomUUID as randomUUID5 } from "crypto";
 import { mkdirSync as mkdirSync22, readdirSync as readdirSync23, readFileSync as readFileSync43, writeFileSync as writeFileSync24 } from "fs";
-import { homedir as homedir15 } from "os";
+import { homedir as homedir16 } from "os";
 import { dirname as dirname26, join as join54, resolve as resolve24 } from "path";
 async function runAgenticFollowthroughProbe(model, specName, opts = {}) {
   const probeDir = getProbeRunDir(model, specName, opts.cacheDir);
@@ -59128,10 +59154,10 @@ function withTimeout(promise, timeoutMs) {
   });
   return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeout));
 }
-function getProbeRunDir(model, specName, cacheDir = join54(homedir15(), ".cache", "specialists", "probes")) {
+function getProbeRunDir(model, specName, cacheDir = join54(homedir16(), ".cache", "specialists", "probes")) {
   return resolve24(getProbeCanonicalPath(model, specName, cacheDir).replace(/\.json$/u, ""), randomUUID5());
 }
-function getProbeCanonicalPath(model, specName, cacheDir = join54(homedir15(), ".cache", "specialists", "probes")) {
+function getProbeCanonicalPath(model, specName, cacheDir = join54(homedir16(), ".cache", "specialists", "probes")) {
   const probeId = createHash11("sha256").update(`${model}\x00${specName}\x00${PROBE_TEMPLATE}`).digest("hex").slice(0, 12);
   return join54(cacheDir, `${sanitizePathSegment(model)}-${sanitizePathSegment(specName)}-${probeId}.json`);
 }
@@ -59760,7 +59786,7 @@ import { once } from "events";
 import { spawnSync as spawnSync29 } from "child_process";
 import { access, readdir as readdir2, readFile as readFile4, constants as constants3 } from "fs/promises";
 import { existsSync as existsSync54 } from "fs";
-import { homedir as homedir16 } from "os";
+import { homedir as homedir17 } from "os";
 import { join as join56 } from "path";
 function createReadinessState() {
   return { shuttingDown: false, auditFailures: [], dbWriteFailuresTotal: 0 };
@@ -59804,7 +59830,7 @@ async function evaluateReadiness2(opts) {
   if (opts.state.auditFailures.length > opts.auditFailureThreshold) {
     return { ready: false, reason: "degraded:audit" };
   }
-  const piConfigPath = opts.piConfigPath ?? join56(homedir16(), ".pi", "agent", "auth.json");
+  const piConfigPath = opts.piConfigPath ?? join56(homedir17(), ".pi", "agent", "auth.json");
   try {
     await access(piConfigPath, constants3.R_OK);
   } catch {
@@ -90592,10 +90618,10 @@ var init_peer_bridge = __esm(() => {
 
 // src/activation/transport/roster.ts
 import { existsSync as existsSync57, readdirSync as readdirSync26, readFileSync as readFileSync47 } from "fs";
-import { homedir as homedir17 } from "os";
+import { homedir as homedir18 } from "os";
 import { join as join58 } from "path";
 function defaultRosterDir() {
-  return join58(homedir17(), ".claude", "sessions");
+  return join58(homedir18(), ".claude", "sessions");
 }
 function procProbe() {
   let bootSeconds;
@@ -95487,7 +95513,9 @@ async function run45() {
         "  specialists init --help     Bootstrap and project workflow setup",
         "",
         "Project model:",
-        "  Specialists are project-only. User-scope discovery is deprecated.",
+        "  Definitions resolve lowest to highest: package canonical, ~/.config/specialists/user.json,",
+        "  ~/.specialists/user/, then <repo>/.specialists/user/. A repo definition wins over a",
+        "  same-named home one and warns naming both.",
         ""
       ].join(`
 `));
