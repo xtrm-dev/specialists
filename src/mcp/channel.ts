@@ -152,12 +152,16 @@ export function formatElapsed(elapsedS: number): string {
 }
 
 /**
- * Spend as a token count. `total_tokens` is a rollup, never a summand — adding it would
- * double-count (unitAI-d99hb). Returns '' when nothing was reported, never a fabricated 0.
+ * Spend as a token count. Pi's formula is input + output + cache_creation +
+ * cache_read (session-metrics-contract.ts): reasoning_tokens is a SUBSET of
+ * output and tool_tokens is outside pi's precomputed total — both are
+ * display-only splits, never summands. `total_tokens` is a rollup, never a
+ * summand — adding it would double-count (unitAI-d99hb). Returns '' when
+ * nothing was reported, never a fabricated 0.
  */
 export function formatTokens(usage: ActivationTokenUsage | undefined): string {
   if (!usage) return '';
-  const total = (['input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens', 'reasoning_tokens', 'tool_tokens'] as const)
+  const total = (['input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens'] as const)
     .reduce((n, k) => n + (usage[k] ?? 0), 0);
   if (total <= 0) return '';
   if (total < 1000) return `${total} tokens`;

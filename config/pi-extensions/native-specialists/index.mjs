@@ -209,13 +209,14 @@ export function fleetSummaryOf({ activations, asks }) {
 export function renderFleetHeader({ activations, asks }) {
   const { running, waiting, blocked, total } = fleetSummaryOf({ activations, asks });
   const label = BOLD(SECTION_LABEL);
-  // Indent plus one separator space: `  specialists 2 running`.
+  // Indent plus one separator space: `  specialists 1 running 1 waiting`.
+  // Text only: no glyphs, no markers, no command hints — statuses joined by spaces.
   if (total === 0 && blocked === 0) return `${SECTION_INDENT}${label} idle`;
   const parts = [];
   if (running > 0) parts.push(`${running} running`);
   if (waiting > 0) parts.push(`${waiting} waiting`);
-  if (blocked > 0) parts.push(`! ${blocked} blocked`);
-  return `${SECTION_INDENT}${label} ${parts.join(' • ')}`;
+  if (blocked > 0) parts.push(`${blocked} blocked`);
+  return `${SECTION_INDENT}${label} ${parts.join(' ')}`;
 }
 
 /**
@@ -241,14 +242,15 @@ export function formatPurposeShort(purpose) {
   return flat.length <= PURPOSE_ROW_MAX ? flat : `${flat.slice(0, PURPOSE_ROW_MAX - 1)}…`;
 }
 
-// Spend counts only. Window-context % is coordinator-owned and out of scope;
-// never fabricated here (unitAI-beqby.3).
+// Spend counts only: pi's formula is input + output + cache_creation + cache_read
+// (session-metrics-contract.ts). reasoning_tokens is a SUBSET of output and
+// tool_tokens is outside pi's precomputed total — both are display-only splits,
+// never summands. total_tokens is a rollup, never a summand.
 export function formatSpendShort(tokenUsage) {
   if (!tokenUsage) return '';
   // Snapshot keys are snake_case (input_tokens, output_tokens, ...); the short
-  // camel keys below are the legacy test/fixture shape. total_tokens is a rollup,
-  // never a summand — adding it would double-count (unitAI-d99hb).
-  const total = ['input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens', 'reasoning_tokens', 'tool_tokens']
+  // camel keys below are the legacy test/fixture shape.
+  const total = ['input_tokens', 'output_tokens', 'cache_creation_tokens', 'cache_read_tokens']
     .reduce((n, k) => n + (tokenUsage[k] ?? 0), 0)
     + (tokenUsage.input ?? 0) + (tokenUsage.output ?? 0) + (tokenUsage.cache ?? 0);
   if (total <= 0) return '';
@@ -318,8 +320,10 @@ function stateMarker({ view, blocked, active, nowMs }) {
 }
 
 /**
- * The metric slot on an entry's second line: elapsed • turns • tokens for work in flight or
- * finished, and the state REASON (`waiting 19s`, `idle 42s`) when there is one to give.
+ * The metric slot on a one-line entry: elapsed, turns and tokens for work in
+ * flight or finished, and the state REASON (`asked 19s`, `idle 42s`) when there
+ * is one to give. Stats are space-separated (`16m00s 56 turns 3843k`); the `·`
+ * separator lives between the identity block and the stats, never inside them.
  *
  * A blocked or idle child's elapsed/turns/spend are not what an operator is looking for at
  * that moment — how long it has been stuck is.
@@ -336,46 +340,45 @@ function rowMetrics({ view, ask, nowMs }) {
   parts.push(formatTurnsShort(view.turn_count));
   const tokens = formatSpendShort(view.token_usage);
   if (tokens) parts.push(tokens);
-  return parts.filter(Boolean).join(' • ');
+  return parts.filter(Boolean).join(' ');
 }
 
 /**
- * One Specialist as a TWO-LINE unit, returned as an array so no caller can render half of
- * it. Forensic ids never appear in either line.
- *
- * Line 1 is identity and intent (name, tracked work, purpose); line 2 is the machine-ish
- * detail (model, thinking level, metrics). Parentheses around the model are gone: with the
- * second line to itself, the separator carries the grouping and the parens only added
- * noise.
+ * One Specialist as a ONE-LINE unit. Beads are deprecated: the tracked work is
+ * the Substrate issue ref only. Full detail (purpose, result, feed, actions)
+ * lives in the /specialists overlay — the row carries identity plus stats only:
+ * marker, name:shortid, issue ref, model, thinking level, then `·` and the
+ * space-separated stats (`16m00s 56 turns 3843k`). Forensic ids never appear.
  */
 export function renderFleetRowLines(view, asks = [], nowMs = Date.now()) {
   const ask = (asks ?? []).find((a) => a.activation_id === view.activation_id);
   const idle = idleSeconds(view, nowMs);
   const active = isActiveState(view.state) && !ask && !(idle != null && idle > IDLE_AFTER_S);
   const marker = stateMarker({ view, blocked: Boolean(ask), active, nowMs });
-  const purpose = formatPurposeShort(view.purpose);
-  const primary =
-    `    ${marker} ${BOLD(`${view.specialist}:${view.activation_id.slice(4)}`)}  ${DIM(view.bead_id ?? '—')}` +
-    (purpose ? `  ${ITALIC_DIM(purpose)}` : '');
-  const thinking = view.thinking_level ? ` ${DIM('·')} ${ACCENT_BOLD(view.thinking_level)}` : '';
-  const meta =
-    `       ${DIM(view.resolved_model ?? '?model')}${thinking}` +
-    `  ${DIM('•')} ${DIM(rowMetrics({ view, ask, nowMs }))}`;
-  return [primary, meta];
+  const work = view.issue_ref ?? view.issue_id ?? '—';
+  const thinking = view.thinking_level ? ` ${BOLD(view.thinking_level)}` : '';
+  return [
+    `    ${marker} ${BOLD(`${view.specialist}:${view.activation_id.slice(4)}`)} ${work} ${DIM(view.resolved_model ?? '?model')}${thinking} ${DIM('·')} ${DIM(rowMetrics({ view, ask, nowMs }))}`,
+  ];
 }
 
-/** Footer-section lines: header + bounded two-line entries with overflow.
- * Expanded by default; blocked rows sort first. `detail` selects one activation's
- * result or feed rendered under the rows (SPECIALISTS-4264); the cache carries
- * the last completed read, so the section never awaits. */
+/** Footer-section lines: empty separator + header + bounded one-line entries with overflow.
+ * The empty line renders ONLY when the fleet is non-idle, so an idle fleet is one line
+ * and a live fleet breathes below the statusline. Expanded by default; blocked rows
+ * sort first. `detail` selects one activation's result or feed rendered under the
+ * rows (SPECIALISTS-4264); the cache carries the last completed read, so the
+ * section never awaits. */
 export function renderSectionLines({ activations, asks }, { expanded = true, nowMs = Date.now(), detail = null, detailCache = null } = {}) {
-  const lines = [renderFleetHeader({ activations, asks })];
+  const lines = [];
+  const nonIdle = (activations ?? []).length > 0 || (asks ?? []).length > 0;
+  if (nonIdle) lines.push('');
+  lines.push(renderFleetHeader({ activations, asks }));
   if (!expanded) return lines;
   const askIds = new Set((asks ?? []).map((a) => a.activation_id));
   const ordered = [...(activations ?? [])].sort(
     (a, b) => Number(askIds.has(b.activation_id)) - Number(askIds.has(a.activation_id)),
   );
-  // Bounded by ENTRIES: each pushed entry is its whole two-line unit.
+  // Bounded by ENTRIES: each pushed entry is its whole one-line unit.
   const entries = ordered.slice(0, FLEET_MAX_ROWS);
   for (const view of entries) lines.push(...renderFleetRowLines(view, asks, nowMs));
   const overflow = ordered.length - entries.length;
@@ -2923,7 +2926,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
         const ask = resolved.fleet.asks.find((a) => a.activation_id === row.activation_id);
         report(ctx, [
           `${row.specialist} ${row.activation_id} · ${row.state ?? 'unknown'}`,
-          `  issue ${row.bead_id ?? '—'} · ${row.resolved_model ?? '?model'}${row.thinking_level ? ` · ${row.thinking_level}` : ''}`,
+          `  issue ${row.issue_ref ?? '—'} · ${row.resolved_model ?? '?model'}${row.thinking_level ? ` · ${row.thinking_level}` : ''}`,
           ...(row.purpose ? [`  purpose: ${row.purpose}`] : []),
           ...(ask ? [`  ${ask.kind ?? 'ask'} ${ask.message_id}: ${ask.body ?? ''}`] : []),
         ].join('\n'));
