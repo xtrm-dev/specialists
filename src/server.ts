@@ -159,6 +159,14 @@ export class SpecialistsServer {
       // One Substrate authority shared with sb/Pi; path from XTRM_STATE_DB or ~/.xtrm/state.db.
       authority: createFileAuthorityWriter(),
       ...(this.observability ? { forensics: createActivationForensicSink(this.observability) } : {}),
+      // A background-woken wake turn settles with no tool call framing it, so no
+      // dispatch/resume observer records its superseding result (SPECIALISTS-4322).
+      // Settle + push here under the same observation contract, so specialist_status
+      // projects the wake settlement instead of the stale uncertain one.
+      onWakeSettlement: (result) => {
+        this.eventPusher.settle(result);
+        this.eventPusher.pushCompletion(result.activationId).catch(() => { /* degraded to polling */ });
+      },
     });
     const getHost = () => this.activationHost;
 

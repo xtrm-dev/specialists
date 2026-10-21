@@ -80,7 +80,6 @@ function statusForLifecycle(name: string, current: SupervisorJobStatus): Supervi
       return 'done';
     case 'activation_failed':
     case 'activation_rejected':
-    case 'output_validation_failed':
       return 'error';
     default:
       return current;
@@ -105,7 +104,6 @@ function statusForSessionEvent(type: string, current: SupervisorJobStatus): Supe
 const ERROR_STATUS_LIFECYCLE = new Set([
   'activation_failed',
   'activation_rejected',
-  'output_validation_failed',
 ]);
 
 function identityOf(state: ActivationProjectionState): ObservabilityIdentityProjection {
@@ -215,17 +213,17 @@ export function createActivationForensicSink(
   };
 
   /**
-   * Aggregate this activation's metrics row exactly once, at its terminal event
-   * (SPECIALISTS-107).
+   * Aggregate this activation's metrics row at its terminal event (SPECIALISTS-107).
    *
    * The accumulator is a pure function of the durable event stream (`specialist_events`
    * joined to `specialist_jobs`), so re-running it on the same stream is idempotent —
    * the writer is `INSERT ... ON CONFLICT(job_id) DO UPDATE` over the full record.
-   * The once-per-activation guard below is therefore delivery control, not correctness:
-   * it keeps a retried/resumed activation from re-scanning its whole stream on every
-   * intermediate terminal leg when nothing changed. Rollback safety: the flag is set
-   * only when the call returns without throwing, so a transient write failure retries
-   * on the next terminal event instead of silently skipping the row forever.
+   * Re-aggregation therefore always runs: a resume leg, a fallback winner and a
+   * background-woken wake turn each EXTEND the stream, and the row must reflect the
+   * extension. A guard that ran once per attempt froze the first terminal leg's row
+   * (SPECIALISTS-4322: an `output_validation_failed` mid-settle signal aggregated the
+   * transient error status and the real terminal event that followed never refreshed
+   * it). Transient write failures simply retry on the next terminal event.
    *
    * Failure-isolated like every other sink write: best-effort, never throws, so a
    * metrics-write failure is diagnostic loss, not activation failure.
@@ -234,19 +232,9 @@ export function createActivationForensicSink(
    * `idx_specialist_events_job_seq`) plus one upsert — the same cost legacy pays per
    * completion via `aggregateJobMetricsBestEffort`. No forensic-table scan, no new index.
    */
-  // Keyed by activation + attempt: a resumed/retried activation is a NEW stream leg whose
-  // later terminal event must re-aggregate (its row must reflect the resumed work), while a
-  // repeated terminal emit for the SAME attempt (e.g. fallback intermediate failures landing
-  // on publishTerminalSettlement) must not re-scan. The underlying writer is idempotent
-  // regardless — same stream in, same record out — so this is delivery control, not
-  // correctness.
-  const aggregatedAtTerminal = new Set<string>();
-  const aggregateTerminalMetrics = (activationId: string, attemptId: string): void => {
-    const key = `${activationId}/${attemptId}`;
-    if (aggregatedAtTerminal.has(key)) return;
+  const aggregateTerminalMetrics = (activationId: string): void => {
     try {
       observability.aggregateJobMetrics(activationId);
-      aggregatedAtTerminal.add(key);
     } catch {
       // Best-effort: a later terminal event retries. Never throws into the activation.
     }
@@ -350,15 +338,18 @@ export function createActivationForensicSink(
         // Supervisor-isms are baked in: the accumulator reads only the shared timeline
         // vocabulary (`run_start` / `status_change` / `run_complete` / `tool` /
         // `turn_summary` / `stale_warning`), which the mapper already projects natively.
-        // `output_validation_failed` is terminal too (mapped to run_complete ERROR), while
-        // `activation_disposed` (stop path) carries no timeline event by design — see below.
+        // `output_validation_failed` is deliberately NOT aggregated here: it is a mid-settle
+        // validation signal, never a terminal event — runToSettled always follows it with
+        // `activation_completed`, which owns the status transition and the aggregation.
+        // Aggregating on the validation signal froze the transient status onto the metrics
+        // row (SPECIALISTS-4322). `activation_disposed` (stop path) carries no timeline
+        // event by design — see below.
         if (
           event.name === 'activation_completed'
           || event.name === 'activation_failed'
           || event.name === 'activation_rejected'
-          || event.name === 'output_validation_failed'
         ) {
-          aggregateTerminalMetrics(event.activationId, event.attemptId);
+          aggregateTerminalMetrics(event.activationId);
         }
 
         if (event.name === 'activation_disposed') {
@@ -367,11 +358,8 @@ export function createActivationForensicSink(
           // by design). Without this, a stopped activation would leave no metrics row — the
           // same absence 107 exists to remove. The stream still ends in a terminal status
           // (`stopped` via the status row), so aggregation reads a coherent, if short, stream.
-          aggregateTerminalMetrics(event.activationId, event.attemptId);
+          aggregateTerminalMetrics(event.activationId);
           states.delete(event.activationId);
-          for (const key of [...aggregatedAtTerminal]) {
-            if (key.startsWith(`${event.activationId}/`)) aggregatedAtTerminal.delete(key);
-          }
         }
       } catch {
         // Never let an observability write failure abort an activation.

@@ -946,6 +946,19 @@ export interface NativeActivationHostDeps {
   sessionStatsTimeoutMs?: number;
   /** Injected for tests; defaults to probing the `pi` binary on PATH. */
   piVersion?: string;
+  /**
+   * Observed when a background-woken wake turn settles with no resume()/retry()
+   * framing it (SPECIALISTS-4322). Pi delivers a finished background task as a
+   * notification into the live session and the model takes a wake turn on its own:
+   * no runToSettled frames that turn, so without this the wake settles only in the
+   * session-event projection (jobs stuck `waiting`, stale metrics) and the
+   * coordinator layers never learn the superseding result. The callback receives
+   * the same ActivationResult the framed path would have produced; wiring it to
+   * the result store (pusher.settle + pushCompletion, like the dispatch/resume
+   * observation contract) keeps specialist_status on the event stream. Optional:
+   * without it the activation still finalises durably, it just pushes nothing.
+   */
+  onWakeSettlement?: (result: ActivationResult) => void;
 }
 
 /** Configuration for pushing interactions to a Claude coordinator. */
@@ -986,6 +999,26 @@ export class NativeActivationHost {
   private readonly backgroundTasks = new Map<string, Map<number, string>>();
   /** Per activation: the poll that releases a lease held over running background tasks. */
   private readonly backgroundWatch = new Map<string, ReturnType<typeof setInterval>>();
+  /**
+   * Activations with an unfinalised spontaneous wake turn (SPECIALISTS-4322). Set when a
+   * turn starts on an already-settled snapshot — i.e. a background-woken wake, not a
+   * framed resume/retry leg — and consumed when that turn's settle finalises. Without
+   * this a redelivered agent_settled would finalise (and publish) the same wake twice.
+   */
+  private readonly wakeDirty = new Set<string>();
+  /** Wake finalisations currently capturing session stats; a concurrent second settle
+   * for the same activation skips and is covered by the in-flight pass, which reads the
+   * live session after the capture. */
+  private readonly wakeFinalising = new Set<string>();
+  /** Outward seam for unframed wake settlements; see NativeActivationHostDeps. */
+  private readonly wakeSettlement?: (result: ActivationResult) => void;
+  /**
+   * Activations with a runToSettled turn currently driving them (SPECIALISTS-4322).
+   * Set on runToSettled entry, cleared when its terminal settlement publishes: every
+   * framed leg funnels through there, so a settle observed while the flag is absent
+   * belongs to a background-woken wake turn with no framing, never to a framed run.
+   */
+  private readonly framedTurns = new Set<string>();
   private readonly backgroundPollMs: number;
   private readonly now: () => number;
   private readonly sessionStatsTimeoutMs?: number;
@@ -1075,6 +1108,7 @@ export class NativeActivationHost {
     this.forensics = withFleetWake(deps.forensics ?? NULL_FORENSIC_SINK, () => this.wakeFleetWaiters());
     this.loadSdk = deps.loadSdk ?? loadPiSdk;
     this.now = deps.now ?? (() => Date.now());
+    this.wakeSettlement = deps.onWakeSettlement;
     this.sessionStatsTimeoutMs = deps.sessionStatsTimeoutMs;
     this.piVersion = deps.piVersion;
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
@@ -2332,7 +2366,13 @@ export class NativeActivationHost {
     });
 
     switch (event.type) {
+      case 'turn_start':
+        // A turn starting on an already-settled snapshot is a background-woken wake,
+        // not a framed leg: mark it so the settle below finalises instead of parking.
+        this.noteWakeTurnStart(snapshot);
+        break;
       case 'agent_start':
+        this.noteWakeTurnStart(snapshot);
         snapshot.state = 'running';
         this.save(snapshot);
         emit('turn_started');
@@ -2355,9 +2395,28 @@ export class NativeActivationHost {
         // `activation_failed` pair (unitAI-8s7xx: emitting it here unconditionally made
         // an aborted turn push BOTH `completed` and `failed`). The lease release and
         // state bookkeeping below are unconditional on every settle, aborted or not.
+        // A settle with no framed turn driving it is a background-woken wake turn
+        // (SPECIALISTS-4322): every framed leg sets framedTurns on runToSettled entry
+        // and clears it when its terminal settlement publishes, so a settle observed
+        // with the flag absent has no runToSettled to emit its terminal record.
+        // Finalise it here or the job parks in `waiting` with a stale metrics row
+        // and the activation is never finalised. The dirty flag proves a wake turn
+        // actually started (a redelivered settle with no new turn finalises nothing).
+        const unframedWake = !this.framedTurns.has(snapshot.activationId)
+          && this.wakeDirty.has(snapshot.activationId);
         snapshot.state = 'settled';
         this.save(snapshot);
         this.releaseIfWriter(snapshot, 'settled');
+        if (unframedWake) {
+          this.wakeDirty.delete(snapshot.activationId);
+          const record = this.registry.get(snapshot.activationId);
+          if (record && !this.wakeFinalising.has(snapshot.activationId)) {
+            this.wakeFinalising.add(snapshot.activationId);
+            void this.finalizeWakeTurn(snapshot, record, emit).finally(() => {
+              this.wakeFinalising.delete(snapshot.activationId);
+            });
+          }
+        }
         break;
       case 'auto_retry_start':
         emit('retry_started', { attempt: event.attempt, max_attempts: event.maxAttempts });
@@ -2546,6 +2605,10 @@ export class NativeActivationHost {
     emit: (name: string, payload?: Record<string, unknown>) => void,
     record: ActivationRecord,
   ): Promise<ActivationResult> {
+    // Framed-turn marker for the unframed-wake detector in onSessionEvent: every
+    // settle while this flag is set belongs to this run, and the terminal below
+    // publishes through the funnel that clears it (SPECIALISTS-4322).
+    this.framedTurns.add(snapshot.activationId);
     // SPECIALISTS-120 criterion 3 / F2: the settlement capture also runs on the FAILURE path.
     // A prompt rejection or a mid-run throw used to settle with no snapshot AND no
     // `session_stats_failed`, which is indistinguishable from a run Pi never measured. The
@@ -2707,6 +2770,135 @@ export class NativeActivationHost {
   }
 
   /**
+   * Mark an activation whose turn starts on an already-settled snapshot: a
+   * background-woken wake, not a framed leg (SPECIALISTS-4322). Framed turns always
+   * pass through starting/running first (resume/retry set starting, agent_start sets
+   * running), so a turn starting from settled can only be the model's own wake after
+   * a background notification. The flag is consumed when that turn's settle
+   * finalises; a redelivered settle with no new turn behind it finalises nothing.
+   */
+  private noteWakeTurnStart(snapshot: ActivationSnapshot): void {
+    if (snapshot.state === 'settled') this.wakeDirty.add(snapshot.activationId);
+  }
+
+  /**
+   * Finalise a background-woken wake turn that no runToSettled frames (SPECIALISTS-4322).
+   *
+   * Pi delivers a finished background task as a notification into the live session and
+   * the model takes a wake turn on its own. That turn settles through onSessionEvent
+   * only — no prompt window, no terminal emit, no metrics refresh — so without this
+   * the job parks in `waiting` with a stale metrics row and the activation is never
+   * finalised. The tail mirrors runToSettled's exactly (stats capture, stopReason
+   * inspection, validation with the live-background-tasks carve-out, terminal emits,
+   * release, publication): the wake is settled by the same rule as every framed turn,
+   * including `uncertain` while its own background tasks still run (SPECIALISTS-4310)
+   * and `failed` for a genuinely failed wake (never `completed`).
+   *
+   * Fire-and-forget from the session fan-out: bounded awaits only, never throws, and
+   * redelivery-safe (the dirty flag is consumed synchronously before the first await).
+   */
+  private async finalizeWakeTurn(
+    snapshot: ActivationSnapshot,
+    record: ActivationRecord,
+    emit: (name: string, payload?: Record<string, unknown>) => void,
+  ): Promise<void> {
+    try {
+      const session = record.session;
+      // Same bounded, failure-tolerant capture as the framed path: the settlement
+      // capture runs on failure legs too, so a missing snapshot stays explicit.
+      await this.captureSessionStats(session, emit);
+      const last = lastAssistantMessage(session.messages);
+      if (last && (last.stopReason === 'error' || last.stopReason === 'aborted')) {
+        const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
+        snapshot.state = 'failed';
+        this.save(snapshot);
+        emit('activation_failed', { error: detail, stop_reason: last.stopReason });
+        const failedResult: ActivationResult = {
+          activationId: snapshot.activationId,
+          participantId: snapshot.participantId,
+          attemptId: snapshot.attemptId,
+          issueId: snapshot.issueId,
+          issueRef: snapshot.issueRef,
+          issueRevision: snapshot.issueRevision,
+          contractHash: snapshot.contractHash,
+          executionBindingId: snapshot.executionBindingId,
+          status: 'failed',
+          output: undefined,
+          validation: { valid: false, errors: [detail] },
+          piSessionId: session.sessionId,
+          configuredModel: snapshot.configuredModel,
+          requestedModel: snapshot.requestedModel,
+          resolvedModel: snapshot.resolvedModel,
+          modelOverride: snapshot.modelOverride,
+          ...(snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {}),
+          thinkingOverride: snapshot.thinkingOverride,
+          fallbackUsed: false,
+          completedAt: this.now(),
+        };
+        this.publishTerminalSettlement(snapshot, failedResult, record, emit);
+        this.notifyWakeSettlement(failedResult);
+        return;
+      }
+      const output = textOf(last);
+      emit('activation_settled');
+      emit('output_validation_started');
+      const pendingTasks = this.liveBackgroundTasks(snapshot.activationId);
+      const validation = pendingTasks.length > 0
+        ? { valid: false as const, errors: [`background tasks still running: ${pendingTasks.join(', ')}; resume the activation after they finish`] }
+        : output.trim().length > 0
+          ? { valid: true as const }
+          : { valid: false as const, errors: ['empty output: specialist produced no output'] };
+      if (validation.valid) {
+        emit('output_validation_passed');
+      } else {
+        emit('output_validation_failed', { errors: validation.errors });
+      }
+      snapshot.state = 'settled';
+      this.save(snapshot);
+      emit('activation_completed', { pi_session_id: session.sessionId, output });
+      this.releaseIfWriter(snapshot, 'completed');
+      const completedResult: ActivationResult = {
+        activationId: snapshot.activationId,
+        participantId: snapshot.participantId,
+        attemptId: snapshot.attemptId,
+        issueId: snapshot.issueId,
+        issueRef: snapshot.issueRef,
+        issueRevision: snapshot.issueRevision,
+        contractHash: snapshot.contractHash,
+        executionBindingId: snapshot.executionBindingId,
+        status: pendingTasks.length > 0 ? 'uncertain' : 'completed',
+        output,
+        validation,
+        piSessionId: session.sessionId,
+        configuredModel: snapshot.configuredModel,
+        requestedModel: snapshot.requestedModel,
+        resolvedModel: snapshot.resolvedModel,
+        modelOverride: snapshot.modelOverride,
+        ...(snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {}),
+        thinkingOverride: snapshot.thinkingOverride,
+        fallbackUsed: false,
+        completedAt: this.now(),
+      };
+      this.publishTerminalSettlement(snapshot, completedResult, record, emit);
+      this.notifyWakeSettlement(completedResult);
+    } catch {
+      // Finalisation is diagnostic plumbing on top of an already-settled turn:
+      // it must never throw into the session fan-out.
+    }
+  }
+
+  /** Report an unframed wake settlement outward; an observer must not break finalisation. */
+  private notifyWakeSettlement(result: ActivationResult): void {
+    const notify = this.wakeSettlement;
+    if (!notify) return;
+    try {
+      notify(result);
+    } catch {
+      // Observer failure is not activation failure.
+    }
+  }
+
+  /**
    * S1 automatic settlement publication (ADR §38).
    *
    * Host-driven: called on every terminal settlement with the live snapshot,
@@ -2725,6 +2917,11 @@ export class NativeActivationHost {
     record: ActivationRecord,
     emit: (name: string, payload?: Record<string, unknown>) => void,
   ): void {
+    // A framed terminal supersedes any pending wake dirt and closes the framed
+    // window: the settle was driven by runToSettled, not by an unframed wake, so a
+    // later redelivered settle finalises nothing (SPECIALISTS-4322).
+    this.wakeDirty.delete(snapshot.activationId);
+    this.framedTurns.delete(snapshot.activationId);
     try {
       const subject: SettlementSubject = {
         activationId: snapshot.activationId,
@@ -3348,6 +3545,9 @@ export class NativeActivationHost {
       this.stopToolDurationWatch(activationId);
       this.toolDurationWarnMsByActivation.delete(activationId);
       this.forgetBackgroundTasks(activationId);
+      this.wakeDirty.delete(activationId);
+      this.wakeFinalising.delete(activationId);
+      this.framedTurns.delete(activationId);
       record.unsubscribe();
       record.session.dispose();
       record.snapshot.state = 'stopped';
