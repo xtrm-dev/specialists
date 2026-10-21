@@ -158,7 +158,7 @@ function printGenericSection(title: string, color: (value: string) => string, va
 }
 
 function printHeader(summary: SpecialistSummary, model: string | null = summary.model): void {
-  const scope = summary.scope === 'default' ? green('[default]') : summary.scope === 'package' ? blue('[package]') : yellow('[user]');
+  const scope = summary.scope === 'default' ? green('[default]') : summary.scope === 'package' ? blue('[package]') : summary.scope === 'home' ? cyan('[home]') : yellow('[user]');
   const source = dim(summary.source);
   console.log();
   console.log(`${bold(cyan(summary.name))} ${scope} ${permissionBadge(summary.permission_required)} ${source}`);
@@ -183,7 +183,7 @@ function printCatalog(summaries: readonly SpecialistSummary[]): void {
   console.log();
 
   for (const summary of rows) {
-    const scope = summary.scope === 'default' ? green('[default]') : summary.scope === 'package' ? blue('[package]') : yellow('[user]');
+    const scope = summary.scope === 'default' ? green('[default]') : summary.scope === 'package' ? blue('[package]') : summary.scope === 'home' ? cyan('[home]') : yellow('[user]');
     const keepAlive = summary.interactive ? yellow('[keep-alive]') : dim('[single-turn]');
     console.log(`${cyan(summary.name)} ${scope} ${permissionBadge(summary.permission_required)} ${keepAlive} ${dim(summary.source)}`);
     console.log(`${dim('  model:')} ${summary.model}`);

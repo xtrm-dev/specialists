@@ -6,8 +6,12 @@ Use `specialist_list` (one compact line per role with a dispatchability verdict;
 `name` for one full record, `detail: "full"` for everything). Operators diagnosing an
 environment from a shell use `sp config show <name> --resolved` and `sp help`.
 
-Package-canonical definitions and rules live in the Specialists package/source; global and
-repo overlays may alter effective fields. The resolved config is therefore more useful
+Package-canonical definitions and rules live in the Specialists package/source; global,
+home (`~/.specialists/user/`), and repo overlays may alter effective fields. Definitions
+live in (lowest → highest): package canonical → `~/.config/specialists/user.json`
+→ `~/.specialists/user/<name>.specialist.json` → `<repo>/.specialists/user/<name>.specialist.json`.
+A home-level definition is discovered in every repository; a same-named repo definition
+wins and warns naming both paths. The resolved config is therefore more useful
 than opening one package JSON file when diagnosing a running environment.
 
 For tracked-work discovery inside an agent session, use the typed Substrate service:
