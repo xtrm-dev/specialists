@@ -2992,6 +2992,7 @@ describe('/specialists overlay (SPECIALISTS-4325)', () => {
     const db = {
       prepare: (sql) => {
         expect(sql).toContain('JOIN projects');
+        expect(sql).toContain('COLLATE NOCASE');
         return { get: (prefix, number) => (prefix === 'SPECIALISTS' && number === 4325 ? { title: 'Fleet epic' } : undefined) };
       },
       close: () => {},
@@ -3016,8 +3017,15 @@ describe('/specialists overlay (SPECIALISTS-4325)', () => {
     expect(mod.readIssueTitle('SPECIALISTS-1', g('/tmp/titles-g.db'))).toBeNull();
     broken = false;
     expect(mod.readIssueTitle('SPECIALISTS-1', g('/tmp/titles-g.db'))).toBe('back');
+    // Handle errors throw (reopen path); no-row stays null. Null opens are
+    // never cached: a transient failure retries the open next read.
+    expect(() => mod.queryIssueTitle({ prepare: () => { throw new Error('io'); } }, 'SPECIALISTS', 1)).toThrow();
+    let nullOpens = 0;
+    const n = (path) => ({ dbPath: path, existsSync: () => true, openDb: () => { nullOpens += 1; return null; } });
+    expect(mod.readIssueTitle('SPECIALISTS-1', n('/tmp/titles-h.db'))).toBeNull();
+    expect(mod.readIssueTitle('SPECIALISTS-1', n('/tmp/titles-h.db'))).toBeNull();
+    expect(nullOpens).toBe(2);
     mod.closeAllSubstrateDb();
-    // Path resolution mirrors the owner: SUBSTRATE_DB, then XTRM_STATE_DB, then home.
     expect(mod.resolveSubstrateDbPath({ SUBSTRATE_DB: '/a.db', XTRM_STATE_DB: '/b.db', HOME: '/h' })).toBe('/a.db');
     expect(mod.resolveSubstrateDbPath({ SUBSTRATE_DB: '', XTRM_STATE_DB: '/b.db', HOME: '/h' })).toBe('/b.db');
     expect(mod.resolveSubstrateDbPath({ HOME: '/h' }).endsWith('.xtrm/state.db')).toBe(true);

@@ -744,23 +744,25 @@ export function resolveSubstrateDbPath(env = process.env) {
 
 /** `PREFIX-number` into `{ prefix, number }`, or null when not a locator. */
 export function parseIssueRef(ref) {
-  const m = /^([A-Za-z][A-Za-z0-9]*)-(\d+)$/.exec(String(ref ?? '').trim());
+  const m = /^([A-Za-z][A-Za-z0-9]*)-(\d{1,15})$/.exec(String(ref ?? '').trim());
   if (!m) return null;
-  return { prefix: m[1].toUpperCase(), number: Number(m[2]) };
+  const number = Number(m[2]);
+  if (!Number.isSafeInteger(number)) return null;
+  return { prefix: m[1].toUpperCase(), number };
 }
 
-/** One indexed join over an already-open db. Never throws: null when no row. */
+/** One indexed join over an already-open db. No-row and blank titles are
+ * `null`; handle errors THROW so the caller can reopen once — catching here
+ * would make the reopen dead code (the outer layer only recovers on throw). */
 export function queryIssueTitle(db, prefix, number) {
   let stmt = null;
   try {
     stmt = db.prepare(
-      'SELECT i.title FROM issues i JOIN projects p ON p.id = i.project_id WHERE p.prefix = ? AND i.human_number = ?',
+      'SELECT i.title FROM issues i JOIN projects p ON p.id = i.project_id WHERE p.prefix = ? COLLATE NOCASE AND i.human_number = ?',
     );
     const row = stmt.get(prefix, number);
     const title = row?.title;
     return typeof title === 'string' && title.trim() ? title : null;
-  } catch {
-    return null;
   } finally {
     // Unfinalized statements pin native memory until GC notices; release eagerly.
     try { stmt?.finalize?.(); } catch { /* already gone */ }
@@ -770,22 +772,27 @@ export function queryIssueTitle(db, prefix, number) {
 const substrateRequire = createRequire(import.meta.url);
 
 /** Read-only open across both drivers (`bun:sqlite` under bun, `node:sqlite`
- * otherwise). The existsSync guard matters: opening a missing path would
- * CREATE an empty database file. Null when no driver loads. */
+ * otherwise). The readonly flag is the TOCTOU fix: the existsSync guard can
+ * race a deletion, but a read-only open throws instead of creating an empty
+ * database. `busy_timeout` mirrors the observability precedent so a transient
+ * writer lock waits briefly rather than surfacing a missing title. Null when
+ * no driver loads. */
 export function openSubstrateDb(dbPath) {
   try {
     const bun = substrateRequire('bun:sqlite');
     if (bun?.Database) {
-      const db = new bun.Database(dbPath);
+      const db = new bun.Database(dbPath, { readonly: true });
       db.exec('PRAGMA query_only = ON');
+      db.exec('PRAGMA busy_timeout = 5000');
       return db;
     }
   } catch { /* fall through to node:sqlite */ }
   try {
     const node = substrateRequire('node:sqlite');
     if (node?.DatabaseSync) {
-      const db = new node.DatabaseSync(dbPath);
+      const db = new node.DatabaseSync(dbPath, { readOnly: true });
       db.exec('PRAGMA query_only = ON');
+      db.exec('PRAGMA busy_timeout = 5000');
       return db;
     }
   } catch { /* no driver: fail open */ }
@@ -811,6 +818,8 @@ export function closeAllSubstrateDb() {
 }
 
 function getSubstrateDb(dbPath, open) {
+  // Null handles are never cached: one transient open failure must not poison
+  // the path for the process lifetime.
   if (!substrateDbCache.has(dbPath)) {
     let db = null;
     try {
@@ -818,7 +827,8 @@ function getSubstrateDb(dbPath, open) {
     } catch {
       db = null;
     }
-    substrateDbCache.set(dbPath, db);
+    if (db) substrateDbCache.set(dbPath, db);
+    return db;
   }
   return substrateDbCache.get(dbPath);
 }
