@@ -12,6 +12,7 @@ import type { TimelineEvent } from '../specialist/timeline-events.js';
 import { forensicEventFromTimelineEvent, type ForensicEvent } from '../specialist/forensic-events.js';
 import { forensicEventToRow, formatRenderedRowColumns, type RenderedRow } from '../specialist/forensic-renderer.js';
 import type { ForensicEventRecord, ListForensicEventsFilters } from '../specialist/observability-sqlite.js';
+import { resolveIssueRef } from './issue-ref.js';
 import {
   bold,
   cyan,
@@ -95,7 +96,9 @@ function parseSince(value: string): number | undefined {
 function parseArgs(argv: readonly string[]): LogOptions {
   let jobId: string | undefined;
   let specialist: string | undefined;
-  let beadId: string | undefined;
+  let issueRef: string | undefined;
+  let beadAlias: string | undefined;
+  let beadIdAlias: string | undefined;
   let nodeId: string | undefined;
   let repo: string | undefined;
   let since: number | undefined;
@@ -109,7 +112,9 @@ function parseArgs(argv: readonly string[]): LogOptions {
     const token = argv[i];
     if ((token === '--job' || token === '--job-id') && argv[i + 1]) { jobId = argv[++i]; continue; }
     if (token === '--specialist' && argv[i + 1]) { specialist = argv[++i]; continue; }
-    if ((token === '--bead' || token === '--bead-id') && argv[i + 1]) { beadId = argv[++i]; continue; }
+    if (token === '--issue-ref' && argv[i + 1]) { issueRef = argv[++i]; continue; }
+    if (token === '--bead' && argv[i + 1]) { beadAlias = argv[++i]; continue; }
+    if (token === '--bead-id' && argv[i + 1]) { beadIdAlias = argv[++i]; continue; }
     if (token === '--node' && argv[i + 1]) { nodeId = argv[++i]; continue; }
     if (token === '--repo' && argv[i + 1]) { repo = argv[++i]; continue; }
     if (token === '--since' && argv[i + 1]) { since = parseSince(argv[++i]); continue; }
@@ -121,6 +126,8 @@ function parseArgs(argv: readonly string[]): LogOptions {
     if (!token.startsWith('-') && !jobId) { jobId = token; continue; }
     throw new Error(`Unknown option: ${token}`);
   }
+
+  const beadId = resolveIssueRef({ issueRef, bead: beadAlias, beadId: beadIdAlias });
 
   return { jobId, specialist, beadId, nodeId, repo, since, limit, follow, json, allEvents, legacy };
 }
@@ -479,7 +486,7 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
     options = parseArgs(argv);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
-    console.error('Usage: specialists|sp log [job-id] [--specialist <name>] [--bead <id>] [--node <id>] [--since <5m|iso>] [--limit <n>] [-f|--follow] [--json] [--all-events] [--legacy]');
+    console.error('Usage: specialists|sp log [job-id] [--specialist <name>] [--issue-ref <id>] [--node <id>] [--since <5m|iso>] [--limit <n>] [-f|--follow] [--json] [--all-events] [--legacy] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)');
     console.error('  Default: renders xtrm.forensic.v1 events. --legacy falls back to TimelineEvent filtering (deprecated, removed next minor release).');
     process.exit(1);
   }

@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { resolveIssueRef } from './issue-ref.js';
 import { bold, cyan, dim, formatTokenUsageSummary, green, magenta, red, yellow } from './format-helpers.js';
 // unitAI-ugw4s: import the TUI's themed row + stats renderers so `sp ps`
 // uses the same visual language as `sp console`'s ps view. The CLI keeps
@@ -151,9 +152,11 @@ function parseArgs(argv: string[]): PsArgs {
     '--json', '--all', '--follow', '-f', '--include-terminal', '--include-merged',
     '--include-cleaned', '--active', '--running', '--mine', '--health', '--needs-attention',
   ]);
-  const valueFlags = new Set(['--node', '--bead', '--since']);
+  const valueFlags = new Set(['--node', '--bead', '--bead-id', '--issue-ref', '--since']);
   let nodeId: string | undefined;
-  let beadFilter: string | undefined;
+  let issueRef: string | undefined;
+  let beadAlias: string | undefined;
+  let beadIdAlias: string | undefined;
   let sinceMs: number | undefined;
   const positional: string[] = [];
 
@@ -168,8 +171,18 @@ function parseArgs(argv: string[]): PsArgs {
       i += 1;
       continue;
     }
+    if (token === '--issue-ref' && argv[i + 1]) {
+      issueRef = argv[i + 1];
+      i += 1;
+      continue;
+    }
     if (token === '--bead' && argv[i + 1]) {
-      beadFilter = argv[i + 1];
+      beadAlias = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    if (token === '--bead-id' && argv[i + 1]) {
+      beadIdAlias = argv[i + 1];
       i += 1;
       continue;
     }
@@ -199,7 +212,7 @@ function parseArgs(argv: string[]): PsArgs {
     mine: argv.includes('--mine'),
     health: argv.includes('--health'),
     needsAttention: argv.includes('--needs-attention'),
-    beadFilter,
+    beadFilter: resolveIssueRef({ issueRef, bead: beadAlias, beadId: beadIdAlias }),
     sinceMs,
     nodeId,
     inspectId: positional[0],
@@ -867,7 +880,7 @@ function loadNativeActivationBlock(args: PsArgs): NativeActivationBlock {
     // whole window and quiet activations were invisible. Now activation ids
     // are chosen first (bounded to the latest N) and only then are their
     // events fetched with no row cap. Every candidate-defining filter
-    // (--bead, --since, and the --mine ownership pre-image) is passed INTO the
+    // (--issue-ref, --since, and the --mine ownership pre-image) is passed INTO the
     // id selection so the bound can never be applied ahead of it.
     const ids = sqliteClient.listNativeActivationIds({
       limit: NATIVE_ACTIVATION_SELECTION_LIMIT,
@@ -917,7 +930,7 @@ function renderNativeActivationsBlock(summaries: NativeActivationSummary[], note
     console.log(`  ${summary.activation_id} ${summary.specialist}${bead} ${statusLabel(summary.state as JobState)} · ${summary.window_event_count} events in window · ${summary.window_turns} turns in window · ${formatActivationAge(now, summary.last_event_at_ms)}${detail}`);
   }
   if (summaries.length > NATIVE_ACTIVATION_DISPLAY_LIMIT) {
-    console.log(dim(`  +${summaries.length - NATIVE_ACTIVATION_DISPLAY_LIMIT} older omitted — narrow with --since/--bead`));
+    console.log(dim(`  +${summaries.length - NATIVE_ACTIVATION_DISPLAY_LIMIT} older omitted — narrow with --since/--issue-ref`));
   }
   console.log('');
 }

@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { basename, join, resolve } from 'node:path';
+import { resolveIssueRef } from './issue-ref.js';
 import { SpecialistLoader } from '../specialist/loader.js';
 import { SpecialistRunner } from '../specialist/runner.js';
 import { CircuitBreaker } from '../utils/circuitBreaker.js';
@@ -83,7 +84,9 @@ function parseNodeArgs(argv: string[]): ParsedNodeArgs {
   let nodeId: string | undefined;
   let findingId: string | undefined;
   let toBead: string | undefined;
-  let beadId: string | undefined;
+  let issueRef: string | undefined;
+  let beadAlias: string | undefined;
+  let beadIdAlias: string | undefined;
   let contextDepth: number | undefined;
   let memberKey: string | undefined;
   let specialist: string | undefined;
@@ -137,8 +140,18 @@ function parseNodeArgs(argv: string[]): ParsedNodeArgs {
       continue;
     }
 
+    if (token === '--issue-ref') {
+      issueRef = readValue('--issue-ref');
+      continue;
+    }
+
     if (token === '--bead') {
-      beadId = readValue('--bead');
+      beadAlias = readValue('--bead');
+      continue;
+    }
+
+    if (token === '--bead-id') {
+      beadIdAlias = readValue('--bead-id');
       continue;
     }
 
@@ -229,8 +242,10 @@ function parseNodeArgs(argv: string[]): ParsedNodeArgs {
     throw new Error(`Unknown argument: ${token}`);
   }
 
+  const beadId = resolveIssueRef({ issueRef, bead: beadAlias, beadId: beadIdAlias });
+
   if (command === 'run' && !nodeConfigInput && !inlineJson) {
-    throw new Error('Usage: specialists node run <node-config-name-or-file> [--inline JSON] [--bead <bead-id>] [--context-depth <n>] [--json]');
+    throw new Error('Usage: specialists node run <node-config-name-or-file> [--inline JSON] [--issue-ref <bead-id>] [--context-depth <n>] [--json] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)');
   }
 
   if (command === 'promote' && (!nodeId || !findingId || !toBead)) {
@@ -248,7 +263,7 @@ function parseNodeArgs(argv: string[]): ParsedNodeArgs {
   }
 
   if (command === 'spawn-member' && (!memberKey || !specialist)) {
-    throw new Error('Usage: specialists node spawn-member --node <node-ref> --member-key <key> --specialist <name> [--bead <id>] [--phase <id>] [--scope <paths>] [--json]');
+    throw new Error('Usage: specialists node spawn-member --node <node-ref> --member-key <key> --specialist <name> [--issue-ref <id>] [--phase <id>] [--scope <paths>] [--json] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)');
   }
 
   if (command === 'create-bead' && !title) {

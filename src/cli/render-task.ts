@@ -11,6 +11,7 @@
 // The parsing/rendering/emission below is shared verbatim with the roleless
 // sibling `sp render-bead` (src/cli/render-bead.ts) — there is exactly one
 // task-side assembly path, and both verbs emit the same envelope shape.
+import { resolveIssueRef } from './issue-ref.js';
 import { SpecialistLoader, SpecialistMissingModelError } from '../specialist/loader.js';
 import { BeadsClient } from '../specialist/beads.js';
 import { renderTaskPrompt } from '../specialist/task-prompt.js';
@@ -43,14 +44,18 @@ export function fail(code: ErrorCode, message: string): never {
 /** Shared flag parsing. Each verb enforces its own required-argument shape. */
 export function parseRenderArgs(argv: string[]): RenderArgs {
   const positional: string[] = [];
-  let beadId = '';
+  let issueRef = '';
+  let beadAlias = '';
+  let beadIdAlias = '';
   let cwd = process.cwd();
   let contextDepth = 3;
   let surface: Surface = 'pi';
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === '--bead') beadId = argv[++i] ?? '';
+    if (arg === '--issue-ref') issueRef = argv[++i] ?? '';
+    else if (arg === '--bead') beadAlias = argv[++i] ?? '';
+    else if (arg === '--bead-id') beadIdAlias = argv[++i] ?? '';
     else if (arg === '--cwd') cwd = argv[++i] ?? cwd;
     else if (arg === '--context-depth') contextDepth = Number(argv[++i]);
     else if (arg === '--surface') surface = (argv[++i] ?? 'pi') as Surface;
@@ -62,6 +67,13 @@ export function parseRenderArgs(argv: string[]): RenderArgs {
   }
   if (!Number.isFinite(contextDepth) || contextDepth < 0) {
     fail('usage', `--context-depth must be a non-negative number (got '${contextDepth}')`);
+  }
+
+  let beadId = '';
+  try {
+    beadId = resolveIssueRef({ issueRef, bead: beadAlias, beadId: beadIdAlias }) ?? '';
+  } catch (error) {
+    fail('usage', error instanceof Error ? error.message : String(error));
   }
 
   return { beadId, cwd, contextDepth: Math.trunc(contextDepth), surface, positional };
@@ -177,7 +189,7 @@ export async function loadSpecialistForSurface(name: string, surface: Surface): 
   return spec;
 }
 
-const USAGE = 'Usage: specialists render-task <name> --bead <id> [--cwd <path>] [--context-depth <n>] [--surface pi|claude|codex]';
+const USAGE = 'Usage: specialists render-task <name> --issue-ref <id> [--cwd <path>] [--context-depth <n>] [--surface pi|claude|codex] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)';
 
 export async function run(): Promise<void> {
   const args = parseRenderArgs(process.argv.slice(3));

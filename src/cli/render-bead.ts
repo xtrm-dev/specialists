@@ -16,7 +16,7 @@
 import { SpecialistSchema, type Specialist } from '../specialist/schema.js';
 import { fail, parseRenderArgs, renderAndEmit } from './render-task.js';
 
-const USAGE = 'Usage: specialists render-bead <id> [--cwd <path>] [--context-depth <n>] [--surface pi|claude|codex]';
+const USAGE = 'Usage: specialists render-bead <id> [--issue-ref <id>] [--cwd <path>] [--context-depth <n>] [--surface pi|claude|codex] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)';
 
 /**
  * The minimal specialist a roleless render stands in for: the bead context and
@@ -44,7 +44,7 @@ export function rolelessSpecialist(): Specialist['specialist'] {
 
 export function run(): void {
   const args = parseRenderArgs(process.argv.slice(3));
-  // The bead id is the verb's subject: accept it positionally, and as --bead for
+  // The bead id is the verb's subject: accept it positionally, and as --issue-ref/--bead for
   // callers sharing an argv builder with `render-task`.
   const beadId = args.beadId || args.positional[0] || '';
   if (!beadId) fail('usage', USAGE);

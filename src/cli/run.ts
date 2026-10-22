@@ -4,6 +4,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { constants as fsConstants, existsSync, fstatSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync, writeFileSync, closeSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { spawn as cpSpawn, execFileSync, execSync } from 'node:child_process';
+import { resolveIssueRef } from './issue-ref.js';
 import { SpecialistLoader } from '../specialist/loader.js';
 import { CircuitBreaker } from '../utils/circuitBreaker.js';
 import { HookEmitter } from '../specialist/hooks.js';
@@ -62,7 +63,7 @@ export interface RunArgs {
   reuseJobId?: string;
   /** Bypass reuse guard for active/unknown target job statuses. */
   forceJob: boolean;
-  /** Owning epic for wave-bound chains. If --bead is set, defaults to bead.parent. */
+  /** Owning epic for wave-bound chains. If --issue-ref is set, defaults to bead.parent. */
   epicId?: string;
   /** Allow provisioning from a potentially stale base branch. */
   forceStaleBase: boolean;
@@ -128,14 +129,18 @@ async function parseArgs(argv: string[]): Promise<RunArgs> {
   const name = argv[0];
   if (!name || name.startsWith('--')) {
     console.error(
-      'Usage: specialists|sp run <name> [--prompt "..."] [--bead <id>] ' +
+      'Usage: specialists|sp run <name> [--prompt "..."] [--issue-ref <id>] ' +
       '[--worktree] [--job <id>] [--force-job] [--epic <id>] [--base-sha <sha>] [--base-ref <branch>] [--accept-stale-base --reason <text>] [--context-depth <n>] [--model <model>] ' +
-      '[--no-beads] [--no-bead-notes] [--keep-alive|--no-keep-alive] [--background] [--json|--raw]',
+      '[--no-beads] [--no-bead-notes] [--keep-alive|--no-keep-alive] [--background] [--json|--raw] ' +
+      '(--bead/--bead-id are permanent compatibility aliases for --issue-ref)',
     );
     process.exit(1);
   }
 
   let prompt = '';
+  let issueRef: string | undefined;
+  let beadAlias: string | undefined;
+  let beadIdAlias: string | undefined;
   let beadId: string | undefined;
   let model: string | undefined;
   let noBeads = false;
@@ -158,7 +163,9 @@ async function parseArgs(argv: string[]): Promise<RunArgs> {
   for (let i = 1; i < argv.length; i++) {
     const token = argv[i];
     if (token === '--prompt'         && argv[i + 1]) { prompt       = argv[++i]; continue; }
-    if (token === '--bead'           && argv[i + 1]) { beadId       = argv[++i]; continue; }
+    if (token === '--issue-ref'      && argv[i + 1]) { issueRef     = argv[++i]; continue; }
+    if (token === '--bead'           && argv[i + 1]) { beadAlias    = argv[++i]; continue; }
+    if (token === '--bead-id'        && argv[i + 1]) { beadIdAlias  = argv[++i]; continue; }
     if (token === '--model'          && argv[i + 1]) { model        = argv[++i]; continue; }
     if (token === '--context-depth'  && argv[i + 1]) { contextDepth = parseInt(argv[++i], 10) || 0; continue; }
     if (token === '--no-beads')      { noBeads      = true; continue; }
@@ -195,6 +202,14 @@ async function parseArgs(argv: string[]): Promise<RunArgs> {
     }
   }
 
+  // ── --issue-ref is primary; --bead/--bead-id are permanent compatibility aliases ──
+  try {
+    beadId = resolveIssueRef({ issueRef, bead: beadAlias, beadId: beadIdAlias });
+  } catch (error) {
+    console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+
   // ── Mutual exclusion ─────────────────────────────────────────────────────────
   if (acceptStaleBase && !staleBaseReason?.trim()) {
     console.error('Error: --accept-stale-base requires --reason <text>.');
@@ -227,17 +242,18 @@ async function parseArgs(argv: string[]): Promise<RunArgs> {
     process.stderr.write(dim(`[warning: --epic ${epicId} with --job may override target job's epic membership]\n`));
   }
 
-  // ── --worktree requires --bead ───────────────────────────────────────────────
+  // ── --worktree requires --issue-ref ──────────────────────────────────────────
   if (worktree && !beadId) {
     console.error(
-      'Error: --worktree requires --bead <id> to derive a deterministic branch name.\n' +
-      'Example: specialists run executor --worktree --bead hgpu.3',
+      'Error: --worktree requires --issue-ref <id> to derive a deterministic branch name.\n' +
+      '(--bead/--bead-id are permanent compatibility aliases for --issue-ref.)\n' +
+      'Example: specialists run executor --worktree --issue-ref hgpu.3',
     );
     process.exit(1);
   }
 
   if (prompt && beadId) {
-    console.error('Error: use either --prompt or --bead, not both.');
+    console.error('Error: use either --prompt or --issue-ref, not both. (--bead is a compatibility alias.)');
     process.exit(1);
   }
 
@@ -251,7 +267,7 @@ async function parseArgs(argv: string[]): Promise<RunArgs> {
   }
 
   if (!prompt && !beadId && !reuseJobId) {
-    console.error('Error: provide --prompt, pipe stdin, use --bead <id>, or provide --job <id> for bead inference.');
+    console.error('Error: provide --prompt, pipe stdin, use --issue-ref <id>, or provide --job <id> for bead inference. (--bead is a compatibility alias.)');
     process.exit(1);
   }
 
@@ -271,7 +287,7 @@ async function parseArgs(argv: string[]): Promise<RunArgs> {
  *             bead id + specialist name and returns its absolute path.
  *
  * --job <id>: reads the target job status to extract `worktree_path` and
- *             `bead_id`. The inferred bead is used only when --bead is omitted.
+ *             `bead_id`. The inferred bead is used only when --issue-ref is omitted.
  *
  * Returns undefined when neither flag is set (run in current directory).
  */
@@ -1674,7 +1690,7 @@ export async function run(): Promise<void> {
   if (shouldAutoProvisionWorktree && !args.beadId) {
     process.stderr.write(
       `Error: specialist '${args.name}' has permission_required=${perm} and requires worktree isolation.\n` +
-      `Provide --bead <id> for automatic worktree provisioning, or use --job <id> to reuse an existing worktree.\n`,
+      `Provide --issue-ref <id> for automatic worktree provisioning, or use --job <id> to reuse an existing worktree.\n`,
     );
     process.exit(1);
   }
@@ -1974,7 +1990,7 @@ export async function run(): Promise<void> {
   }
 
   if (!prompt && !effectiveBeadId) {
-    console.error('Error: provide --prompt, pipe stdin, use --bead <id>, or provide --job <id> for bead inference.');
+    console.error('Error: provide --prompt, pipe stdin, use --issue-ref <id>, or provide --job <id> for bead inference.');
     process.exit(1);
   }
 

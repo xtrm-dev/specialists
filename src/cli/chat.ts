@@ -5,6 +5,7 @@ import { ChatFeed } from './chat/feed.js';
 import { ChatStatus } from './chat/status.js';
 import { createChatControl } from './chat/control.js';
 import { loadStatuses } from '../specialist/status-load.js';
+import { resolveIssueRef } from './issue-ref.js';
 import { SpecialistLoader } from '../specialist/loader.js';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
 import type { TimelineEvent } from '../specialist/timeline-events.js';
@@ -215,24 +216,29 @@ export async function run(): Promise<void> {
 
 function parseArgs(argv: string[]): ChatArgs {
   const name = argv[0];
-  if (!name) throw new Error('Usage: sp chat <specialist> [prompt...] [--bead <id>] [--prompt <text>] [--context-depth N] [--model M]');
+  if (!name) throw new Error('Usage: sp chat <specialist> [prompt...] [--issue-ref <id>] [--prompt <text>] [--context-depth N] [--model M] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)');
 
-  let beadId: string | undefined;
+  let issueRef: string | undefined;
+  let beadAlias: string | undefined;
+  let beadIdAlias: string | undefined;
   let contextDepth = DEFAULT_CONTEXT_DEPTH;
   let model: string | undefined;
   const promptParts: string[] = [];
 
   for (let i = 1; i < argv.length; i++) {
     const token = argv[i];
-    if (token === '--bead') beadId = argv[++i] ?? '';
+    if (token === '--issue-ref') issueRef = argv[++i] ?? '';
+    else if (token === '--bead') beadAlias = argv[++i] ?? '';
+    else if (token === '--bead-id') beadIdAlias = argv[++i] ?? '';
     else if (token === '--prompt') promptParts.push(argv[++i] ?? '');
     else if (token === '--context-depth') contextDepth = Number(argv[++i] ?? DEFAULT_CONTEXT_DEPTH);
     else if (token === '--model') model = argv[++i];
     else if (!token.startsWith('--')) promptParts.push(token);
   }
 
+  const beadId = resolveIssueRef({ issueRef, bead: beadAlias, beadId: beadIdAlias });
   const prompt = promptParts.join(' ').trim();
-  if (!beadId && !prompt) throw new Error('Usage: sp chat <specialist> [prompt...] [--bead <id>] [--prompt <text>] [--context-depth N] [--model M]');
+  if (!beadId && !prompt) throw new Error('Usage: sp chat <specialist> [prompt...] [--issue-ref <id>] [--prompt <text>] [--context-depth N] [--model M] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)');
   return { name, prompt, beadId, contextDepth, model };
 }
 

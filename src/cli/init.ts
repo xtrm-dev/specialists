@@ -95,11 +95,11 @@ Native/current tracked flow:
 Core observation/compatibility commands:
 - \`specialists list\`
 - \`specialists ps\` / \`specialists feed\` / \`specialists result\`
-- legacy \`specialists run <name> --bead <id>\` remains available only while XTRM-93 keeps the Supervisor backend reachable.
+- legacy \`specialists run <name> --issue-ref <id>\` remains available only while XTRM-93 keeps the Supervisor backend reachable (--bead/--bead-id are permanent compatibility aliases for --issue-ref).
 
 Rules:
 - Do not use Beads notes/status as authority for native work.
-- \`--bead\` / \`bead_id\` may be a compatibility alias; inspect the live surface before inferring backend semantics.
+- \`--issue-ref\` is the primary spelling; \`--bead\` / \`--bead-id\` / \`bead_id\` are permanent compatibility aliases for the same value; inspect the live surface before inferring backend semantics.
 - Messages coordinate; they do not rewrite SCOPE/SUCCESS/NON_GOALS/CONSTRAINTS/VALIDATION/OUTPUT.
 - Add custom Specialist definitions under \`.specialists/user/\`; current role prompts must preserve pinned-Issue/Journal/settlement/Closure semantics.
 <!-- specialists:end -->

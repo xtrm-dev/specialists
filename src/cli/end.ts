@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { createObservabilitySqliteClient } from '../specialist/observability-sqlite.js';
 import { isEpicUnresolvedState } from '../specialist/epic-lifecycle.js';
+import { resolveIssueRef } from './issue-ref.js';
 import { checkEpicUnresolvedGuard, resolveMergeTargets, executePublicationPlan, printSummary } from './merge.js';
 import { handleEpicMergeCommand } from './epic.js';
 
@@ -12,7 +13,10 @@ interface EndOptions {
 }
 
 function parseOptions(argv: readonly string[]): EndOptions {
-  let beadId: string | undefined;
+  let issueRef: string | undefined;
+  let beadAlias: string | undefined;
+  let beadIdAlias: string | undefined;
+  let positionalBead: string | undefined;
   let epicId: string | undefined;
   let rebuild = false;
   let pr = false;
@@ -20,8 +24,20 @@ function parseOptions(argv: readonly string[]): EndOptions {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
 
+    if (token === '--issue-ref' && argv[index + 1]) {
+      issueRef = argv[index + 1];
+      index += 1;
+      continue;
+    }
+
     if (token === '--bead' && argv[index + 1]) {
-      beadId = argv[index + 1];
+      beadAlias = argv[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (token === '--bead-id' && argv[index + 1]) {
+      beadIdAlias = argv[index + 1];
       index += 1;
       continue;
     }
@@ -42,13 +58,15 @@ function parseOptions(argv: readonly string[]): EndOptions {
       continue;
     }
 
-    if (!token.startsWith('-') && !beadId && !epicId) {
-      beadId = token;
+    if (!token.startsWith('-') && !positionalBead && !epicId) {
+      positionalBead = token;
       continue;
     }
 
     throw new Error(`Unknown option: ${token}`);
   }
+
+  const beadId = resolveIssueRef({ issueRef, bead: beadAlias ?? positionalBead, beadId: beadIdAlias });
 
   return { beadId, epicId, rebuild, pr };
 }
@@ -92,7 +110,7 @@ function detectCurrentBeadIdFromWorkspace(): string | undefined {
 
 function printUsageAndExit(message: string): never {
   console.error(message);
-  console.error('Usage: specialists|sp end [--bead <id>|--epic <id>] [--pr] [--rebuild]');
+  console.error('Usage: specialists|sp end [--issue-ref <id>|--epic <id>] [--pr] [--rebuild] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)');
   process.exit(1);
 }
 
@@ -130,7 +148,7 @@ export async function run(): Promise<void> {
 
   const beadId = options.beadId ?? detectCurrentBeadIdFromWorkspace();
   if (!beadId) {
-    printUsageAndExit('Unable to infer current chain bead from workspace. Pass --bead <id> or --epic <id>.');
+    printUsageAndExit('Unable to infer current chain bead from workspace. Pass --issue-ref <id> or --epic <id>. (--bead is a compatibility alias.)');
   }
 
   const guard = checkEpicUnresolvedGuard(beadId);
