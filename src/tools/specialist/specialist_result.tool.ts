@@ -74,6 +74,7 @@ export function createSpecialistResultTool(
         return {
           activation_id: hit.activation_id,
           specialist: snapshots.find(s => s.activationId === id)?.specialist ?? null,
+          bead_id: hit.bead_id,
           issue_ref: hit.issue_ref,
           status: hit.status,
           output: hit.output ?? '',
@@ -90,10 +91,12 @@ export function createSpecialistResultTool(
         const output = client?.readResult(id) ?? null;
         if (client && output !== null) {
           const row = client.readStatus(id);
+          const workRef = row?.bead_id ?? null;
           return {
             activation_id: id,
             specialist: row?.specialist ?? null,
-            issue_ref: row?.bead_id ?? null,
+            bead_id: workRef,
+            issue_ref: workRef,
             status: row?.status ?? 'done',
             output,
             validation: null,

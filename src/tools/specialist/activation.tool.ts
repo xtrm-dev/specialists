@@ -169,6 +169,7 @@ export interface ActivationCompactView {
   activation_id: string;
   specialist: string;
   bead_id: string;
+  issue_ref: string;
   state: string;
   access: 'read' | 'write';
   /** Present only when the activation runs under a lease waiver. Absent otherwise. */
@@ -187,6 +188,7 @@ export function toActivationCompactView(snapshot: ActivationSnapshot, nowMs: num
     activation_id: snapshot.activationId,
     specialist: snapshot.specialist,
     bead_id: snapshot.issueRef,
+    issue_ref: snapshot.issueRef,
     state: snapshot.state,
     access: snapshot.access,
     ...(snapshot.leaseWaiver ? { lease_waiver: true as const } : {}),

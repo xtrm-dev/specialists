@@ -227,6 +227,7 @@ export function buildChannelFrame(input: {
   activationId: string;
   specialist: string;
   beadId?: string;
+  issueRef?: string;
   eventClass: string;
   detail?: ChannelDetail;
 }): ChannelFrame {
@@ -239,14 +240,18 @@ export function buildChannelFrame(input: {
     event: input.eventClass,
     read_with: settled ? 'specialist_result' : 'specialist_status',
   };
-  if (input.beadId) meta.bead_id = input.beadId;
+  const workRef = input.beadId ?? input.issueRef;
+  if (workRef) {
+    meta.bead_id = workRef;
+    meta.issue_ref = workRef;
+  }
 
   for (const key of Object.keys(meta)) {
     // Unreachable with the literals above; it guards the next key someone adds.
     if (!META_KEY.test(key)) throw new Error(`channel meta key "${key}" fails ${META_KEY.source}`);
   }
 
-  const work = input.beadId ? ` on ${input.beadId}` : '';
+  const work = workRef ? ` on ${workRef}` : '';
   const action = ACTION[input.eventClass] ?? 'Call specialist_status for authoritative state.';
   const head = `Specialist ${input.specialist}${work}: ${input.eventClass} (${input.activationId}). ${action}`;
   return {

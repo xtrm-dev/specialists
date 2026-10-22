@@ -622,6 +622,7 @@ describe('native-specialists extension (Pi coordinator surface)', () => {
       expect(out).toEqual({
         activation_id: 'act:aaaa',
         specialist: 'explorer',
+        bead_id: 'bd-1',
         issue_ref: 'bd-1',
         status: 'completed',
         output: 'report',

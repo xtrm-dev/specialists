@@ -86,7 +86,7 @@ export function createFeedSpecialistTool(jobsDir: string) {
         ...(model !== undefined ? { model } : {}),
         status,
         is_dead,
-        ...(bead_id !== undefined ? { bead_id } : {}),
+        ...(bead_id !== undefined ? { bead_id, issue_ref: bead_id } : {}),
         ...(metrics !== undefined ? { metrics } : {}),
         events: sliced,
         cursor,
