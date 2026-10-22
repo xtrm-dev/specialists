@@ -321,3 +321,52 @@ describe('renderTaskPrompt — surface-specific skill prefix baked into initial_
     expect(out.prompt_hash).toBe(createHash('sha256').update(out.initial_prompt).digest('hex').slice(0, 16));
   });
 });
+
+// SPECIALISTS-4331 Phase 2a: $issue_ref alias beside $bead_id.
+describe('renderTaskPrompt — $issue_ref alias (SPECIALISTS-4331)', () => {
+  it('renders $issue_ref with exactly the same value as $bead_id (task-prompt path)', () => {
+    const out = renderTaskPrompt({ ...base, specialist: spec('bead=$bead_id issue=$issue_ref') });
+    expect(out.initial_prompt).toContain(`bead=${BEAD.id} issue=${BEAD.id}`);
+    expect(out.variables.bead_id).toBe(BEAD.id);
+    expect(out.variables.issue_ref).toBe(BEAD.id);
+    expect(out.variables.issue_ref).toBe(out.variables.bead_id);
+  });
+
+  it('exposes identical values in the system-prompt path (beadTemplateVariables)', () => {
+    const out = renderTaskPrompt({ ...base, specialist: spec('$prompt') });
+    expect(out.beadTemplateVariables.bead_id).toBe(BEAD.id);
+    expect(out.beadTemplateVariables.issue_ref).toBe(BEAD.id);
+    expect(out.beadTemplateVariables.issue_ref).toBe(out.beadTemplateVariables.bead_id);
+  });
+
+  it('keeps both spellings empty together when no bead is bound (no silent divergence)', () => {
+    const out = renderTaskPrompt({
+      cwd: '/repo',
+      specialist: spec('bead=$bead_id issue=$issue_ref'),
+      fallbackPrompt: () => 'ad-hoc task',
+    });
+    // No beadId: both resolve to empty, never one populated and the other empty.
+    expect(out.variables.bead_id).toBe('');
+    expect(out.variables.issue_ref).toBe('');
+  });
+
+  it('still refuses an unknown $token, naming it', () => {
+    expect(() => renderTaskPrompt({ ...base, specialist: spec('ok=$issue_ref bad=$nope') }))
+      .toThrow(/unresolved placeholder.*\$nope/);
+  });
+
+  it('migrated shipped templates (test-engineer, service-knowledge-sync) still render', async () => {
+    const { readFileSync } = await import('node:fs');
+    for (const name of ['test-engineer', 'service-knowledge-sync']) {
+      const cfg = JSON.parse(readFileSync(`config/specialists/${name}.specialist.json`, 'utf-8'));
+      const template = cfg.specialist.prompt.task_template as string;
+      expect(template).toContain('$issue_ref');
+      expect(template).not.toContain('$bead_id');
+      const s = spec(template);
+      const out = renderTaskPrompt({ ...base, specialist: s });
+      expect(out.initial_prompt).toContain(BEAD.id);
+      expect(out.initial_prompt).not.toMatch(/\$issue_ref/);
+      expect(out.initial_prompt).not.toMatch(/\$bead_id/);
+    }
+  });
+});

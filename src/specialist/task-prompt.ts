@@ -22,6 +22,7 @@ const SKILL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const OPTIONALLY_ABSENT_PLACEHOLDERS = new Set([
   'bead_context',
   'gitnexus_summary',
+  'issue_ref',
   'obligations_diff',
   'resolved_tool_contract',
   'reused_worktree_awareness',
@@ -199,11 +200,12 @@ export function renderTaskPrompt(input: TaskPromptInput): TaskPromptResult {
     ...(input.gitnexusSummary ? { gitnexus_summary: input.gitnexusSummary } : {}),
   };
   const beadVariables: Record<string, string> = beadId
-    ? { bead_context: resolvedPrompt, bead_id: beadId }
+    ? { bead_context: resolvedPrompt, bead_id: beadId, issue_ref: beadId }
     : {};
   const beadTemplateVariables: Record<string, string> = {
     prompt: resolvedPrompt,
     bead_id: beadId ?? '',
+    issue_ref: beadId ?? '',
     ...lineageVariables,
   };
   const variables: Record<string, string> = {
@@ -211,6 +213,7 @@ export function renderTaskPrompt(input: TaskPromptInput): TaskPromptResult {
     cwd,
     pre_script_output: input.preScriptOutput ?? '',
     bead_id: beadId ?? '',
+    issue_ref: beadId ?? '',
     ...lineageVariables,
     ...(input.variables ?? {}),
     ...beadVariables,
