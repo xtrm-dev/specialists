@@ -25939,6 +25939,7 @@ function toActivationCompactView(snapshot, nowMs = Date.now()) {
     activation_id: snapshot.activationId,
     specialist: snapshot.specialist,
     bead_id: snapshot.issueRef,
+    issue_ref: snapshot.issueRef,
     state: snapshot.state,
     access: snapshot.access,
     ...snapshot.leaseWaiver ? { lease_waiver: true } : {},

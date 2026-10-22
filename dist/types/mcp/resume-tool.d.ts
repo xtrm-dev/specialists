@@ -94,6 +94,7 @@ export declare function createSpecialistResumeTool(getHost: () => NativeActivati
         activation_id: string;
         specialist: string;
         bead_id: string;
+        issue_ref: string;
         state: string;
         access: "read" | "write";
         lease_waiver?: true;

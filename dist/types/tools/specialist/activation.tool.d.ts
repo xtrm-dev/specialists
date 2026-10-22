@@ -90,6 +90,7 @@ export interface ActivationCompactView {
     activation_id: string;
     specialist: string;
     bead_id: string;
+    issue_ref: string;
     state: string;
     access: 'read' | 'write';
     /** Present only when the activation runs under a lease waiver. Absent otherwise. */
@@ -403,6 +404,7 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         activation_id: string;
         specialist: string;
         bead_id: string;
+        issue_ref: string;
         state: string;
         access: "read" | "write";
         /** Present only when the activation runs under a lease waiver. Absent otherwise. */
@@ -429,6 +431,7 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         activation_id: string;
         specialist: string;
         bead_id: string;
+        issue_ref: string;
         state: string;
         access: "read" | "write";
         /** Present only when the activation runs under a lease waiver. Absent otherwise. */
@@ -577,6 +580,7 @@ export declare function createSpecialistSteerTool(getHost: () => NativeActivatio
         activation_id: string;
         specialist: string;
         bead_id: string;
+        issue_ref: string;
         state: string;
         access: "read" | "write";
         /** Present only when the activation runs under a lease waiver. Absent otherwise. */
@@ -796,6 +800,7 @@ export declare function createSpecialistRetryTool(getHost: () => NativeActivatio
         activation_id: string;
         specialist: string;
         bead_id: string;
+        issue_ref: string;
         state: string;
         access: "read" | "write";
         /** Present only when the activation runs under a lease waiver. Absent otherwise. */

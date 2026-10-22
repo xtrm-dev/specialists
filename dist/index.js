@@ -89427,13 +89427,16 @@ function buildChannelFrame(input) {
     event: input.eventClass,
     read_with: settled ? "specialist_result" : "specialist_status"
   };
-  if (input.beadId)
-    meta.bead_id = input.beadId;
+  const workRef = input.beadId ?? input.issueRef;
+  if (workRef) {
+    meta.bead_id = workRef;
+    meta.issue_ref = workRef;
+  }
   for (const key of Object.keys(meta)) {
     if (!META_KEY.test(key))
       throw new Error(`channel meta key "${key}" fails ${META_KEY.source}`);
   }
-  const work = input.beadId ? ` on ${input.beadId}` : "";
+  const work = workRef ? ` on ${workRef}` : "";
   const action = ACTION[input.eventClass] ?? "Call specialist_status for authoritative state.";
   const head = `Specialist ${input.specialist}${work}: ${input.eventClass} (${input.activationId}). ${action}`;
   return {
@@ -89603,6 +89606,7 @@ function toActivationCompactView(snapshot, nowMs = Date.now()) {
     activation_id: snapshot.activationId,
     specialist: snapshot.specialist,
     bead_id: snapshot.issueRef,
+    issue_ref: snapshot.issueRef,
     state: snapshot.state,
     access: snapshot.access,
     ...snapshot.leaseWaiver ? { lease_waiver: true } : {},
@@ -89987,6 +89991,7 @@ function createSpecialistResultTool(getHost, getPusher, openObservability = () =
         return {
           activation_id: hit.activation_id,
           specialist: snapshots.find((s) => s.activationId === id)?.specialist ?? null,
+          bead_id: hit.bead_id,
           issue_ref: hit.issue_ref,
           status: hit.status,
           output: hit.output ?? "",
@@ -90002,10 +90007,12 @@ function createSpecialistResultTool(getHost, getPusher, openObservability = () =
         const output = client?.readResult(id) ?? null;
         if (client && output !== null) {
           const row = client.readStatus(id);
+          const workRef = row?.bead_id ?? null;
           return {
             activation_id: id,
             specialist: row?.specialist ?? null,
-            issue_ref: row?.bead_id ?? null,
+            bead_id: workRef,
+            issue_ref: workRef,
             status: row?.status ?? "done",
             output,
             validation: null,

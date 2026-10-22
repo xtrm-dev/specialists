@@ -118,6 +118,7 @@ export declare function buildChannelFrame(input: {
     activationId: string;
     specialist: string;
     beadId?: string;
+    issueRef?: string;
     eventClass: string;
     detail?: ChannelDetail;
 }): ChannelFrame;

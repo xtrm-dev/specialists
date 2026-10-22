@@ -33,6 +33,7 @@ export declare function createSpecialistResultTool(getHost?: () => NativeActivat
         candidates: string[];
         activation_id?: undefined;
         specialist?: undefined;
+        bead_id?: undefined;
         issue_ref?: undefined;
         output?: undefined;
         validation?: undefined;
@@ -44,6 +45,7 @@ export declare function createSpecialistResultTool(getHost?: () => NativeActivat
     } | {
         activation_id: string;
         specialist: string | null;
+        bead_id: string;
         issue_ref: string;
         status: string;
         output: {};
@@ -62,6 +64,7 @@ export declare function createSpecialistResultTool(getHost?: () => NativeActivat
     } | {
         activation_id: string;
         specialist: string | null;
+        bead_id: string | null;
         issue_ref: string | null;
         status: import("../../specialist/status-contract.ts").SupervisorJobStatus;
         output: string;
@@ -81,6 +84,7 @@ export declare function createSpecialistResultTool(getHost?: () => NativeActivat
         error?: undefined;
         candidates?: undefined;
         specialist?: undefined;
+        bead_id?: undefined;
         issue_ref?: undefined;
         output?: undefined;
         validation?: undefined;
@@ -93,6 +97,7 @@ export declare function createSpecialistResultTool(getHost?: () => NativeActivat
         candidates?: undefined;
         activation_id?: undefined;
         specialist?: undefined;
+        bead_id?: undefined;
         issue_ref?: undefined;
         output?: undefined;
         validation?: undefined;

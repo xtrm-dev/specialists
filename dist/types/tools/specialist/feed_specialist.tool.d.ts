@@ -39,6 +39,7 @@ export declare function createFeedSpecialistTool(jobsDir: string): {
         is_complete: boolean;
         metrics?: Record<string, unknown> | undefined;
         bead_id?: string | undefined;
+        issue_ref?: string | undefined;
         status: string;
         is_dead: boolean;
         model?: string | undefined;
