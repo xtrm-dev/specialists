@@ -108,7 +108,7 @@ function spec(tier: string) {
     specialist: {
       metadata: { name: 'executor', version: '1.0.0', description: 'd', category: 'c' },
       execution: { model: 'testprov/test-model', permission_required: tier, response_format: 'text', output_type: 'codegen', bare: false },
-      prompt: { system: 'You are the executor.', task_template: 'Do: {{bead_id}}' },
+      prompt: { system: 'You are the executor.', task_template: 'Do: $bead_id' },
     },
   };
 }
@@ -349,7 +349,7 @@ describe('lease-waived read-tier activation workspace', () => {
           ...(waiver ? { lease_waiver: true } : {}),
           response_format: 'text', output_type: 'analysis', bare: false,
         },
-        prompt: { system: 'You watch.', task_template: 'Watch: {{bead_id}}' },
+        prompt: { system: 'You watch.', task_template: 'Watch: $bead_id' },
       },
     };
   }

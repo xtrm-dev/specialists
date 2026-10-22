@@ -17113,11 +17113,28 @@ var OPTIONALLY_ABSENT_PLACEHOLDERS = new Set([
 
 class TemplatePlaceholderError extends Error {
   unresolved;
-  constructor(unresolved) {
-    super(`task_template references unresolved placeholder(s): ${unresolved.map((n) => `$${n}`).join(", ")}`);
+  mustache;
+  constructor(unresolved, opts) {
+    const mustache = opts?.mustache ?? [];
+    const where = opts?.specialistName ? ` in specialist '${opts.specialistName}' (its definition: config/specialists/${opts.specialistName}.specialist.json, or the user override of the same name)` : "";
+    const dollarPart = unresolved.length ? unresolved.map((n) => `$${n}`).join(", ") : "";
+    const mustachePart = mustache.length ? mustache.map((n) => `{{${n}}}`).join(", ") : "";
+    const allParts = [dollarPart, mustachePart].filter(Boolean).join(", ");
+    const hint = mustache.length ? " — mustache {{...}} is not supported, use $name instead" : "";
+    super(`task_template references unresolved placeholder(s)${where}: ${allParts}${hint}`);
     this.name = "TemplatePlaceholderError";
     this.unresolved = unresolved;
+    this.mustache = mustache;
   }
+}
+var MUSTACHE_PLACEHOLDER_RE = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+function extractMustacheTokens(template) {
+  const seen = new Set;
+  for (const match of template.matchAll(MUSTACHE_PLACEHOLDER_RE)) {
+    if (!seen.has(match[1]))
+      seen.add(match[1]);
+  }
+  return [...seen];
 }
 function deriveSkillName(path) {
   const base = basename(path);
@@ -17206,9 +17223,14 @@ ${buildBeadBoundaryInstruction(cwd, input.worktreeBoundary)}`.trim() : input.fal
     if (variables[name] === undefined)
       variables[name] = "";
   }
+  const mustacheTokens = extractMustacheTokens(prompt.task_template);
   const unresolvedTokens = extractTemplateTokens(prompt.task_template).filter((name) => variables[name] === undefined);
-  if (unresolvedTokens.length > 0)
-    throw new TemplatePlaceholderError(unresolvedTokens);
+  if (mustacheTokens.length > 0 || unresolvedTokens.length > 0) {
+    throw new TemplatePlaceholderError(unresolvedTokens, {
+      mustache: mustacheTokens,
+      specialistName: specialist.metadata?.name
+    });
+  }
   let renderedTask = renderTemplate(prompt.task_template, variables);
   const taskTemplateComponent = measurePayloadComponent("task_template", "task_template", renderedTask);
   let mandatoryRulesBlock = "";

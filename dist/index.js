@@ -21099,6 +21099,14 @@ function summarizePayloadBreakdown(components) {
 // src/specialist/task-prompt.ts
 import { basename as basename3, dirname as dirname6 } from "path";
 import { createHash as createHash2 } from "crypto";
+function extractMustacheTokens(template) {
+  const seen = new Set;
+  for (const match of template.matchAll(MUSTACHE_PLACEHOLDER_RE)) {
+    if (!seen.has(match[1]))
+      seen.add(match[1]);
+  }
+  return [...seen];
+}
 function deriveSkillName(path) {
   const base = basename3(path);
   if (base === "SKILL.md")
@@ -21186,9 +21194,14 @@ ${buildBeadBoundaryInstruction(cwd, input.worktreeBoundary)}`.trim() : input.fal
     if (variables[name] === undefined)
       variables[name] = "";
   }
+  const mustacheTokens = extractMustacheTokens(prompt.task_template);
   const unresolvedTokens = extractTemplateTokens(prompt.task_template).filter((name) => variables[name] === undefined);
-  if (unresolvedTokens.length > 0)
-    throw new TemplatePlaceholderError(unresolvedTokens);
+  if (mustacheTokens.length > 0 || unresolvedTokens.length > 0) {
+    throw new TemplatePlaceholderError(unresolvedTokens, {
+      mustache: mustacheTokens,
+      specialistName: specialist.metadata?.name
+    });
+  }
   let renderedTask = renderTemplate(prompt.task_template, variables);
   const taskTemplateComponent = measurePayloadComponent("task_template", "task_template", renderedTask);
   let mandatoryRulesBlock = "";
@@ -21232,7 +21245,7 @@ ${mandatoryRulesBlock}`;
     resolvedPrompt
   };
 }
-var MANDATORY_RULES_TOKEN_LIMIT = 2400, SKILL_NAME_PATTERN, OPTIONALLY_ABSENT_PLACEHOLDERS, TemplatePlaceholderError;
+var MANDATORY_RULES_TOKEN_LIMIT = 2400, SKILL_NAME_PATTERN, OPTIONALLY_ABSENT_PLACEHOLDERS, TemplatePlaceholderError, MUSTACHE_PLACEHOLDER_RE;
 var init_task_prompt = __esm(() => {
   init_templateEngine();
   init_mandatory_rules();
@@ -21250,12 +21263,21 @@ var init_task_prompt = __esm(() => {
   ]);
   TemplatePlaceholderError = class TemplatePlaceholderError extends Error {
     unresolved;
-    constructor(unresolved) {
-      super(`task_template references unresolved placeholder(s): ${unresolved.map((n) => `$${n}`).join(", ")}`);
+    mustache;
+    constructor(unresolved, opts) {
+      const mustache = opts?.mustache ?? [];
+      const where = opts?.specialistName ? ` in specialist '${opts.specialistName}' (its definition: config/specialists/${opts.specialistName}.specialist.json, or the user override of the same name)` : "";
+      const dollarPart = unresolved.length ? unresolved.map((n) => `$${n}`).join(", ") : "";
+      const mustachePart = mustache.length ? mustache.map((n) => `{{${n}}}`).join(", ") : "";
+      const allParts = [dollarPart, mustachePart].filter(Boolean).join(", ");
+      const hint = mustache.length ? " \u2014 mustache {{...}} is not supported, use $name instead" : "";
+      super(`task_template references unresolved placeholder(s)${where}: ${allParts}${hint}`);
       this.name = "TemplatePlaceholderError";
       this.unresolved = unresolved;
+      this.mustache = mustache;
     }
   };
+  MUSTACHE_PLACEHOLDER_RE = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
 });
 
 // src/cli/render-task.ts

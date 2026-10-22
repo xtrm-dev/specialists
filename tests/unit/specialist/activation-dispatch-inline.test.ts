@@ -127,7 +127,7 @@ function hostWith(fixture: { events?: Array<{ name: string; beadId?: string }>; 
           output_type: 'research',
           bare: false,
         },
-        prompt: { system: 'You are the researcher.', task_template: 'Do: {{bead_id}}' },
+        prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
       },
     }) } as never,
     loadSdk: async () => sdk,

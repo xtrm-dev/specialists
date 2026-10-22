@@ -117,7 +117,7 @@ function specWithThinking() {
         bare: false,
         thinking_level: 'high',
       },
-      prompt: { system: 'You are the researcher.', task_template: 'Do: {{bead_id}}' },
+      prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
     },
   };
 }

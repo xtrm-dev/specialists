@@ -7,11 +7,28 @@ export declare const MANDATORY_RULES_TOKEN_LIMIT = 2400;
  * A task_template referenced a `$name` that no caller provides and that is not a
  * known execution-only placeholder. Fail loud: a complete initial prompt is the
  * renderer's contract, and a silent literal `$name` handed to the model is a leak.
+ *
+ * Mustache `{{name}}` is never substituted (SPECIALISTS-4327): any `{{identifier}}`
+ * in the template is a config bug and is refused here with the `{{...}}` spelling
+ * so the author sees the syntax they wrote. `specialistName` names the definition
+ * file (`config/specialists/<name>.specialist.json` or a user override) so the
+ * author can fix it without reading the renderer.
  */
 export declare class TemplatePlaceholderError extends Error {
     readonly unresolved: string[];
-    constructor(unresolved: string[]);
+    readonly mustache: string[];
+    constructor(unresolved: string[], opts?: {
+        mustache?: string[];
+        specialistName?: string;
+    });
 }
+/**
+ * The unique `{{name}}` tokens referenced by a template, in first-occurrence order.
+ * Anchored to placeholder position (double braces around a bare identifier), so
+ * JSON object literals (`{"key": "value"}`), code fences and other literal braces
+ * never match: only the mustache syntax an author most plausibly writes is refused.
+ */
+export declare function extractMustacheTokens(template: string): string[];
 export type Surface = 'pi' | 'claude' | 'codex';
 /**
  * Derive a skill's invocation name from its declared path.

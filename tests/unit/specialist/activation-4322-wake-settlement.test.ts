@@ -116,7 +116,7 @@ function wakeHarness(opts: { alive: { value: boolean }; onWakeSettlement?: (resu
         model: 'testprov/test-model', permission_required: 'LOW', lease_waiver: true,
         response_format: 'text', output_type: 'analysis', bare: false,
       },
-      prompt: { system: 'You watch.', task_template: 'Watch: {{bead_id}}' },
+      prompt: { system: 'You watch.', task_template: 'Watch: $bead_id' },
     },
   };
   const workRoot = scratch('wake-settle-ws-');
