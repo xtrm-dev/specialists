@@ -359,7 +359,7 @@ export function renderFleetRowLines(view, asks = [], nowMs = Date.now()) {
   const idle = idleSeconds(view, nowMs);
   const active = isActiveState(view.state) && !ask && !(idle != null && idle > IDLE_AFTER_S);
   const marker = stateMarker({ view, blocked: Boolean(ask), active, nowMs });
-  const work = view.issue_ref ?? view.issue_id ?? '—';
+  const work = view.issue_ref ?? view.bead_id ?? view.issue_id ?? '—';
   const thinking = view.thinking_level ? ` ${BOLD(view.thinking_level)}` : '';
   return [
     `    ${marker} ${BOLD(`${view.specialist}:${view.activation_id.slice(4)}`)} ${work} ${DIM(view.resolved_model ?? '?model')}${thinking} ${DIM('·')} ${DIM(rowMetrics({ view, ask, nowMs }))}`,
@@ -977,6 +977,7 @@ export function createAskObserverSink(base, onAsk, onTerminal) {
           attemptId: event.attemptId,
           specialist: event.specialist,
           beadId: event.beadId,
+          issueRef: event.beadId,
         };
         const kind = ASK_EVENTS[event.name];
         if (kind) {
@@ -1079,7 +1080,7 @@ function instructionLine(instruction, activationId) {
  */
 export function formatAskWake(ask, view) {
   const escalated = ask.kind === 'escalation';
-  const beadId = ask.beadId ?? view?.bead_id ?? '—';
+  const beadId = ask.issueRef ?? ask.beadId ?? view?.issue_ref ?? view?.bead_id ?? '—';
   // The state word names what happened: `asked` (blocked on your reply) vs
   // `escalated` (raised for intervention) — never the overloaded `waiting`,
   // which core also uses for idle keep-alive jobs. Asks carry no run metadata,
@@ -1106,7 +1107,7 @@ export function formatAskWake(ask, view) {
  */
 export function formatSettlementWake(done, view, opts = {}) {
   const failed = done.outcome === 'failed';
-  const beadId = done.beadId ?? view?.bead_id ?? '—';
+  const beadId = done.issueRef ?? done.beadId ?? view?.issue_ref ?? view?.bead_id ?? '—';
   const facts = failed ? modelFacts(view) : costFacts(view);
   const header = wakeHeader(`${done.specialist}:${done.activationId}`, failed ? 'failed' : 'done', beadId);
   const body = resultLines(opts.resultText ?? done.output, opts);
@@ -1227,6 +1228,14 @@ export function installEventCardRenderer(pi, customType) {
 // is imported from the shared frontend module for the same reason `toActivationView`
 // and `toPendingAskView` already were (unitAI-kv8ac).
 
+function withIssuePair(view, fallback) {
+  if (!view || typeof view !== 'object') return view;
+  const workRef = view.issue_ref ?? view.bead_id ?? fallback;
+  if (workRef == null) return view;
+  if (view.bead_id === workRef && view.issue_ref === workRef) return view;
+  return { ...view, bead_id: workRef, issue_ref: workRef };
+}
+
 /**
  * Attach a settled result to a shared view when one is available.
  * Additive-only over the MCP vocabulary: never mutates the shared projection.
@@ -1234,9 +1243,15 @@ export function installEventCardRenderer(pi, customType) {
  * rows carry the whole validated result, as before.
  */
 function withResult(view, result, full = false) {
-  if (!result) return view;
-  if (full) return { ...view, result: toActivationResultView(result) };
-  return { ...view, result_status: result.status ?? 'settled' };
+  const paired = withIssuePair(view, result?.issueRef);
+  if (!result) return paired;
+  if (full) {
+    const resultView = toActivationResultView(result);
+    const workRef = resultView.issue_ref ?? resultView.bead_id ?? result.issueRef;
+    const pairedResult = workRef != null ? { ...resultView, bead_id: workRef, issue_ref: workRef } : resultView;
+    return { ...paired, result: pairedResult };
+  }
+  return { ...paired, result_status: result.status ?? 'settled' };
 }
 
 /** Permission tiers that mutate the workspace (mirrors native-host.ts line 57). */
@@ -1460,6 +1475,7 @@ const ActivationCompact = Type.Object({
   activation_id: Type.String(),
   specialist: Type.String(),
   bead_id: Type.String(),
+  issue_ref: Type.Optional(Type.String()),
   state: Type.String(),
   access: Type.String(),
   resolved_model: Type.String(),
@@ -1526,6 +1542,7 @@ const Envelope = Type.Object({
   in_reply_to: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   attempt_id: Type.Optional(Type.String()),
   previous_attempt_id: Type.Optional(Type.String()),
+  bead_id: Type.Optional(Type.String()),
   issue_ref: Type.Optional(Type.String()),
   created_issue_ref: Type.Optional(Type.String()),
   created_bead_id: Type.Optional(Type.String()),
@@ -1582,6 +1599,7 @@ const Registry = Type.Object({
 const Result = Type.Object({
   activation_id: Type.Optional(Type.String()),
   specialist: Type.Optional(Type.String()),
+  bead_id: Type.Optional(Type.String()),
   issue_ref: Type.Optional(Type.String()),
   status: Type.Optional(Type.String()),
   output: Type.Optional(Type.Unknown()),
@@ -1694,7 +1712,7 @@ function summarizePayload(payload) {
   if (Array.isArray(payload.activations)) {
     const lines = [`Fleet: ${payload.activations.length} activation(s), ${(payload.pending_asks ?? []).length} pending ask(s)`];
     for (const a of payload.activations) {
-      lines.push(`- ${a.specialist ?? '?'} on ${a.bead_id ?? '?'} — ${a.state ?? '?'} (${a.activation_id ?? '?'})${a.resolved_model ? ` [${a.resolved_model}]` : ''}${a.result ? ` → ${a.result.status ?? 'settled'}` : ''}`);
+      lines.push(`- ${a.specialist ?? '?'} on ${a.issue_ref ?? a.bead_id ?? '?'} — ${a.state ?? '?'} (${a.activation_id ?? '?'})${a.resolved_model ? ` [${a.resolved_model}]` : ''}${a.result ? ` → ${a.result.status ?? 'settled'}` : ''}`);
     }
     for (const ask of payload.pending_asks ?? []) {
       lines.push(`? ${ask.kind ?? 'ask'} from ${ask.activation_id ?? '?'} (${ask.message_id ?? '?'}): ${(ask.body ?? '').split('\n')[0]}`);
@@ -1717,7 +1735,7 @@ function summarizePayload(payload) {
   // specialist_result: a settled result (has `source`) or not-settled guidance (has `next`).
   if (typeof payload.activation_id === 'string' && typeof payload.source === 'string') {
     const text = typeof payload.output === 'string' ? payload.output : '';
-    const lines = [`Result · ${payload.specialist ?? '?'} · ${payload.issue_ref ?? payload.activation_id} · ${payload.status ?? '?'} (${payload.source})${payload.resolved_model ? ` [${payload.resolved_model}]` : ''}`];
+    const lines = [`Result · ${payload.specialist ?? '?'} · ${payload.issue_ref ?? payload.bead_id ?? payload.activation_id} · ${payload.status ?? '?'} (${payload.source})${payload.resolved_model ? ` [${payload.resolved_model}]` : ''}`];
     if (text.trim()) {
       lines.push(...text.trim().split('\n').slice(0, RESULT_EXCERPT_LINES).map((l) => `  ${l.trim()}`));
     }
@@ -1954,7 +1972,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   const viewFor = (activationId) => {
     try {
       const snapshot = host?.inspect(activationId);
-      return snapshot ? toActivationView(snapshot) : undefined;
+      return snapshot ? withIssuePair(toActivationView(snapshot), snapshot?.issueRef) : undefined;
     } catch {
       return undefined;
     }
@@ -2054,7 +2072,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       if (sel.kind === 'result') {
         const out = await resultToolDef('section', { activation_id: sel.id });
         const payload = out?.structuredContent ?? {};
-        fleetDetailCache = { id: sel.id, kind: sel.kind, lines: resultCommandLines(payload), lastSeq: null, settled: true, unadjudicated: true, issueRef: payload.issue_ref ?? null };
+        fleetDetailCache = { id: sel.id, kind: sel.kind, lines: resultCommandLines(payload), lastSeq: null, settled: true, unadjudicated: true, issueRef: payload.issue_ref ?? payload.bead_id ?? null };
         return;
       }
       // A live feed follows from its cursor: only events newer than the last
@@ -2331,9 +2349,9 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
 
         const snapshot = h.inspect(handle.activationId);
         const full = params.full === true;
-        const view = snapshot
+        const view = withIssuePair(snapshot
           ? full ? toActivationView(snapshot) : toActivationCompactView(snapshot)
-          : { activation_id: handle.activationId };
+          : { activation_id: handle.activationId }, handle.issueRef);
         return resultOf(annexBuildIdentity({
               status: 'dispatched',
               ...view,
@@ -2395,17 +2413,17 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       if (full) {
         return resultOf(annexBuildIdentity({
               activations: h.list().map((snapshot) =>
-                withResult(toActivationView(snapshot), results.get(snapshot.activationId), true)),
+                withResult(withIssuePair(toActivationView(snapshot), snapshot?.issueRef), results.get(snapshot.activationId), true)),
               pending_asks: h.pendingAsks().map(toPendingAskView),
             }))
       }
       return resultOf(annexBuildIdentity({
-            activations: h.list().map((snapshot) => ({
+            activations: h.list().map((snapshot) => withIssuePair({
               ...toActivationCompactView(snapshot),
               ...(results.has(snapshot.activationId)
                 ? { result_status: results.get(snapshot.activationId).status ?? 'settled' }
                 : {}),
-            })),
+            }, snapshot?.issueRef)),
             pending_asks: h.pendingAsks().map(toPendingAskCompactView),
           }))
     },
@@ -2474,6 +2492,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     return {
       activation_id: result.activationId,
       specialist: snapshot?.specialist ?? String(result.participantId ?? '').replace(/^specialist::/, ''),
+      bead_id: result.issueRef,
       issue_ref: result.issueRef,
       status: result.status,
       output: result.output ?? null,
@@ -2732,9 +2751,9 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
 
       const snapshot = h.inspect(handle.activationId);
       const full = params.full === true;
-      const view = snapshot
+      const view = withIssuePair(snapshot
         ? full ? toActivationView(snapshot) : toActivationCompactView(snapshot)
-        : { activation_id: handle.activationId };
+        : { activation_id: handle.activationId }, handle.issueRef);
       return resultOf({
             status: 'resumed',
             previous_attempt_id: previousAttemptId,
@@ -2808,9 +2827,9 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
 
       const snapshot = h.inspect(handle.activationId);
       const full = params.full === true;
-      const view = snapshot
+      const view = withIssuePair(snapshot
         ? full ? toActivationView(snapshot) : toActivationCompactView(snapshot)
-        : { activation_id: handle.activationId };
+        : { activation_id: handle.activationId }, handle.issueRef);
       return resultOf({
             status: 'retried',
             previous_attempt_id: previousAttemptId,
@@ -2872,9 +2891,9 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       }
       const snapshot = h.inspect(params.activation_id);
       const full = params.full === true;
-      const view = snapshot
+      const view = withIssuePair(snapshot
         ? full ? toActivationView(snapshot) : toActivationCompactView(snapshot)
-        : { activation_id: params.activation_id };
+        : { activation_id: params.activation_id }, snapshot?.issueRef);
       return resultOf({ status: 'steered', ...view })
     },
   });
@@ -3155,7 +3174,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     return {
       // Arrow form, never bare `.map(toActivationView)`: Array.map passes the
       // element INDEX as nowMs, freezing every row at elapsed 0s (unitAI-d99hb).
-      activations: host.list().map((s) => toActivationView(s)),
+      activations: host.list().map((s) => withIssuePair(toActivationView(s), s?.issueRef)),
       asks: host.pendingAsks().map(toPendingAskView),
     };
   };
@@ -3272,7 +3291,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
         report(ctx, `specialist_result refused: ${payload.error ?? 'unknown error'}`, 'warning');
         return;
       }
-      fleetDetailCache = { id, kind, lines: resultCommandLines(payload), lastSeq: null, settled: true, unadjudicated: true, issueRef: payload.issue_ref ?? null };
+      fleetDetailCache = { id, kind, lines: resultCommandLines(payload), lastSeq: null, settled: true, unadjudicated: true, issueRef: payload.issue_ref ?? payload.bead_id ?? null };
       report(ctx, resultCommandLines(payload).join('\n'));
       return;
     }
@@ -3477,7 +3496,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
         const ask = resolved.fleet.asks.find((a) => a.activation_id === row.activation_id);
         report(ctx, [
           `${row.specialist} ${row.activation_id} · ${row.state ?? 'unknown'}`,
-          `  issue ${row.issue_ref ?? '—'} · ${row.resolved_model ?? '?model'}${row.thinking_level ? ` · ${row.thinking_level}` : ''}`,
+          `  issue ${row.issue_ref ?? row.bead_id ?? '—'} · ${row.resolved_model ?? '?model'}${row.thinking_level ? ` · ${row.thinking_level}` : ''}`,
           ...(row.purpose ? [`  purpose: ${row.purpose}`] : []),
           ...(ask ? [`  ${ask.kind ?? 'ask'} ${ask.message_id}: ${ask.body ?? ''}`] : []),
         ].join('\n'));

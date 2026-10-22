@@ -52,6 +52,7 @@ describe('buildChannelFrame', () => {
       event: 'completed',
       read_with: 'specialist_result',
       bead_id: 'unitAI-aiwva.21',
+      issue_ref: 'unitAI-aiwva.21',
     });
     for (const key of Object.keys(params.meta)) {
       expect(key).toMatch(/^[a-zA-Z_][a-zA-Z0-9_]*$/);
@@ -75,6 +76,7 @@ describe('buildChannelFrame', () => {
       activationId: 'act:2', specialist: 'researcher', eventClass: 'needs_reply',
     });
     expect(params.meta.bead_id).toBeUndefined();
+    expect(params.meta.issue_ref).toBeUndefined();
     expect(params.meta.activation_id).toBe('act:2');
   });
 
