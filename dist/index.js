@@ -12195,7 +12195,7 @@ var init_project_pack_skill_resolver = __esm(() => {
 // src/specialist/loader.ts
 import { readdir, readFile, stat } from "fs/promises";
 import { basename, join as join5 } from "path";
-import { existsSync as existsSync6 } from "fs";
+import { existsSync as existsSync6, realpathSync as realpathSync2 } from "fs";
 import { homedir as homedir3 } from "os";
 async function checkStaleness(summary) {
   if (!summary.filestoWatch?.length || !summary.updated)
@@ -12214,6 +12214,13 @@ async function checkStaleness(summary) {
     }
   }
   return "OK";
+}
+function realpathOr(path) {
+  try {
+    return realpathSync2(path);
+  } catch {
+    return path;
+  }
 }
 function resolveHomeDir() {
   try {
@@ -12397,7 +12404,7 @@ class SpecialistLoader {
       return null;
     const homeHit = hits.find((h) => h.dir.scope === "home");
     const repoHit = hits.find((h) => h.dir.scope === "user");
-    if (homeHit && repoHit) {
+    if (homeHit && repoHit && realpathOr(repoHit.resolved.filePath) !== realpathOr(homeHit.resolved.filePath)) {
       process.stderr.write(`[specialists] warning: '${name}' resolved from repo '${repoHit.resolved.filePath}' shadows home '${homeHit.resolved.filePath}'
 `);
     }
@@ -24766,7 +24773,7 @@ var init_session_metrics_contract = __esm(() => {
 // src/pi/session.ts
 import { createHash as createHash3 } from "crypto";
 import { spawn as spawn2, execFileSync as execFileSync2 } from "child_process";
-import { existsSync as existsSync20, lstatSync as lstatSync3, mkdirSync as mkdirSync10, readdirSync as readdirSync7, readFileSync as readFileSync15, realpathSync as realpathSync2, statSync as statSync4, writeFileSync as writeFileSync9 } from "fs";
+import { existsSync as existsSync20, lstatSync as lstatSync3, mkdirSync as mkdirSync10, readdirSync as readdirSync7, readFileSync as readFileSync15, realpathSync as realpathSync3, statSync as statSync4, writeFileSync as writeFileSync9 } from "fs";
 import { homedir as homedir5, tmpdir } from "os";
 import { isAbsolute as isAbsolute2, resolve as resolve13, sep as sep3, join as join21, dirname as dirname14 } from "path";
 function toRuntimeToolCatalogs(catalogIndex) {
@@ -24997,7 +25004,7 @@ function canonicalizeLocalExtensionIdentity(source) {
     return null;
   }
   try {
-    return realpathSync2(candidate);
+    return realpathSync3(candidate);
   } catch {
     try {
       return resolve13(candidate);
@@ -27889,7 +27896,7 @@ import {
   lstatSync as lstatSync4,
   openSync as openSync2,
   readFileSync as readFileSync17,
-  realpathSync as realpathSync3
+  realpathSync as realpathSync4
 } from "fs";
 import { homedir as homedir7 } from "os";
 import { isAbsolute as isAbsolute3, join as join22, relative as relative3, resolve as resolve16 } from "path";
@@ -27906,7 +27913,7 @@ function canonicalizeSkillRoot(root, baseDir) {
   try {
     const normalized = normalizePath(root, baseDir);
     lstatSync4(normalized);
-    const canonical = realpathSync3(normalized);
+    const canonical = realpathSync4(normalized);
     const stat = lstatSync4(canonical);
     if (!stat.isDirectory())
       throw new Error("not a directory");
@@ -27920,7 +27927,7 @@ function canonicalizeSkillPath(field, path, baseDir) {
   try {
     const normalized = normalizePath(path, baseDir);
     lstatSync4(normalized);
-    const canonical = realpathSync3(normalized);
+    const canonical = realpathSync4(normalized);
     const stat = lstatSync4(canonical);
     if (!stat.isFile() && !stat.isDirectory())
       throw new Error("not a file or directory");
@@ -28001,13 +28008,13 @@ function requireNoFollowFlag() {
   return constants2.O_NOFOLLOW;
 }
 function readSkillSourceBytes(path, noFollowFlag) {
-  if (realpathSync3(path) !== path)
+  if (realpathSync4(path) !== path)
     throw new Error("skill source canonical path changed");
   const declaredStat = lstatSync4(path);
   if (declaredStat.isSymbolicLink())
     throw new Error("symlinked skill source");
   const sourcePath = declaredStat.isDirectory() ? join22(path, "SKILL.md") : path;
-  if (realpathSync3(sourcePath) !== sourcePath)
+  if (realpathSync4(sourcePath) !== sourcePath)
     throw new Error("skill file canonical path changed");
   const sourceStat = lstatSync4(sourcePath);
   if (sourceStat.isSymbolicLink() || !sourceStat.isFile())
@@ -44269,7 +44276,7 @@ function createPiJsonProjector(context) {
 
 // src/cli/run.ts
 import { dirname as dirname21, join as join37, resolve as resolve18, sep as sep4 } from "path";
-import { constants as fsConstants, existsSync as existsSync35, fstatSync as fstatSync2, openSync as openSync4, readFileSync as readFileSync28, readSync, readdirSync as readdirSync13, realpathSync as realpathSync4, statSync as statSync10, closeSync as closeSync3 } from "fs";
+import { constants as fsConstants, existsSync as existsSync35, fstatSync as fstatSync2, openSync as openSync4, readFileSync as readFileSync28, readSync, readdirSync as readdirSync13, realpathSync as realpathSync5, statSync as statSync10, closeSync as closeSync3 } from "fs";
 import { randomBytes } from "crypto";
 import { spawn as cpSpawn, execFileSync as execFileSync4, execSync as execSync5 } from "child_process";
 function formatBackgroundLaunchLine(opts) {
@@ -45873,7 +45880,7 @@ var init_run = __esm(() => {
     fstatSync: fstatSync2,
     readSync,
     closeSync: closeSync3,
-    realpathSync: realpathSync4,
+    realpathSync: realpathSync5,
     constants: fsConstants
   };
   OBLIGATION_MARKER_REGEX = /\b(TODO|FIXME|HACK|XXX|TEMP|WIP|NOTE\(release\))(?![\w-])/;
@@ -56492,7 +56499,7 @@ ${detail.missing.map((m) => `  - ${m}`).join(`
 // src/activation/workspace-lease.ts
 import { execFileSync as execFileSync5, spawnSync as spawnSync26 } from "child_process";
 import { createHash as createHash8 } from "crypto";
-import { appendFileSync as appendFileSync6, existsSync as existsSync47, linkSync, mkdirSync as mkdirSync18, readFileSync as readFileSync38, realpathSync as realpathSync5, renameSync as renameSync6, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync21 } from "fs";
+import { appendFileSync as appendFileSync6, existsSync as existsSync47, linkSync, mkdirSync as mkdirSync18, readFileSync as readFileSync38, realpathSync as realpathSync6, renameSync as renameSync6, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync21 } from "fs";
 import { dirname as dirname23, join as join49 } from "path";
 function workspaceIdentityFor(cwd) {
   return { repositoryRoot: cwd, worktreePath: cwd };
@@ -56560,7 +56567,7 @@ function selfHolder(probe = procLeaseProbe()) {
 function workspaceKey(workspace) {
   let resolved = workspace.worktreePath;
   try {
-    resolved = realpathSync5(workspace.worktreePath);
+    resolved = realpathSync6(workspace.worktreePath);
   } catch {}
   return createHash8("sha256").update(resolved).digest("hex").slice(0, 16);
 }
@@ -91493,7 +91500,7 @@ var init_native_activation_observability = __esm(() => {
     activation_starting: "Session construction has no legacy timeline event; run_start follows once construction succeeds.",
     output_validation_started: "Native result validation has no legacy timeline event kind.",
     output_validation_passed: "Native result validation has no legacy timeline event kind.",
-    output_validation_failed: "Native result validation has no legacy timeline event kind; terminal failure is run_complete.",
+    output_validation_failed: "Native result validation has no legacy timeline event kind; it is a mid-settle signal, not a terminal failure, so it leaves no timeline row and moves no status \u2014 the outcome rides on the run_complete the settle emits next and on the settlement validation.",
     activation_disposed: "In-memory session disposal after a terminal event has no legacy timeline event.",
     lease_released: "Workspace-lease teardown has no legacy timeline event.",
     lease_reconciled: "Lease reconciliation has no legacy timeline event.",
@@ -92442,6 +92449,10 @@ class NativeActivationHost {
   backgroundTaskAlive;
   backgroundTasks = new Map;
   backgroundWatch = new Map;
+  wakeDirty = new Set;
+  wakeFinalising = new Set;
+  wakeSettlement;
+  framedTurns = new Set;
   backgroundPollMs;
   now;
   sessionStatsTimeoutMs;
@@ -92471,6 +92482,7 @@ class NativeActivationHost {
     this.forensics = withFleetWake(deps.forensics ?? NULL_FORENSIC_SINK, () => this.wakeFleetWaiters());
     this.loadSdk = deps.loadSdk ?? loadPiSdk;
     this.now = deps.now ?? (() => Date.now());
+    this.wakeSettlement = deps.onWakeSettlement;
     this.sessionStatsTimeoutMs = deps.sessionStatsTimeoutMs;
     this.piVersion = deps.piVersion;
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
@@ -93225,7 +93237,11 @@ class NativeActivationHost {
       event
     });
     switch (event.type) {
+      case "turn_start":
+        this.noteWakeTurnStart(snapshot);
+        break;
       case "agent_start":
+        this.noteWakeTurnStart(snapshot);
         snapshot.state = "running";
         this.save(snapshot);
         emit("turn_started");
@@ -93237,9 +93253,20 @@ class NativeActivationHost {
         snapshot.turnCount = (snapshot.turnCount ?? 0) + 1;
         break;
       case "agent_settled":
+        const unframedWake = !this.framedTurns.has(snapshot.activationId) && this.wakeDirty.has(snapshot.activationId);
         snapshot.state = "settled";
         this.save(snapshot);
         this.releaseIfWriter(snapshot, "settled");
+        if (unframedWake) {
+          this.wakeDirty.delete(snapshot.activationId);
+          const record = this.registry.get(snapshot.activationId);
+          if (record && !this.wakeFinalising.has(snapshot.activationId)) {
+            this.wakeFinalising.add(snapshot.activationId);
+            this.finalizeWakeTurn(snapshot, record, emit).finally(() => {
+              this.wakeFinalising.delete(snapshot.activationId);
+            });
+          }
+        }
         break;
       case "auto_retry_start":
         emit("retry_started", { attempt: event.attempt, max_attempts: event.maxAttempts });
@@ -93432,6 +93459,7 @@ class NativeActivationHost {
     this.toolDurationWatch.delete(activationId);
   }
   async runToSettled(snapshot, session, initialPrompt, emit, record) {
+    this.framedTurns.add(snapshot.activationId);
     let settlementRecorded = false;
     const recordSettlementOnce = async () => {
       if (settlementRecorded)
@@ -93545,7 +93573,97 @@ class NativeActivationHost {
       return thrownResult;
     }
   }
+  noteWakeTurnStart(snapshot) {
+    if (snapshot.state === "settled")
+      this.wakeDirty.add(snapshot.activationId);
+  }
+  async finalizeWakeTurn(snapshot, record, emit) {
+    try {
+      const session = record.session;
+      await this.captureSessionStats(session, emit);
+      const last = lastAssistantMessage(session.messages);
+      if (last && (last.stopReason === "error" || last.stopReason === "aborted")) {
+        const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
+        snapshot.state = "failed";
+        this.save(snapshot);
+        emit("activation_failed", { error: detail, stop_reason: last.stopReason });
+        const failedResult = {
+          activationId: snapshot.activationId,
+          participantId: snapshot.participantId,
+          attemptId: snapshot.attemptId,
+          issueId: snapshot.issueId,
+          issueRef: snapshot.issueRef,
+          issueRevision: snapshot.issueRevision,
+          contractHash: snapshot.contractHash,
+          executionBindingId: snapshot.executionBindingId,
+          status: "failed",
+          output: undefined,
+          validation: { valid: false, errors: [detail] },
+          piSessionId: session.sessionId,
+          configuredModel: snapshot.configuredModel,
+          requestedModel: snapshot.requestedModel,
+          resolvedModel: snapshot.resolvedModel,
+          modelOverride: snapshot.modelOverride,
+          ...snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {},
+          thinkingOverride: snapshot.thinkingOverride,
+          fallbackUsed: false,
+          completedAt: this.now()
+        };
+        this.publishTerminalSettlement(snapshot, failedResult, record, emit);
+        this.notifyWakeSettlement(failedResult);
+        return;
+      }
+      const output = textOf(last);
+      emit("activation_settled");
+      emit("output_validation_started");
+      const pendingTasks = this.liveBackgroundTasks(snapshot.activationId);
+      const validation = pendingTasks.length > 0 ? { valid: false, errors: [`background tasks still running: ${pendingTasks.join(", ")}; resume the activation after they finish`] } : output.trim().length > 0 ? { valid: true } : { valid: false, errors: ["empty output: specialist produced no output"] };
+      if (validation.valid) {
+        emit("output_validation_passed");
+      } else {
+        emit("output_validation_failed", { errors: validation.errors });
+      }
+      snapshot.state = "settled";
+      this.save(snapshot);
+      emit("activation_completed", { pi_session_id: session.sessionId, output });
+      this.releaseIfWriter(snapshot, "completed");
+      const completedResult = {
+        activationId: snapshot.activationId,
+        participantId: snapshot.participantId,
+        attemptId: snapshot.attemptId,
+        issueId: snapshot.issueId,
+        issueRef: snapshot.issueRef,
+        issueRevision: snapshot.issueRevision,
+        contractHash: snapshot.contractHash,
+        executionBindingId: snapshot.executionBindingId,
+        status: pendingTasks.length > 0 ? "uncertain" : "completed",
+        output,
+        validation,
+        piSessionId: session.sessionId,
+        configuredModel: snapshot.configuredModel,
+        requestedModel: snapshot.requestedModel,
+        resolvedModel: snapshot.resolvedModel,
+        modelOverride: snapshot.modelOverride,
+        ...snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {},
+        thinkingOverride: snapshot.thinkingOverride,
+        fallbackUsed: false,
+        completedAt: this.now()
+      };
+      this.publishTerminalSettlement(snapshot, completedResult, record, emit);
+      this.notifyWakeSettlement(completedResult);
+    } catch {}
+  }
+  notifyWakeSettlement(result) {
+    const notify = this.wakeSettlement;
+    if (!notify)
+      return;
+    try {
+      notify(result);
+    } catch {}
+  }
   publishTerminalSettlement(snapshot, result, record, emit) {
+    this.wakeDirty.delete(snapshot.activationId);
+    this.framedTurns.delete(snapshot.activationId);
     try {
       const subject = {
         activationId: snapshot.activationId,
@@ -93969,6 +94087,9 @@ class NativeActivationHost {
       this.stopToolDurationWatch(activationId);
       this.toolDurationWarnMsByActivation.delete(activationId);
       this.forgetBackgroundTasks(activationId);
+      this.wakeDirty.delete(activationId);
+      this.wakeFinalising.delete(activationId);
+      this.framedTurns.delete(activationId);
       record.unsubscribe();
       record.session.dispose();
       record.snapshot.state = "stopped";
@@ -94329,7 +94450,6 @@ function statusForLifecycle(name, current) {
       return "done";
     case "activation_failed":
     case "activation_rejected":
-    case "output_validation_failed":
       return "error";
     default:
       return current;
@@ -94407,14 +94527,9 @@ function createActivationForensicSink(observability) {
       observability.upsertStatus(status, identityOf(state));
     }
   };
-  const aggregatedAtTerminal = new Set;
-  const aggregateTerminalMetrics = (activationId, attemptId) => {
-    const key = `${activationId}/${attemptId}`;
-    if (aggregatedAtTerminal.has(key))
-      return;
+  const aggregateTerminalMetrics = (activationId) => {
     try {
       observability.aggregateJobMetrics(activationId);
-      aggregatedAtTerminal.add(key);
     } catch {}
   };
   return {
@@ -94471,16 +94586,12 @@ function createActivationForensicSink(observability) {
         } else {
           writeProjection(event.activationId, state, timelineEvent?.type, timelineEvent ? [timelineEvent] : [], error);
         }
-        if (event.name === "activation_completed" || event.name === "activation_failed" || event.name === "activation_rejected" || event.name === "output_validation_failed") {
-          aggregateTerminalMetrics(event.activationId, event.attemptId);
+        if (event.name === "activation_completed" || event.name === "activation_failed" || event.name === "activation_rejected") {
+          aggregateTerminalMetrics(event.activationId);
         }
         if (event.name === "activation_disposed") {
-          aggregateTerminalMetrics(event.activationId, event.attemptId);
+          aggregateTerminalMetrics(event.activationId);
           states.delete(event.activationId);
-          for (const key of [...aggregatedAtTerminal]) {
-            if (key.startsWith(`${event.activationId}/`))
-              aggregatedAtTerminal.delete(key);
-          }
         }
       } catch {}
     },
@@ -94534,8 +94645,7 @@ var init_forensic_sink = __esm(() => {
   init_session_metrics_contract();
   ERROR_STATUS_LIFECYCLE = new Set([
     "activation_failed",
-    "activation_rejected",
-    "output_validation_failed"
+    "activation_rejected"
   ]);
 });
 
@@ -95284,6 +95394,10 @@ function buildV2Server(ctx, options) {
   const host = new NativeActivationHost({
     loader,
     authority: createFileAuthorityWriter(),
+    onWakeSettlement: (result) => {
+      pusher.settle(result);
+      pusher.pushCompletion(result.activationId).catch(() => {});
+    },
     forensics: wakeSuppressed() ? createActivationForensicSink(observability) : withChannelPush(createActivationForensicSink(observability), (frame) => channelSend(frame), (activationId) => snapshotDetail(host.inspect(activationId)))
   });
   const getHost = () => host;

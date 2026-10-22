@@ -1,7 +1,7 @@
 // src/specialist/loader.ts
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { parse as parseYaml } from 'yaml';
 import {
@@ -153,6 +153,15 @@ interface MergeOutcome {
   topLayer: { scope: ScanDirScope; source: ScanDirSource; filePath: string; deprecatedYaml: boolean };
   /** Warnings for blocked-field attempts across all override layers. */
   warnings: BlockedFieldWarning[];
+}
+
+/** Real path when it resolves, else the lexical path: used only to tell two layers apart. */
+function realpathOr(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
 }
 
 /** Resolve the home directory for the ~/.specialists/user/ layer. Null when unavailable. */
@@ -416,9 +425,14 @@ export class SpecialistLoader {
 
     // A same-named repo definition wins over the home definition. Warn naming
     // both paths instead of silently shadowing (pi skill rule).
+    //
+    // One case is NOT a shadow: several repos reach the home layer through a symlink
+    // (`<repo>/.specialists/user -> ~/.specialists/user`), so both layers hold the SAME file.
+    // Warning there would be noise about nothing, on every `sp list`. Compare real paths, not
+    // the lexical ones the scan dirs were built from.
     const homeHit = hits.find(h => h.dir.scope === 'home');
     const repoHit = hits.find(h => h.dir.scope === 'user');
-    if (homeHit && repoHit) {
+    if (homeHit && repoHit && realpathOr(repoHit.resolved.filePath) !== realpathOr(homeHit.resolved.filePath)) {
       process.stderr.write(
         `[specialists] warning: '${name}' resolved from repo '${repoHit.resolved.filePath}' shadows home '${homeHit.resolved.filePath}'\n`,
       );
