@@ -98,7 +98,9 @@ async function run() {
         '  specialists init --help     Bootstrap and project workflow setup',
         '',
         'Project model:',
-        '  Specialists are project-only. User-scope discovery is deprecated.',
+        '  Definitions resolve lowest to highest: package canonical, ~/.config/specialists/user.json,',
+        '  ~/.specialists/user/, then <repo>/.specialists/user/. A repo definition wins over a',
+        '  same-named home one and warns naming both.',
         '',
       ].join('\n'));
       return;

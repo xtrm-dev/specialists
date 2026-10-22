@@ -137,7 +137,8 @@ Load only the one you need: `references/chain-recipes.md` (role/gate recipes),
 `references/dispatch-preconditions.md` (git/workspace prerequisites). Operator surfaces:
 `references/kpi.md` (cost/stall analysis), `references/nodes.md` (NodeSupervisor),
 `references/script-class.md` (`sp script`/`sp serve`), `references/specialist-definitions.md`
-(definition authoring; helpers under `scripts/specialist-definitions/`). They stay
+(definition authoring; helpers under `scripts/specialist-definitions/`, including when a
+read-tier role needs `execution.lease_waiver` to run its own commands). They stay
 discoverable through this root without extra triggers, keeping the catalog small.
 
 ## What this skill deliberately does not own

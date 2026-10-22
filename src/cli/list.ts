@@ -106,7 +106,7 @@ function getRuleSetLine(templateSets: readonly string[]): string | null {
 // ── Types ──────────────────────────────────────────────────────────────────────
 export interface ParsedArgs {
   category?: string;
-  scope?: 'default' | 'user';
+  scope?: 'default' | 'user' | 'home' | 'package';
   json?: boolean;
   live?: boolean;
   showDead?: boolean;
@@ -312,9 +312,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
     if (token === '--scope') {
       const value = argv[++i];
-      if (value !== 'default' && value !== 'user') {
+      if (value !== 'default' && value !== 'user' && value !== 'home' && value !== 'package') {
         throw new ArgParseError(
-          `--scope must be "default" or "user", got: "${value ?? ''}"`
+          `--scope must be "default", "user", "home" or "package", got: "${value ?? ''}"`
         );
       }
       result.scope = value;
@@ -401,7 +401,7 @@ export async function run(): Promise<void> {
 
   console.log(`\n${bold(`Specialists (${specialists.length})`)}  ${dim(`specialists v${localVersion}`)}\n`);
   for (const s of specialists) {
-    const scopeTag = s.scope === 'default' ? green('[default]') : s.scope === 'package' ? blue('[package]') : yellow('[user]');
+    const scopeTag = s.scope === 'default' ? green('[default]') : s.scope === 'package' ? blue('[package]') : s.scope === 'home' ? cyan('[home]') : yellow('[user]');
     const permission = permissionBadge(s.permission_required);
     const keepAliveTag = s.interactive ? `  ${yellow('[keep-alive]')}` : '';
     const thinkingTag = s.thinking_level && s.thinking_level !== 'off'

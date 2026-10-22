@@ -17113,11 +17113,28 @@ var OPTIONALLY_ABSENT_PLACEHOLDERS = new Set([
 
 class TemplatePlaceholderError extends Error {
   unresolved;
-  constructor(unresolved) {
-    super(`task_template references unresolved placeholder(s): ${unresolved.map((n) => `$${n}`).join(", ")}`);
+  mustache;
+  constructor(unresolved, opts) {
+    const mustache = opts?.mustache ?? [];
+    const where = opts?.specialistName ? ` in specialist '${opts.specialistName}' (its definition: config/specialists/${opts.specialistName}.specialist.json, or the user override of the same name)` : "";
+    const dollarPart = unresolved.length ? unresolved.map((n) => `$${n}`).join(", ") : "";
+    const mustachePart = mustache.length ? mustache.map((n) => `{{${n}}}`).join(", ") : "";
+    const allParts = [dollarPart, mustachePart].filter(Boolean).join(", ");
+    const hint = mustache.length ? " — mustache {{...}} is not supported, use $name instead" : "";
+    super(`task_template references unresolved placeholder(s)${where}: ${allParts}${hint}`);
     this.name = "TemplatePlaceholderError";
     this.unresolved = unresolved;
+    this.mustache = mustache;
   }
+}
+var MUSTACHE_PLACEHOLDER_RE = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+function extractMustacheTokens(template) {
+  const seen = new Set;
+  for (const match of template.matchAll(MUSTACHE_PLACEHOLDER_RE)) {
+    if (!seen.has(match[1]))
+      seen.add(match[1]);
+  }
+  return [...seen];
 }
 function deriveSkillName(path) {
   const base = basename(path);
@@ -17206,9 +17223,14 @@ ${buildBeadBoundaryInstruction(cwd, input.worktreeBoundary)}`.trim() : input.fal
     if (variables[name] === undefined)
       variables[name] = "";
   }
+  const mustacheTokens = extractMustacheTokens(prompt.task_template);
   const unresolvedTokens = extractTemplateTokens(prompt.task_template).filter((name) => variables[name] === undefined);
-  if (unresolvedTokens.length > 0)
-    throw new TemplatePlaceholderError(unresolvedTokens);
+  if (mustacheTokens.length > 0 || unresolvedTokens.length > 0) {
+    throw new TemplatePlaceholderError(unresolvedTokens, {
+      mustache: mustacheTokens,
+      specialistName: specialist.metadata?.name
+    });
+  }
   let renderedTask = renderTemplate(prompt.task_template, variables);
   const taskTemplateComponent = measurePayloadComponent("task_template", "task_template", renderedTask);
   let mandatoryRulesBlock = "";
@@ -19651,7 +19673,8 @@ function isAuthFailureMessage(message) {
 // src/specialist/loader.ts
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename as basename3, join as join12 } from "node:path";
-import { existsSync as existsSync15 } from "node:fs";
+import { existsSync as existsSync15, realpathSync as realpathSync4 } from "node:fs";
+import { homedir as homedir6 } from "node:os";
 
 // node_modules/yaml/dist/index.js
 var composer = require_composer();
@@ -20412,17 +20435,42 @@ class SpecialistExtensionSourceCollisionError extends Error {
     this.name = "SpecialistExtensionSourceCollisionError";
   }
 }
+function realpathOr(path) {
+  try {
+    return realpathSync4(path);
+  } catch {
+    return path;
+  }
+}
+function resolveHomeDir() {
+  try {
+    const home = process.env.HOME?.trim() || homedir6();
+    return home ? home : null;
+  } catch {
+    return null;
+  }
+}
+
 class SpecialistLoader {
   cache = new Map;
   blockedFieldWarnings = new Map;
   projectDir;
+  homeDir;
   constructor(options = {}) {
     this.projectDir = options.projectDir ?? process.cwd();
+    this.homeDir = options.homeDir ?? resolveHomeDir();
+  }
+  getHomeUserDir() {
+    if (!this.homeDir)
+      return null;
+    return join12(this.homeDir, ".specialists", "user");
   }
   getScanDirs() {
+    const homeUserDir = this.getHomeUserDir();
     const dirs = [
       { path: join12(this.projectDir, ".specialists", "user"), scope: "user", source: "user" },
       { path: join12(this.projectDir, ".specialists", "user", "specialists"), scope: "user", source: "legacy" },
+      ...homeUserDir ? [{ path: homeUserDir, scope: "home", source: "home" }] : [],
       { path: join12(this.projectDir, "config", "specialists"), scope: "package", source: "package-fallback" },
       { path: resolveCanonicalAssetDir("specialists") ?? "", scope: "package", source: "package-live" }
     ];
@@ -20574,6 +20622,12 @@ class SpecialistLoader {
     const hits = this.findLayerHits(name);
     if (hits.length === 0)
       return null;
+    const homeHit = hits.find((h) => h.dir.scope === "home");
+    const repoHit = hits.find((h) => h.dir.scope === "user");
+    if (homeHit && repoHit && realpathOr(repoHit.resolved.filePath) !== realpathOr(homeHit.resolved.filePath)) {
+      process.stderr.write(`[specialists] warning: '${name}' resolved from repo '${repoHit.resolved.filePath}' shadows home '${homeHit.resolved.filePath}'
+`);
+    }
     const baseHit = hits[0];
     const baseContent = await readFile(baseHit.resolved.filePath, "utf-8");
     const base = await parseSpecialist(this.toJson(baseContent, baseHit.resolved.deprecatedYaml));
@@ -20641,7 +20695,8 @@ class SpecialistLoader {
     const seen = new Set;
     for (const dir of this.getScanDirs()) {
       const files = await readdir(dir.path).catch(() => []);
-      for (const file of files.filter((f) => f.endsWith(".specialist.json") || f.endsWith(".specialist.yaml"))) {
+      const specFiles = files.filter((f) => f.endsWith(".specialist.json") || f.endsWith(".specialist.yaml")).sort();
+      for (const file of specFiles) {
         const specialistName = basename3(file).replace(/\.specialist\.(json|yaml)$/, "");
         if (seen.has(specialistName))
           continue;
@@ -20685,6 +20740,7 @@ class SpecialistLoader {
         }
       }
     }
+    results.sort((a, b) => a.name.localeCompare(b.name));
     return results;
   }
   async get(name) {
@@ -20855,13 +20911,13 @@ import { existsSync as existsSync21 } from "node:fs";
 // src/activation/workitem-store.ts
 import { existsSync as existsSync16 } from "node:fs";
 import { createRequire as createRequire3 } from "node:module";
-import { homedir as homedir7 } from "node:os";
+import { homedir as homedir8 } from "node:os";
 import { dirname as dirname10, join as join14 } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // src/activation/authority-store.ts
 import { createRequire as createRequire2 } from "node:module";
-import { homedir as homedir6 } from "node:os";
+import { homedir as homedir7 } from "node:os";
 import { dirname as dirname9, join as join13 } from "node:path";
 var require2 = createRequire2(import.meta.url);
 function resolveAuthorityDbPath(env = process.env) {
@@ -20871,7 +20927,7 @@ function resolveAuthorityDbPath(env = process.env) {
   const legacy = (env.XTRM_STATE_DB ?? "").trim();
   if (legacy)
     return legacy;
-  return join13(homedir6(), ".xtrm", "state.db");
+  return join13(homedir7(), ".xtrm", "state.db");
 }
 var NULL_AUTHORITY_WRITER = { record: () => {}, remove: () => {} };
 
@@ -20894,7 +20950,7 @@ function resolveSubstrateFromGlobalPrefix(libDirs) {
   const candidates = uniqueExistingLibDirs(libDirs ?? [
     ...resolveGlobalNodeModulesDirs().map((modulesDir) => dirname10(modulesDir)),
     join14(runtimePrefix, "lib"),
-    join14(homedir7(), ".bun", "install", "global")
+    join14(homedir8(), ".bun", "install", "global")
   ]);
   for (const libDir of candidates) {
     try {
@@ -21701,11 +21757,11 @@ import { connect, createServer } from "node:net";
 
 // src/activation/transport/roster.ts
 import { existsSync as existsSync18, readdirSync as readdirSync4, readFileSync as readFileSync10 } from "node:fs";
-import { homedir as homedir8 } from "node:os";
+import { homedir as homedir9 } from "node:os";
 import { join as join16 } from "node:path";
 var SUPPORTED_PEER_PROTOCOL = 1;
 function defaultRosterDir() {
-  return join16(homedir8(), ".claude", "sessions");
+  return join16(homedir9(), ".claude", "sessions");
 }
 function procProbe() {
   let bootSeconds;
@@ -21987,7 +22043,7 @@ function isDeliveredStatus(status) {
 // src/activation/workspace-lease.ts
 import { execFileSync as execFileSync2, spawnSync as spawnSync4 } from "node:child_process";
 import { createHash as createHash5 } from "node:crypto";
-import { appendFileSync, existsSync as existsSync19, linkSync, mkdirSync as mkdirSync6, readFileSync as readFileSync11, realpathSync as realpathSync4, renameSync as renameSync3, rmSync as rmSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "node:fs";
+import { appendFileSync, existsSync as existsSync19, linkSync, mkdirSync as mkdirSync6, readFileSync as readFileSync11, realpathSync as realpathSync5, renameSync as renameSync3, rmSync as rmSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "node:fs";
 import { dirname as dirname11, join as join17 } from "node:path";
 
 // src/activation/types.ts
@@ -22100,7 +22156,7 @@ function selfHolder(probe = procLeaseProbe()) {
 function workspaceKey(workspace) {
   let resolved = workspace.worktreePath;
   try {
-    resolved = realpathSync4(workspace.worktreePath);
+    resolved = realpathSync5(workspace.worktreePath);
   } catch {}
   return createHash5("sha256").update(resolved).digest("hex").slice(0, 16);
 }
@@ -22218,6 +22274,7 @@ function acquire(request, probe = procLeaseProbe()) {
     activationId,
     attemptId,
     specialist: request.specialist,
+    ...request.leaseWaiver ? { leaseWaiver: true } : {},
     holder: selfHolder(probe),
     acquiredAtMs: Date.now()
   };
@@ -22514,7 +22571,7 @@ var NATIVE_LIFECYCLE_OBSERVABILITY_GAPS = Object.freeze({
   activation_starting: "Session construction has no legacy timeline event; run_start follows once construction succeeds.",
   output_validation_started: "Native result validation has no legacy timeline event kind.",
   output_validation_passed: "Native result validation has no legacy timeline event kind.",
-  output_validation_failed: "Native result validation has no legacy timeline event kind; terminal failure is run_complete.",
+  output_validation_failed: "Native result validation has no legacy timeline event kind; it is a mid-settle signal, not a terminal failure, so it leaves no timeline row and moves no status — the outcome rides on the run_complete the settle emits next and on the settlement validation.",
   activation_disposed: "In-memory session disposal after a terminal event has no legacy timeline event.",
   lease_released: "Workspace-lease teardown has no legacy timeline event.",
   lease_reconciled: "Lease reconciliation has no legacy timeline event.",
@@ -23649,6 +23706,9 @@ function extractTokenUsage(event) {
 }
 var WRITE_TIERS = new Set(["MEDIUM", "HIGH"]);
 var TOOL_DURATION_CHECK_INTERVAL_MS = 1e4;
+var LIVE_BACKGROUND_STATUSES = new Set(["running", "armed", "started"]);
+var TERMINAL_BACKGROUND_STATUSES = new Set(["completed", "failed", "stopped", "expired", "timed_out", "killed"]);
+var BACKGROUND_TASK_MAX_HOLD_MS = 2 * 60 * 60 * 1000 + 60000;
 function normalizeToolDurationWarnMs(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
@@ -23894,6 +23954,10 @@ class NativeActivationHost {
   backgroundTaskAlive;
   backgroundTasks = new Map;
   backgroundWatch = new Map;
+  wakeDirty = new Set;
+  wakeFinalising = new Set;
+  wakeSettlement;
+  framedTurns = new Set;
   backgroundPollMs;
   now;
   sessionStatsTimeoutMs;
@@ -23923,6 +23987,7 @@ class NativeActivationHost {
     this.forensics = withFleetWake(deps.forensics ?? NULL_FORENSIC_SINK, () => this.wakeFleetWaiters());
     this.loadSdk = deps.loadSdk ?? loadPiSdk;
     this.now = deps.now ?? (() => Date.now());
+    this.wakeSettlement = deps.onWakeSettlement;
     this.sessionStatsTimeoutMs = deps.sessionStatsTimeoutMs;
     this.piVersion = deps.piVersion;
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
@@ -24280,7 +24345,13 @@ class NativeActivationHost {
     }
     if (access === "write" || leaseWaiver) {
       try {
-        acquire({ workspace, activationId, attemptId, specialist: request.specialist });
+        acquire({
+          workspace,
+          activationId,
+          attemptId,
+          specialist: request.specialist,
+          ...leaseWaiver ? { leaseWaiver: true } : {}
+        });
       } catch (error) {
         if (error instanceof DispatchRejectedError) {
           emit("lease_denied", {
@@ -24548,7 +24619,7 @@ class NativeActivationHost {
       state: "starting",
       access,
       workspace,
-      leaseWaiver,
+      ...leaseWaiver ? { leaseWaiver: true } : {},
       piSessionId: session.sessionId,
       configuredModel,
       requestedModel,
@@ -24671,7 +24742,11 @@ class NativeActivationHost {
       event
     });
     switch (event.type) {
+      case "turn_start":
+        this.noteWakeTurnStart(snapshot);
+        break;
       case "agent_start":
+        this.noteWakeTurnStart(snapshot);
         snapshot.state = "running";
         this.save(snapshot);
         emit("turn_started");
@@ -24683,9 +24758,20 @@ class NativeActivationHost {
         snapshot.turnCount = (snapshot.turnCount ?? 0) + 1;
         break;
       case "agent_settled":
+        const unframedWake = !this.framedTurns.has(snapshot.activationId) && this.wakeDirty.has(snapshot.activationId);
         snapshot.state = "settled";
         this.save(snapshot);
         this.releaseIfWriter(snapshot, "settled");
+        if (unframedWake) {
+          this.wakeDirty.delete(snapshot.activationId);
+          const record = this.registry.get(snapshot.activationId);
+          if (record && !this.wakeFinalising.has(snapshot.activationId)) {
+            this.wakeFinalising.add(snapshot.activationId);
+            this.finalizeWakeTurn(snapshot, record, emit).finally(() => {
+              this.wakeFinalising.delete(snapshot.activationId);
+            });
+          }
+        }
         break;
       case "auto_retry_start":
         emit("retry_started", { attempt: event.attempt, max_attempts: event.maxAttempts });
@@ -24705,6 +24791,10 @@ class NativeActivationHost {
       case "tool_execution_end":
         this.noteToolEnd(snapshot.activationId, event);
         this.noteBackgroundTask(snapshot.activationId, event);
+        break;
+      case "message_start":
+      case "message_end":
+        this.noteBackgroundEnd(snapshot.activationId, event);
         break;
       default:
         break;
@@ -24742,14 +24832,51 @@ class NativeActivationHost {
     this.toolDurationWatch.set(snapshot.activationId, { tool, toolCallId, startMs: this.now(), warned: false, timer });
   }
   noteBackgroundTask(activationId, event) {
+    const details = resultDetails(event.result);
+    const taskId = typeof details?.task_id === "string" && details.task_id.length > 0 ? details.task_id : undefined;
+    const status = typeof details?.status === "string" ? details.status.toLowerCase() : undefined;
     const text = resultContent(event.result);
+    const label = text?.split(`
+`)[0]?.trim() || (typeof details?.summary === "string" ? details.summary : undefined);
+    if (taskId) {
+      const tasks = this.backgroundTasks.get(activationId) ?? new Map;
+      if (status !== undefined && TERMINAL_BACKGROUND_STATUSES.has(status)) {
+        const existing = tasks.get(taskId);
+        if (existing)
+          existing.live = false;
+        this.backgroundTasks.set(activationId, tasks);
+        return;
+      }
+      if (status === undefined || !LIVE_BACKGROUND_STATUSES.has(status))
+        return;
+      tasks.set(taskId, {
+        id: taskId,
+        label: label ?? taskId,
+        deadlineMs: this.now() + BACKGROUND_TASK_MAX_HOLD_MS,
+        live: true
+      });
+      this.backgroundTasks.set(activationId, tasks);
+      return;
+    }
     const pid = Number(text?.match(/^PID: (\d+)$/m)?.[1]);
     if (!text || !/^Status: running$/m.test(text) || !Number.isInteger(pid) || pid <= 0)
       return;
     const tasks = this.backgroundTasks.get(activationId) ?? new Map;
-    tasks.set(pid, text.split(`
-`)[0].trim());
+    tasks.set(`pid:${pid}`, { id: `pid:${pid}`, label: label ?? `pid ${pid}`, pid, live: true });
     this.backgroundTasks.set(activationId, tasks);
+  }
+  noteBackgroundEnd(activationId, event) {
+    const message = recordOf(event.message);
+    const details = recordOf(message?.details);
+    const taskId = typeof details?.task_id === "string" && details.task_id.length > 0 ? details.task_id : undefined;
+    if (!taskId)
+      return;
+    const status = typeof details?.status === "string" ? details.status.toLowerCase() : undefined;
+    if (status !== undefined && LIVE_BACKGROUND_STATUSES.has(status))
+      return;
+    const existing = this.backgroundTasks.get(activationId)?.get(taskId);
+    if (existing)
+      existing.live = false;
   }
   watchBackgroundTasks(snapshot) {
     if (this.backgroundWatch.has(snapshot.activationId))
@@ -24773,10 +24900,21 @@ class NativeActivationHost {
     const tasks = this.backgroundTasks.get(activationId);
     if (!tasks)
       return [];
-    for (const pid of tasks.keys())
-      if (!this.backgroundTaskAlive(pid))
-        tasks.delete(pid);
-    return [...tasks].map(([pid, label]) => `${label} (pid ${pid})`);
+    const nowMs = this.now();
+    for (const [key, ref] of tasks) {
+      if (!ref.live) {
+        tasks.delete(key);
+        continue;
+      }
+      if (ref.pid !== undefined) {
+        if (!this.backgroundTaskAlive(ref.pid))
+          tasks.delete(key);
+        continue;
+      }
+      if (ref.deadlineMs !== undefined && nowMs > ref.deadlineMs)
+        tasks.delete(key);
+    }
+    return [...tasks.values()].map((ref) => ref.pid !== undefined ? `${ref.label} (pid ${ref.pid})` : `${ref.label} (${ref.id})`);
   }
   noteToolEnd(activationId, event) {
     const watch = this.toolDurationWatch.get(activationId);
@@ -24826,6 +24964,7 @@ class NativeActivationHost {
     this.toolDurationWatch.delete(activationId);
   }
   async runToSettled(snapshot, session, initialPrompt, emit, record) {
+    this.framedTurns.add(snapshot.activationId);
     let settlementRecorded = false;
     const recordSettlementOnce = async () => {
       if (settlementRecorded)
@@ -24939,7 +25078,97 @@ class NativeActivationHost {
       return thrownResult;
     }
   }
+  noteWakeTurnStart(snapshot) {
+    if (snapshot.state === "settled")
+      this.wakeDirty.add(snapshot.activationId);
+  }
+  async finalizeWakeTurn(snapshot, record, emit) {
+    try {
+      const session = record.session;
+      await this.captureSessionStats(session, emit);
+      const last = lastAssistantMessage(session.messages);
+      if (last && (last.stopReason === "error" || last.stopReason === "aborted")) {
+        const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
+        snapshot.state = "failed";
+        this.save(snapshot);
+        emit("activation_failed", { error: detail, stop_reason: last.stopReason });
+        const failedResult = {
+          activationId: snapshot.activationId,
+          participantId: snapshot.participantId,
+          attemptId: snapshot.attemptId,
+          issueId: snapshot.issueId,
+          issueRef: snapshot.issueRef,
+          issueRevision: snapshot.issueRevision,
+          contractHash: snapshot.contractHash,
+          executionBindingId: snapshot.executionBindingId,
+          status: "failed",
+          output: undefined,
+          validation: { valid: false, errors: [detail] },
+          piSessionId: session.sessionId,
+          configuredModel: snapshot.configuredModel,
+          requestedModel: snapshot.requestedModel,
+          resolvedModel: snapshot.resolvedModel,
+          modelOverride: snapshot.modelOverride,
+          ...snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {},
+          thinkingOverride: snapshot.thinkingOverride,
+          fallbackUsed: false,
+          completedAt: this.now()
+        };
+        this.publishTerminalSettlement(snapshot, failedResult, record, emit);
+        this.notifyWakeSettlement(failedResult);
+        return;
+      }
+      const output = textOf(last);
+      emit("activation_settled");
+      emit("output_validation_started");
+      const pendingTasks = this.liveBackgroundTasks(snapshot.activationId);
+      const validation = pendingTasks.length > 0 ? { valid: false, errors: [`background tasks still running: ${pendingTasks.join(", ")}; resume the activation after they finish`] } : output.trim().length > 0 ? { valid: true } : { valid: false, errors: ["empty output: specialist produced no output"] };
+      if (validation.valid) {
+        emit("output_validation_passed");
+      } else {
+        emit("output_validation_failed", { errors: validation.errors });
+      }
+      snapshot.state = "settled";
+      this.save(snapshot);
+      emit("activation_completed", { pi_session_id: session.sessionId, output });
+      this.releaseIfWriter(snapshot, "completed");
+      const completedResult = {
+        activationId: snapshot.activationId,
+        participantId: snapshot.participantId,
+        attemptId: snapshot.attemptId,
+        issueId: snapshot.issueId,
+        issueRef: snapshot.issueRef,
+        issueRevision: snapshot.issueRevision,
+        contractHash: snapshot.contractHash,
+        executionBindingId: snapshot.executionBindingId,
+        status: pendingTasks.length > 0 ? "uncertain" : "completed",
+        output,
+        validation,
+        piSessionId: session.sessionId,
+        configuredModel: snapshot.configuredModel,
+        requestedModel: snapshot.requestedModel,
+        resolvedModel: snapshot.resolvedModel,
+        modelOverride: snapshot.modelOverride,
+        ...snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {},
+        thinkingOverride: snapshot.thinkingOverride,
+        fallbackUsed: false,
+        completedAt: this.now()
+      };
+      this.publishTerminalSettlement(snapshot, completedResult, record, emit);
+      this.notifyWakeSettlement(completedResult);
+    } catch {}
+  }
+  notifyWakeSettlement(result) {
+    const notify = this.wakeSettlement;
+    if (!notify)
+      return;
+    try {
+      notify(result);
+    } catch {}
+  }
   publishTerminalSettlement(snapshot, result, record, emit) {
+    this.wakeDirty.delete(snapshot.activationId);
+    this.framedTurns.delete(snapshot.activationId);
     try {
       const subject = {
         activationId: snapshot.activationId,
@@ -25037,7 +25266,8 @@ class NativeActivationHost {
             workspace: record.snapshot.workspace,
             activationId: record.snapshot.activationId,
             attemptId: record.snapshot.attemptId,
-            specialist: record.snapshot.specialist
+            specialist: record.snapshot.specialist,
+            ...record.snapshot.leaseWaiver ? { leaseWaiver: true } : {}
           });
         } catch (error) {
           if (error instanceof DispatchRejectedError) {
@@ -25362,6 +25592,9 @@ class NativeActivationHost {
       this.stopToolDurationWatch(activationId);
       this.toolDurationWarnMsByActivation.delete(activationId);
       this.forgetBackgroundTasks(activationId);
+      this.wakeDirty.delete(activationId);
+      this.wakeFinalising.delete(activationId);
+      this.framedTurns.delete(activationId);
       record.unsubscribe();
       record.session.dispose();
       record.snapshot.state = "stopped";
@@ -25496,6 +25729,12 @@ function defaultInlineTitle(specialist, contract) {
   const firstLine = problem.split(`
 `).map((s) => s.trim()).find(Boolean) ?? "";
   return `${specialist}: ${firstLine}`.trim();
+}
+function recordOf(value) {
+  return value !== null && typeof value === "object" ? value : undefined;
+}
+function resultDetails(result) {
+  return recordOf(recordOf(result)?.details);
 }
 function purposeExcerptFromContract(contract) {
   if (contract !== null && typeof contract === "object") {
@@ -25897,7 +26136,6 @@ function statusForLifecycle(name, current) {
       return "done";
     case "activation_failed":
     case "activation_rejected":
-    case "output_validation_failed":
       return "error";
     default:
       return current;
@@ -25912,8 +26150,7 @@ function statusForSessionEvent(type, current) {
 }
 var ERROR_STATUS_LIFECYCLE = new Set([
   "activation_failed",
-  "activation_rejected",
-  "output_validation_failed"
+  "activation_rejected"
 ]);
 function identityOf(state) {
   return { attemptId: state.attemptId, attemptNo: state.attemptNo };
@@ -25980,14 +26217,9 @@ function createActivationForensicSink(observability) {
       observability.upsertStatus(status, identityOf(state));
     }
   };
-  const aggregatedAtTerminal = new Set;
-  const aggregateTerminalMetrics = (activationId, attemptId) => {
-    const key = `${activationId}/${attemptId}`;
-    if (aggregatedAtTerminal.has(key))
-      return;
+  const aggregateTerminalMetrics = (activationId) => {
     try {
       observability.aggregateJobMetrics(activationId);
-      aggregatedAtTerminal.add(key);
     } catch {}
   };
   return {
@@ -26044,16 +26276,12 @@ function createActivationForensicSink(observability) {
         } else {
           writeProjection(event.activationId, state, timelineEvent?.type, timelineEvent ? [timelineEvent] : [], error);
         }
-        if (event.name === "activation_completed" || event.name === "activation_failed" || event.name === "activation_rejected" || event.name === "output_validation_failed") {
-          aggregateTerminalMetrics(event.activationId, event.attemptId);
+        if (event.name === "activation_completed" || event.name === "activation_failed" || event.name === "activation_rejected") {
+          aggregateTerminalMetrics(event.activationId);
         }
         if (event.name === "activation_disposed") {
-          aggregateTerminalMetrics(event.activationId, event.attemptId);
+          aggregateTerminalMetrics(event.activationId);
           states.delete(event.activationId);
-          for (const key of [...aggregatedAtTerminal]) {
-            if (key.startsWith(`${event.activationId}/`))
-              aggregatedAtTerminal.delete(key);
-          }
         }
       } catch {}
     },

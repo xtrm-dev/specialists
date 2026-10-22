@@ -131,10 +131,16 @@ describe('command-specific --help', () => {
     expect(out).toContain('zombie job detection');
   });
 
-  it('list --help describes project-only scope', () => {
+  it('list --help states the definition layers instead of claiming project-only scope', () => {
     const out = captureIndexHelp(['list', '--help']);
     expect(out).toContain('current project');
-    expect(out).toContain('project-only');
+    // SPECIALISTS-4323: ~/.specialists/user/ is a real layer, so help must name it and the
+    // repo-over-home precedence rather than describing user-scope discovery as deprecated.
+    expect(out).toContain('~/.specialists/user/');
+    expect(out).toContain('<repo>/.specialists/user/');
+    expect(out).toContain('wins over a');
+    expect(out).not.toContain('project-only');
+    expect(out).not.toContain('User-scope discovery is deprecated');
     expect(out).not.toContain('--scope <project|user>');
   });
 

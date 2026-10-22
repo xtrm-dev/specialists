@@ -379,7 +379,7 @@ function readOnlySpec(executionExtra: Record<string, unknown> = {}) {
         bare: false,
         ...executionExtra,
       },
-      prompt: { system: 'You are the researcher.', task_template: 'Do: {{bead_id}}' },
+      prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
     },
   };
 }

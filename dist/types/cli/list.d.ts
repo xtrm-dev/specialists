@@ -2,7 +2,7 @@ export declare function getChainPositionBadge(name: string): string | null;
 export declare function computeMedianElapsedMs(elapsedMs: readonly number[]): number | null;
 export interface ParsedArgs {
     category?: string;
-    scope?: 'default' | 'user';
+    scope?: 'default' | 'user' | 'home' | 'package';
     json?: boolean;
     live?: boolean;
     showDead?: boolean;

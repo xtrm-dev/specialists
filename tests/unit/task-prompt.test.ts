@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
-import { renderTaskPrompt, buildSkillPrefix, deriveSkillName } from '../../src/specialist/task-prompt.js';
+import { renderTaskPrompt, buildSkillPrefix, deriveSkillName, extractMustacheTokens, TemplatePlaceholderError } from '../../src/specialist/task-prompt.js';
 import { buildBeadContext, type BeadRecord } from '../../src/specialist/beads.js';
 import type { Specialist } from '../../src/specialist/schema.js';
 
@@ -65,6 +65,68 @@ describe('renderTaskPrompt', () => {
     const ok = renderTaskPrompt({ ...base, specialist: spec('bead=$bead_id cwd=$cwd') });
     expect(ok.initial_prompt).toContain('bead=unitAI-6639v');
     expect(ok.initial_prompt).toContain('cwd=/repo');
+  });
+
+  // SPECIALISTS-4327: mustache {{name}} is never substituted — refuse, never leak literally.
+  it('refuses a mustache placeholder instead of leaking literal braces to the model', () => {
+    let error: unknown;
+    try {
+      renderTaskPrompt({ ...base, specialist: spec('Run the probe for {{bead_id}}') });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(TemplatePlaceholderError);
+    const message = (error as Error).message;
+    // Names the offending token in the syntax the author wrote...
+    expect(message).toContain('{{bead_id}}');
+    expect(message).toContain('bead_id');
+    // ...and the definition file, so the author can fix it without reading the renderer.
+    expect(message).toContain('chain-coordinator');
+    expect(message).toContain('.specialist.json');
+    // Points at the supported syntax.
+    expect(message).toContain('$name');
+  });
+
+  it('refuses mustache with inner whitespace and dedups repeats', () => {
+    expect(extractMustacheTokens('{{ bead_id }} and {{bead_id}}')).toEqual(['bead_id']);
+    expect(() => renderTaskPrompt({ ...base, specialist: spec('{{ bead_id }}') }))
+      .toThrow(/\{\{bead_id\}\}/);
+  });
+
+  it('names both syntaxes when $unknown and {{mustache}} co-occur', () => {
+    let error: unknown;
+    try {
+      renderTaskPrompt({ ...base, specialist: spec('$nope and {{bead_id}}') });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(TemplatePlaceholderError);
+    expect((error as Error).message).toContain('$nope');
+    expect((error as Error).message).toContain('{{bead_id}}');
+    expect((error as TemplatePlaceholderError).mustache).toEqual(['bead_id']);
+    expect((error as TemplatePlaceholderError).unresolved).toContain('nope');
+  });
+
+  it('still renders JSON object literals and fenced code containing braces', () => {
+    const out = renderTaskPrompt({
+      ...base,
+      specialist: spec('Run the probe for $bead_id with config {"key": "value", "count": 2}'),
+    });
+    expect(out.initial_prompt).toContain('Run the probe for unitAI-6639v');
+    expect(out.initial_prompt).toContain('{"key": "value", "count": 2}');
+  });
+
+  it('still renders a fenced JSON block without treating braces as placeholders', () => {
+    const template = '```json\n{"outer": {"inner": 1}}\n```\nbead=$bead_id';
+    const out = renderTaskPrompt({ ...base, specialist: spec(template) });
+    expect(out.initial_prompt).toContain('{"outer": {"inner": 1}}');
+    expect(out.initial_prompt).toContain('bead=unitAI-6639v');
+  });
+
+  it('extractMustacheTokens ignores non-placeholder braces', () => {
+    expect(extractMustacheTokens('config {"key": "value"} and {} and {{}}')).toEqual([]);
+    expect(extractMustacheTokens('no braces here $bead_id')).toEqual([]);
+    expect(extractMustacheTokens('{{a}} {{b}} {{a}}')).toEqual(['a', 'b']);
   });
 
   it('resolves absent execution-only placeholders to empty instead of leaking $name', () => {
@@ -319,5 +381,54 @@ describe('renderTaskPrompt — surface-specific skill prefix baked into initial_
     expect(out.initial_prompt.startsWith('/skill:using-specialists\n\n')).toBe(true);
     expect(out.initial_prompt.endsWith('DIFF CONTEXT')).toBe(true);
     expect(out.prompt_hash).toBe(createHash('sha256').update(out.initial_prompt).digest('hex').slice(0, 16));
+  });
+});
+
+// SPECIALISTS-4331 Phase 2a: $issue_ref alias beside $bead_id.
+describe('renderTaskPrompt — $issue_ref alias (SPECIALISTS-4331)', () => {
+  it('renders $issue_ref with exactly the same value as $bead_id (task-prompt path)', () => {
+    const out = renderTaskPrompt({ ...base, specialist: spec('bead=$bead_id issue=$issue_ref') });
+    expect(out.initial_prompt).toContain(`bead=${BEAD.id} issue=${BEAD.id}`);
+    expect(out.variables.bead_id).toBe(BEAD.id);
+    expect(out.variables.issue_ref).toBe(BEAD.id);
+    expect(out.variables.issue_ref).toBe(out.variables.bead_id);
+  });
+
+  it('exposes identical values in the system-prompt path (beadTemplateVariables)', () => {
+    const out = renderTaskPrompt({ ...base, specialist: spec('$prompt') });
+    expect(out.beadTemplateVariables.bead_id).toBe(BEAD.id);
+    expect(out.beadTemplateVariables.issue_ref).toBe(BEAD.id);
+    expect(out.beadTemplateVariables.issue_ref).toBe(out.beadTemplateVariables.bead_id);
+  });
+
+  it('keeps both spellings empty together when no bead is bound (no silent divergence)', () => {
+    const out = renderTaskPrompt({
+      cwd: '/repo',
+      specialist: spec('bead=$bead_id issue=$issue_ref'),
+      fallbackPrompt: () => 'ad-hoc task',
+    });
+    // No beadId: both resolve to empty, never one populated and the other empty.
+    expect(out.variables.bead_id).toBe('');
+    expect(out.variables.issue_ref).toBe('');
+  });
+
+  it('still refuses an unknown $token, naming it', () => {
+    expect(() => renderTaskPrompt({ ...base, specialist: spec('ok=$issue_ref bad=$nope') }))
+      .toThrow(/unresolved placeholder.*\$nope/);
+  });
+
+  it('migrated shipped templates (test-engineer, service-knowledge-sync) still render', async () => {
+    const { readFileSync } = await import('node:fs');
+    for (const name of ['test-engineer', 'service-knowledge-sync']) {
+      const cfg = JSON.parse(readFileSync(`config/specialists/${name}.specialist.json`, 'utf-8'));
+      const template = cfg.specialist.prompt.task_template as string;
+      expect(template).toContain('$issue_ref');
+      expect(template).not.toContain('$bead_id');
+      const s = spec(template);
+      const out = renderTaskPrompt({ ...base, specialist: s });
+      expect(out.initial_prompt).toContain(BEAD.id);
+      expect(out.initial_prompt).not.toMatch(/\$issue_ref/);
+      expect(out.initial_prompt).not.toMatch(/\$bead_id/);
+    }
   });
 });

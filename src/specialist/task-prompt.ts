@@ -22,6 +22,7 @@ const SKILL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const OPTIONALLY_ABSENT_PLACEHOLDERS = new Set([
   'bead_context',
   'gitnexus_summary',
+  'issue_ref',
   'obligations_diff',
   'resolved_tool_contract',
   'reused_worktree_awareness',
@@ -34,14 +35,46 @@ const OPTIONALLY_ABSENT_PLACEHOLDERS = new Set([
  * A task_template referenced a `$name` that no caller provides and that is not a
  * known execution-only placeholder. Fail loud: a complete initial prompt is the
  * renderer's contract, and a silent literal `$name` handed to the model is a leak.
+ *
+ * Mustache `{{name}}` is never substituted (SPECIALISTS-4327): any `{{identifier}}`
+ * in the template is a config bug and is refused here with the `{{...}}` spelling
+ * so the author sees the syntax they wrote. `specialistName` names the definition
+ * file (`config/specialists/<name>.specialist.json` or a user override) so the
+ * author can fix it without reading the renderer.
  */
 export class TemplatePlaceholderError extends Error {
   readonly unresolved: string[];
-  constructor(unresolved: string[]) {
-    super(`task_template references unresolved placeholder(s): ${unresolved.map((n) => `$${n}`).join(', ')}`);
+  readonly mustache: string[];
+  constructor(unresolved: string[], opts?: { mustache?: string[]; specialistName?: string }) {
+    const mustache = opts?.mustache ?? [];
+    const where = opts?.specialistName
+      ? ` in specialist '${opts.specialistName}' (its definition: config/specialists/${opts.specialistName}.specialist.json, or the user override of the same name)`
+      : '';
+    const dollarPart = unresolved.length ? unresolved.map((n) => `$${n}`).join(', ') : '';
+    const mustachePart = mustache.length ? mustache.map((n) => `{{${n}}}`).join(', ') : '';
+    const allParts = [dollarPart, mustachePart].filter(Boolean).join(', ');
+    const hint = mustache.length ? ' — mustache {{...}} is not supported, use $name instead' : '';
+    super(`task_template references unresolved placeholder(s)${where}: ${allParts}${hint}`);
     this.name = 'TemplatePlaceholderError';
     this.unresolved = unresolved;
+    this.mustache = mustache;
   }
+}
+
+const MUSTACHE_PLACEHOLDER_RE = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+
+/**
+ * The unique `{{name}}` tokens referenced by a template, in first-occurrence order.
+ * Anchored to placeholder position (double braces around a bare identifier), so
+ * JSON object literals (`{"key": "value"}`), code fences and other literal braces
+ * never match: only the mustache syntax an author most plausibly writes is refused.
+ */
+export function extractMustacheTokens(template: string): string[] {
+  const seen = new Set<string>();
+  for (const match of template.matchAll(MUSTACHE_PLACEHOLDER_RE)) {
+    if (!seen.has(match[1])) seen.add(match[1]);
+  }
+  return [...seen];
 }
 
 export type Surface = 'pi' | 'claude' | 'codex';
@@ -199,11 +232,12 @@ export function renderTaskPrompt(input: TaskPromptInput): TaskPromptResult {
     ...(input.gitnexusSummary ? { gitnexus_summary: input.gitnexusSummary } : {}),
   };
   const beadVariables: Record<string, string> = beadId
-    ? { bead_context: resolvedPrompt, bead_id: beadId }
+    ? { bead_context: resolvedPrompt, bead_id: beadId, issue_ref: beadId }
     : {};
   const beadTemplateVariables: Record<string, string> = {
     prompt: resolvedPrompt,
     bead_id: beadId ?? '',
+    issue_ref: beadId ?? '',
     ...lineageVariables,
   };
   const variables: Record<string, string> = {
@@ -211,6 +245,7 @@ export function renderTaskPrompt(input: TaskPromptInput): TaskPromptResult {
     cwd,
     pre_script_output: input.preScriptOutput ?? '',
     bead_id: beadId ?? '',
+    issue_ref: beadId ?? '',
     ...lineageVariables,
     ...(input.variables ?? {}),
     ...beadVariables,
@@ -227,9 +262,18 @@ export function renderTaskPrompt(input: TaskPromptInput): TaskPromptResult {
 
   // Shared post-render invariant: no unresolved `$name` may reach the model. Any
   // token in the template that is still missing here is a config bug -> refuse.
+  // Mustache `{{name}}` is refused unconditionally (never substituted): it is not
+  // a `$name` token so the guard below cannot see it, and leaking it literally
+  // hands the model a config bug as prose (SPECIALISTS-4327).
+  const mustacheTokens = extractMustacheTokens(prompt.task_template);
   const unresolvedTokens = extractTemplateTokens(prompt.task_template)
     .filter((name) => variables[name] === undefined);
-  if (unresolvedTokens.length > 0) throw new TemplatePlaceholderError(unresolvedTokens);
+  if (mustacheTokens.length > 0 || unresolvedTokens.length > 0) {
+    throw new TemplatePlaceholderError(unresolvedTokens, {
+      mustache: mustacheTokens,
+      specialistName: specialist.metadata?.name,
+    });
+  }
 
   // ONE pass over the original template. The previous two-pass render substituted
   // $prompt with the bead body and then re-scanned the RESULT, so a bead whose text

@@ -10,10 +10,11 @@ import { leaseScopeFor } from '../../../src/activation/workspace-reconcile.js';
 /**
  * SPECIALISTS-23. The workspace lease fences native activations against each other, but the
  * coordinator is not a participant in it: a Claude Code session edits through its own tools
- * without acquiring or inspecting the lease. Because native activations run IN PLACE, a
- * coordinator edit and a write-tier activation's edit to the same file can interleave and
- * silently lose one of the two writes. That is the accepted cost of run-in-place; the point
- * of this hook is that the loss stops being silent.
+ * without acquiring or inspecting the lease. Write-tier activations run in per-Issue worktrees
+ * (SPECIALISTS-4310) and so do waived read-tier observers, so the hook is silent in the common
+ * case; it fires when the lease is held on the SAME workspace the coordinator is editing, where
+ * a coordinator edit and the activation's edit to one file can interleave and silently lose one
+ * of the two writes. The point of this hook is that the loss stops being silent.
  *
  * These tests run the REAL hook script, not a reimplementation of it.
  */
@@ -66,6 +67,39 @@ describe('coordinator lease warning hook (SPECIALISTS-23)', () => {
 
     // Read-only: the hook must not have touched the lease record.
     expect(readFileSync(leaseFile, 'utf8')).toBe(before);
+  });
+
+  it('names the waiver when a read-tier observer holds the lease', () => {
+    const root = workspace();
+    const scope = leaseScopeFor(root);
+    acquire({
+      workspace: scope,
+      activationId: 'act:watcher-1',
+      attemptId: 'att:watcher-1:1',
+      specialist: 'deploy-watcher',
+      leaseWaiver: true,
+    });
+
+    const { stdout, status } = runHook(root);
+
+    expect(status).toBe(0);
+    const payload = JSON.parse(stdout) as { systemMessage?: string };
+    expect(payload.systemMessage).toContain('deploy-watcher');
+    expect(payload.systemMessage).toContain('read-tier waiver');
+    // Still a warning, never a block.
+    expect((payload as { permissionDecision?: string }).permissionDecision).toBeUndefined();
+  });
+
+  it('does not claim a waiver on an ordinary write-tier lease', () => {
+    const root = workspace();
+    const scope = leaseScopeFor(root);
+    acquire({ workspace: scope, activationId: 'act:writer-1', attemptId: 'att:writer-1:1', specialist: 'executor' });
+
+    const { stdout } = runHook(root);
+
+    const payload = JSON.parse(stdout) as { systemMessage?: string };
+    expect(payload.systemMessage).toContain('holds the workspace lease on');
+    expect(payload.systemMessage).not.toContain('waiver');
   });
 
   it('is silent when no activation holds the workspace', () => {

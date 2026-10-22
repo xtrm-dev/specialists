@@ -1753,6 +1753,10 @@ describe('permission-guard CLI surface', () => {
   });
 
   it('loads nothing extra when opted out (byte-for-byte unchanged)', async () => {
+    // The spawn env inherits process.env, so an ambient tier variable (a specialist
+    // session running this suite sets it) would satisfy the assertion below without the
+    // guard doing anything. Clear it to test the opted-out path itself.
+    delete process.env.PI_SPECIALIST_PERMISSION_TIER;
     process.env.SPECIALISTS_PERMISSION_GUARD = '0';
     const { getPermissionGuardExtensionPath } = await import('../../../src/pi/permission-guard-extension.js');
     const session = await PiAgentSession.create({ model: 'gemini', permissionLevel: 'READ_ONLY' });

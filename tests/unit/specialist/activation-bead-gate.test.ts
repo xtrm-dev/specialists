@@ -140,7 +140,7 @@ describe('NativeActivationHost — bead gate admission', () => {
         specialist: {
           metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },
           execution: { model: 'testprov/test-model', permission_required: 'READ_ONLY', response_format: 'text', output_type: 'research', bare: false },
-          prompt: { system: 'You are the researcher.', task_template: 'Do: {{bead_id}}' },
+          prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
         },
       }) } as never,
       workItems: testWorkItems({ description: (bead as { description?: string }).description }),
@@ -277,7 +277,7 @@ describe('extractPurposeExcerpt (unitAI-uvg4j)', () => {
       specialist: {
         metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },
         execution: { model: 'testprov/test-model', permission_required: 'READ_ONLY', response_format: 'text', output_type: 'research', bare: false },
-        prompt: { system: 'You are the researcher.', task_template: 'Do: {{bead_id}}' },
+        prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
       },
     }) } as never;
     const session = {
