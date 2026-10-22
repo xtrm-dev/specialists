@@ -12195,7 +12195,8 @@ var init_project_pack_skill_resolver = __esm(() => {
 // src/specialist/loader.ts
 import { readdir, readFile, stat } from "fs/promises";
 import { basename, join as join5 } from "path";
-import { existsSync as existsSync6 } from "fs";
+import { existsSync as existsSync6, realpathSync as realpathSync2 } from "fs";
+import { homedir as homedir3 } from "os";
 async function checkStaleness(summary) {
   if (!summary.filestoWatch?.length || !summary.updated)
     return "OK";
@@ -12214,18 +12215,42 @@ async function checkStaleness(summary) {
   }
   return "OK";
 }
+function realpathOr(path) {
+  try {
+    return realpathSync2(path);
+  } catch {
+    return path;
+  }
+}
+function resolveHomeDir() {
+  try {
+    const home = process.env.HOME?.trim() || homedir3();
+    return home ? home : null;
+  } catch {
+    return null;
+  }
+}
 
 class SpecialistLoader {
   cache = new Map;
   blockedFieldWarnings = new Map;
   projectDir;
+  homeDir;
   constructor(options = {}) {
     this.projectDir = options.projectDir ?? process.cwd();
+    this.homeDir = options.homeDir ?? resolveHomeDir();
+  }
+  getHomeUserDir() {
+    if (!this.homeDir)
+      return null;
+    return join5(this.homeDir, ".specialists", "user");
   }
   getScanDirs() {
+    const homeUserDir = this.getHomeUserDir();
     const dirs = [
       { path: join5(this.projectDir, ".specialists", "user"), scope: "user", source: "user" },
       { path: join5(this.projectDir, ".specialists", "user", "specialists"), scope: "user", source: "legacy" },
+      ...homeUserDir ? [{ path: homeUserDir, scope: "home", source: "home" }] : [],
       { path: join5(this.projectDir, "config", "specialists"), scope: "package", source: "package-fallback" },
       { path: resolveCanonicalAssetDir("specialists") ?? "", scope: "package", source: "package-live" }
     ];
@@ -12377,6 +12402,12 @@ class SpecialistLoader {
     const hits = this.findLayerHits(name);
     if (hits.length === 0)
       return null;
+    const homeHit = hits.find((h) => h.dir.scope === "home");
+    const repoHit = hits.find((h) => h.dir.scope === "user");
+    if (homeHit && repoHit && realpathOr(repoHit.resolved.filePath) !== realpathOr(homeHit.resolved.filePath)) {
+      process.stderr.write(`[specialists] warning: '${name}' resolved from repo '${repoHit.resolved.filePath}' shadows home '${homeHit.resolved.filePath}'
+`);
+    }
     const baseHit = hits[0];
     const baseContent = await readFile(baseHit.resolved.filePath, "utf-8");
     const base = await parseSpecialist(this.toJson(baseContent, baseHit.resolved.deprecatedYaml));
@@ -12444,7 +12475,8 @@ class SpecialistLoader {
     const seen = new Set;
     for (const dir of this.getScanDirs()) {
       const files = await readdir(dir.path).catch(() => []);
-      for (const file of files.filter((f) => f.endsWith(".specialist.json") || f.endsWith(".specialist.yaml"))) {
+      const specFiles = files.filter((f) => f.endsWith(".specialist.json") || f.endsWith(".specialist.yaml")).sort();
+      for (const file of specFiles) {
         const specialistName = basename(file).replace(/\.specialist\.(json|yaml)$/, "");
         if (seen.has(specialistName))
           continue;
@@ -12488,6 +12520,7 @@ class SpecialistLoader {
         }
       }
     }
+    results.sort((a, b) => a.name.localeCompare(b.name));
     return results;
   }
   async get(name) {
@@ -20622,8 +20655,8 @@ function parseArgs2(argv) {
     }
     if (token === "--scope") {
       const value = argv[++i];
-      if (value !== "default" && value !== "user") {
-        throw new ArgParseError(`--scope must be "default" or "user", got: "${value ?? ""}"`);
+      if (value !== "default" && value !== "user" && value !== "home" && value !== "package") {
+        throw new ArgParseError(`--scope must be "default", "user", "home" or "package", got: "${value ?? ""}"`);
       }
       result.scope = value;
       continue;
@@ -20693,7 +20726,7 @@ async function run4() {
 ${bold2(`Specialists (${specialists.length})`)}  ${dim2(`specialists v${localVersion}`)}
 `);
   for (const s of specialists) {
-    const scopeTag = s.scope === "default" ? green("[default]") : s.scope === "package" ? blue("[package]") : yellow2("[user]");
+    const scopeTag = s.scope === "default" ? green("[default]") : s.scope === "package" ? blue("[package]") : s.scope === "home" ? cyan("[home]") : yellow2("[user]");
     const permission = permissionBadge(s.permission_required);
     const keepAliveTag = s.interactive ? `  ${yellow2("[keep-alive]")}` : "";
     const thinkingTag = s.thinking_level && s.thinking_level !== "off" ? `  ${dim2(`thinking:${s.thinking_level}`)}` : "";
@@ -21066,6 +21099,14 @@ function summarizePayloadBreakdown(components) {
 // src/specialist/task-prompt.ts
 import { basename as basename3, dirname as dirname6 } from "path";
 import { createHash as createHash2 } from "crypto";
+function extractMustacheTokens(template) {
+  const seen = new Set;
+  for (const match of template.matchAll(MUSTACHE_PLACEHOLDER_RE)) {
+    if (!seen.has(match[1]))
+      seen.add(match[1]);
+  }
+  return [...seen];
+}
 function deriveSkillName(path) {
   const base = basename3(path);
   if (base === "SKILL.md")
@@ -21153,9 +21194,14 @@ ${buildBeadBoundaryInstruction(cwd, input.worktreeBoundary)}`.trim() : input.fal
     if (variables[name] === undefined)
       variables[name] = "";
   }
+  const mustacheTokens = extractMustacheTokens(prompt.task_template);
   const unresolvedTokens = extractTemplateTokens(prompt.task_template).filter((name) => variables[name] === undefined);
-  if (unresolvedTokens.length > 0)
-    throw new TemplatePlaceholderError(unresolvedTokens);
+  if (mustacheTokens.length > 0 || unresolvedTokens.length > 0) {
+    throw new TemplatePlaceholderError(unresolvedTokens, {
+      mustache: mustacheTokens,
+      specialistName: specialist.metadata?.name
+    });
+  }
   let renderedTask = renderTemplate(prompt.task_template, variables);
   const taskTemplateComponent = measurePayloadComponent("task_template", "task_template", renderedTask);
   let mandatoryRulesBlock = "";
@@ -21199,7 +21245,7 @@ ${mandatoryRulesBlock}`;
     resolvedPrompt
   };
 }
-var MANDATORY_RULES_TOKEN_LIMIT = 2400, SKILL_NAME_PATTERN, OPTIONALLY_ABSENT_PLACEHOLDERS, TemplatePlaceholderError;
+var MANDATORY_RULES_TOKEN_LIMIT = 2400, SKILL_NAME_PATTERN, OPTIONALLY_ABSENT_PLACEHOLDERS, TemplatePlaceholderError, MUSTACHE_PLACEHOLDER_RE;
 var init_task_prompt = __esm(() => {
   init_templateEngine();
   init_mandatory_rules();
@@ -21217,12 +21263,21 @@ var init_task_prompt = __esm(() => {
   ]);
   TemplatePlaceholderError = class TemplatePlaceholderError extends Error {
     unresolved;
-    constructor(unresolved) {
-      super(`task_template references unresolved placeholder(s): ${unresolved.map((n) => `$${n}`).join(", ")}`);
+    mustache;
+    constructor(unresolved, opts) {
+      const mustache = opts?.mustache ?? [];
+      const where = opts?.specialistName ? ` in specialist '${opts.specialistName}' (its definition: config/specialists/${opts.specialistName}.specialist.json, or the user override of the same name)` : "";
+      const dollarPart = unresolved.length ? unresolved.map((n) => `$${n}`).join(", ") : "";
+      const mustachePart = mustache.length ? mustache.map((n) => `{{${n}}}`).join(", ") : "";
+      const allParts = [dollarPart, mustachePart].filter(Boolean).join(", ");
+      const hint = mustache.length ? " \u2014 mustache {{...}} is not supported, use $name instead" : "";
+      super(`task_template references unresolved placeholder(s)${where}: ${allParts}${hint}`);
       this.name = "TemplatePlaceholderError";
       this.unresolved = unresolved;
+      this.mustache = mustache;
     }
   };
+  MUSTACHE_PLACEHOLDER_RE = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
 });
 
 // src/cli/render-task.ts
@@ -21800,7 +21855,7 @@ function printGenericSection(title, color, value) {
   console.log(formatValue(value));
 }
 function printHeader(summary, model = summary.model) {
-  const scope = summary.scope === "default" ? green2("[default]") : summary.scope === "package" ? blue2("[package]") : yellow3("[user]");
+  const scope = summary.scope === "default" ? green2("[default]") : summary.scope === "package" ? blue2("[package]") : summary.scope === "home" ? cyan2("[home]") : yellow3("[user]");
   const source = dim3(summary.source);
   console.log();
   console.log(`${bold3(cyan2(summary.name))} ${scope} ${permissionBadge2(summary.permission_required)} ${source}`);
@@ -21819,7 +21874,7 @@ function printCatalog(summaries) {
   console.log(bold3(`Specialists catalog (${rows.length})`));
   console.log();
   for (const summary of rows) {
-    const scope = summary.scope === "default" ? green2("[default]") : summary.scope === "package" ? blue2("[package]") : yellow3("[user]");
+    const scope = summary.scope === "default" ? green2("[default]") : summary.scope === "package" ? blue2("[package]") : summary.scope === "home" ? cyan2("[home]") : yellow3("[user]");
     const keepAlive = summary.interactive ? yellow3("[keep-alive]") : dim3("[single-turn]");
     console.log(`${cyan2(summary.name)} ${scope} ${permissionBadge2(summary.permission_required)} ${keepAlive} ${dim3(summary.source)}`);
     console.log(`${dim3("  model:")} ${summary.model}`);
@@ -22095,7 +22150,7 @@ var init_models = __esm(() => {
 
 // src/pi/native-specialists-registration.ts
 import { existsSync as existsSync13, mkdirSync as mkdirSync7, readFileSync as readFileSync12, writeFileSync as writeFileSync6 } from "fs";
-import { homedir as homedir3 } from "os";
+import { homedir as homedir4 } from "os";
 import { dirname as dirname7, join as join14, resolve as resolve5 } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
 function getNativeSpecialistsExtensionPath() {
@@ -22107,7 +22162,7 @@ function getNativeSpecialistsExtensionPath() {
   return null;
 }
 function getPiSettingsPath(env = process.env) {
-  const agentDir = env.PI_CODING_AGENT_DIR || join14(homedir3(), ".pi", "agent");
+  const agentDir = env.PI_CODING_AGENT_DIR || join14(homedir4(), ".pi", "agent");
   return join14(agentDir, "settings.json");
 }
 function sourceOf(entry) {
@@ -24740,8 +24795,8 @@ var init_session_metrics_contract = __esm(() => {
 // src/pi/session.ts
 import { createHash as createHash3 } from "crypto";
 import { spawn as spawn2, execFileSync as execFileSync2 } from "child_process";
-import { existsSync as existsSync20, lstatSync as lstatSync3, mkdirSync as mkdirSync10, readdirSync as readdirSync7, readFileSync as readFileSync15, realpathSync as realpathSync2, statSync as statSync4, writeFileSync as writeFileSync9 } from "fs";
-import { homedir as homedir4, tmpdir } from "os";
+import { existsSync as existsSync20, lstatSync as lstatSync3, mkdirSync as mkdirSync10, readdirSync as readdirSync7, readFileSync as readFileSync15, realpathSync as realpathSync3, statSync as statSync4, writeFileSync as writeFileSync9 } from "fs";
+import { homedir as homedir5, tmpdir } from "os";
 import { isAbsolute as isAbsolute2, resolve as resolve13, sep as sep3, join as join21, dirname as dirname14 } from "path";
 function toRuntimeToolCatalogs(catalogIndex) {
   return catalogIndex.catalogs.map((catalog) => ({
@@ -24971,7 +25026,7 @@ function canonicalizeLocalExtensionIdentity(source) {
     return null;
   }
   try {
-    return realpathSync2(candidate);
+    return realpathSync3(candidate);
   } catch {
     try {
       return resolve13(candidate);
@@ -25038,7 +25093,7 @@ function resolveExecutionExtensionSelection(extensions) {
 }
 function resolveCuratedExtensionPaths(options) {
   const all = [];
-  const piExtDir = join21(homedir4(), ".pi", "agent", "extensions");
+  const piExtDir = join21(homedir5(), ".pi", "agent", "extensions");
   const permLevel = (options.permissionLevel ?? "").toUpperCase();
   if (permLevel !== "READ_ONLY") {
     const qgPath = join21(piExtDir, "quality-gates");
@@ -25051,7 +25106,7 @@ function resolveCuratedExtensionPaths(options) {
   const cavemanPath = join21(piExtDir, "caveman");
   if (existsSync20(cavemanPath))
     all.push(cavemanPath);
-  const nvidiaNimPath = join21(homedir4(), ".pi", "agent", "git", "github.com", "xRyul", "pi-nvidia-nim");
+  const nvidiaNimPath = join21(homedir5(), ".pi", "agent", "git", "github.com", "xRyul", "pi-nvidia-nim");
   if (existsSync20(nvidiaNimPath))
     all.push(nvidiaNimPath);
   const gitnexusContract = options.resolvedToolContract?.extensions.gitnexus;
@@ -25098,7 +25153,7 @@ function resolvePiVersion() {
 }
 function resolveGlobalNodeModulesDirs(deps = {}) {
   const env = deps.env ?? process.env;
-  const home = deps.home ?? homedir4();
+  const home = deps.home ?? homedir5();
   const execPath = deps.execPath ?? process.execPath;
   const exists = deps.exists ?? existsSync20;
   const readDir = deps.readDir ?? ((path) => readdirSync7(path));
@@ -26593,7 +26648,7 @@ import { createHash as createHash4 } from "crypto";
 import { execSync as execSync2, spawnSync as spawnSync12 } from "child_process";
 import { existsSync as existsSync22, readFileSync as readFileSync16 } from "fs";
 import { basename as basename5, resolve as resolve15 } from "path";
-import { homedir as homedir5 } from "os";
+import { homedir as homedir6 } from "os";
 function sanitizeScriptName(name) {
   const cleaned = name.replace(/[\u0000-\u001f\u007f-\u009f"\\<>]/g, "").slice(0, 128);
   return /^[A-Za-z0-9:][A-Za-z0-9._:-]{0,127}$/.test(cleaned) ? cleaned : "unknown";
@@ -26760,7 +26815,7 @@ ${blocks}
 </pre_flight_context>`;
 }
 function resolvePath2(p) {
-  return p.startsWith("~/") ? resolve15(homedir5(), p.slice(2)) : resolve15(p);
+  return p.startsWith("~/") ? resolve15(homedir6(), p.slice(2)) : resolve15(p);
 }
 function commandExists(cmd) {
   const result = spawnSync12("which", [cmd], { stdio: "ignore" });
@@ -27863,9 +27918,9 @@ import {
   lstatSync as lstatSync4,
   openSync as openSync2,
   readFileSync as readFileSync17,
-  realpathSync as realpathSync3
+  realpathSync as realpathSync4
 } from "fs";
-import { homedir as homedir6 } from "os";
+import { homedir as homedir7 } from "os";
 import { isAbsolute as isAbsolute3, join as join22, relative as relative3, resolve as resolve16 } from "path";
 function normalizePath(path, baseDir) {
   if (isAbsolute3(path))
@@ -27880,7 +27935,7 @@ function canonicalizeSkillRoot(root, baseDir) {
   try {
     const normalized = normalizePath(root, baseDir);
     lstatSync4(normalized);
-    const canonical = realpathSync3(normalized);
+    const canonical = realpathSync4(normalized);
     const stat = lstatSync4(canonical);
     if (!stat.isDirectory())
       throw new Error("not a directory");
@@ -27894,7 +27949,7 @@ function canonicalizeSkillPath(field, path, baseDir) {
   try {
     const normalized = normalizePath(path, baseDir);
     lstatSync4(normalized);
-    const canonical = realpathSync3(normalized);
+    const canonical = realpathSync4(normalized);
     const stat = lstatSync4(canonical);
     if (!stat.isFile() && !stat.isDirectory())
       throw new Error("not a file or directory");
@@ -27975,13 +28030,13 @@ function requireNoFollowFlag() {
   return constants2.O_NOFOLLOW;
 }
 function readSkillSourceBytes(path, noFollowFlag) {
-  if (realpathSync3(path) !== path)
+  if (realpathSync4(path) !== path)
     throw new Error("skill source canonical path changed");
   const declaredStat = lstatSync4(path);
   if (declaredStat.isSymbolicLink())
     throw new Error("symlinked skill source");
   const sourcePath = declaredStat.isDirectory() ? join22(path, "SKILL.md") : path;
-  if (realpathSync3(sourcePath) !== sourcePath)
+  if (realpathSync4(sourcePath) !== sourcePath)
     throw new Error("skill file canonical path changed");
   const sourceStat = lstatSync4(sourcePath);
   if (sourceStat.isSymbolicLink() || !sourceStat.isFile())
@@ -28668,7 +28723,7 @@ function appendExtensionArgs(args, spec, resolvedToolContract, extensionSources 
   const readLineNumbersPath = getReadLineNumbersExtensionPath();
   if (readLineNumbersPath)
     args.push("-e", readLineNumbersPath);
-  const piExtDir = join22(homedir6(), ".pi", "agent", "extensions");
+  const piExtDir = join22(homedir7(), ".pi", "agent", "extensions");
   if (permissionLevel !== "READ_ONLY") {
     const qualityGatesPath = join22(piExtDir, "quality-gates");
     if (existsSync23(qualityGatesPath))
@@ -39291,10 +39346,10 @@ import {
   statSync as statSync6,
   writeFileSync as writeFileSync15
 } from "fs";
-import { homedir as homedir8 } from "os";
+import { homedir as homedir9 } from "os";
 import { dirname as dirname18, join as join30 } from "path";
 function getConsoleConfigPath() {
-  const home = process.env.HOME?.trim() || homedir8();
+  const home = process.env.HOME?.trim() || homedir9();
   const xdgConfigHome = process.env.XDG_CONFIG_HOME?.trim();
   if (xdgConfigHome) {
     const xdgPath = join30(xdgConfigHome, SPECIALISTS_SUBDIR2, CONFIG_FILENAME2);
@@ -39382,10 +39437,10 @@ var init_repo_config = __esm(() => {
 
 // src/cli/console/repo-discovery.ts
 import { existsSync as existsSync30, readdirSync as readdirSync10, statSync as statSync7 } from "fs";
-import { homedir as homedir9 } from "os";
+import { homedir as homedir10 } from "os";
 import { join as join31 } from "path";
 function expandHomePath(p) {
-  const home = process.env.HOME?.trim() || homedir9();
+  const home = process.env.HOME?.trim() || homedir10();
   if (p === "~")
     return home;
   if (p.startsWith("~/"))
@@ -39479,13 +39534,13 @@ var init_repo_discovery = __esm(() => {
 });
 
 // src/cli/console/config-source.ts
-import { homedir as homedir10 } from "os";
+import { homedir as homedir11 } from "os";
 import { join as join32 } from "path";
 import { existsSync as existsSync31, readFileSync as readFileSync24, statSync as statSync8 } from "fs";
 function readGlobalConfigSnapshot(loader) {
   const location = getGlobalUserConfigPath();
   const exists = existsSync31(location.path);
-  const home = homedir10();
+  const home = homedir11();
   const displayPath = home && location.path.startsWith(home) ? location.path.replace(home, "~") : location.path;
   if (!exists) {
     return {
@@ -44243,7 +44298,7 @@ function createPiJsonProjector(context) {
 
 // src/cli/run.ts
 import { dirname as dirname21, join as join37, resolve as resolve18, sep as sep4 } from "path";
-import { constants as fsConstants, existsSync as existsSync35, fstatSync as fstatSync2, openSync as openSync4, readFileSync as readFileSync28, readSync, readdirSync as readdirSync13, realpathSync as realpathSync4, statSync as statSync10, closeSync as closeSync3 } from "fs";
+import { constants as fsConstants, existsSync as existsSync35, fstatSync as fstatSync2, openSync as openSync4, readFileSync as readFileSync28, readSync, readdirSync as readdirSync13, realpathSync as realpathSync5, statSync as statSync10, closeSync as closeSync3 } from "fs";
 import { randomBytes } from "crypto";
 import { spawn as cpSpawn, execFileSync as execFileSync4, execSync as execSync5 } from "child_process";
 function formatBackgroundLaunchLine(opts) {
@@ -45847,7 +45902,7 @@ var init_run = __esm(() => {
     fstatSync: fstatSync2,
     readSync,
     closeSync: closeSync3,
-    realpathSync: realpathSync4,
+    realpathSync: realpathSync5,
     constants: fsConstants
   };
   OBLIGATION_MARKER_REGEX = /\b(TODO|FIXME|HACK|XXX|TEMP|WIP|NOTE\(release\))(?![\w-])/;
@@ -50295,7 +50350,7 @@ function formatActivationAge(nowMs, atMs) {
 // src/activation/authority-store.ts
 import { mkdirSync as mkdirSync17 } from "fs";
 import { createRequire as createRequire5 } from "module";
-import { homedir as homedir11 } from "os";
+import { homedir as homedir12 } from "os";
 import { dirname as dirname22, join as join41 } from "path";
 function resolveAuthorityDbPath(env = process.env) {
   const substrate = (env.SUBSTRATE_DB ?? "").trim();
@@ -50304,7 +50359,7 @@ function resolveAuthorityDbPath(env = process.env) {
   const legacy = (env.XTRM_STATE_DB ?? "").trim();
   if (legacy)
     return legacy;
-  return join41(homedir11(), ".xtrm", "state.db");
+  return join41(homedir12(), ".xtrm", "state.db");
 }
 function openAuthorityDb(dbPath) {
   try {
@@ -56466,7 +56521,7 @@ ${detail.missing.map((m) => `  - ${m}`).join(`
 // src/activation/workspace-lease.ts
 import { execFileSync as execFileSync5, spawnSync as spawnSync26 } from "child_process";
 import { createHash as createHash8 } from "crypto";
-import { appendFileSync as appendFileSync6, existsSync as existsSync47, linkSync, mkdirSync as mkdirSync18, readFileSync as readFileSync38, realpathSync as realpathSync5, renameSync as renameSync6, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync21 } from "fs";
+import { appendFileSync as appendFileSync6, existsSync as existsSync47, linkSync, mkdirSync as mkdirSync18, readFileSync as readFileSync38, realpathSync as realpathSync6, renameSync as renameSync6, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync21 } from "fs";
 import { dirname as dirname23, join as join49 } from "path";
 function workspaceIdentityFor(cwd) {
   return { repositoryRoot: cwd, worktreePath: cwd };
@@ -56534,7 +56589,7 @@ function selfHolder(probe = procLeaseProbe()) {
 function workspaceKey(workspace) {
   let resolved = workspace.worktreePath;
   try {
-    resolved = realpathSync5(workspace.worktreePath);
+    resolved = realpathSync6(workspace.worktreePath);
   } catch {}
   return createHash8("sha256").update(resolved).digest("hex").slice(0, 16);
 }
@@ -56587,6 +56642,7 @@ function acquire(request, probe = procLeaseProbe()) {
     activationId,
     attemptId,
     specialist: request.specialist,
+    ...request.leaseWaiver ? { leaseWaiver: true } : {},
     holder: selfHolder(probe),
     acquiredAtMs: Date.now()
   };
@@ -57331,7 +57387,7 @@ var init_channel_doctor = () => {};
 // src/activation/workitem-store.ts
 import { existsSync as existsSync50 } from "fs";
 import { createRequire as createRequire6 } from "module";
-import { homedir as homedir12 } from "os";
+import { homedir as homedir13 } from "os";
 import { dirname as dirname24, join as join51 } from "path";
 import { pathToFileURL } from "url";
 function resolveSubstrateDir(explicit, resolveInstalled) {
@@ -57350,7 +57406,7 @@ function resolveSubstrateFromGlobalPrefix(libDirs) {
   const candidates = uniqueExistingLibDirs(libDirs ?? [
     ...resolveGlobalNodeModulesDirs().map((modulesDir) => dirname24(modulesDir)),
     join51(runtimePrefix, "lib"),
-    join51(homedir12(), ".bun", "install", "global")
+    join51(homedir13(), ".bun", "install", "global")
   ]);
   for (const libDir of candidates) {
     try {
@@ -57772,7 +57828,7 @@ var init_workitem_store = __esm(() => {
 import { createHash as createHash10 } from "crypto";
 import { spawnSync as spawnSync27 } from "child_process";
 import { existsSync as existsSync51, mkdirSync as mkdirSync20, readdirSync as readdirSync22, readFileSync as readFileSync41, writeFileSync as writeFileSync22 } from "fs";
-import { homedir as homedir13 } from "os";
+import { homedir as homedir14 } from "os";
 import { join as join52, relative as relative5, resolve as resolve23 } from "path";
 import { fileURLToPath as fileURLToPath10 } from "url";
 function ok3(msg) {
@@ -57942,7 +57998,7 @@ function checkChannels() {
   section3("Claude Code channel wake  (8-gate chain, spec AM.3)");
   const report = runChannelDoctorChecks({
     managedSettingsPath: resolveManagedSettingsPath(),
-    installedPluginsPath: join52(homedir13(), ".claude", "plugins", "installed_plugins.json"),
+    installedPluginsPath: join52(homedir14(), ".claude", "plugins", "installed_plugins.json"),
     serverSourcePath: resolveServerSourcePath(),
     expectedPluginName: EXPECTED_PLUGIN_NAME,
     expectedMarketplaceName: EXPECTED_MARKETPLACE_NAME,
@@ -58074,7 +58130,7 @@ function resolvePackageAssetDir(relativePath) {
   return resolveCanonicalAssetDir(relativePath) ?? (existsSync51(join52(CWD, "config", relativePath)) ? join52(CWD, "config", relativePath) : null);
 }
 function checkSkillDrift() {
-  section3(`Skills \u2014 global default pool  (~/${relative5(homedir13(), GLOBAL_DEFAULT_SKILLS_DIR)})`);
+  section3(`Skills \u2014 global default pool  (~/${relative5(homedir14(), GLOBAL_DEFAULT_SKILLS_DIR)})`);
   const canonicalSkillsDir = resolvePackageAssetDir("skills");
   if (!canonicalSkillsDir) {
     fail9("package canonical skills source missing");
@@ -58860,14 +58916,14 @@ var init_doctor = __esm(() => {
   CWD = process.cwd();
   SPECIALISTS_DIR = join52(CWD, ".specialists");
   USER_SPECIALISTS_DIR = join52(SPECIALISTS_DIR, "user");
-  XTRM_HOME = join52(homedir13(), ".xtrm");
+  XTRM_HOME = join52(homedir14(), ".xtrm");
   GLOBAL_DEFAULT_SKILLS_DIR = join52(XTRM_HOME, "skills", "default");
 });
 
 // src/specialist/benchmarks.ts
 import { randomUUID as randomUUID4 } from "crypto";
 import { closeSync as closeSync5, existsSync as existsSync52, fsyncSync as fsyncSync2, mkdirSync as mkdirSync21, openSync as openSync6, readFileSync as readFileSync42, renameSync as renameSync7, writeFileSync as writeFileSync23 } from "fs";
-import { homedir as homedir14 } from "os";
+import { homedir as homedir15 } from "os";
 import { dirname as dirname25, join as join53 } from "path";
 async function loadBenchmarkSnapshot(options = {}) {
   const warnings = [];
@@ -58984,7 +59040,7 @@ function toSnapshot(cache) {
 function isOffline(options) {
   return options.offline === true || process.env.SPECIALISTS_OFFLINE === "1";
 }
-function getBenchmarkCachePath(source, cacheDir = join53(homedir14(), ".cache", "specialists", "benchmarks")) {
+function getBenchmarkCachePath(source, cacheDir = join53(homedir15(), ".cache", "specialists", "benchmarks")) {
   return join53(cacheDir, `${source}.json`);
 }
 function writeCache2(path, snapshot) {
@@ -59023,7 +59079,7 @@ var init_benchmarks = __esm(() => {
 // src/specialist/model-probes.ts
 import { createHash as createHash11, randomUUID as randomUUID5 } from "crypto";
 import { mkdirSync as mkdirSync22, readdirSync as readdirSync23, readFileSync as readFileSync43, writeFileSync as writeFileSync24 } from "fs";
-import { homedir as homedir15 } from "os";
+import { homedir as homedir16 } from "os";
 import { dirname as dirname26, join as join54, resolve as resolve24 } from "path";
 async function runAgenticFollowthroughProbe(model, specName, opts = {}) {
   const probeDir = getProbeRunDir(model, specName, opts.cacheDir);
@@ -59127,10 +59183,10 @@ function withTimeout(promise, timeoutMs) {
   });
   return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeout));
 }
-function getProbeRunDir(model, specName, cacheDir = join54(homedir15(), ".cache", "specialists", "probes")) {
+function getProbeRunDir(model, specName, cacheDir = join54(homedir16(), ".cache", "specialists", "probes")) {
   return resolve24(getProbeCanonicalPath(model, specName, cacheDir).replace(/\.json$/u, ""), randomUUID5());
 }
-function getProbeCanonicalPath(model, specName, cacheDir = join54(homedir15(), ".cache", "specialists", "probes")) {
+function getProbeCanonicalPath(model, specName, cacheDir = join54(homedir16(), ".cache", "specialists", "probes")) {
   const probeId = createHash11("sha256").update(`${model}\x00${specName}\x00${PROBE_TEMPLATE}`).digest("hex").slice(0, 12);
   return join54(cacheDir, `${sanitizePathSegment(model)}-${sanitizePathSegment(specName)}-${probeId}.json`);
 }
@@ -59759,7 +59815,7 @@ import { once } from "events";
 import { spawnSync as spawnSync29 } from "child_process";
 import { access, readdir as readdir2, readFile as readFile4, constants as constants3 } from "fs/promises";
 import { existsSync as existsSync54 } from "fs";
-import { homedir as homedir16 } from "os";
+import { homedir as homedir17 } from "os";
 import { join as join56 } from "path";
 function createReadinessState() {
   return { shuttingDown: false, auditFailures: [], dbWriteFailuresTotal: 0 };
@@ -59803,7 +59859,7 @@ async function evaluateReadiness2(opts) {
   if (opts.state.auditFailures.length > opts.auditFailureThreshold) {
     return { ready: false, reason: "degraded:audit" };
   }
-  const piConfigPath = opts.piConfigPath ?? join56(homedir16(), ".pi", "agent", "auth.json");
+  const piConfigPath = opts.piConfigPath ?? join56(homedir17(), ".pi", "agent", "auth.json");
   try {
     await access(piConfigPath, constants3.R_OK);
   } catch {
@@ -90591,10 +90647,10 @@ var init_peer_bridge = __esm(() => {
 
 // src/activation/transport/roster.ts
 import { existsSync as existsSync57, readdirSync as readdirSync26, readFileSync as readFileSync47 } from "fs";
-import { homedir as homedir17 } from "os";
+import { homedir as homedir18 } from "os";
 import { join as join58 } from "path";
 function defaultRosterDir() {
-  return join58(homedir17(), ".claude", "sessions");
+  return join58(homedir18(), ".claude", "sessions");
 }
 function procProbe() {
   let bootSeconds;
@@ -91466,7 +91522,7 @@ var init_native_activation_observability = __esm(() => {
     activation_starting: "Session construction has no legacy timeline event; run_start follows once construction succeeds.",
     output_validation_started: "Native result validation has no legacy timeline event kind.",
     output_validation_passed: "Native result validation has no legacy timeline event kind.",
-    output_validation_failed: "Native result validation has no legacy timeline event kind; terminal failure is run_complete.",
+    output_validation_failed: "Native result validation has no legacy timeline event kind; it is a mid-settle signal, not a terminal failure, so it leaves no timeline row and moves no status \u2014 the outcome rides on the run_complete the settle emits next and on the settlement validation.",
     activation_disposed: "In-memory session disposal after a terminal event has no legacy timeline event.",
     lease_released: "Workspace-lease teardown has no legacy timeline event.",
     lease_reconciled: "Lease reconciliation has no legacy timeline event.",
@@ -92415,6 +92471,10 @@ class NativeActivationHost {
   backgroundTaskAlive;
   backgroundTasks = new Map;
   backgroundWatch = new Map;
+  wakeDirty = new Set;
+  wakeFinalising = new Set;
+  wakeSettlement;
+  framedTurns = new Set;
   backgroundPollMs;
   now;
   sessionStatsTimeoutMs;
@@ -92444,6 +92504,7 @@ class NativeActivationHost {
     this.forensics = withFleetWake(deps.forensics ?? NULL_FORENSIC_SINK, () => this.wakeFleetWaiters());
     this.loadSdk = deps.loadSdk ?? loadPiSdk;
     this.now = deps.now ?? (() => Date.now());
+    this.wakeSettlement = deps.onWakeSettlement;
     this.sessionStatsTimeoutMs = deps.sessionStatsTimeoutMs;
     this.piVersion = deps.piVersion;
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
@@ -92801,7 +92862,13 @@ class NativeActivationHost {
     }
     if (access === "write" || leaseWaiver) {
       try {
-        acquire({ workspace, activationId, attemptId, specialist: request.specialist });
+        acquire({
+          workspace,
+          activationId,
+          attemptId,
+          specialist: request.specialist,
+          ...leaseWaiver ? { leaseWaiver: true } : {}
+        });
       } catch (error) {
         if (error instanceof DispatchRejectedError) {
           emit("lease_denied", {
@@ -93069,7 +93136,7 @@ class NativeActivationHost {
       state: "starting",
       access,
       workspace,
-      leaseWaiver,
+      ...leaseWaiver ? { leaseWaiver: true } : {},
       piSessionId: session.sessionId,
       configuredModel,
       requestedModel,
@@ -93192,7 +93259,11 @@ class NativeActivationHost {
       event
     });
     switch (event.type) {
+      case "turn_start":
+        this.noteWakeTurnStart(snapshot);
+        break;
       case "agent_start":
+        this.noteWakeTurnStart(snapshot);
         snapshot.state = "running";
         this.save(snapshot);
         emit("turn_started");
@@ -93204,9 +93275,20 @@ class NativeActivationHost {
         snapshot.turnCount = (snapshot.turnCount ?? 0) + 1;
         break;
       case "agent_settled":
+        const unframedWake = !this.framedTurns.has(snapshot.activationId) && this.wakeDirty.has(snapshot.activationId);
         snapshot.state = "settled";
         this.save(snapshot);
         this.releaseIfWriter(snapshot, "settled");
+        if (unframedWake) {
+          this.wakeDirty.delete(snapshot.activationId);
+          const record = this.registry.get(snapshot.activationId);
+          if (record && !this.wakeFinalising.has(snapshot.activationId)) {
+            this.wakeFinalising.add(snapshot.activationId);
+            this.finalizeWakeTurn(snapshot, record, emit).finally(() => {
+              this.wakeFinalising.delete(snapshot.activationId);
+            });
+          }
+        }
         break;
       case "auto_retry_start":
         emit("retry_started", { attempt: event.attempt, max_attempts: event.maxAttempts });
@@ -93226,6 +93308,10 @@ class NativeActivationHost {
       case "tool_execution_end":
         this.noteToolEnd(snapshot.activationId, event);
         this.noteBackgroundTask(snapshot.activationId, event);
+        break;
+      case "message_start":
+      case "message_end":
+        this.noteBackgroundEnd(snapshot.activationId, event);
         break;
       default:
         break;
@@ -93263,14 +93349,51 @@ class NativeActivationHost {
     this.toolDurationWatch.set(snapshot.activationId, { tool, toolCallId, startMs: this.now(), warned: false, timer });
   }
   noteBackgroundTask(activationId, event) {
+    const details = resultDetails(event.result);
+    const taskId = typeof details?.task_id === "string" && details.task_id.length > 0 ? details.task_id : undefined;
+    const status = typeof details?.status === "string" ? details.status.toLowerCase() : undefined;
     const text = resultContent(event.result);
+    const label = text?.split(`
+`)[0]?.trim() || (typeof details?.summary === "string" ? details.summary : undefined);
+    if (taskId) {
+      const tasks = this.backgroundTasks.get(activationId) ?? new Map;
+      if (status !== undefined && TERMINAL_BACKGROUND_STATUSES.has(status)) {
+        const existing = tasks.get(taskId);
+        if (existing)
+          existing.live = false;
+        this.backgroundTasks.set(activationId, tasks);
+        return;
+      }
+      if (status === undefined || !LIVE_BACKGROUND_STATUSES.has(status))
+        return;
+      tasks.set(taskId, {
+        id: taskId,
+        label: label ?? taskId,
+        deadlineMs: this.now() + BACKGROUND_TASK_MAX_HOLD_MS,
+        live: true
+      });
+      this.backgroundTasks.set(activationId, tasks);
+      return;
+    }
     const pid = Number(text?.match(/^PID: (\d+)$/m)?.[1]);
     if (!text || !/^Status: running$/m.test(text) || !Number.isInteger(pid) || pid <= 0)
       return;
     const tasks = this.backgroundTasks.get(activationId) ?? new Map;
-    tasks.set(pid, text.split(`
-`)[0].trim());
+    tasks.set(`pid:${pid}`, { id: `pid:${pid}`, label: label ?? `pid ${pid}`, pid, live: true });
     this.backgroundTasks.set(activationId, tasks);
+  }
+  noteBackgroundEnd(activationId, event) {
+    const message = recordOf(event.message);
+    const details = recordOf(message?.details);
+    const taskId = typeof details?.task_id === "string" && details.task_id.length > 0 ? details.task_id : undefined;
+    if (!taskId)
+      return;
+    const status = typeof details?.status === "string" ? details.status.toLowerCase() : undefined;
+    if (status !== undefined && LIVE_BACKGROUND_STATUSES.has(status))
+      return;
+    const existing = this.backgroundTasks.get(activationId)?.get(taskId);
+    if (existing)
+      existing.live = false;
   }
   watchBackgroundTasks(snapshot) {
     if (this.backgroundWatch.has(snapshot.activationId))
@@ -93294,10 +93417,21 @@ class NativeActivationHost {
     const tasks = this.backgroundTasks.get(activationId);
     if (!tasks)
       return [];
-    for (const pid of tasks.keys())
-      if (!this.backgroundTaskAlive(pid))
-        tasks.delete(pid);
-    return [...tasks].map(([pid, label]) => `${label} (pid ${pid})`);
+    const nowMs = this.now();
+    for (const [key, ref] of tasks) {
+      if (!ref.live) {
+        tasks.delete(key);
+        continue;
+      }
+      if (ref.pid !== undefined) {
+        if (!this.backgroundTaskAlive(ref.pid))
+          tasks.delete(key);
+        continue;
+      }
+      if (ref.deadlineMs !== undefined && nowMs > ref.deadlineMs)
+        tasks.delete(key);
+    }
+    return [...tasks.values()].map((ref) => ref.pid !== undefined ? `${ref.label} (pid ${ref.pid})` : `${ref.label} (${ref.id})`);
   }
   noteToolEnd(activationId, event) {
     const watch = this.toolDurationWatch.get(activationId);
@@ -93347,6 +93481,7 @@ class NativeActivationHost {
     this.toolDurationWatch.delete(activationId);
   }
   async runToSettled(snapshot, session, initialPrompt, emit, record) {
+    this.framedTurns.add(snapshot.activationId);
     let settlementRecorded = false;
     const recordSettlementOnce = async () => {
       if (settlementRecorded)
@@ -93460,7 +93595,97 @@ class NativeActivationHost {
       return thrownResult;
     }
   }
+  noteWakeTurnStart(snapshot) {
+    if (snapshot.state === "settled")
+      this.wakeDirty.add(snapshot.activationId);
+  }
+  async finalizeWakeTurn(snapshot, record, emit) {
+    try {
+      const session = record.session;
+      await this.captureSessionStats(session, emit);
+      const last = lastAssistantMessage(session.messages);
+      if (last && (last.stopReason === "error" || last.stopReason === "aborted")) {
+        const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
+        snapshot.state = "failed";
+        this.save(snapshot);
+        emit("activation_failed", { error: detail, stop_reason: last.stopReason });
+        const failedResult = {
+          activationId: snapshot.activationId,
+          participantId: snapshot.participantId,
+          attemptId: snapshot.attemptId,
+          issueId: snapshot.issueId,
+          issueRef: snapshot.issueRef,
+          issueRevision: snapshot.issueRevision,
+          contractHash: snapshot.contractHash,
+          executionBindingId: snapshot.executionBindingId,
+          status: "failed",
+          output: undefined,
+          validation: { valid: false, errors: [detail] },
+          piSessionId: session.sessionId,
+          configuredModel: snapshot.configuredModel,
+          requestedModel: snapshot.requestedModel,
+          resolvedModel: snapshot.resolvedModel,
+          modelOverride: snapshot.modelOverride,
+          ...snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {},
+          thinkingOverride: snapshot.thinkingOverride,
+          fallbackUsed: false,
+          completedAt: this.now()
+        };
+        this.publishTerminalSettlement(snapshot, failedResult, record, emit);
+        this.notifyWakeSettlement(failedResult);
+        return;
+      }
+      const output = textOf(last);
+      emit("activation_settled");
+      emit("output_validation_started");
+      const pendingTasks = this.liveBackgroundTasks(snapshot.activationId);
+      const validation = pendingTasks.length > 0 ? { valid: false, errors: [`background tasks still running: ${pendingTasks.join(", ")}; resume the activation after they finish`] } : output.trim().length > 0 ? { valid: true } : { valid: false, errors: ["empty output: specialist produced no output"] };
+      if (validation.valid) {
+        emit("output_validation_passed");
+      } else {
+        emit("output_validation_failed", { errors: validation.errors });
+      }
+      snapshot.state = "settled";
+      this.save(snapshot);
+      emit("activation_completed", { pi_session_id: session.sessionId, output });
+      this.releaseIfWriter(snapshot, "completed");
+      const completedResult = {
+        activationId: snapshot.activationId,
+        participantId: snapshot.participantId,
+        attemptId: snapshot.attemptId,
+        issueId: snapshot.issueId,
+        issueRef: snapshot.issueRef,
+        issueRevision: snapshot.issueRevision,
+        contractHash: snapshot.contractHash,
+        executionBindingId: snapshot.executionBindingId,
+        status: pendingTasks.length > 0 ? "uncertain" : "completed",
+        output,
+        validation,
+        piSessionId: session.sessionId,
+        configuredModel: snapshot.configuredModel,
+        requestedModel: snapshot.requestedModel,
+        resolvedModel: snapshot.resolvedModel,
+        modelOverride: snapshot.modelOverride,
+        ...snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {},
+        thinkingOverride: snapshot.thinkingOverride,
+        fallbackUsed: false,
+        completedAt: this.now()
+      };
+      this.publishTerminalSettlement(snapshot, completedResult, record, emit);
+      this.notifyWakeSettlement(completedResult);
+    } catch {}
+  }
+  notifyWakeSettlement(result) {
+    const notify = this.wakeSettlement;
+    if (!notify)
+      return;
+    try {
+      notify(result);
+    } catch {}
+  }
   publishTerminalSettlement(snapshot, result, record, emit) {
+    this.wakeDirty.delete(snapshot.activationId);
+    this.framedTurns.delete(snapshot.activationId);
     try {
       const subject = {
         activationId: snapshot.activationId,
@@ -93558,7 +93783,8 @@ class NativeActivationHost {
             workspace: record.snapshot.workspace,
             activationId: record.snapshot.activationId,
             attemptId: record.snapshot.attemptId,
-            specialist: record.snapshot.specialist
+            specialist: record.snapshot.specialist,
+            ...record.snapshot.leaseWaiver ? { leaseWaiver: true } : {}
           });
         } catch (error) {
           if (error instanceof DispatchRejectedError) {
@@ -93883,6 +94109,9 @@ class NativeActivationHost {
       this.stopToolDurationWatch(activationId);
       this.toolDurationWarnMsByActivation.delete(activationId);
       this.forgetBackgroundTasks(activationId);
+      this.wakeDirty.delete(activationId);
+      this.wakeFinalising.delete(activationId);
+      this.framedTurns.delete(activationId);
       record.unsubscribe();
       record.session.dispose();
       record.snapshot.state = "stopped";
@@ -94018,6 +94247,12 @@ function defaultInlineTitle(specialist, contract) {
 `).map((s) => s.trim()).find(Boolean) ?? "";
   return `${specialist}: ${firstLine}`.trim();
 }
+function recordOf(value) {
+  return value !== null && typeof value === "object" ? value : undefined;
+}
+function resultDetails(result) {
+  return recordOf(recordOf(result)?.details);
+}
 function purposeExcerptFromContract(contract) {
   if (contract !== null && typeof contract === "object") {
     const c = contract;
@@ -94088,7 +94323,7 @@ function legacyOnlyConfigNotes(spec) {
   }
   return notes;
 }
-var TOKEN_USAGE_KEYS, WRITE_TIERS, TOOL_DURATION_CHECK_INTERVAL_MS = 1e4, NON_LOCAL_EXTENSION_PREFIXES, defaultExtensionSourceResolutionEnv, EXTENSION_CLASS_SOURCES, BUILTIN_TOOL_SOURCES, EMPTY_DISCOVERY, FALLBACK_RETRYABLE_CLASSES, NULL_FORENSIC_SINK;
+var TOKEN_USAGE_KEYS, WRITE_TIERS, TOOL_DURATION_CHECK_INTERVAL_MS = 1e4, LIVE_BACKGROUND_STATUSES, TERMINAL_BACKGROUND_STATUSES, BACKGROUND_TASK_MAX_HOLD_MS, NON_LOCAL_EXTENSION_PREFIXES, defaultExtensionSourceResolutionEnv, EXTENSION_CLASS_SOURCES, BUILTIN_TOOL_SOURCES, EMPTY_DISCOVERY, FALLBACK_RETRYABLE_CLASSES, NULL_FORENSIC_SINK;
 var init_native_host = __esm(() => {
   init_loader();
   init_system_prompt();
@@ -94123,6 +94358,9 @@ var init_native_host = __esm(() => {
     "total_tokens"
   ];
   WRITE_TIERS = new Set(["MEDIUM", "HIGH"]);
+  LIVE_BACKGROUND_STATUSES = new Set(["running", "armed", "started"]);
+  TERMINAL_BACKGROUND_STATUSES = new Set(["completed", "failed", "stopped", "expired", "timed_out", "killed"]);
+  BACKGROUND_TASK_MAX_HOLD_MS = 2 * 60 * 60 * 1000 + 60000;
   NON_LOCAL_EXTENSION_PREFIXES = ["npm:", "git:", "github:", "http:", "https:", "ssh:"];
   defaultExtensionSourceResolutionEnv = {
     globalNodeModulesDirs: resolveGlobalNodeModulesDirs,
@@ -94234,7 +94472,6 @@ function statusForLifecycle(name, current) {
       return "done";
     case "activation_failed":
     case "activation_rejected":
-    case "output_validation_failed":
       return "error";
     default:
       return current;
@@ -94312,14 +94549,9 @@ function createActivationForensicSink(observability) {
       observability.upsertStatus(status, identityOf(state));
     }
   };
-  const aggregatedAtTerminal = new Set;
-  const aggregateTerminalMetrics = (activationId, attemptId) => {
-    const key = `${activationId}/${attemptId}`;
-    if (aggregatedAtTerminal.has(key))
-      return;
+  const aggregateTerminalMetrics = (activationId) => {
     try {
       observability.aggregateJobMetrics(activationId);
-      aggregatedAtTerminal.add(key);
     } catch {}
   };
   return {
@@ -94376,16 +94608,12 @@ function createActivationForensicSink(observability) {
         } else {
           writeProjection(event.activationId, state, timelineEvent?.type, timelineEvent ? [timelineEvent] : [], error);
         }
-        if (event.name === "activation_completed" || event.name === "activation_failed" || event.name === "activation_rejected" || event.name === "output_validation_failed") {
-          aggregateTerminalMetrics(event.activationId, event.attemptId);
+        if (event.name === "activation_completed" || event.name === "activation_failed" || event.name === "activation_rejected") {
+          aggregateTerminalMetrics(event.activationId);
         }
         if (event.name === "activation_disposed") {
-          aggregateTerminalMetrics(event.activationId, event.attemptId);
+          aggregateTerminalMetrics(event.activationId);
           states.delete(event.activationId);
-          for (const key of [...aggregatedAtTerminal]) {
-            if (key.startsWith(`${event.activationId}/`))
-              aggregatedAtTerminal.delete(key);
-          }
         }
       } catch {}
     },
@@ -94439,8 +94667,7 @@ var init_forensic_sink = __esm(() => {
   init_session_metrics_contract();
   ERROR_STATUS_LIFECYCLE = new Set([
     "activation_failed",
-    "activation_rejected",
-    "output_validation_failed"
+    "activation_rejected"
   ]);
 });
 
@@ -95189,6 +95416,10 @@ function buildV2Server(ctx, options) {
   const host = new NativeActivationHost({
     loader,
     authority: createFileAuthorityWriter(),
+    onWakeSettlement: (result) => {
+      pusher.settle(result);
+      pusher.pushCompletion(result.activationId).catch(() => {});
+    },
     forensics: wakeSuppressed() ? createActivationForensicSink(observability) : withChannelPush(createActivationForensicSink(observability), (frame) => channelSend(frame), (activationId) => snapshotDetail(host.inspect(activationId)))
   });
   const getHost = () => host;
@@ -95418,7 +95649,9 @@ async function run45() {
         "  specialists init --help     Bootstrap and project workflow setup",
         "",
         "Project model:",
-        "  Specialists are project-only. User-scope discovery is deprecated.",
+        "  Definitions resolve lowest to highest: package canonical, ~/.config/specialists/user.json,",
+        "  ~/.specialists/user/, then <repo>/.specialists/user/. A repo definition wins over a",
+        "  same-named home one and warns naming both.",
         ""
       ].join(`
 `));

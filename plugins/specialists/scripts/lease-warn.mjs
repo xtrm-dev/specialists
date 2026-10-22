@@ -3,9 +3,15 @@
 //
 // The workspace lease fences native activations against each other. The coordinator is NOT a
 // participant in it: a Claude Code session edits through its own tools without acquiring or
-// inspecting the lease. Because native activations run IN PLACE (see resolveWorkspace in
-// src/activation/native-host.ts), a coordinator edit and a write-tier activation's edit to the
-// same file can interleave and silently lose one of the two writes.
+// inspecting the lease.
+//
+// Since SPECIALISTS-4310 a write-tier activation runs in its own per-Issue worktree, and since
+// the lease waiver a read-tier observer does too, so the common case is that the coordinator and
+// the activation touch different files and this hook says nothing. It fires in the case that
+// remains: the lease is held on the SAME workspace the coordinator is editing (an activation
+// pinned to this checkout, or a coordinator that cd'd into the activation's worktree). There a
+// coordinator edit and the activation's edit to one file can interleave and silently lose one of
+// the two writes.
 //
 // This hook makes that loss visible. It does NOT prevent it.
 //
@@ -48,11 +54,16 @@ if (runtimePath) {
     const status = inspect(workspace);
     if (status.state === 'held' && status.lease) {
       const specialist = status.lease.specialist ?? 'a specialist';
+      // The waiver is display only: a read-tier observer holds its isolated worktree for the
+      // same reason a writer does, and naming it stops the warning reading as "a writer is
+      // about to race you" when the holder is a watcher that only reads production.
+      const holder = status.lease.leaseWaiver
+        ? `${specialist} (${status.lease.activationId}) holds the workspace lease under a read-tier waiver`
+        : `${specialist} (${status.lease.activationId}) holds the workspace lease`;
       const message =
-        `native-specialists: ${specialist} (${status.lease.activationId}) holds the workspace ` +
-        `lease on ${workspace.worktreePath}. Your edit still applies, but it can interleave with ` +
-        'that activation\'s writes and one of the two can be lost. Stop the activation first if ' +
-        'you need the file to yourself.';
+        `native-specialists: ${holder} on ${workspace.worktreePath}. Your edit still applies, but ` +
+        'it can interleave with that activation\'s writes and one of the two can be lost. Stop ' +
+        'the activation first if you need the file to yourself.';
       process.stdout.write(JSON.stringify({
         systemMessage: message,
         hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: message },

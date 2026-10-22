@@ -18,8 +18,8 @@ declare function specialistSummaryView(summary: SpecialistSummary): {
     name: string;
     category: string;
     description: string;
-    scope: "default" | "user" | "package";
-    source: "user" | "legacy" | "default-mirror" | "package-fallback" | "package-live";
+    scope: "default" | "user" | "home" | "package";
+    source: "user" | "legacy" | "home" | "default-mirror" | "package-fallback" | "package-live";
     version: string;
     permission_required: "READ_ONLY" | "LOW" | "MEDIUM" | "HIGH";
 };

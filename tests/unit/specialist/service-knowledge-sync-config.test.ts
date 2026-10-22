@@ -63,7 +63,7 @@ async function seedMachinery(root: string): Promise<void> {
 describe('service-knowledge-sync v2 role binding', () => {
   it('validates and preserves the RC execution contract', async () => {
     expect(await validateSpecialist(CONFIG_TEXT)).toMatchObject({ valid: true, errors: [] });
-    expect(SPECIALIST.metadata).toMatchObject({ version: '1.11.5', updated: '2026-10-15' });
+    expect(SPECIALIST.metadata).toMatchObject({ version: '1.12.0', updated: '2026-10-20' });
     expect(SPECIALIST.execution.extensions).toEqual({ 'npm:@jaggerxtrm/pi-service-knowledge@1.0.0': true });
   });
 
@@ -559,6 +559,8 @@ describe('service-knowledge-sync v2 role binding', () => {
     expect(SPECIALIST.validation?.files_to_watch).toEqual([
       '.xtrm/skills/*/service-knowledge/service-registry.json',
       '.xtrm/skills/*/service-knowledge/SKILL.md',
+      '.xtrm/skills/*/service-knowledge/services/*/SKILL.md',
+      '.xtrm/skills/default/service-knowledge/scripts/*.py',
     ]);
   });
 
@@ -578,7 +580,7 @@ describe('service-knowledge-sync v2 role binding', () => {
     expect(prompt).toContain('## Worktree / marker / index semantics');
     expect(prompt).toContain('**Drift doctrine**');
     expect(prompt).toContain('The marker is **advisory**');
-    expect(prompt).toContain('indexes the supplied session cwd, including worktree branch content');
+    expect(prompt).toContain('indexes the checkout it runs in');
     expect(prompt).not.toContain('The index reflects MAIN');
     expect(prompt).not.toContain('reads the main checkout');
   });

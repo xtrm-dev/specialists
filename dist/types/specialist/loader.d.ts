@@ -32,12 +32,13 @@ export interface SpecialistSummary {
     skills: string[];
     scripts: ScriptEntry[];
     mandatoryRuleTemplateSets: string[];
-    scope: 'user' | 'default' | 'package';
+    scope: 'user' | 'home' | 'default' | 'package';
     /**
      * Scope says where override came from.
-     * user = repo authoring layer, default = repo-managed mirror, package = upstream fallback.
+     * user = repo authoring layer, home = ~/.specialists/user/ layer,
+     * default = repo-managed mirror, package = upstream fallback.
      */
-    source: 'user' | 'default-mirror' | 'package-fallback' | 'package-live' | 'legacy';
+    source: 'user' | 'home' | 'default-mirror' | 'package-fallback' | 'package-live' | 'legacy';
     filePath: string;
     updated?: string;
     filestoWatch?: string[];
@@ -57,17 +58,27 @@ export declare class SpecialistExtensionSourceCollisionError extends Error {
 export declare function checkStaleness(summary: SpecialistSummary): Promise<'OK' | 'STALE' | 'AGED'>;
 interface LoaderOptions {
     projectDir?: string;
+    /** Override for ~/.specialists/user/ resolution (tests only; defaults to HOME/homedir). */
+    homeDir?: string;
 }
 export declare class SpecialistLoader {
     private cache;
     private blockedFieldWarnings;
     private projectDir;
+    private homeDir;
     constructor(options?: LoaderOptions);
+    /** Home-level authoring layer: ~/.specialists/user/. Null when HOME is unavailable. */
+    private getHomeUserDir;
     /**
-     * Scan dirs in priority order: highest-priority layer FIRST (user → package).
+     * Scan dirs in priority order: highest-priority layer FIRST (repo user → home → package).
      *
-     * KAN-90 three-layer contract:
-     *   package canonical → ~/.config/specialists/user.json → repo .specialists/user/<name>
+     * Layered contract (lowest → highest):
+     *   package canonical → ~/.config/specialists/user.json → ~/.specialists/user/<name>
+     *     → repo .specialists/user/<name>
+     *
+     * Like pi skill discovery (user + project locations scanned together), a
+     * home-level definition is discovered in every repository. A same-named repo
+     * definition wins; the collision warns instead of silently shadowing.
      *
      * The repo `.specialists/default/` mirror was retired by commit 31a6421c
      * ("reconcile: empty .specialists/default/ — live-from-package canonical resolves all")
@@ -80,7 +91,7 @@ export declare class SpecialistLoader {
     private getScanDirs;
     private toJson;
     private resolveSpecialistPath;
-    /** Find every layer that has a file for `name`, ordered base-first (package → user). */
+    /** Find every layer that has a file for `name`, ordered base-first (package → home → repo user). */
     private findLayerHits;
     /**
      * Apply override-allowed fields from `override` onto `base`, in place.
@@ -90,11 +101,14 @@ export declare class SpecialistLoader {
     private applyOverrideFields;
     private resolveOverrideValue;
     /**
-     * Build the merged spec for `name`. Single linear pass over the three layers:
+     * Build the merged spec for `name`. Single linear pass over the layers
+     * (lowest → highest):
      *
-     *   package canonical → ~/.config/specialists/user.json → repo .specialists/user/<name>
+     *   package canonical → ~/.config/specialists/user.json → ~/.specialists/user/<name>
+     *     → repo .specialists/user/<name>
      *
-     * findLayerHits returns at most two hits (package + user repo), ordered base-first.
+     * findLayerHits returns hits ordered base-first. The home and repo layers are
+     * full-spec files; only override-allowed fields propagate onto the base.
      * Does NOT throw on null model; caller (get) enforces the missing-model error.
      */
     private buildMergedSpec;
@@ -103,14 +117,14 @@ export declare class SpecialistLoader {
     get(name: string): Promise<Specialist>;
     /**
      * Return the merged (effective) spec for `name`: package canonical + global
-     * user.json + repo overrides, in the same precedence as get().
+     * user.json + home ~/.specialists/user/ + repo overrides, in the same precedence as get().
      *
      * Unlike get(), does NOT enforce the "model must be set" gate — this method
      * exists precisely so tooling (sp view --raw, launchers, doctors) can inspect
      * the effective config even when it isn't yet runnable. Callers that need
      * runtime enforcement should still use get().
      *
-     * Returns null if the specialist has no package canonical (unknown name).
+     * Returns null if no layer holds a file for `name` (unknown name).
      */
     getEffective(name: string): Promise<Specialist | null>;
     /**

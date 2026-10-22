@@ -82,6 +82,7 @@ describe('override template + schema', () => {
         timeout_ms: null,
         stall_timeout_ms: null,
         interactive: null,
+        lease_waiver: null,
         thinking_level: null,
         max_retries: null,
         prompt_limit_bytes: null,

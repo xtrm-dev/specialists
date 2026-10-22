@@ -179,7 +179,7 @@ function readOnlySpec() {
         output_type: 'research',
         bare: false,
       },
-      prompt: { system: 'You are the researcher.', task_template: 'Do: {{bead_id}}' },
+      prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
     },
   };
 }
@@ -684,7 +684,7 @@ describe('spec-configured threshold parity (PR #387 review)', () => {
           output_type: 'research',
           bare: false,
         },
-        prompt: { system: 'You are the researcher.', task_template: 'Do: {{bead_id}}' },
+        prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
         // Same source legacy `sp run` reads (launch.ts:96 passes spec stall_detection
         // to the Supervisor): a configured threshold must reach native identically.
         stall_detection: { tool_duration_warn_ms: ms },

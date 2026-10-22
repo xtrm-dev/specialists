@@ -47,7 +47,7 @@ import { type ProvisionedWorkspace } from './workspace-lease.js';
 import { type PiSdk, type PiAgentSessionEvent, type PiResourceLoaderLike } from './pi-sdk.js';
 import { type SettlementStore } from './settlement-store.js';
 import { type AuthorityWriter } from './authority-store.js';
-import { type ActivationHandle, type ActivationRequest, type ActivationSnapshot, type LiveActivationStats, type WorkspaceIdentity } from './types.js';
+import { type ActivationHandle, type ActivationRequest, type ActivationResult, type ActivationSnapshot, type LiveActivationStats, type WorkspaceIdentity } from './types.js';
 /**
  * True when an extension source cannot be handed to pi's in-process resource loader as a
  * path, and must instead be resolved by the pi CLI itself.
@@ -452,6 +452,19 @@ export interface NativeActivationHostDeps {
     sessionStatsTimeoutMs?: number;
     /** Injected for tests; defaults to probing the `pi` binary on PATH. */
     piVersion?: string;
+    /**
+     * Observed when a background-woken wake turn settles with no resume()/retry()
+     * framing it (SPECIALISTS-4322). Pi delivers a finished background task as a
+     * notification into the live session and the model takes a wake turn on its own:
+     * no runToSettled frames that turn, so without this the wake settles only in the
+     * session-event projection (jobs stuck `waiting`, stale metrics) and the
+     * coordinator layers never learn the superseding result. The callback receives
+     * the same ActivationResult the framed path would have produced; wiring it to
+     * the result store (pusher.settle + pushCompletion, like the dispatch/resume
+     * observation contract) keeps specialist_status on the event stream. Optional:
+     * without it the activation still finalises durably, it just pushes nothing.
+     */
+    onWakeSettlement?: (result: ActivationResult) => void;
 }
 /** Configuration for pushing interactions to a Claude coordinator. */
 export interface PeerDelivery {
@@ -485,10 +498,35 @@ export declare class NativeActivationHost {
     private readonly cwd;
     private readonly provisionWriterWorkspace;
     private readonly backgroundTaskAlive;
-    /** Per activation: background tasks its tools reported as started, by PID. */
+    /**
+     * Per activation: background tasks its tools reported as started, by the identity the
+     * extension reported. Keyed by task id (current `xtrm-background`) or `pid:<n>` (the
+     * retired `pi-background-tasks` text contract), because only one of the two shapes can
+     * prove liveness per task and the host must not confuse them.
+     */
     private readonly backgroundTasks;
     /** Per activation: the poll that releases a lease held over running background tasks. */
     private readonly backgroundWatch;
+    /**
+     * Activations with an unfinalised spontaneous wake turn (SPECIALISTS-4322). Set when a
+     * turn starts on an already-settled snapshot — i.e. a background-woken wake, not a
+     * framed resume/retry leg — and consumed when that turn's settle finalises. Without
+     * this a redelivered agent_settled would finalise (and publish) the same wake twice.
+     */
+    private readonly wakeDirty;
+    /** Wake finalisations currently capturing session stats; a concurrent second settle
+     * for the same activation skips and is covered by the in-flight pass, which reads the
+     * live session after the capture. */
+    private readonly wakeFinalising;
+    /** Outward seam for unframed wake settlements; see NativeActivationHostDeps. */
+    private readonly wakeSettlement?;
+    /**
+     * Activations with a runToSettled turn currently driving them (SPECIALISTS-4322).
+     * Set on runToSettled entry, cleared when its terminal settlement publishes: every
+     * framed leg funnels through there, so a settle observed while the flag is absent
+     * belongs to a background-woken wake turn with no framing, never to a framed run.
+     */
+    private readonly framedTurns;
     private readonly backgroundPollMs;
     private readonly now;
     private readonly sessionStatsTimeoutMs?;
@@ -615,11 +653,27 @@ export declare class NativeActivationHost {
      */
     private noteToolStart;
     /**
-     * Record a background task a tool reported as started (SPECIALISTS-4310). pi-background-tasks
-     * (`bg_run` and its siblings) answers with `Status: running` and `PID: <n>` and lets the turn
-     * end while the task runs; the host must not read that idle turn as a finished activation.
+     * Record a background task a tool reported as started, and forget one it reported as ended
+     * (SPECIALISTS-4310, SPECIALISTS-4320). A tool that starts work in the background lets the
+     * turn end while the task runs; the host must not read that idle turn as a finished
+     * activation, because the task still uses the workspace and the wake it produces belongs to
+     * this activation.
+     *
+     * Two result shapes exist and both are accepted, because the fleet still has sessions on the
+     * retired one:
+     * - `xtrm-background` (`BashBackground`/`Monitor`) reports the identity in tool-result
+     *   `details` (`task_id` with status `running` or `armed`) and never prints a pid;
+     * - `pi-background-tasks` (`bg_run`) prints `Status: running` and `PID: <n>` in the text.
+     * Reading only the text is what broke long watches: the details-only shape recorded nothing,
+     * so the settle carve-out never applied and a waking activation found its lease gone.
      */
     private noteBackgroundTask;
+    /**
+     * A background notification that reaches the session ends the task it names. The wake itself
+     * is how a settled activation resumes, so this is the same channel that proves the task is
+     * over; anything the extension sends with a terminal status retires the record.
+     */
+    private noteBackgroundEnd;
     /**
      * Release the held lease once the background tasks exit, if the activation is still idle.
      * A resumed turn holds the lease itself and re-checks on its own settle.
@@ -641,6 +695,34 @@ export declare class NativeActivationHost {
     /** Clear the poll timer and drop the watch. Idempotent; safe on every exit path. */
     private stopToolDurationWatch;
     private runToSettled;
+    /**
+     * Mark an activation whose turn starts on an already-settled snapshot: a
+     * background-woken wake, not a framed leg (SPECIALISTS-4322). Framed turns always
+     * pass through starting/running first (resume/retry set starting, agent_start sets
+     * running), so a turn starting from settled can only be the model's own wake after
+     * a background notification. The flag is consumed when that turn's settle
+     * finalises; a redelivered settle with no new turn behind it finalises nothing.
+     */
+    private noteWakeTurnStart;
+    /**
+     * Finalise a background-woken wake turn that no runToSettled frames (SPECIALISTS-4322).
+     *
+     * Pi delivers a finished background task as a notification into the live session and
+     * the model takes a wake turn on its own. That turn settles through onSessionEvent
+     * only — no prompt window, no terminal emit, no metrics refresh — so without this
+     * the job parks in `waiting` with a stale metrics row and the activation is never
+     * finalised. The tail mirrors runToSettled's exactly (stats capture, stopReason
+     * inspection, validation with the live-background-tasks carve-out, terminal emits,
+     * release, publication): the wake is settled by the same rule as every framed turn,
+     * including `uncertain` while its own background tasks still run (SPECIALISTS-4310)
+     * and `failed` for a genuinely failed wake (never `completed`).
+     *
+     * Fire-and-forget from the session fan-out: bounded awaits only, never throws, and
+     * redelivery-safe (the dirty flag is consumed synchronously before the first await).
+     */
+    private finalizeWakeTurn;
+    /** Report an unframed wake settlement outward; an observer must not break finalisation. */
+    private notifyWakeSettlement;
     /**
      * S1 automatic settlement publication (ADR §38).
      *

@@ -1,7 +1,8 @@
 // src/specialist/loader.ts
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { parse as parseYaml } from 'yaml';
 import {
   parseSpecialist,
@@ -65,12 +66,13 @@ export interface SpecialistSummary {
   skills: string[];
   scripts: ScriptEntry[];
   mandatoryRuleTemplateSets: string[];
-  scope: 'user' | 'default' | 'package';
+  scope: 'user' | 'home' | 'default' | 'package';
   /**
    * Scope says where override came from.
-   * user = repo authoring layer, default = repo-managed mirror, package = upstream fallback.
+   * user = repo authoring layer, home = ~/.specialists/user/ layer,
+   * default = repo-managed mirror, package = upstream fallback.
    */
-  source: 'user' | 'default-mirror' | 'package-fallback' | 'package-live' | 'legacy';
+  source: 'user' | 'home' | 'default-mirror' | 'package-fallback' | 'package-live' | 'legacy';
   filePath: string;
   updated?: string;
   filestoWatch?: string[];
@@ -126,6 +128,8 @@ export async function checkStaleness(
 
 interface LoaderOptions {
   projectDir?: string;
+  /** Override for ~/.specialists/user/ resolution (tests only; defaults to HOME/homedir). */
+  homeDir?: string;
 }
 
 type ScanDirScope = SpecialistSummary['scope'];
@@ -151,20 +155,52 @@ interface MergeOutcome {
   warnings: BlockedFieldWarning[];
 }
 
+/** Real path when it resolves, else the lexical path: used only to tell two layers apart. */
+function realpathOr(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+/** Resolve the home directory for the ~/.specialists/user/ layer. Null when unavailable. */
+function resolveHomeDir(): string | null {
+  try {
+    const home = process.env.HOME?.trim() || homedir();
+    return home ? home : null;
+  } catch {
+    return null;
+  }
+}
+
 export class SpecialistLoader {
   private cache = new Map<string, Specialist>();
   private blockedFieldWarnings = new Map<string, BlockedFieldWarning[]>();
   private projectDir: string;
+  private homeDir: string | null;
 
   constructor(options: LoaderOptions = {}) {
     this.projectDir = options.projectDir ?? process.cwd();
+    this.homeDir = options.homeDir ?? resolveHomeDir();
+  }
+
+  /** Home-level authoring layer: ~/.specialists/user/. Null when HOME is unavailable. */
+  private getHomeUserDir(): string | null {
+    if (!this.homeDir) return null;
+    return join(this.homeDir, '.specialists', 'user');
   }
 
   /**
-   * Scan dirs in priority order: highest-priority layer FIRST (user → package).
+   * Scan dirs in priority order: highest-priority layer FIRST (repo user → home → package).
    *
-   * KAN-90 three-layer contract:
-   *   package canonical → ~/.config/specialists/user.json → repo .specialists/user/<name>
+   * Layered contract (lowest → highest):
+   *   package canonical → ~/.config/specialists/user.json → ~/.specialists/user/<name>
+   *     → repo .specialists/user/<name>
+   *
+   * Like pi skill discovery (user + project locations scanned together), a
+   * home-level definition is discovered in every repository. A same-named repo
+   * definition wins; the collision warns instead of silently shadowing.
    *
    * The repo `.specialists/default/` mirror was retired by commit 31a6421c
    * ("reconcile: empty .specialists/default/ — live-from-package canonical resolves all")
@@ -175,11 +211,16 @@ export class SpecialistLoader {
    * authoritative — they belonged to the same `scope: 'default'` tier.
    */
   private getScanDirs(): ScanDir[] {
+    const homeUserDir = this.getHomeUserDir();
     const dirs: ScanDir[] = [
-      // Repo authoring layer (highest priority). Full-spec replacement.
+      // Repo authoring layer (highest priority). Full spec; only allowed fields propagate.
       { path: join(this.projectDir, '.specialists', 'user'), scope: 'user', source: 'user' },
       // Back-compat nested user path — migration bridge only.
       { path: join(this.projectDir, '.specialists', 'user', 'specialists'), scope: 'user', source: 'legacy' },
+
+      // Home authoring layer: ~/.specialists/user/. Full spec; only allowed fields
+      // propagate. Sits below the repo layer so the repo definition wins on collision.
+      ...(homeUserDir ? [{ path: homeUserDir, scope: 'home' as ScanDirScope, source: 'home' as ScanDirSource }] : []),
 
       // Package canonical (read-only fallback). The merge base.
       { path: join(this.projectDir, 'config', 'specialists'), scope: 'package', source: 'package-fallback' },
@@ -207,7 +248,7 @@ export class SpecialistLoader {
     return null;
   }
 
-  /** Find every layer that has a file for `name`, ordered base-first (package → user). */
+  /** Find every layer that has a file for `name`, ordered base-first (package → home → repo user). */
   private findLayerHits(name: string): Array<{ dir: ScanDir; resolved: ResolvedSpecPath }> {
     const hits: Array<{ dir: ScanDir; resolved: ResolvedSpecPath }> = [];
     const seenScopes = new Set<ScanDirScope>();
@@ -368,16 +409,34 @@ export class SpecialistLoader {
   }
 
   /**
-   * Build the merged spec for `name`. Single linear pass over the three layers:
+   * Build the merged spec for `name`. Single linear pass over the layers
+   * (lowest → highest):
    *
-   *   package canonical → ~/.config/specialists/user.json → repo .specialists/user/<name>
+   *   package canonical → ~/.config/specialists/user.json → ~/.specialists/user/<name>
+   *     → repo .specialists/user/<name>
    *
-   * findLayerHits returns at most two hits (package + user repo), ordered base-first.
+   * findLayerHits returns hits ordered base-first. The home and repo layers are
+   * full-spec files; only override-allowed fields propagate onto the base.
    * Does NOT throw on null model; caller (get) enforces the missing-model error.
    */
   private async buildMergedSpec(name: string): Promise<MergeOutcome | null> {
     const hits = this.findLayerHits(name);
     if (hits.length === 0) return null;
+
+    // A same-named repo definition wins over the home definition. Warn naming
+    // both paths instead of silently shadowing (pi skill rule).
+    //
+    // One case is NOT a shadow: several repos reach the home layer through a symlink
+    // (`<repo>/.specialists/user -> ~/.specialists/user`), so both layers hold the SAME file.
+    // Warning there would be noise about nothing, on every `sp list`. Compare real paths, not
+    // the lexical ones the scan dirs were built from.
+    const homeHit = hits.find(h => h.dir.scope === 'home');
+    const repoHit = hits.find(h => h.dir.scope === 'user');
+    if (homeHit && repoHit && realpathOr(repoHit.resolved.filePath) !== realpathOr(homeHit.resolved.filePath)) {
+      process.stderr.write(
+        `[specialists] warning: '${name}' resolved from repo '${repoHit.resolved.filePath}' shadows home '${homeHit.resolved.filePath}'\n`,
+      );
+    }
 
     // Layer 1: package canonical (always lowest hit; full spec).
     const baseHit = hits[0];
@@ -407,7 +466,8 @@ export class SpecialistLoader {
       );
     }
 
-    // Layer 3: repo .specialists/user/<name> (full spec; only allowed fields propagate).
+    // Layer 3+4: home ~/.specialists/user/<name> then repo .specialists/user/<name>
+    // (full spec files; only allowed fields propagate, highest layer wins).
     for (const hit of hits.slice(1)) {
       const content = await readFile(hit.resolved.filePath, 'utf-8');
       let overrideRaw: unknown;
@@ -465,7 +525,10 @@ export class SpecialistLoader {
 
     for (const dir of this.getScanDirs()) {
       const files = await readdir(dir.path).catch(() => []);
-      for (const file of files.filter(f => f.endsWith('.specialist.json') || f.endsWith('.specialist.yaml'))) {
+      const specFiles = files
+        .filter(f => f.endsWith('.specialist.json') || f.endsWith('.specialist.yaml'))
+        .sort();
+      for (const file of specFiles) {
         const specialistName = basename(file).replace(/\.specialist\.(json|yaml)$/, '');
         if (seen.has(specialistName)) continue;
 
@@ -505,6 +568,8 @@ export class SpecialistLoader {
         }
       }
     }
+    // Deterministic output independent of filesystem enumeration order.
+    results.sort((a, b) => a.name.localeCompare(b.name));
     return results;
   }
 
@@ -528,14 +593,14 @@ export class SpecialistLoader {
 
   /**
    * Return the merged (effective) spec for `name`: package canonical + global
-   * user.json + repo overrides, in the same precedence as get().
+   * user.json + home ~/.specialists/user/ + repo overrides, in the same precedence as get().
    *
    * Unlike get(), does NOT enforce the "model must be set" gate — this method
    * exists precisely so tooling (sp view --raw, launchers, doctors) can inspect
    * the effective config even when it isn't yet runnable. Callers that need
    * runtime enforcement should still use get().
    *
-   * Returns null if the specialist has no package canonical (unknown name).
+   * Returns null if no layer holds a file for `name` (unknown name).
    */
   async getEffective(name: string): Promise<Specialist | null> {
     const merged = await this.buildMergedSpec(name);

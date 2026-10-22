@@ -184,7 +184,7 @@ function specFor(name: string, outputType: string): Record<string, unknown> {
         output_type: outputType,
         bare: false,
       },
-      prompt: { system: `You are the ${name}.`, task_template: 'Do: {{bead_id}}' },
+      prompt: { system: `You are the ${name}.`, task_template: 'Do: $bead_id' },
     },
   };
 }

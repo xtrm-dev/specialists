@@ -207,7 +207,7 @@ function hostWith(fixture: HostFixture = {}) {
           bare: false,
           ...(fixture.thinkingLevel ? { thinking_level: fixture.thinkingLevel } : {}),
         },
-        prompt: { system: 'You are the researcher.', task_template: 'Do: {{bead_id}}' },
+        prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
       },
     }) } as never,
     workItems: testWorkItems({

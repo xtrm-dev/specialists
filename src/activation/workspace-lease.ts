@@ -191,6 +191,14 @@ export interface WorkspaceLease {
   attemptId: AttemptId;
   /** Display only — for the rejection message. Never used to decide anything. */
   specialist?: string;
+  /**
+   * True when the activation holds this workspace under `execution.lease_waiver` rather than a
+   * write tier. Display only, like `specialist`: it lets a reader (the coordinator's lease hook,
+   * `specialists lease list`) tell a read-tier observer apart from a writer. It is never read by
+   * admission — the waiver is resolved from the definition, not from the lease file, so a
+   * hand-edited record cannot widen anything.
+   */
+  leaseWaiver?: boolean;
   holder: HolderProcess;
   acquiredAtMs: number;
 }
@@ -337,6 +345,8 @@ export interface AcquireRequest {
   activationId: ActivationId;
   attemptId: AttemptId;
   specialist?: string;
+  /** Records the waiver on the lease for display; absent means an ordinary write-tier holder. */
+  leaseWaiver?: boolean;
 }
 
 export interface RecoveryOutcome {
@@ -497,6 +507,7 @@ export function acquire(
     activationId,
     attemptId,
     specialist: request.specialist,
+    ...(request.leaseWaiver ? { leaseWaiver: true } : {}),
     holder: selfHolder(probe),
     acquiredAtMs: Date.now(),
   };

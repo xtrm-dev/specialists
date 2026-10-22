@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
-import { renderTaskPrompt, buildSkillPrefix, deriveSkillName } from '../../src/specialist/task-prompt.js';
+import { renderTaskPrompt, buildSkillPrefix, deriveSkillName, extractMustacheTokens, TemplatePlaceholderError } from '../../src/specialist/task-prompt.js';
 import { buildBeadContext, type BeadRecord } from '../../src/specialist/beads.js';
 import type { Specialist } from '../../src/specialist/schema.js';
 
@@ -65,6 +65,68 @@ describe('renderTaskPrompt', () => {
     const ok = renderTaskPrompt({ ...base, specialist: spec('bead=$bead_id cwd=$cwd') });
     expect(ok.initial_prompt).toContain('bead=unitAI-6639v');
     expect(ok.initial_prompt).toContain('cwd=/repo');
+  });
+
+  // SPECIALISTS-4327: mustache {{name}} is never substituted — refuse, never leak literally.
+  it('refuses a mustache placeholder instead of leaking literal braces to the model', () => {
+    let error: unknown;
+    try {
+      renderTaskPrompt({ ...base, specialist: spec('Run the probe for {{bead_id}}') });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(TemplatePlaceholderError);
+    const message = (error as Error).message;
+    // Names the offending token in the syntax the author wrote...
+    expect(message).toContain('{{bead_id}}');
+    expect(message).toContain('bead_id');
+    // ...and the definition file, so the author can fix it without reading the renderer.
+    expect(message).toContain('chain-coordinator');
+    expect(message).toContain('.specialist.json');
+    // Points at the supported syntax.
+    expect(message).toContain('$name');
+  });
+
+  it('refuses mustache with inner whitespace and dedups repeats', () => {
+    expect(extractMustacheTokens('{{ bead_id }} and {{bead_id}}')).toEqual(['bead_id']);
+    expect(() => renderTaskPrompt({ ...base, specialist: spec('{{ bead_id }}') }))
+      .toThrow(/\{\{bead_id\}\}/);
+  });
+
+  it('names both syntaxes when $unknown and {{mustache}} co-occur', () => {
+    let error: unknown;
+    try {
+      renderTaskPrompt({ ...base, specialist: spec('$nope and {{bead_id}}') });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(TemplatePlaceholderError);
+    expect((error as Error).message).toContain('$nope');
+    expect((error as Error).message).toContain('{{bead_id}}');
+    expect((error as TemplatePlaceholderError).mustache).toEqual(['bead_id']);
+    expect((error as TemplatePlaceholderError).unresolved).toContain('nope');
+  });
+
+  it('still renders JSON object literals and fenced code containing braces', () => {
+    const out = renderTaskPrompt({
+      ...base,
+      specialist: spec('Run the probe for $bead_id with config {"key": "value", "count": 2}'),
+    });
+    expect(out.initial_prompt).toContain('Run the probe for unitAI-6639v');
+    expect(out.initial_prompt).toContain('{"key": "value", "count": 2}');
+  });
+
+  it('still renders a fenced JSON block without treating braces as placeholders', () => {
+    const template = '```json\n{"outer": {"inner": 1}}\n```\nbead=$bead_id';
+    const out = renderTaskPrompt({ ...base, specialist: spec(template) });
+    expect(out.initial_prompt).toContain('{"outer": {"inner": 1}}');
+    expect(out.initial_prompt).toContain('bead=unitAI-6639v');
+  });
+
+  it('extractMustacheTokens ignores non-placeholder braces', () => {
+    expect(extractMustacheTokens('config {"key": "value"} and {} and {{}}')).toEqual([]);
+    expect(extractMustacheTokens('no braces here $bead_id')).toEqual([]);
+    expect(extractMustacheTokens('{{a}} {{b}} {{a}}')).toEqual(['a', 'b']);
   });
 
   it('resolves absent execution-only placeholders to empty instead of leaking $name', () => {

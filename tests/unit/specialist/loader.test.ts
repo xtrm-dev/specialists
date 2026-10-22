@@ -1,8 +1,9 @@
 // tests/unit/specialist/loader.test.ts
 // ISSUE: xtrm-wiy5n.4.11 — static skip remains tracked.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, writeFile, mkdir, utimes } from 'node:fs/promises';
+import { mkdtemp, writeFile, mkdir, utimes, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
+import { realpathSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { rm } from 'node:fs/promises';
 import { SpecialistExtensionSourceCollisionError, SpecialistLoader, checkStaleness, type SpecialistSummary } from '../../../src/specialist/loader.js';
@@ -1454,6 +1455,147 @@ describe('KAN-90 — global override layer + null-model hard fail', () => {
     );
     const spec = await loader.get('demo');
     expect(spec.specialist.skills?.paths).toEqual(['/a', '/b', '/c', '/d']);
+  });
+});
+
+describe('home layer ~/.specialists/user/ (SPECIALISTS-4323)', () => {
+  let tmpProject: string;
+  let tmpHome: string;
+  let originalHome: string | undefined;
+  let originalXdg: string | undefined;
+
+  beforeEach(async () => {
+    tmpProject = await mkdtemp(join(tmpdir(), 'home-proj-'));
+    tmpHome = await mkdtemp(join(tmpdir(), 'home-home-'));
+    originalHome = process.env.HOME;
+    originalXdg = process.env.XDG_CONFIG_HOME;
+    process.env.HOME = tmpHome;
+    delete process.env.XDG_CONFIG_HOME;
+    await mkdir(join(tmpProject, 'config', 'specialists'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    process.env.HOME = originalHome;
+    if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = originalXdg;
+    await rm(tmpProject, { recursive: true, force: true });
+    await rm(tmpHome, { recursive: true, force: true });
+    loadPresets({ force: true });
+  });
+
+  async function writeHomeSpec(name: string, model = 'home/model'): Promise<string> {
+    const dir = join(tmpHome, '.specialists', 'user');
+    await mkdir(dir, { recursive: true });
+    const filePath = join(dir, `${name}.specialist.json`);
+    await writeFile(filePath, MINIMAL_YAML(name).replace('gemini', model));
+    return filePath;
+  }
+
+  it('discovers a home-only spec with home scope/source in a repo without .specialists/user/', async () => {
+    await writeHomeSpec('home-only');
+    const loader = new SpecialistLoader({ projectDir: tmpProject });
+    const list = await loader.list();
+    const found = list.find(s => s.name === 'home-only');
+    expect(found).toBeDefined();
+    expect(found?.scope).toBe('home');
+    expect(found?.source).toBe('home');
+    expect(found?.filePath).toContain(join('.specialists', 'user'));
+  });
+
+  it('dispatches a home-only spec via get() (no Specialist not found)', async () => {
+    await writeHomeSpec('home-only');
+    const loader = new SpecialistLoader({ projectDir: tmpProject });
+    const spec = await loader.get('home-only');
+    expect(spec.specialist.metadata.name).toBe('home-only');
+    expect(spec.specialist.execution.model).toBe('home/model');
+  });
+
+  it('repo layer wins over home layer for the same name', async () => {
+    await writeHomeSpec('shared', 'home/model');
+    const repoDir = join(tmpProject, '.specialists', 'user');
+    await mkdir(repoDir, { recursive: true });
+    await writeFile(join(repoDir, 'shared.specialist.json'), MINIMAL_YAML('shared').replace('gemini', 'repo/model'));
+    const loader = new SpecialistLoader({ projectDir: tmpProject });
+    const list = await loader.list();
+    const shared = list.filter(s => s.name === 'shared');
+    expect(shared).toHaveLength(1);
+    expect(shared[0]?.scope).toBe('user');
+    expect(shared[0]?.source).toBe('user');
+    expect(shared[0]?.filePath).toBe(join(repoDir, 'shared.specialist.json'));
+    const spec = await loader.get('shared');
+    expect(spec.specialist.execution.model).toBe('repo/model');
+  });
+
+  it('emits a warning naming both paths on home/repo collision', async () => {
+    const homePath = await writeHomeSpec('shared');
+    const repoDir = join(tmpProject, '.specialists', 'user');
+    await mkdir(repoDir, { recursive: true });
+    const repoPath = join(repoDir, 'shared.specialist.json');
+    await writeFile(repoPath, MINIMAL_YAML('shared'));
+    const loader = new SpecialistLoader({ projectDir: tmpProject });
+    const chunks: string[] = [];
+    const orig = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: unknown, ...args: unknown[]) => {
+      chunks.push(String(chunk));
+      return orig(chunk as never, ...(args as []));
+    }) as typeof process.stderr.write;
+    try {
+      await loader.get('shared');
+    } finally {
+      process.stderr.write = orig;
+    }
+    const output = chunks.join('');
+    expect(output).toContain("'shared'");
+    expect(output).toContain(homePath);
+    expect(output).toContain(repoPath);
+  });
+
+  it('does not warn when the repo layer is a symlink to the home layer (same file)', async () => {
+    // Four repos on this machine reach the home layer this way:
+    // `<repo>/.specialists/user -> ~/.specialists/user`. Both layers then hold the SAME file,
+    // so there is no shadowing to report and warning would be noise on every `sp list`.
+    const homePath = await writeHomeSpec('shared');
+    await mkdir(join(tmpProject, '.specialists'), { recursive: true });
+    await symlink(join(tmpHome, '.specialists', 'user'), join(tmpProject, '.specialists', 'user'), 'dir');
+
+    const loader = new SpecialistLoader({ projectDir: tmpProject });
+    const chunks: string[] = [];
+    const orig = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: unknown, ...args: unknown[]) => {
+      chunks.push(String(chunk));
+      return orig(chunk as never, ...(args as []));
+    }) as typeof process.stderr.write;
+    let spec;
+    try {
+      spec = await loader.get('shared');
+    } finally {
+      process.stderr.write = orig;
+    }
+    expect(chunks.join('')).not.toContain('shadows home');
+    // And the file really is the same one, so the resolved content is the home content.
+    expect(realpathSync(homePath)).toBe(realpathSync(join(tmpProject, '.specialists', 'user', 'shared.specialist.json')));
+    expect(spec.specialist.metadata.name).toBe('shared');
+  });
+
+  it('emits no duplicate row for a colliding name and keeps package-only behaviour', async () => {
+    await writeFile(join(tmpProject, 'config', 'specialists', 'pkg-only.specialist.json'), MINIMAL_YAML('pkg-only'));
+    await writeHomeSpec('shared');
+    const repoDir = join(tmpProject, '.specialists', 'user');
+    await mkdir(repoDir, { recursive: true });
+    await writeFile(join(repoDir, 'shared.specialist.json'), MINIMAL_YAML('shared'));
+    const loader = new SpecialistLoader({ projectDir: tmpProject });
+    const list = await loader.list();
+    expect(list.filter(s => s.name === 'shared')).toHaveLength(1);
+    const pkgOnly = list.find(s => s.name === 'pkg-only');
+    expect(pkgOnly?.scope).toBe('package');
+    expect(pkgOnly?.source).toBe('package-fallback');
+  });
+
+  it('resolves the home layer from HOME when no homeDir override is given', async () => {
+    await writeHomeSpec('via-env');
+    const loader = new SpecialistLoader({ projectDir: tmpProject });
+    const spec = await loader.getEffective('via-env');
+    expect(spec?.specialist.metadata.name).toBe('via-env');
   });
 });
 

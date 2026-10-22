@@ -171,6 +171,43 @@ const WRITE_TIERS = new Set(['MEDIUM', 'HIGH']);
 const TOOL_DURATION_CHECK_INTERVAL_MS = 10_000;
 
 /**
+ * Statuses an `xtrm-background` result uses for work that is still in flight: a started command
+ * (`running`) and an armed monitor (`armed`, which wakes the session per matching line).
+ */
+const LIVE_BACKGROUND_STATUSES = new Set(['running', 'armed', 'started']);
+
+/**
+ * Statuses that mean the task or monitor is over. `timed_out` is the extension's own kill at
+ * `timeout_ms`, so reaching it also proves the child is gone.
+ */
+const TERMINAL_BACKGROUND_STATUSES = new Set(['completed', 'failed', 'stopped', 'expired', 'timed_out', 'killed']);
+
+/**
+ * Fail-closed ceiling for a task whose liveness cannot be probed (SPECIALISTS-4320).
+ * `xtrm-background` reports `task_id` but no pid, so the host cannot ask the OS; it proves the
+ * task ended through the extension's own exit notification. If that notification never reaches
+ * the session (extension gone, delivery dropped) the record must still expire, or a lease would
+ * be held forever on evidence nobody can re-check. Two hours is the extension's maximum task
+ * timeout plus its kill grace; past that a task cannot still be running.
+ */
+const BACKGROUND_TASK_MAX_HOLD_MS = 2 * 60 * 60 * 1000 + 60_000;
+
+/**
+ * One background task an activation started, with whatever can prove it is still alive.
+ * `pid` comes from the retired text contract; `deadlineMs` is the notification-plus-ceiling
+ * model used by `xtrm-background`, which reports an id but never a pid.
+ */
+interface BackgroundTaskRef {
+  /** Identity the extension reported (`task_id`) or `pid:<n>` for the legacy contract. */
+  id: string;
+  label: string;
+  pid?: number;
+  deadlineMs?: number;
+  /** False once a stop result or an exit notification retires the record. */
+  live: boolean;
+}
+
+/**
  * Legacy-faithful threshold normalization (Target 2, PR #387 review).
  *
  * Legacy spreads the configured value straight through (`{...DEFAULTS,
@@ -946,6 +983,19 @@ export interface NativeActivationHostDeps {
   sessionStatsTimeoutMs?: number;
   /** Injected for tests; defaults to probing the `pi` binary on PATH. */
   piVersion?: string;
+  /**
+   * Observed when a background-woken wake turn settles with no resume()/retry()
+   * framing it (SPECIALISTS-4322). Pi delivers a finished background task as a
+   * notification into the live session and the model takes a wake turn on its own:
+   * no runToSettled frames that turn, so without this the wake settles only in the
+   * session-event projection (jobs stuck `waiting`, stale metrics) and the
+   * coordinator layers never learn the superseding result. The callback receives
+   * the same ActivationResult the framed path would have produced; wiring it to
+   * the result store (pusher.settle + pushCompletion, like the dispatch/resume
+   * observation contract) keeps specialist_status on the event stream. Optional:
+   * without it the activation still finalises durably, it just pushes nothing.
+   */
+  onWakeSettlement?: (result: ActivationResult) => void;
 }
 
 /** Configuration for pushing interactions to a Claude coordinator. */
@@ -982,10 +1032,35 @@ export class NativeActivationHost {
   private readonly cwd: string;
   private readonly provisionWriterWorkspace: (cwd: string, issueRef: string) => ProvisionedWorkspace;
   private readonly backgroundTaskAlive: (pid: number) => boolean;
-  /** Per activation: background tasks its tools reported as started, by PID. */
-  private readonly backgroundTasks = new Map<string, Map<number, string>>();
+  /**
+   * Per activation: background tasks its tools reported as started, by the identity the
+   * extension reported. Keyed by task id (current `xtrm-background`) or `pid:<n>` (the
+   * retired `pi-background-tasks` text contract), because only one of the two shapes can
+   * prove liveness per task and the host must not confuse them.
+   */
+  private readonly backgroundTasks = new Map<string, Map<string, BackgroundTaskRef>>();
   /** Per activation: the poll that releases a lease held over running background tasks. */
   private readonly backgroundWatch = new Map<string, ReturnType<typeof setInterval>>();
+  /**
+   * Activations with an unfinalised spontaneous wake turn (SPECIALISTS-4322). Set when a
+   * turn starts on an already-settled snapshot — i.e. a background-woken wake, not a
+   * framed resume/retry leg — and consumed when that turn's settle finalises. Without
+   * this a redelivered agent_settled would finalise (and publish) the same wake twice.
+   */
+  private readonly wakeDirty = new Set<string>();
+  /** Wake finalisations currently capturing session stats; a concurrent second settle
+   * for the same activation skips and is covered by the in-flight pass, which reads the
+   * live session after the capture. */
+  private readonly wakeFinalising = new Set<string>();
+  /** Outward seam for unframed wake settlements; see NativeActivationHostDeps. */
+  private readonly wakeSettlement?: (result: ActivationResult) => void;
+  /**
+   * Activations with a runToSettled turn currently driving them (SPECIALISTS-4322).
+   * Set on runToSettled entry, cleared when its terminal settlement publishes: every
+   * framed leg funnels through there, so a settle observed while the flag is absent
+   * belongs to a background-woken wake turn with no framing, never to a framed run.
+   */
+  private readonly framedTurns = new Set<string>();
   private readonly backgroundPollMs: number;
   private readonly now: () => number;
   private readonly sessionStatsTimeoutMs?: number;
@@ -1075,6 +1150,7 @@ export class NativeActivationHost {
     this.forensics = withFleetWake(deps.forensics ?? NULL_FORENSIC_SINK, () => this.wakeFleetWaiters());
     this.loadSdk = deps.loadSdk ?? loadPiSdk;
     this.now = deps.now ?? (() => Date.now());
+    this.wakeSettlement = deps.onWakeSettlement;
     this.sessionStatsTimeoutMs = deps.sessionStatsTimeoutMs;
     this.piVersion = deps.piVersion;
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
@@ -1688,7 +1764,13 @@ export class NativeActivationHost {
     // reconciliation decides what happened (`workspace-reconcile.ts`).
     if (access === 'write' || leaseWaiver) {
       try {
-        acquireLease({ workspace, activationId, attemptId, specialist: request.specialist });
+        acquireLease({
+          workspace,
+          activationId,
+          attemptId,
+          specialist: request.specialist,
+          ...(leaseWaiver ? { leaseWaiver: true } : {}),
+        });
       } catch (error) {
         if (error instanceof DispatchRejectedError) {
           emit('lease_denied', {
@@ -2332,7 +2414,13 @@ export class NativeActivationHost {
     });
 
     switch (event.type) {
+      case 'turn_start':
+        // A turn starting on an already-settled snapshot is a background-woken wake,
+        // not a framed leg: mark it so the settle below finalises instead of parking.
+        this.noteWakeTurnStart(snapshot);
+        break;
       case 'agent_start':
+        this.noteWakeTurnStart(snapshot);
         snapshot.state = 'running';
         this.save(snapshot);
         emit('turn_started');
@@ -2355,9 +2443,28 @@ export class NativeActivationHost {
         // `activation_failed` pair (unitAI-8s7xx: emitting it here unconditionally made
         // an aborted turn push BOTH `completed` and `failed`). The lease release and
         // state bookkeeping below are unconditional on every settle, aborted or not.
+        // A settle with no framed turn driving it is a background-woken wake turn
+        // (SPECIALISTS-4322): every framed leg sets framedTurns on runToSettled entry
+        // and clears it when its terminal settlement publishes, so a settle observed
+        // with the flag absent has no runToSettled to emit its terminal record.
+        // Finalise it here or the job parks in `waiting` with a stale metrics row
+        // and the activation is never finalised. The dirty flag proves a wake turn
+        // actually started (a redelivered settle with no new turn finalises nothing).
+        const unframedWake = !this.framedTurns.has(snapshot.activationId)
+          && this.wakeDirty.has(snapshot.activationId);
         snapshot.state = 'settled';
         this.save(snapshot);
         this.releaseIfWriter(snapshot, 'settled');
+        if (unframedWake) {
+          this.wakeDirty.delete(snapshot.activationId);
+          const record = this.registry.get(snapshot.activationId);
+          if (record && !this.wakeFinalising.has(snapshot.activationId)) {
+            this.wakeFinalising.add(snapshot.activationId);
+            void this.finalizeWakeTurn(snapshot, record, emit).finally(() => {
+              this.wakeFinalising.delete(snapshot.activationId);
+            });
+          }
+        }
         break;
       case 'auto_retry_start':
         emit('retry_started', { attempt: event.attempt, max_attempts: event.maxAttempts });
@@ -2379,6 +2486,12 @@ export class NativeActivationHost {
       case 'tool_execution_end':
         this.noteToolEnd(snapshot.activationId, event);
         this.noteBackgroundTask(snapshot.activationId, event);
+        break;
+      case 'message_start':
+      case 'message_end':
+        // A background task's exit notification arrives as a session message carrying the
+        // task id in its details; that is the evidence the task is over (SPECIALISTS-4320).
+        this.noteBackgroundEnd(snapshot.activationId, event);
         break;
       default:
         break;
@@ -2436,17 +2549,72 @@ export class NativeActivationHost {
   }
 
   /**
-   * Record a background task a tool reported as started (SPECIALISTS-4310). pi-background-tasks
-   * (`bg_run` and its siblings) answers with `Status: running` and `PID: <n>` and lets the turn
-   * end while the task runs; the host must not read that idle turn as a finished activation.
+   * Record a background task a tool reported as started, and forget one it reported as ended
+   * (SPECIALISTS-4310, SPECIALISTS-4320). A tool that starts work in the background lets the
+   * turn end while the task runs; the host must not read that idle turn as a finished
+   * activation, because the task still uses the workspace and the wake it produces belongs to
+   * this activation.
+   *
+   * Two result shapes exist and both are accepted, because the fleet still has sessions on the
+   * retired one:
+   * - `xtrm-background` (`BashBackground`/`Monitor`) reports the identity in tool-result
+   *   `details` (`task_id` with status `running` or `armed`) and never prints a pid;
+   * - `pi-background-tasks` (`bg_run`) prints `Status: running` and `PID: <n>` in the text.
+   * Reading only the text is what broke long watches: the details-only shape recorded nothing,
+   * so the settle carve-out never applied and a waking activation found its lease gone.
    */
   private noteBackgroundTask(activationId: string, event: PiAgentSessionEvent): void {
+    const details = resultDetails(event.result);
+    const taskId = typeof details?.task_id === 'string' && details.task_id.length > 0 ? details.task_id : undefined;
+    const status = typeof details?.status === 'string' ? details.status.toLowerCase() : undefined;
     const text = resultContent(event.result);
+    const label = text?.split('\n')[0]?.trim() || (typeof details?.summary === 'string' ? details.summary : undefined);
+
+    if (taskId) {
+      const tasks = this.backgroundTasks.get(activationId) ?? new Map<string, BackgroundTaskRef>();
+      if (status !== undefined && TERMINAL_BACKGROUND_STATUSES.has(status)) {
+        // A task or monitor the tool just reported as finished (BackgroundStop, or an
+        // immediate exit) is dead now; keep the map so `liveBackgroundTasks` can prune.
+        const existing = tasks.get(taskId);
+        if (existing) existing.live = false;
+        this.backgroundTasks.set(activationId, tasks);
+        return;
+      }
+      if (status === undefined || !LIVE_BACKGROUND_STATUSES.has(status)) return;
+      tasks.set(taskId, {
+        id: taskId,
+        label: label ?? taskId,
+        // No pid is reported, so liveness is proved by the end notification (noteBackgroundEnd)
+        // with this ceiling as the fail-closed backstop: past it the task cannot still be
+        // running, because the extension kills it at its own maximum timeout.
+        deadlineMs: this.now() + BACKGROUND_TASK_MAX_HOLD_MS,
+        live: true,
+      });
+      this.backgroundTasks.set(activationId, tasks);
+      return;
+    }
+
     const pid = Number(text?.match(/^PID: (\d+)$/m)?.[1]);
     if (!text || !/^Status: running$/m.test(text) || !Number.isInteger(pid) || pid <= 0) return;
-    const tasks = this.backgroundTasks.get(activationId) ?? new Map<number, string>();
-    tasks.set(pid, text.split('\n')[0].trim());
+    const tasks = this.backgroundTasks.get(activationId) ?? new Map<string, BackgroundTaskRef>();
+    tasks.set(`pid:${pid}`, { id: `pid:${pid}`, label: label ?? `pid ${pid}`, pid, live: true });
     this.backgroundTasks.set(activationId, tasks);
+  }
+
+  /**
+   * A background notification that reaches the session ends the task it names. The wake itself
+   * is how a settled activation resumes, so this is the same channel that proves the task is
+   * over; anything the extension sends with a terminal status retires the record.
+   */
+  private noteBackgroundEnd(activationId: string, event: PiAgentSessionEvent): void {
+    const message = recordOf(event.message);
+    const details = recordOf(message?.details);
+    const taskId = typeof details?.task_id === 'string' && details.task_id.length > 0 ? details.task_id : undefined;
+    if (!taskId) return;
+    const status = typeof details?.status === 'string' ? details.status.toLowerCase() : undefined;
+    if (status !== undefined && LIVE_BACKGROUND_STATUSES.has(status)) return;
+    const existing = this.backgroundTasks.get(activationId)?.get(taskId);
+    if (existing) existing.live = false;
   }
 
   /**
@@ -2474,8 +2642,21 @@ export class NativeActivationHost {
   private liveBackgroundTasks(activationId: string): string[] {
     const tasks = this.backgroundTasks.get(activationId);
     if (!tasks) return [];
-    for (const pid of tasks.keys()) if (!this.backgroundTaskAlive(pid)) tasks.delete(pid);
-    return [...tasks].map(([pid, label]) => `${label} (pid ${pid})`);
+    const nowMs = this.now();
+    for (const [key, ref] of tasks) {
+      if (!ref.live) {
+        tasks.delete(key);
+        continue;
+      }
+      if (ref.pid !== undefined) {
+        if (!this.backgroundTaskAlive(ref.pid)) tasks.delete(key);
+        continue;
+      }
+      if (ref.deadlineMs !== undefined && nowMs > ref.deadlineMs) tasks.delete(key);
+    }
+    return [...tasks.values()].map((ref) =>
+      ref.pid !== undefined ? `${ref.label} (pid ${ref.pid})` : `${ref.label} (${ref.id})`,
+    );
   }
 
   /** Clear the watch when the tool call ends; a stray end never kills a live call. */
@@ -2546,6 +2727,10 @@ export class NativeActivationHost {
     emit: (name: string, payload?: Record<string, unknown>) => void,
     record: ActivationRecord,
   ): Promise<ActivationResult> {
+    // Framed-turn marker for the unframed-wake detector in onSessionEvent: every
+    // settle while this flag is set belongs to this run, and the terminal below
+    // publishes through the funnel that clears it (SPECIALISTS-4322).
+    this.framedTurns.add(snapshot.activationId);
     // SPECIALISTS-120 criterion 3 / F2: the settlement capture also runs on the FAILURE path.
     // A prompt rejection or a mid-run throw used to settle with no snapshot AND no
     // `session_stats_failed`, which is indistinguishable from a run Pi never measured. The
@@ -2707,6 +2892,135 @@ export class NativeActivationHost {
   }
 
   /**
+   * Mark an activation whose turn starts on an already-settled snapshot: a
+   * background-woken wake, not a framed leg (SPECIALISTS-4322). Framed turns always
+   * pass through starting/running first (resume/retry set starting, agent_start sets
+   * running), so a turn starting from settled can only be the model's own wake after
+   * a background notification. The flag is consumed when that turn's settle
+   * finalises; a redelivered settle with no new turn behind it finalises nothing.
+   */
+  private noteWakeTurnStart(snapshot: ActivationSnapshot): void {
+    if (snapshot.state === 'settled') this.wakeDirty.add(snapshot.activationId);
+  }
+
+  /**
+   * Finalise a background-woken wake turn that no runToSettled frames (SPECIALISTS-4322).
+   *
+   * Pi delivers a finished background task as a notification into the live session and
+   * the model takes a wake turn on its own. That turn settles through onSessionEvent
+   * only — no prompt window, no terminal emit, no metrics refresh — so without this
+   * the job parks in `waiting` with a stale metrics row and the activation is never
+   * finalised. The tail mirrors runToSettled's exactly (stats capture, stopReason
+   * inspection, validation with the live-background-tasks carve-out, terminal emits,
+   * release, publication): the wake is settled by the same rule as every framed turn,
+   * including `uncertain` while its own background tasks still run (SPECIALISTS-4310)
+   * and `failed` for a genuinely failed wake (never `completed`).
+   *
+   * Fire-and-forget from the session fan-out: bounded awaits only, never throws, and
+   * redelivery-safe (the dirty flag is consumed synchronously before the first await).
+   */
+  private async finalizeWakeTurn(
+    snapshot: ActivationSnapshot,
+    record: ActivationRecord,
+    emit: (name: string, payload?: Record<string, unknown>) => void,
+  ): Promise<void> {
+    try {
+      const session = record.session;
+      // Same bounded, failure-tolerant capture as the framed path: the settlement
+      // capture runs on failure legs too, so a missing snapshot stays explicit.
+      await this.captureSessionStats(session, emit);
+      const last = lastAssistantMessage(session.messages);
+      if (last && (last.stopReason === 'error' || last.stopReason === 'aborted')) {
+        const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
+        snapshot.state = 'failed';
+        this.save(snapshot);
+        emit('activation_failed', { error: detail, stop_reason: last.stopReason });
+        const failedResult: ActivationResult = {
+          activationId: snapshot.activationId,
+          participantId: snapshot.participantId,
+          attemptId: snapshot.attemptId,
+          issueId: snapshot.issueId,
+          issueRef: snapshot.issueRef,
+          issueRevision: snapshot.issueRevision,
+          contractHash: snapshot.contractHash,
+          executionBindingId: snapshot.executionBindingId,
+          status: 'failed',
+          output: undefined,
+          validation: { valid: false, errors: [detail] },
+          piSessionId: session.sessionId,
+          configuredModel: snapshot.configuredModel,
+          requestedModel: snapshot.requestedModel,
+          resolvedModel: snapshot.resolvedModel,
+          modelOverride: snapshot.modelOverride,
+          ...(snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {}),
+          thinkingOverride: snapshot.thinkingOverride,
+          fallbackUsed: false,
+          completedAt: this.now(),
+        };
+        this.publishTerminalSettlement(snapshot, failedResult, record, emit);
+        this.notifyWakeSettlement(failedResult);
+        return;
+      }
+      const output = textOf(last);
+      emit('activation_settled');
+      emit('output_validation_started');
+      const pendingTasks = this.liveBackgroundTasks(snapshot.activationId);
+      const validation = pendingTasks.length > 0
+        ? { valid: false as const, errors: [`background tasks still running: ${pendingTasks.join(', ')}; resume the activation after they finish`] }
+        : output.trim().length > 0
+          ? { valid: true as const }
+          : { valid: false as const, errors: ['empty output: specialist produced no output'] };
+      if (validation.valid) {
+        emit('output_validation_passed');
+      } else {
+        emit('output_validation_failed', { errors: validation.errors });
+      }
+      snapshot.state = 'settled';
+      this.save(snapshot);
+      emit('activation_completed', { pi_session_id: session.sessionId, output });
+      this.releaseIfWriter(snapshot, 'completed');
+      const completedResult: ActivationResult = {
+        activationId: snapshot.activationId,
+        participantId: snapshot.participantId,
+        attemptId: snapshot.attemptId,
+        issueId: snapshot.issueId,
+        issueRef: snapshot.issueRef,
+        issueRevision: snapshot.issueRevision,
+        contractHash: snapshot.contractHash,
+        executionBindingId: snapshot.executionBindingId,
+        status: pendingTasks.length > 0 ? 'uncertain' : 'completed',
+        output,
+        validation,
+        piSessionId: session.sessionId,
+        configuredModel: snapshot.configuredModel,
+        requestedModel: snapshot.requestedModel,
+        resolvedModel: snapshot.resolvedModel,
+        modelOverride: snapshot.modelOverride,
+        ...(snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {}),
+        thinkingOverride: snapshot.thinkingOverride,
+        fallbackUsed: false,
+        completedAt: this.now(),
+      };
+      this.publishTerminalSettlement(snapshot, completedResult, record, emit);
+      this.notifyWakeSettlement(completedResult);
+    } catch {
+      // Finalisation is diagnostic plumbing on top of an already-settled turn:
+      // it must never throw into the session fan-out.
+    }
+  }
+
+  /** Report an unframed wake settlement outward; an observer must not break finalisation. */
+  private notifyWakeSettlement(result: ActivationResult): void {
+    const notify = this.wakeSettlement;
+    if (!notify) return;
+    try {
+      notify(result);
+    } catch {
+      // Observer failure is not activation failure.
+    }
+  }
+
+  /**
    * S1 automatic settlement publication (ADR §38).
    *
    * Host-driven: called on every terminal settlement with the live snapshot,
@@ -2725,6 +3039,11 @@ export class NativeActivationHost {
     record: ActivationRecord,
     emit: (name: string, payload?: Record<string, unknown>) => void,
   ): void {
+    // A framed terminal supersedes any pending wake dirt and closes the framed
+    // window: the settle was driven by runToSettled, not by an unframed wake, so a
+    // later redelivered settle finalises nothing (SPECIALISTS-4322).
+    this.wakeDirty.delete(snapshot.activationId);
+    this.framedTurns.delete(snapshot.activationId);
     try {
       const subject: SettlementSubject = {
         activationId: snapshot.activationId,
@@ -2885,6 +3204,7 @@ export class NativeActivationHost {
             activationId: record.snapshot.activationId,
             attemptId: record.snapshot.attemptId,
             specialist: record.snapshot.specialist,
+            ...(record.snapshot.leaseWaiver ? { leaseWaiver: true } : {}),
           });
         } catch (error) {
           // Contention ends the walk with a reason that names the lease. A silent
@@ -3348,6 +3668,9 @@ export class NativeActivationHost {
       this.stopToolDurationWatch(activationId);
       this.toolDurationWarnMsByActivation.delete(activationId);
       this.forgetBackgroundTasks(activationId);
+      this.wakeDirty.delete(activationId);
+      this.wakeFinalising.delete(activationId);
+      this.framedTurns.delete(activationId);
       record.unsubscribe();
       record.session.dispose();
       record.snapshot.state = 'stopped';
@@ -3531,6 +3854,19 @@ export function defaultInlineTitle(specialist: string, contract: string): string
 }
 
 /** Capture the same one-line purpose projection as the legacy path, without markdown bullets. */
+/** Narrow an unknown tool result / message to its record view, or undefined. */
+function recordOf(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
+}
+
+/**
+ * The `details` a tool attached to its result. This is where `xtrm-background` reports the
+ * task identity (`task_id`, `status`); the text content never carries it (SPECIALISTS-4320).
+ */
+function resultDetails(result: unknown): Record<string, unknown> | undefined {
+  return recordOf(recordOf(result)?.details);
+}
+
 function purposeExcerptFromContract(contract: unknown): string {
   if (contract !== null && typeof contract === 'object') {
     const c = contract as Record<string, unknown>;

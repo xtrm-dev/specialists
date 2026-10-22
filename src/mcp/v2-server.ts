@@ -114,6 +114,14 @@ export function buildV2Server(ctx?: McpRequestContext, options?: BuildV2ServerOp
     loader,
     // One Substrate authority shared with sb/Pi; path from XTRM_STATE_DB or ~/.xtrm/state.db.
     authority: createFileAuthorityWriter(),
+    // A background-woken wake turn settles with no tool call framing it, so no
+    // dispatch/resume observer records its superseding result (SPECIALISTS-4322).
+    // Settle + push here under the same observation contract, so specialist_status
+    // projects the wake settlement instead of the stale uncertain one.
+    onWakeSettlement: (result) => {
+      pusher.settle(result);
+      pusher.pushCompletion(result.activationId).catch(() => { /* degraded to polling */ });
+    },
     // The push rides the forensic stream the host already emits — no poll, no
     // bus. A null observability store still gets a channel sink, because the
     // push is not forensics and must not depend on a diagnostic database.

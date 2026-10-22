@@ -364,7 +364,7 @@ function readOnlySpec() {
         output_type: 'research',
         bare: false,
       },
-      prompt: { system: 'You are the researcher.', task_template: 'Do: {{bead_id}}' },
+      prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
     },
   };
 }
