@@ -1970,6 +1970,9 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
         ? options.createHost({ wrapSink })
         : createCoordinatorHost({ wrapSink });
       announceWake();
+      // A host now exists where none did: park the fleet watcher so the widget
+      // above the prompt follows every later transition. Idempotent when parked.
+      kickFollowLoop();
     }
     return host;
   };
@@ -2038,12 +2041,14 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   // selection they just opened, the two settlement/ask wakes refresh it when a
   // child settles or asks, and the fleet-change follow loop below refreshes it
   // on every Fleet change while the selection is live (the Claude pane
-  // refreshes on status change, not on a timer). The footer seam calls
-  // renderBelow as a plain function on its own cycle, so the section always
-  // paints the last completed read, never a pending promise. No timers, no
+  // refreshes on status change, not on a timer). Text reports and the overlay
+  // read the last completed cache, never a pending promise. No timers, no
   // polling, no execute-body wrapping.
   const refreshFleetDetail = async (followCursor = null) => {
     const sel = fleetDetail;
+    // A detail refresh means the fleet moved: repark the watcher so the
+    // widget above the prompt follows even when no feed selection is live.
+    kickFollowLoop();
     if (!sel) { notifyDetailListeners(); return; }
     try {
       if (sel.kind === 'result') {
@@ -2092,19 +2097,6 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   fleetDetailRef.current = null; // reassigned below by selection; kept in sync
   const syncDetailRef = () => { fleetDetailRef.current = fleetDetail; };
   refreshFleetDetailRef.current = refreshFleetDetail;
-
-  const renderBelow = () => {
-    if (!fleetVisible) return [];
-    const fleet = readFleet();
-    if (fleet.activations.length === 0 && fleet.asks.length === 0) return [];
-    // One clock per paint so every row in the frame shares the spinner frame.
-    return renderFleetSection(fleet, {
-      expanded: fleetExpanded,
-      nowMs: Date.now(),
-      detail: fleetDetail,
-      detailCache: fleetDetailCache,
-    });
-  };
 
   pi.registerTool({
     name: 'specialist_dispatch',
@@ -3171,36 +3163,50 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   /** Fleet view-model helper (projection-only; no cached state). */
   const renderFleetSection = (fleet, opts) => renderSectionLines(fleet, opts);
 
-  // Operational fleet: the footer section below the statusline repaints on its
-  // own cycle. Rows render expanded one row per specialist by default;
-  // /specialists collapse opts out to the single line. No inspector: /specialists inspect
-  // prints the same expanded text report (the ui.custom path hard-locked the
-  // TUI in this pi version, unitAI-nmxhg — the interactive inspector stays
-  // deferred with UI-4 and the footer repaints on its own cycle). The section
-  // render is a projection: readFleet() afresh on every render, nothing cached.
+  // Operational fleet: the widget above the prompt (setWidget defaults to
+  // aboveEditor) repaints on fleet change. Rows render expanded one row per
+  // specialist by default; /specialists collapse opts out to the header alone.
+  // The widget render reads live fleet at paint time (projection, nothing
+  // cached); repaints are event-driven through the fleet-change loop below,
+  // never a timer. Time-derived row parts (elapsed, spinner frame) refresh on
+  // events; the overlay always renders the current instant on open.
   let fleetExpanded = true;
-  let fleetUnregister = null;
 
-
-
-  // Seam lookup order: explicit test seam, then the core footer's global hook,
-  // then absent. The core module is not importable from this tree, so the
-  // runtime shares it via globalThis (set by custom-footer when loaded).
-  const findFooterSeam = () => {
-    if (typeof options.registerFooterSection === 'function') return options.registerFooterSection;
+  // The ui surface the widget needs, captured from session_start and every
+  // command report (tool executes carry no ctx). Absent on headless runs —
+  // painting without one is a silent no-op.
+  let fleetUi = null;
+  const captureFleetUi = (ctx) => {
     try {
-      const hook = globalThis.__registerFooterSection;
-      if (typeof hook === 'function') return hook;
-    } catch { /* no global — fallback decides */ }
-    return null;
+      if (ctx?.hasUI && typeof ctx?.ui?.setWidget === 'function') fleetUi = ctx.ui;
+    } catch { /* a context that throws on property access is not live */ }
   };
 
-  // Hide-until-seam (unitAI-beqby.9, operator decision): the footer-section seam
-  // is the only fleet surface. When the seam is absent the fleet stays hidden —
-  // no setWidget fallback, so no aboveEditor/belowEditor widget competes with
-  // the footer. Slash commands still report the fleet as text. The section
-  // renders on the footer's own cycle, so repaints are no-ops everywhere else.
-  const paintFleet = () => {};
+  // Fleet widget above the prompt: the separator + header + bounded one-line
+  // rows, or nothing at all when idle, hidden, or headless — an idle fleet is
+  // silence, not a bare header (the /bg idle rule).
+  const paintFleetWidget = () => {
+    const ui = fleetUi;
+    if (!ui) return;
+    try {
+      if (!fleetVisible) {
+        ui.setWidget(FLEET_WIDGET_KEY, undefined);
+        return;
+      }
+      const fleet = readFleet();
+      if (fleet.activations.length === 0 && fleet.asks.length === 0) {
+        ui.setWidget(FLEET_WIDGET_KEY, undefined);
+        return;
+      }
+      ui.setWidget(FLEET_WIDGET_KEY, () => ({
+        render: (width) => renderFleetSection(readFleet(), { expanded: fleetExpanded, nowMs: Date.now() }),
+        invalidate: () => {},
+        dispose: () => {},
+      }), { placement: 'aboveEditor' });
+    } catch {
+      /* headless runtimes without widgets; the host stays the truth */
+    }
+  };
 
   // Inspector deferred with UI-4 (unitAI-nmxhg): /specialists inspect prints the
   // expanded text report instead of mounting a ui.custom pane.
@@ -3296,16 +3302,18 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   const resultToolDef = resultExecute;
   const feedToolDef = feedExecute;
 
-  // Fleet-change follow loop (SPECIALISTS-4264 review round 2): while a feed
-  // selection is live, park in the SAME host.waitForFleetChange the
-  // specialist_status blocking wait uses and refresh the selection on every
-  // Fleet change — the Claude pane's refresh-on-status-change, without a timer
-  // and without polling. Level-triggered, so a change landing between the
-  // liveness check and the park resolves immediately (no lost wakeup, no spin).
-  // One loop per process, idempotent across session restarts (followRunning
-  // guard); session_shutdown sets followStopped, which unblocks the loop at
-  // its next park or refresh boundary (extension lifecycle: no background work
-  // survives the session).
+  // Fleet-change follow loop (SPECIALISTS-4264 review round 2, extended
+  // SPECIALISTS-4325): park in the SAME host.waitForFleetChange the
+  // specialist_status blocking wait uses. Every wake repaints the widget above
+  // the prompt; a live feed selection additionally refreshes — the Claude
+  // pane's refresh-on-status-change, without a timer and without polling.
+  // Level-triggered, so a change landing between the liveness check and the
+  // park resolves immediately (no lost wakeup, no spin). One loop per process,
+  // idempotent across session restarts (followRunning guard); session_shutdown
+  // sets followStopped, which unblocks the loop at its next park or refresh
+  // boundary (extension lifecycle: no background work survives the session).
+  // The loop never creates the host: it reads the live variable, and a null
+  // host simply ends the pass — creation stays owned by getHost().
   const FOLLOW_WAIT_MS = 25_000;
   let followRunning = false;
   let followStopped = false;
@@ -3315,23 +3323,25 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     try {
       for (;;) {
         if (followStopped) return;
+        // Every pass repaints the widget; the feed detail below advances only
+        // while its selection is live.
+        paintFleetWidget();
+        const h = host;
+        if (!h || typeof h.waitForFleetChange !== 'function' || typeof h.fleetChangeEpoch !== 'function') return;
         const sel = fleetDetail;
-        const live = sel?.kind === 'feed'
-          && readFleet().activations.some((a) => a.activation_id === sel.id && isActiveStateFor(a.state));
-        if (!live) return;
-        let h;
-        try { h = getHost(); } catch { return; }
-        if (typeof h?.waitForFleetChange !== 'function' || typeof h?.fleetChangeEpoch !== 'function') return;
         const epoch = h.fleetChangeEpoch();
         const outcome = await h.waitForFleetChange(FOLLOW_WAIT_MS, epoch);
         if (followStopped) return;
+        const live = sel?.kind === 'feed'
+          && readFleet().activations.some((a) => a.activation_id === sel.id && isActiveStateFor(a.state));
+        if (!live) continue;
         // Re-check liveness after the park: the selection may have settled or
         // changed while parked, and a settled feed must not re-read.
         const now = fleetDetail;
         if (!now || now.kind !== 'feed' || now.id !== sel.id) continue;
         if (!readFleet().activations.some((a) => a.activation_id === now.id && isActiveStateFor(a.state))) {
           await refreshFleetDetail();
-          return;
+          continue;
         }
         if (outcome === 'change') await refreshFleetDetail(fleetDetailCache?.lastSeq ?? null);
       }
@@ -3345,18 +3355,17 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     // A restart must not leave a stale stop behind: a new session may select a
     // live feed again, and the loop is idempotent while one already runs.
     followStopped = false;
-    if (!ctx.hasUI) return;
-    const seam = findFooterSeam();
-    if (seam && !fleetUnregister) {
-      try { fleetUnregister = seam(FLEET_WIDGET_KEY, renderBelow) ?? null; }
-      catch { fleetUnregister = null; }
-    }
-    if (fleetUnregister) return; // section renders on the footer's own cycle
-    // No seam: the fleet stays hidden (hide-until-seam, unitAI-beqby.9).
+    captureFleetUi(ctx);
+    paintFleetWidget();
+    // Repark when a host already lives (never create one here: a null host is
+    // an empty fleet, not an error); getHost() kicks on creation.
+    if (host) kickFollowLoop();
   });
 
   /** Report to the operator on whichever surface the current mode actually has. */
   const report = (ctx, message, level = 'info') => {
+    captureFleetUi(ctx);
+    kickFollowLoop();
     if (ctx.hasUI) ctx.ui.notify(message, level);
     else console.log(message);
   };
@@ -3452,7 +3461,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
         const ref = parts[1] ?? '';
         if (!ref) {
           report(ctx, renderFleetSection(readFleet(), { expanded: fleetExpanded }).join('\n'));
-          paintFleet();
+          paintFleetWidget();
           return;
         }
         const resolved = resolveCommandActivation(ref);
@@ -3486,7 +3495,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       // The panel is only half the answer: in json/print mode there is no
       // widget at all, so the command always reports the Fleet in text too.
       report(ctx, renderFleetSection(readFleet(), { expanded: fleetExpanded }).join('\n'));
-      paintFleet();
+      paintFleetWidget();
     };
   const specialistsCompletions = (prefix) => {
       const normalized = prefix.trim().toLowerCase();
@@ -3495,7 +3504,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
         .map((value) => ({
           value,
           label: value,
-          description: value === 'show' ? 'Show the Fleet panel.' : value === 'hide' ? 'Hide the Fleet panel.' : value === 'inspect' ? 'Print the expanded Fleet report.' : value === 'expand' ? 'Expand rows in the footer section.' : value === 'collapse' ? 'Collapse to one line.' : value === 'status' ? 'Show one activation.' : value === 'result' ? 'Read one activation\'s result.' : 'Read one activation\'s event feed.',
+          description: value === 'show' ? 'Show the Fleet panel.' : value === 'hide' ? 'Hide the Fleet panel.' : value === 'inspect' ? 'Print the expanded Fleet report.' : value === 'expand' ? 'Expand rows in the fleet widget.' : value === 'collapse' ? 'Collapse to one line.' : value === 'status' ? 'Show one activation.' : value === 'result' ? 'Read one activation\'s result.' : 'Read one activation\'s event feed.',
         }));
       return items.length > 0 ? items : null;
   };
@@ -3673,8 +3682,6 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     // touch the host while its activations are being disposed below.
     followStopped = true;
     closeAllSubstrateDb();
-    try { fleetUnregister?.(); } catch {}
-    fleetUnregister = null;
     if (!host) return;
     if (!host) return;
     for (const snapshot of host.list()) {

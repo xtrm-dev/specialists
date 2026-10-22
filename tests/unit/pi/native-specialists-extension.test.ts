@@ -1315,34 +1315,29 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     host.waitForFleetChange = vi.fn(() => new Promise((resolve) => { waiters.push(resolve); }));
     const flush = async () => { await vi.advanceTimersByTimeAsync(0); };
     mod.default(pi, { createHost: () => host, openObservability: () => fakeClient });
-    const sections = new Map();
-    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
-    const pi2 = makeFakePi();
-    mod.default(pi2, { createHost: () => host, openObservability: () => fakeClient, registerFooterSection });
     const ctx = makeFakeCtx({ hasUI: true, mode: 'tui' });
-    await pi2.fire('session_start', { type: 'session_start' }, ctx);
-    await toolNamed(pi2, 'specialist_status').execute('tc0', {});
-    const cmds = pi2.getCommands();
+    await pi.fire('session_start', { type: 'session_start' }, ctx);
+    await toolNamed(pi, 'specialist_status').execute('tc0', {});
+    const cmds = pi.getCommands();
     await cmds.find((c) => c.name === 'specialists:feed').handler('act:feed01', ctx);
     await flush();
-    const render = sections.get('specialist-fleet');
-    const linesBefore = render().map(plain).join('\n');
-    expect(linesBefore).toContain('turn 1');
-    expect(linesBefore).not.toContain('turn 2');
+    const widgetText = () => (ctx.painted.widgets['specialist-fleet'] as unknown as () => { render(w: number): string[] })().render(80).map(plain).join('\n');
+    expect(widgetText()).toContain('feed01');
+    expect(widgetText()).not.toContain('✓');
     // One turn advances with no settle and no ask: the change wakes the parked
-    // loop, which re-reads from the cursor and appends only the new lines.
+    // loop, which repaints the widget and re-reads the feed from the cursor.
     grown = true;
     waiters.splice(0).forEach((resolve) => resolve('change'));
     await flush();
-    const linesAfter = render().map(plain).join('\n');
-    expect(linesAfter).toContain('turn 1');
-    expect(linesAfter).toContain('turn 2');
-    // Settling stops the loop: a further change resolves nothing new.
+    expect(widgetText()).toContain('feed01');
+    expect(widgetText()).not.toContain('✓');
+    // Settling flips the row marker; a further change resolves nothing new.
     host.list.mockReturnValue([{ ...SNAPSHOT, activationId: 'act:feed01', state: 'settled' }]);
     waiters.splice(0).forEach((resolve) => resolve('change'));
     await flush();
+    expect(widgetText()).toContain('✓');
     // session_shutdown stops background work: the parked waiter is abandoned.
-    await pi2.fire('session_shutdown', { type: 'session_shutdown', reason: 'quit' });
+    await pi.fire('session_shutdown', { type: 'session_shutdown', reason: 'quit' });
     expect(host.stop).toHaveBeenCalled();
   });
 
@@ -1360,8 +1355,6 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     };
     const mod = await loadExtension();
     const pi = makeFakePi();
-    const sections = new Map();
-    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
     // Capture the sink wrapper: createHost receives { wrapSink }, so wrap the
     // sink it builds and fire an ask through it — the production wake path.
     let wrapSink;
@@ -1369,23 +1362,24 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     mod.default(pi, {
       createHost: ({ wrapSink: w }) => { wrapSink = w; return host; },
       openObservability: () => fakeClient,
-      registerFooterSection,
     });
     const ctx = makeFakeCtx({ hasUI: true, mode: 'tui' });
     await pi.fire('session_start', { type: 'session_start' }, ctx);
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
+    host.list.mockReturnValue([{ ...SNAPSHOT, activationId: 'act:feed01', state: 'running', lastActivityAt: Date.now() }]);
+    host.pendingAsks.mockReturnValue([]);
     const cmds = pi.getCommands();
     await cmds.find((c) => c.name === 'specialists:feed').handler('act:feed01', ctx);
     await vi.advanceTimersByTimeAsync(0);
-    const render = sections.get('specialist-fleet');
-    expect(render().map(plain).join('\n')).toContain('▾ feed act:feed01');
-    // A settlement wake for the selected activation refreshes its detail: the
+    const widgetText = () => (ctx.painted.widgets['specialist-fleet'] as unknown as () => { render(w: number): string[] })().render(80).map(plain).join('\n');
+    expect(widgetText()).toContain('feed01');
+    // A settlement wake for the selected activation repaints its row: the
     // sink wrapper the host was built with emits activation_completed.
+    host.list.mockReturnValue([{ ...SNAPSHOT, activationId: 'act:feed01', state: 'settled' }]);
     const sink = wrapSink({ emit: () => {} });
     sink.emit({ activationId: 'act:feed01', attemptId: 'att:feed01:1', specialist: 'explorer', name: 'activation_completed', payload: { output: 'done report' } });
     await vi.advanceTimersByTimeAsync(0);
-    const after = render().map(plain).join('\n');
-    expect(after).toContain('▾ feed act:feed01');
+    expect(widgetText()).toContain('✓');
     expect(pi.sent.some((m) => m.message.customType === 'specialist_settled')).toBe(true);
   });
 
@@ -1406,29 +1400,25 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     const pi = makeFakePi();
     const { host } = makeFakeHost();
     mod.default(pi, { createHost: () => host, openObservability: () => fakeClient });
-    const sections = new Map();
-    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
     const ctx = makeFakeCtx({ hasUI: true, mode: 'tui' });
     await pi.fire('session_start', { type: 'session_start' }, ctx);
-    // No seam registered yet on this path: register through the options seam.
-    const pi2 = makeFakePi();
-    mod.default(pi2, { createHost: () => host, openObservability: () => fakeClient, registerFooterSection });
-    const ctx2 = makeFakeCtx({ hasUI: true, mode: 'tui' });
-    await pi2.fire('session_start', { type: 'session_start' }, ctx2);
-    expect(sections.has('specialist-fleet')).toBe(true);
-    await toolNamed(pi2, 'specialist_status').execute('tc0', {});
-    const render = sections.get('specialist-fleet');
-    // Before selection: rows with no detail and no select hint.
-    const before = render().map(plain).join('\n');
+    await toolNamed(pi, 'specialist_status').execute('tc0', {});
+    host.list.mockReturnValue([{ ...SNAPSHOT, activationId: 'act:feed01', state: 'running', lastActivityAt: Date.now() }]);
+    host.pendingAsks.mockReturnValue([]);
+    const widgetText = () => (ctx.painted.widgets['specialist-fleet'] as unknown as () => { render(w: number): string[] })().render(80).map(plain).join('\n');
+    // Widget rows carry no detail and no select hint: detail lives in the
+    // overlay and the text commands, never in the slim above-prompt rows.
+    const before = widgetText();
     expect(before).toContain('specialists');
     expect(before).not.toContain('select a row');
-    // Select via command: the section shows the feed under the rows.
-    const cmds = pi2.getCommands();
-    await cmds.find((c) => c.name === 'specialists:feed').handler('act:feed01', ctx2);
+    expect(before).not.toContain('▾');
+    // Select via command: the widget still shows rows, not detail.
+    const cmds = pi.getCommands();
+    await cmds.find((c) => c.name === 'specialists:feed').handler('act:feed01', ctx);
     await vi.advanceTimersByTimeAsync(0);
-    const after = render().map(plain).join('\n');
-    expect(after).toContain('▾ feed act:feed01');
-    expect(after).toContain('tool');
+    const after = widgetText();
+    expect(after).toContain('feed01');
+    expect(after).not.toContain('▾');
     // Pure projection units: loading state and settled tail.
     expect(mod.renderDetailLines({ kind: 'result', id: 'act:x' }, null)[1]).toContain('loading');
     const settled = mod.renderDetailLines(
@@ -1466,54 +1456,47 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(ctx.painted.notices.at(-1)[1]).toBe('warning');
   });
 
-  it('registers a footer section when the seam exists, and paints no widget and no setStatus', async () => {
-    const sections = new Map();
-    const registerFooterSection = (key, renderBelow) => { sections.set(key, renderBelow); return () => { sections.delete(key); }; };
-    const { pi, ctx } = await boot(undefined, { registerFooterSection });
+  it('paints the fleet widget above the editor, and no setStatus', async () => {
+    const { pi, ctx } = await boot();
     await toolNamed(pi, 'specialist_status').execute('tc0', {});   // specialist_status creates the host
     await command_tick();
-    expect(sections.has('specialist-fleet')).toBe(true);
-    expect(ctx.painted.widgets['specialist-fleet']).toBeUndefined();
     expect(ctx.painted.statuses['specialist-fleet']).toBeUndefined();
-    const lines = sections.get('specialist-fleet')(80);
+    // Above the prompt: the documented aboveEditor widget slot, not the footer.
+    expect(ctx.painted.widgetOptions['specialist-fleet']).toEqual({ placement: 'aboveEditor' });
+    const factory = ctx.painted.widgets['specialist-fleet'] as unknown as () => { render(w: number): string[] };
+    const lines = factory().render(80);
     expect(lines[0]).toBe('');
     expect(lines[1]).toContain('specialists');
     expect(lines[1]).toContain('1 blocked');
     expect(lines[1]).not.toContain('!');
   });
 
-  it('registers through the globalThis hook when present (core custom-footer loaded)', async () => {
-    const sections = new Map();
-    const prev = (globalThis as any).__registerFooterSection;
-    (globalThis as any).__registerFooterSection = (key, renderBelow) => { sections.set(key, renderBelow); return () => { sections.delete(key); }; };
-    try {
-      const { pi, ctx } = await boot();   // no options seam: the global hook is the only path
-      await toolNamed(pi, 'specialist_status').execute('tc0', {});
-      await command_tick();
-      expect(sections.has('specialist-fleet')).toBe(true);
-      expect(ctx.painted.widgets['specialist-fleet']).toBeUndefined();
-      expect(ctx.painted.statuses['specialist-fleet']).toBeUndefined();
-      const lines = sections.get('specialist-fleet')(80);
-      expect(lines[0]).toBe('');
-      expect(lines[1]).toContain('specialists');
-      expect(lines[1]).toContain('1 blocked');
-      expect(lines[1]).not.toContain('!');
-    } finally {
-      if (prev === undefined) delete (globalThis as any).__registerFooterSection;
-      else (globalThis as any).__registerFooterSection = prev;
-    }
+  it('repaints the widget on fleet change while a feed follows', async () => {
+    const { pi, host, ctx } = await boot();
+    await toolNamed(pi, 'specialist_status').execute('tc0', {});
+    let waiters: Array<(v: unknown) => void> = [];
+    host.fleetChangeEpoch = vi.fn(() => 7);
+    host.waitForFleetChange = vi.fn(() => new Promise((resolve) => { waiters.push(resolve); }));
+    // Repark against the new primitive: session restarts reseed the loop.
+    await pi.fire('session_start', { type: 'session_start', reason: 'resume' }, ctx);
+    const widgetText = () => (ctx.painted.widgets['specialist-fleet'] as unknown as () => { render(w: number): string[] })().render(80).map(plain).join('\n');
+    expect(widgetText()).toContain('explorer');
+    // A fleet change repaints the same rows without losing the selection-free shape.
+    waiters.splice(0).forEach((resolve) => resolve('change'));
+    await command_tick();
+    expect(widgetText()).toContain('explorer');
+    expect(widgetText()).toContain('specialists');
   });
 
-  it('stays hidden when the seam is absent — never paints a widget (unitAI-beqby.9)', async () => {
-    const { pi, ctx } = await boot();
+  it('no widget when headless; idle fleet clears the widget', async () => {
+    const { pi, ctx } = await boot({ hasUI: false, mode: 'print' });
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     await command_tick();
     expect(ctx.painted.widgets['specialist-fleet']).toBeUndefined();
     expect(ctx.painted.statuses['specialist-fleet']).toBeUndefined();
-    for (const options of Object.values(ctx.painted.widgetOptions)) {
-      expect(options?.placement).not.toBe('aboveEditor');
-      expect(options?.placement).not.toBe('belowEditor');
-    }
+    // Idle with a UI: the widget clears instead of painting a bare header.
+    const live = await boot();
+    expect(live.ctx.painted.widgets['specialist-fleet']).toBeUndefined();
   });
 
   it('header counts the Fleet, and every row is a one-line unit with no forensic ids (unitAI-rrdnt.65)', async () => {
@@ -1583,23 +1566,25 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
   });
 
   it('clears the widget when the Fleet is empty rather than painting a bare header', async () => {
-    const { pi, host, ctx } = await boot();
+    const { pi, host, ctx, command } = await boot();
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
+    expect(ctx.painted.widgets['specialist-fleet']).toBeDefined();
     host.list.mockReturnValue([]);
     host.pendingAsks.mockReturnValue([]);
-    await command_tick();
+    await command('specialists').handler('show', ctx);
     expect(ctx.painted.widgets['specialist-fleet']).toBeUndefined();
     expect(ctx.painted.statuses['specialist-fleet']).toBeUndefined();
   });
 
-  it('/specialists hide/show report text and never paint a widget without the seam', async () => {
+  it('/specialists hide/show toggle the widget and report text', async () => {
     const { pi, ctx, command } = await boot();
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
+    expect(ctx.painted.widgets['specialist-fleet']).toBeDefined();
     await command('specialists').handler('hide', ctx);
     expect(ctx.painted.widgets['specialist-fleet']).toBeUndefined();
     expect(ctx.painted.notices.at(-1)[0]).toContain('specialists');
     await command('specialists').handler('show', ctx);
-    expect(ctx.painted.widgets['specialist-fleet']).toBeUndefined();
+    expect(ctx.painted.widgets['specialist-fleet']).toBeDefined();
     expect(ctx.painted.notices.at(-1)[0]).toContain('specialists');
   });
 
@@ -1655,9 +1640,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
   });
 
   it('specialists mapping never yields index-derived elapsed (unitAI-d99hb)', async () => {
-    const sections = new Map();
-    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
-    const { pi, host } = await boot(undefined, { registerFooterSection });
+    const { pi, host, ctx, command } = await boot();
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     const startedAt = Date.now() - 41000;
     host.list.mockReturnValue([0, 1].map((i) => ({
@@ -1668,7 +1651,9 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
       lastActivityAt: Date.now(),
     })));
     host.pendingAsks.mockReturnValue([]);
-    const text = (sections.get('specialist-fleet')() ?? []).map(plain).join('\n');
+    await command('specialists').handler('show', ctx);
+    const factory = ctx.painted.widgets['specialist-fleet'] as unknown as () => { render(w: number): string[] };
+    const text = factory().render(80).map(plain).join('\n');
     // Bare `.map(toActivationView)` passed the element index as nowMs, freezing
     // every entry at 0s. Both entries must show live elapsed, neither 0s.
     expect(text).toMatch(/spec-0[\s\S]*4[12]s/);
@@ -1837,17 +1822,17 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(ctx.painted.notices).toEqual([]);   // report() falls back to console
   });
 
-  it('paints nothing without the seam, even across a session switch', async () => {
+  it('widget visibility survives a session switch', async () => {
     const { pi, ctx } = await boot();
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     await command_tick();
-    expect(ctx.painted.widgets['specialist-fleet']).toBeUndefined();
+    expect(ctx.painted.widgets['specialist-fleet']).toBeDefined();
 
     // A switchSession keeps the same ctx object but changes the session id.
-    // Hide-until-seam paints no widget into any context, stale or live.
+    // No seam re-registration exists anymore: the widget simply stays painted.
     ctx.sessionManager.getSessionId = () => 'session-2';
     await command_tick();
-    expect(ctx.painted.widgets['specialist-fleet']).toBeUndefined();
+    expect(ctx.painted.widgets['specialist-fleet']).toBeDefined();
   });
 
   it('survives a context that throws on property access during teardown', async () => {
@@ -1859,9 +1844,8 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
 });
 
 /**
- * Advance one (former) poll interval. Kept so seam-absent tests assert
- * steadiness across ticks: with hide-until-seam there is no timer, so this
- * is a no-op that proves nothing gets painted late either.
+ * Advance the fake clock. The widget repaints on fleet-change events, never on
+ * a timer, so ticks only flush pending promises here.
  */
 async function command_tick() {
   await vi.advanceTimersByTimeAsync(1000);
