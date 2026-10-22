@@ -97,8 +97,12 @@ export declare const BRIEF_LIMITS: {
 /** Elapsed as a short clock: 42s, 3m05s, 1h02m. */
 export declare function formatElapsed(elapsedS: number): string;
 /**
- * Spend as a token count. `total_tokens` is a rollup, never a summand — adding it would
- * double-count (unitAI-d99hb). Returns '' when nothing was reported, never a fabricated 0.
+ * Spend as a token count. Pi's formula is input + output + cache_creation +
+ * cache_read (session-metrics-contract.ts): reasoning_tokens is a SUBSET of
+ * output and tool_tokens is outside pi's precomputed total — both are
+ * display-only splits, never summands. `total_tokens` is a rollup, never a
+ * summand — adding it would double-count (unitAI-d99hb). Returns '' when
+ * nothing was reported, never a fabricated 0.
  */
 export declare function formatTokens(usage: ActivationTokenUsage | undefined): string;
 /** The snapshot facts a brief reads — the same ones `specialist_status` projects. */

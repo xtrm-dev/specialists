@@ -1,0 +1,1 @@
+{"version":3,"file":"issue-ref.d.ts","sourceRoot":"","sources":["../../../src/cli/issue-ref.ts"],"names":[],"mappings":"AAOA,MAAM,WAAW,aAAa;IAC5B,QAAQ,CAAC,EAAE,MAAM,CAAC;IAClB,IAAI,CAAC,EAAE,MAAM,CAAC;IACd,MAAM,CAAC,EAAE,MAAM,CAAC;CACjB;AAED,wBAAgB,eAAe,CAAC,KAAK,EAAE,aAAa,GAAG,MAAM,GAAG,SAAS,CAaxE"}

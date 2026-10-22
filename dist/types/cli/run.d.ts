@@ -23,7 +23,7 @@ export interface RunArgs {
     reuseJobId?: string;
     /** Bypass reuse guard for active/unknown target job statuses. */
     forceJob: boolean;
-    /** Owning epic for wave-bound chains. If --bead is set, defaults to bead.parent. */
+    /** Owning epic for wave-bound chains. If --issue-ref is set, defaults to bead.parent. */
     epicId?: string;
     /** Allow provisioning from a potentially stale base branch. */
     forceStaleBase: boolean;

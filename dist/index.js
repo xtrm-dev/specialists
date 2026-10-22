@@ -20793,6 +20793,22 @@ var init_list = __esm(() => {
   };
 });
 
+// src/cli/issue-ref.ts
+function resolveIssueRef(input) {
+  const candidates = [];
+  if (input.issueRef?.trim())
+    candidates.push(input.issueRef.trim());
+  if (input.bead?.trim())
+    candidates.push(input.bead.trim());
+  if (input.beadId?.trim())
+    candidates.push(input.beadId.trim());
+  const distinct = [...new Set(candidates)];
+  if (distinct.length > 1) {
+    throw new Error(`Conflicting --issue-ref/--bead values (${distinct.join(" vs ")}). ` + `Supply one value: --issue-ref <id> (primary; --bead/--bead-id are permanent compatibility aliases).`);
+  }
+  return distinct[0];
+}
+
 // src/activation/contract-sections.ts
 function headingOf(line) {
   const bare = line.trim().replace(/^#+\s*/, "").replace(/\*/g, "").trim();
@@ -21175,10 +21191,11 @@ ${buildBeadBoundaryInstruction(cwd, input.worktreeBoundary)}`.trim() : input.fal
     ...input.worktreeOwnerJobId ? { worktree_owner_job_id: input.worktreeOwnerJobId } : {},
     ...input.gitnexusSummary ? { gitnexus_summary: input.gitnexusSummary } : {}
   };
-  const beadVariables = beadId ? { bead_context: resolvedPrompt, bead_id: beadId } : {};
+  const beadVariables = beadId ? { bead_context: resolvedPrompt, bead_id: beadId, issue_ref: beadId } : {};
   const beadTemplateVariables = {
     prompt: resolvedPrompt,
     bead_id: beadId ?? "",
+    issue_ref: beadId ?? "",
     ...lineageVariables
   };
   const variables = {
@@ -21186,6 +21203,7 @@ ${buildBeadBoundaryInstruction(cwd, input.worktreeBoundary)}`.trim() : input.fal
     cwd,
     pre_script_output: input.preScriptOutput ?? "",
     bead_id: beadId ?? "",
+    issue_ref: beadId ?? "",
     ...lineageVariables,
     ...input.variables ?? {},
     ...beadVariables
@@ -21254,6 +21272,7 @@ var init_task_prompt = __esm(() => {
   OPTIONALLY_ABSENT_PLACEHOLDERS = new Set([
     "bead_context",
     "gitnexus_summary",
+    "issue_ref",
     "obligations_diff",
     "resolved_tool_contract",
     "reused_worktree_awareness",
@@ -21288,14 +21307,20 @@ function fail(code, message) {
 }
 function parseRenderArgs(argv) {
   const positional = [];
-  let beadId = "";
+  let issueRef = "";
+  let beadAlias = "";
+  let beadIdAlias = "";
   let cwd = process.cwd();
   let contextDepth = 3;
   let surface = "pi";
   for (let i = 0;i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === "--bead")
-      beadId = argv[++i] ?? "";
+    if (arg === "--issue-ref")
+      issueRef = argv[++i] ?? "";
+    else if (arg === "--bead")
+      beadAlias = argv[++i] ?? "";
+    else if (arg === "--bead-id")
+      beadIdAlias = argv[++i] ?? "";
     else if (arg === "--cwd")
       cwd = argv[++i] ?? cwd;
     else if (arg === "--context-depth")
@@ -21310,6 +21335,12 @@ function parseRenderArgs(argv) {
   }
   if (!Number.isFinite(contextDepth) || contextDepth < 0) {
     fail("usage", `--context-depth must be a non-negative number (got '${contextDepth}')`);
+  }
+  let beadId = "";
+  try {
+    beadId = resolveIssueRef({ issueRef, bead: beadAlias, beadId: beadIdAlias }) ?? "";
+  } catch (error) {
+    fail("usage", error instanceof Error ? error.message : String(error));
   }
   return { beadId, cwd, contextDepth: Math.trunc(contextDepth), surface, positional };
 }
@@ -21398,7 +21429,7 @@ async function run5() {
   });
   renderAndEmit(spec.specialist, spec.specialist.metadata.name, args);
 }
-var USAGE = "Usage: specialists render-task <name> --bead <id> [--cwd <path>] [--context-depth <n>] [--surface pi|claude|codex]";
+var USAGE = "Usage: specialists render-task <name> --issue-ref <id> [--cwd <path>] [--context-depth <n>] [--surface pi|claude|codex] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)";
 var init_render_task = __esm(() => {
   init_loader();
   init_beads();
@@ -21427,7 +21458,7 @@ function run6() {
     fail("usage", USAGE2);
   renderAndEmit(rolelessSpecialist(), null, { ...args, beadId });
 }
-var USAGE2 = "Usage: specialists render-bead <id> [--cwd <path>] [--context-depth <n>] [--surface pi|claude|codex]";
+var USAGE2 = "Usage: specialists render-bead <id> [--issue-ref <id>] [--cwd <path>] [--context-depth <n>] [--surface pi|claude|codex] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)";
 var init_render_bead = __esm(() => {
   init_schema();
   init_render_task();
@@ -22968,11 +22999,11 @@ Native/current tracked flow:
 Core observation/compatibility commands:
 - \`specialists list\`
 - \`specialists ps\` / \`specialists feed\` / \`specialists result\`
-- legacy \`specialists run <name> --bead <id>\` remains available only while XTRM-93 keeps the Supervisor backend reachable.
+- legacy \`specialists run <name> --issue-ref <id>\` remains available only while XTRM-93 keeps the Supervisor backend reachable (--bead/--bead-id are permanent compatibility aliases for --issue-ref).
 
 Rules:
 - Do not use Beads notes/status as authority for native work.
-- \`--bead\` / \`bead_id\` may be a compatibility alias; inspect the live surface before inferring backend semantics.
+- \`--issue-ref\` is the primary spelling; \`--bead\` / \`--bead-id\` / \`bead_id\` are permanent compatibility aliases for the same value; inspect the live surface before inferring backend semantics.
 - Messages coordinate; they do not rewrite SCOPE/SUCCESS/NON_GOALS/CONSTRAINTS/VALIDATION/OUTPUT.
 - Add custom Specialist definitions under \`.specialists/user/\`; current role prompts must preserve pinned-Issue/Journal/settlement/Closure semantics.
 <!-- specialists:end -->
@@ -37623,15 +37654,21 @@ async function run16() {
 function parseArgs8(argv) {
   const name = argv[0];
   if (!name)
-    throw new Error("Usage: sp chat <specialist> [prompt...] [--bead <id>] [--prompt <text>] [--context-depth N] [--model M]");
-  let beadId;
+    throw new Error("Usage: sp chat <specialist> [prompt...] [--issue-ref <id>] [--prompt <text>] [--context-depth N] [--model M] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)");
+  let issueRef;
+  let beadAlias;
+  let beadIdAlias;
   let contextDepth = DEFAULT_CONTEXT_DEPTH;
   let model;
   const promptParts = [];
   for (let i = 1;i < argv.length; i++) {
     const token = argv[i];
-    if (token === "--bead")
-      beadId = argv[++i] ?? "";
+    if (token === "--issue-ref")
+      issueRef = argv[++i] ?? "";
+    else if (token === "--bead")
+      beadAlias = argv[++i] ?? "";
+    else if (token === "--bead-id")
+      beadIdAlias = argv[++i] ?? "";
     else if (token === "--prompt")
       promptParts.push(argv[++i] ?? "");
     else if (token === "--context-depth")
@@ -37641,9 +37678,10 @@ function parseArgs8(argv) {
     else if (!token.startsWith("--"))
       promptParts.push(token);
   }
+  const beadId = resolveIssueRef({ issueRef, bead: beadAlias, beadId: beadIdAlias });
   const prompt = promptParts.join(" ").trim();
   if (!beadId && !prompt)
-    throw new Error("Usage: sp chat <specialist> [prompt...] [--bead <id>] [--prompt <text>] [--context-depth N] [--model M]");
+    throw new Error("Usage: sp chat <specialist> [prompt...] [--issue-ref <id>] [--prompt <text>] [--context-depth N] [--model M] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)");
   return { name, prompt, beadId, contextDepth, model };
 }
 function buildPrompt(args) {
@@ -44331,10 +44369,13 @@ function extractLaunchError(text) {
 async function parseArgs9(argv) {
   const name = argv[0];
   if (!name || name.startsWith("--")) {
-    console.error('Usage: specialists|sp run <name> [--prompt "..."] [--bead <id>] ' + "[--worktree] [--job <id>] [--force-job] [--epic <id>] [--base-sha <sha>] [--base-ref <branch>] [--accept-stale-base --reason <text>] [--context-depth <n>] [--model <model>] " + "[--no-beads] [--no-bead-notes] [--keep-alive|--no-keep-alive] [--background] [--json|--raw]");
+    console.error('Usage: specialists|sp run <name> [--prompt "..."] [--issue-ref <id>] ' + "[--worktree] [--job <id>] [--force-job] [--epic <id>] [--base-sha <sha>] [--base-ref <branch>] [--accept-stale-base --reason <text>] [--context-depth <n>] [--model <model>] " + "[--no-beads] [--no-bead-notes] [--keep-alive|--no-keep-alive] [--background] [--json|--raw] " + "(--bead/--bead-id are permanent compatibility aliases for --issue-ref)");
     process.exit(1);
   }
   let prompt = "";
+  let issueRef;
+  let beadAlias;
+  let beadIdAlias;
   let beadId;
   let model;
   let noBeads = false;
@@ -44359,8 +44400,16 @@ async function parseArgs9(argv) {
       prompt = argv[++i];
       continue;
     }
+    if (token === "--issue-ref" && argv[i + 1]) {
+      issueRef = argv[++i];
+      continue;
+    }
     if (token === "--bead" && argv[i + 1]) {
-      beadId = argv[++i];
+      beadAlias = argv[++i];
+      continue;
+    }
+    if (token === "--bead-id" && argv[i + 1]) {
+      beadIdAlias = argv[++i];
       continue;
     }
     if (token === "--model" && argv[i + 1]) {
@@ -44446,6 +44495,12 @@ async function parseArgs9(argv) {
       continue;
     }
   }
+  try {
+    beadId = resolveIssueRef({ issueRef, bead: beadAlias, beadId: beadIdAlias });
+  } catch (error) {
+    console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
   if (acceptStaleBase && !staleBaseReason?.trim()) {
     console.error("Error: --accept-stale-base requires --reason <text>.");
     process.exit(1);
@@ -44465,12 +44520,13 @@ async function parseArgs9(argv) {
 `));
   }
   if (worktree && !beadId) {
-    console.error(`Error: --worktree requires --bead <id> to derive a deterministic branch name.
-` + "Example: specialists run executor --worktree --bead hgpu.3");
+    console.error(`Error: --worktree requires --issue-ref <id> to derive a deterministic branch name.
+` + `(--bead/--bead-id are permanent compatibility aliases for --issue-ref.)
+` + "Example: specialists run executor --worktree --issue-ref hgpu.3");
     process.exit(1);
   }
   if (prompt && beadId) {
-    console.error("Error: use either --prompt or --bead, not both.");
+    console.error("Error: use either --prompt or --issue-ref, not both. (--bead is a compatibility alias.)");
     process.exit(1);
   }
   if (!prompt && !beadId && !process.stdin.isTTY) {
@@ -44484,7 +44540,7 @@ async function parseArgs9(argv) {
     });
   }
   if (!prompt && !beadId && !reuseJobId) {
-    console.error("Error: provide --prompt, pipe stdin, use --bead <id>, or provide --job <id> for bead inference.");
+    console.error("Error: provide --prompt, pipe stdin, use --issue-ref <id>, or provide --job <id> for bead inference. (--bead is a compatibility alias.)");
     process.exit(1);
   }
   return {
@@ -45612,7 +45668,7 @@ async function run19() {
   const useWorktree = args.worktree || shouldAutoProvisionWorktree;
   if (shouldAutoProvisionWorktree && !args.beadId) {
     process.stderr.write(`Error: specialist '${args.name}' has permission_required=${perm} and requires worktree isolation.
-` + `Provide --bead <id> for automatic worktree provisioning, or use --job <id> to reuse an existing worktree.
+` + `Provide --issue-ref <id> for automatic worktree provisioning, or use --job <id> to reuse an existing worktree.
 `);
     process.exit(1);
   }
@@ -45853,7 +45909,7 @@ async function run19() {
     };
   }
   if (!prompt && !effectiveBeadId) {
-    console.error("Error: provide --prompt, pipe stdin, use --bead <id>, or provide --job <id> for bead inference.");
+    console.error("Error: provide --prompt, pipe stdin, use --issue-ref <id>, or provide --job <id> for bead inference.");
     process.exit(1);
   }
   await launchSpecialist({
@@ -48203,7 +48259,9 @@ function parseNodeArgs(argv) {
   let nodeId;
   let findingId;
   let toBead;
-  let beadId;
+  let issueRef;
+  let beadAlias;
+  let beadIdAlias;
   let contextDepth;
   let memberKey;
   let specialist;
@@ -48248,8 +48306,16 @@ function parseNodeArgs(argv) {
       toBead = readValue("--to-bead");
       continue;
     }
+    if (token === "--issue-ref") {
+      issueRef = readValue("--issue-ref");
+      continue;
+    }
     if (token === "--bead") {
-      beadId = readValue("--bead");
+      beadAlias = readValue("--bead");
+      continue;
+    }
+    if (token === "--bead-id") {
+      beadIdAlias = readValue("--bead-id");
       continue;
     }
     if (token === "--context-depth") {
@@ -48323,8 +48389,9 @@ function parseNodeArgs(argv) {
     }
     throw new Error(`Unknown argument: ${token}`);
   }
+  const beadId = resolveIssueRef({ issueRef, bead: beadAlias, beadId: beadIdAlias });
   if (command === "run" && !nodeConfigInput && !inlineJson) {
-    throw new Error("Usage: specialists node run <node-config-name-or-file> [--inline JSON] [--bead <bead-id>] [--context-depth <n>] [--json]");
+    throw new Error("Usage: specialists node run <node-config-name-or-file> [--inline JSON] [--issue-ref <bead-id>] [--context-depth <n>] [--json] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)");
   }
   if (command === "promote" && (!nodeId || !findingId || !toBead)) {
     throw new Error("Usage: specialists node promote <node-ref> <finding-id> --to-bead <bead-id> [--json]");
@@ -48338,7 +48405,7 @@ function parseNodeArgs(argv) {
     }
   }
   if (command === "spawn-member" && (!memberKey || !specialist)) {
-    throw new Error("Usage: specialists node spawn-member --node <node-ref> --member-key <key> --specialist <name> [--bead <id>] [--phase <id>] [--scope <paths>] [--json]");
+    throw new Error("Usage: specialists node spawn-member --node <node-ref> --member-key <key> --specialist <name> [--issue-ref <id>] [--phase <id>] [--scope <paths>] [--json] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)");
   }
   if (command === "create-bead" && !title) {
     throw new Error('Usage: specialists node create-bead --node <node-ref> --title "..." [--type task] [--priority 2] [--depends-on <id>] [--json]');
@@ -50553,9 +50620,11 @@ function parseArgs10(argv) {
     "--health",
     "--needs-attention"
   ]);
-  const valueFlags = new Set(["--node", "--bead", "--since"]);
+  const valueFlags = new Set(["--node", "--bead", "--bead-id", "--issue-ref", "--since"]);
   let nodeId;
-  let beadFilter;
+  let issueRef;
+  let beadAlias;
+  let beadIdAlias;
   let sinceMs;
   const positional = [];
   for (let i = 0;i < argv.length; i += 1) {
@@ -50569,8 +50638,18 @@ function parseArgs10(argv) {
       i += 1;
       continue;
     }
+    if (token === "--issue-ref" && argv[i + 1]) {
+      issueRef = argv[i + 1];
+      i += 1;
+      continue;
+    }
     if (token === "--bead" && argv[i + 1]) {
-      beadFilter = argv[i + 1];
+      beadAlias = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    if (token === "--bead-id" && argv[i + 1]) {
+      beadIdAlias = argv[i + 1];
       i += 1;
       continue;
     }
@@ -50595,7 +50674,7 @@ function parseArgs10(argv) {
     mine: argv.includes("--mine"),
     health: argv.includes("--health"),
     needsAttention: argv.includes("--needs-attention"),
-    beadFilter,
+    beadFilter: resolveIssueRef({ issueRef, bead: beadAlias, beadId: beadIdAlias }),
     sinceMs,
     nodeId,
     inspectId: positional[0]
@@ -51133,7 +51212,7 @@ function renderNativeActivationsBlock(summaries, note) {
     console.log(`  ${summary.activation_id} ${summary.specialist}${bead} ${statusLabel(summary.state)} \xB7 ${summary.window_event_count} events in window \xB7 ${summary.window_turns} turns in window \xB7 ${formatActivationAge(now, summary.last_event_at_ms)}${detail}`);
   }
   if (summaries.length > NATIVE_ACTIVATION_DISPLAY_LIMIT) {
-    console.log(dim9(`  +${summaries.length - NATIVE_ACTIVATION_DISPLAY_LIMIT} older omitted \u2014 narrow with --since/--bead`));
+    console.log(dim9(`  +${summaries.length - NATIVE_ACTIVATION_DISPLAY_LIMIT} older omitted \u2014 narrow with --since/--issue-ref`));
   }
   console.log("");
 }
@@ -54084,7 +54163,9 @@ function parseSince4(value) {
 function parseArgs15(argv) {
   let jobId;
   let specialist;
-  let beadId;
+  let issueRef;
+  let beadAlias;
+  let beadIdAlias;
   let nodeId;
   let repo;
   let since;
@@ -54103,8 +54184,16 @@ function parseArgs15(argv) {
       specialist = argv[++i];
       continue;
     }
-    if ((token === "--bead" || token === "--bead-id") && argv[i + 1]) {
-      beadId = argv[++i];
+    if (token === "--issue-ref" && argv[i + 1]) {
+      issueRef = argv[++i];
+      continue;
+    }
+    if (token === "--bead" && argv[i + 1]) {
+      beadAlias = argv[++i];
+      continue;
+    }
+    if (token === "--bead-id" && argv[i + 1]) {
+      beadIdAlias = argv[++i];
       continue;
     }
     if (token === "--node" && argv[i + 1]) {
@@ -54145,6 +54234,7 @@ function parseArgs15(argv) {
     }
     throw new Error(`Unknown option: ${token}`);
   }
+  const beadId = resolveIssueRef({ issueRef, bead: beadAlias, beadId: beadIdAlias });
   return { jobId, specialist, beadId, nodeId, repo, since, limit, follow, json, allEvents, legacy };
 }
 function discoverDbTargets(cwd, repoFilter) {
@@ -54497,7 +54587,7 @@ async function run26(argv = process.argv.slice(3)) {
     options = parseArgs15(argv);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
-    console.error("Usage: specialists|sp log [job-id] [--specialist <name>] [--bead <id>] [--node <id>] [--since <5m|iso>] [--limit <n>] [-f|--follow] [--json] [--all-events] [--legacy]");
+    console.error("Usage: specialists|sp log [job-id] [--specialist <name>] [--issue-ref <id>] [--node <id>] [--since <5m|iso>] [--limit <n>] [-f|--follow] [--json] [--all-events] [--legacy] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)");
     console.error("  Default: renders xtrm.forensic.v1 events. --legacy falls back to TimelineEvent filtering (deprecated, removed next minor release).");
     process.exit(1);
   }
@@ -55605,14 +55695,27 @@ var init_clean = __esm(() => {
 // src/cli/end.ts
 import { spawnSync as spawnSync25 } from "child_process";
 function parseOptions3(argv) {
-  let beadId;
+  let issueRef;
+  let beadAlias;
+  let beadIdAlias;
+  let positionalBead;
   let epicId;
   let rebuild = false;
   let pr = false;
   for (let index = 0;index < argv.length; index += 1) {
     const token = argv[index];
+    if (token === "--issue-ref" && argv[index + 1]) {
+      issueRef = argv[index + 1];
+      index += 1;
+      continue;
+    }
     if (token === "--bead" && argv[index + 1]) {
-      beadId = argv[index + 1];
+      beadAlias = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    if (token === "--bead-id" && argv[index + 1]) {
+      beadIdAlias = argv[index + 1];
       index += 1;
       continue;
     }
@@ -55629,12 +55732,13 @@ function parseOptions3(argv) {
       pr = true;
       continue;
     }
-    if (!token.startsWith("-") && !beadId && !epicId) {
-      beadId = token;
+    if (!token.startsWith("-") && !positionalBead && !epicId) {
+      positionalBead = token;
       continue;
     }
     throw new Error(`Unknown option: ${token}`);
   }
+  const beadId = resolveIssueRef({ issueRef, bead: beadAlias ?? positionalBead, beadId: beadIdAlias });
   return { beadId, epicId, rebuild, pr };
 }
 function runCommand3(command, args) {
@@ -55668,7 +55772,7 @@ function detectCurrentBeadIdFromWorkspace() {
 }
 function printUsageAndExit3(message) {
   console.error(message);
-  console.error("Usage: specialists|sp end [--bead <id>|--epic <id>] [--pr] [--rebuild]");
+  console.error("Usage: specialists|sp end [--issue-ref <id>|--epic <id>] [--pr] [--rebuild] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)");
   process.exit(1);
 }
 async function publishChain(beadId, options) {
@@ -55700,7 +55804,7 @@ async function run32() {
   }
   const beadId = options.beadId ?? detectCurrentBeadIdFromWorkspace();
   if (!beadId) {
-    printUsageAndExit3("Unable to infer current chain bead from workspace. Pass --bead <id> or --epic <id>.");
+    printUsageAndExit3("Unable to infer current chain bead from workspace. Pass --issue-ref <id> or --epic <id>. (--bead is a compatibility alias.)");
   }
   const guard = checkEpicUnresolvedGuard(beadId);
   if (guard.blocked && guard.epicId && guard.epicStatus && isEpicUnresolvedState(guard.epicStatus)) {
@@ -56303,8 +56407,8 @@ async function run38() {
   lines.push(`  ${dim13("  # settlement/result is evidence; Closure remains explicit")}`);
   lines.push("");
   lines.push(`  ${bold11("Legacy sp compatibility")} (Supervisor/Beads backend while XTRM-93 keeps it reachable):`);
-  lines.push(`  ${cmd2("specialists run code-review")} ${flag("--bead")} ${dim13("unitAI-abc")}`);
-  lines.push(`  ${dim13("  # compatibility locator; do not generalize this lifecycle into native role doctrine")}`);
+  lines.push(`  ${cmd2("specialists run code-review")} ${flag("--issue-ref")} ${dim13("unitAI-abc")}`);
+  lines.push(`  ${dim13("  # --bead/--bead-id are permanent compatibility aliases for --issue-ref; do not generalize this lifecycle into native role doctrine")}`);
   lines.push("");
   lines.push(`  Override model for one run:`);
   lines.push(`  ${cmd2("specialists run code-review")} ${flag("--model")} ${dim13("anthropic/claude-opus-4-6")} ${flag("--prompt")} ${dim13('"..."')}`);
@@ -56334,7 +56438,8 @@ async function run38() {
   lines.push(`  ${dim13("  # delivered after current tool calls finish, before the next LLM call")}`);
   lines.push("");
   lines.push(`  ${bold11("Keep-alive multi-turn")} \u2014 start with ${flag("--keep-alive")}, then follow up:`);
-  lines.push(`  ${cmd2("specialists run debugger")} ${flag("--bead unitAI-abc --keep-alive")}`);
+  lines.push(`  ${cmd2("specialists run debugger")} ${flag("--issue-ref unitAI-abc --keep-alive")}`);
+  lines.push(`  ${dim13("  # --bead is a permanent compatibility alias for --issue-ref")}`);
   lines.push(`  ${dim13("  # \u2192 status: waiting after first turn")}`);
   lines.push(`  ${cmd2("specialists result a1b2c3")}                   # read first turn`);
   lines.push(`  ${cmd2("specialists follow-up a1b2c3")} ${flag('"now write the fix"')}    # next turn, same Pi context`);
@@ -56448,15 +56553,15 @@ async function run38() {
   lines.push(`  ${dim13("  ready Substrate Issue -> specialist_dispatch(issue_ref=...) -> result/settlement -> explicit Closure")}`);
   lines.push("");
   lines.push(`  ${bold11("Legacy compatibility run:")}`);
-  lines.push(`  ${cmd2("specialists run deep-analysis --bead unitAI-abc")}`);
-  lines.push(`  ${dim13("  # Supervisor/Beads compatibility path only")}`);
+  lines.push(`  ${cmd2("specialists run deep-analysis --issue-ref unitAI-abc")}`);
+  lines.push(`  ${dim13("  # Supervisor/Beads compatibility path only (--bead is an alias for --issue-ref)")}`);
   lines.push("");
   lines.push(`  ${bold11("Steer a job mid-run:")}`);
   lines.push(`  ${cmd2('specialists steer <job-id> "focus only on the auth module"')}`);
   lines.push(`  ${cmd2("specialists result <job-id>")}`);
   lines.push("");
   lines.push(`  ${bold11("Multi-turn keep-alive (iterative work):")}`);
-  lines.push(`  ${cmd2("specialists run debugger --bead unitAI-abc --keep-alive")}`);
+  lines.push(`  ${cmd2("specialists run debugger --issue-ref unitAI-abc --keep-alive")}`);
   lines.push(`  ${cmd2("specialists result <job-id>")}`);
   lines.push(`  ${cmd2('specialists follow-up <job-id> "now write the fix for the root cause"')}`);
   lines.push(`  ${cmd2("specialists feed <job-id> --follow")}`);
@@ -60417,11 +60522,12 @@ async function run44() {
     "    # observe with specialist_status / persisted result; settlement is not Issue Closure",
     "",
     "  Legacy sp job compatibility",
-    "    specialists chat <name> [prompt...] [--bead <id>] [--prompt <text>] [--context-depth N]",
+    "    specialists chat <name> [prompt...] [--issue-ref <id>] [--prompt <text>] [--context-depth N]",
+    "    (--bead/--bead-id are permanent compatibility aliases for --issue-ref)",
     "    specialists ps <job-id> --json     # legacy/native persisted projections",
     "",
     "  Interactive TUI",
-    "    specialists chat <name> --bead <id>       # launches job + feed/status/result/input TUI",
+    "    specialists chat <name> --issue-ref <id>  # launches job + feed/status/result/input TUI (--bead is a compatibility alias)",
     "    specialists console                      # navigable ps/feed/result/inspect operator TUI",
     "    # freeform input steers running jobs or resumes waiting jobs automatically",
     "    # /quit or Ctrl+C detach; /stop intentionally stops; /finalize, /notes, /show use control paths",
@@ -60430,10 +60536,10 @@ async function run44() {
     '    specialists run <name> --prompt "..."',
     "",
     "  Legacy CLI rules",
-    "    --bead is a legacy/compatibility work locator; it does not make Beads native authority",
+    "    --issue-ref is the primary work locator; --bead/--bead-id are permanent compatibility aliases (same value)",
     "    --prompt is for quick untracked work",
-    "    chat without --bead may auto-create legacy tracking beads on the Supervisor backend",
-    "    --context-depth defaults to 3 with --bead",
+    "    chat without --issue-ref may auto-create legacy tracking beads on the Supervisor backend",
+    "    --context-depth defaults to 3 with --issue-ref",
     "    --no-beads affects the legacy Beads backend only",
     "",
     "  Output modes",
@@ -60473,12 +60579,12 @@ async function run44() {
     "  specialists view explorer --section prompt",
     "  specialists edit executor --preset power",
     "  specialists edit explorer --get specialist.execution.model",
-    "  specialists run debugger --bead unitAI-123",
+    "  specialists run debugger --issue-ref unitAI-123",
     '  specialists run codebase-explorer --prompt "Map the CLI architecture"',
     "  specialists ps abc123 --json                    # check job status",
     "  specialists feed -f                             # stream compact job events",
     "  specialists log --specialist reviewer -f         # full runtime/debug log",
-    "  specialists chat explorer --bead unitAI-123     # live TUI: feed + result + input",
+    "  specialists chat explorer --issue-ref unitAI-123  # live TUI: feed + result + input (--bead is a compatibility alias)",
     "  specialists console                          # operator TUI over ps/feed/result/inspect",
     '  specialists steer <job-id> "focus only on supervisor.ts"',
     '  specialists resume <job-id> "now write the fix"',
@@ -89264,7 +89370,7 @@ function formatElapsed4(elapsedS) {
 function formatTokens(usage) {
   if (!usage)
     return "";
-  const total = ["input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens", "reasoning_tokens", "tool_tokens"].reduce((n, k) => n + (usage[k] ?? 0), 0);
+  const total = ["input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens"].reduce((n, k) => n + (usage[k] ?? 0), 0);
   if (total <= 0)
     return "";
   if (total < 1000)
@@ -95664,14 +95770,15 @@ async function run45() {
     if (wantsHelp()) {
       console.log([
         "",
-        "Usage: specialists render-task <name> --bead <id> [options]",
+        "Usage: specialists render-task <name> --issue-ref <id> [options] (--bead/--bead-id are permanent compatibility aliases)",
         "",
         "Render the initial interactive-role user prompt for a specialist + bead.",
         "Read-only: creates no job, worktree, session, bead, or status row, and",
         "never emits prompt.system (the launcher owns that via `view --raw`).",
         "",
         "Options:",
-        "  --bead <id>            Bead whose context is rendered (required)",
+        "  --issue-ref <id>       Issue whose context is rendered (required; primary spelling)",
+        "  --bead, --bead-id <id> Permanent compatibility aliases for --issue-ref (same value)",
         "  --cwd <path>           Project cwd for boundary rules (default: cwd)",
         "  --context-depth <n>    Completed-blocker depth (default: 3)",
         "  --surface pi|claude    Interactive surface being launched (default: pi)",
@@ -95684,9 +95791,9 @@ async function run45() {
         "Errors: JSON { ok: false, error: { code, message } } with exit 1.",
         "",
         "Examples:",
-        "  specialists render-task chain-coordinator --bead unitAI-6639v",
-        "  specialists render-task chain-coordinator --bead unitAI-6639v --surface claude",
-        "  specialists render-task chain-coordinator --bead unitAI-6639v --surface codex",
+        "  specialists render-task chain-coordinator --issue-ref unitAI-6639v",
+        "  specialists render-task chain-coordinator --issue-ref unitAI-6639v --surface claude",
+        "  specialists render-task chain-coordinator --issue-ref unitAI-6639v --surface codex",
         ""
       ].join(`
 `));
@@ -95702,12 +95809,13 @@ async function run45() {
         "Usage: specialists render-bead <id> [options]",
         "",
         "Roleless sibling of `render-task`: render the initial user prompt for a bead",
-        "with NO specialist, for bare launches (`xt claude worker --bead <id>` without",
+        "with NO specialist, for bare launches (`xt claude worker --issue-ref <id>` without",
         "--role). Same bead context, boundary rules, MANDATORY_RULES, and envelope.",
         "Read-only: creates no job, worktree, session, bead, or status row.",
         "",
         "Options:",
-        "  --bead <id>            Alternative to the positional id",
+        "  --issue-ref <id>       Alternative to the positional id (primary spelling)",
+        "  --bead, --bead-id <id> Permanent compatibility aliases for --issue-ref",
         "  --cwd <path>           Project cwd for boundary rules (default: cwd)",
         "  --context-depth <n>    Completed-blocker depth (default: 3)",
         "  --surface pi|claude|codex  Interactive surface being launched (default: pi);",
@@ -96120,7 +96228,7 @@ async function run45() {
     if (wantsHelp()) {
       console.log([
         "",
-        "Usage: specialists chat <name> [prompt...] [--bead <id>] [--prompt <text>] [--context-depth N] [--model M]",
+        "Usage: specialists chat <name> [prompt...] [--issue-ref <id>] [--prompt <text>] [--context-depth N] [--model M] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)",
         "",
         "Interactive shell for a specialist run. Streams job output into a TUI.",
         ""
@@ -96153,17 +96261,18 @@ async function run45() {
         "bash tool reaps its descendants on return or timeout, killing the job.",
         "",
         "Primary modes:",
-        "  tracked:    specialists run <name> --bead <id>",
+        "  tracked:    specialists run <name> --issue-ref <id>",
         '  ad-hoc:     specialists run <name> --prompt "..."',
-        "  explicit wt specialists run <name> --bead <id> --worktree",
-        "  reuse job:  specialists run <name> --bead <id> --job <prior-job-id>",
+        "  explicit wt specialists run <name> --issue-ref <id> --worktree",
+        "  reuse job:  specialists run <name> --issue-ref <id> --job <prior-job-id>",
         "",
         "Options:",
-        "  --bead <id>          Use an existing bead as the prompt source",
+        "  --issue-ref <id>     Use an existing issue as the prompt source (primary spelling)",
+        "  --bead, --bead-id <id> Permanent compatibility aliases for --issue-ref (same value)",
         "  --prompt <text>      Ad-hoc prompt for untracked work",
-        "  --context-depth <n>  Dependency context depth when using --bead (default: 3)",
+        "  --context-depth <n>  Dependency context depth when using --issue-ref (default: 3)",
         "  --no-beads           Do not create a new tracking bead (does not disable bead reading)",
-        "  --no-bead-notes      Do not append completion notes to an external --bead",
+        "  --no-bead-notes      Do not append completion notes to an external --issue-ref",
         "  --model <model>      Override the configured model for this run",
         "  --keep-alive         Keep session alive for follow-up prompts",
         "  --no-keep-alive      Force a single-turn run even if the specialist defaults to keep-alive",
@@ -96178,8 +96287,8 @@ async function run45() {
         "  --json               Emit a pi-compatible NDJSON event stream on stdout",
         "  --raw                Emit raw LLM text deltas (legacy). Excludes --background:",
         "                       a detached run has no deltas to stream back to the caller.",
-        "  --worktree           Explicitly provision (or reuse) a bd-managed worktree derived from --bead.",
-        "                       Requires --bead. Mutually exclusive with --job.",
+        "  --worktree           Explicitly provision (or reuse) a bd-managed worktree derived from --issue-ref.",
+        "                       Requires --issue-ref. Mutually exclusive with --job.",
         "  --job <id>           Reuse the workspace of a prior job (must have been started with",
         "                       --worktree). Caller bead context remains authoritative.",
         "                       Mutually exclusive with --worktree.",
@@ -96200,22 +96309,22 @@ async function run45() {
         "                       Emits a deprecation warning; removal in a future release.",
         "",
         "Examples:",
-        "  specialists run debugger --bead unitAI-55d",
-        "  specialists run debugger --bead unitAI-55d --context-depth 2",
-        "  specialists run executor --bead hgpu.3 --worktree",
-        "  specialists run executor --bead impl-2 --worktree --force-stale-base",
-        "  specialists run reviewer --bead hgpu.3 --job <prior-job-id>",
-        "  specialists run reviewer --job <exec-id> --force-job --bead fix-123",
-        "  specialists run explorer --bead prep.1 --epic unitAI-100",
+        "  specialists run debugger --issue-ref unitAI-55d",
+        "  specialists run debugger --issue-ref unitAI-55d --context-depth 2",
+        "  specialists run executor --issue-ref hgpu.3 --worktree",
+        "  specialists run executor --issue-ref impl-2 --worktree --force-stale-base",
+        "  specialists run reviewer --issue-ref hgpu.3 --job <prior-job-id>",
+        "  specialists run reviewer --job <exec-id> --force-job --issue-ref fix-123",
+        "  specialists run explorer --issue-ref prep.1 --epic unitAI-100",
         '  specialists run code-review --prompt "Audit src/api.ts"',
         "  cat brief.md | specialists run report-generator",
         "",
         "Rules:",
-        "  Use --bead for tracked work.",
+        "  Use --issue-ref for tracked work (--bead/--bead-id are permanent compatibility aliases).",
         "  MEDIUM/HIGH specialists auto-provision a worktree when requires_worktree=true.",
         "  Use --job to reuse a prior worktree without re-provisioning.",
         "  --worktree and --job are mutually exclusive.",
-        "  --worktree requires --bead to derive a deterministic branch name.",
+        "  --worktree requires --issue-ref to derive a deterministic branch name.",
         "",
         "Async execution patterns:",
         "  MCP:   specialist_dispatch (fire-and-forget, poll specialist_status for completion)",
@@ -96237,10 +96346,10 @@ async function run45() {
         "Usage: specialists node <run|list|promote|members|memory|stop|spawn-member|create-bead|wait-phase|complete> [options]",
         "",
         "Commands:",
-        "  run <node-config> [--inline JSON] [--bead <bead-id>] [--context-depth <n>] [--json]",
+        "  run <node-config> [--inline JSON] [--issue-ref <bead-id>] [--context-depth <n>] [--json] (--bead/--bead-id are aliases)",
         "                                                      Start a NodeSupervisor run",
         "  list [--json]                                       List node configs; source order: repo config/nodes -> .specialists/default/nodes -> package config/nodes",
-        "  spawn-member --node <node-ref> --member-key <key> --specialist <name> [--bead <id>] [--phase <id>] [--scope <paths>] [--json]",
+        "  spawn-member --node <node-ref> --member-key <key> --specialist <name> [--issue-ref <id>] [--phase <id>] [--scope <paths>] [--json] (--bead is an alias)",
         "                                                      Spawn a dynamic node member",
         '  create-bead --node <node-ref> --title "..." [--type task] [--priority 2] [--depends-on <id>] [--json]',
         "                                                      Create follow-up bead from node context",
@@ -96259,7 +96368,7 @@ async function run45() {
         "Customize repo-owned nodes in config/nodes; run specialists init to refresh managed mirror.",
         "",
         "Examples:",
-        "  specialists node run research --bead unitAI-123 --context-depth 2",
+        "  specialists node run research --issue-ref unitAI-123 --context-depth 2",
         "  specialists node members research --json",
         "  specialists node memory research",
         "  specialists node spawn-member --node research --member-key explore-1 --specialist explorer --phase explore-1 --json",
@@ -96360,6 +96469,8 @@ async function run45() {
         "  --active            Show active jobs only; hide unresolved terminal problems",
         "  --include-terminal  Include terminal history that has not been cleaned",
         "  --include-cleaned   Include rows hidden by sp clean --ps",
+        "  --issue-ref <id>    Filter by issue locator (primary spelling)",
+        "  --bead, --bead-id <id> Permanent compatibility aliases for --issue-ref",
         "",
         "Output columns:",
         "  st           Status icon: \u25C9 running, \u25D0 waiting/starting, \u25CB done/error",
@@ -96529,7 +96640,7 @@ async function run45() {
       console.log([
         "",
         "Usage: specialists log [job-id] [options]",
-        "       specialists log -f [--specialist <name>] [--bead <id>]",
+        "       specialists log -f [--specialist <name>] [--issue-ref <id>] (--bead/--bead-id are aliases)",
         "",
         "Runtime-oriented specialist log stream. From a repo root it reads that repo;",
         "from a parent directory it aggregates child repos with observability DBs.",
@@ -96540,7 +96651,8 @@ async function run45() {
         "Options:",
         "  --job <id>          Filter to one job id",
         "  --specialist <name> Filter by specialist role",
-        "  --bead <id>         Filter by bead id",
+        "  --issue-ref <id>    Filter by issue locator (primary spelling)",
+        "  --bead, --bead-id <id> Permanent compatibility aliases for --issue-ref",
         "  --node <id>         Filter by node id",
         "  --repo <name>       In parent/global mode, filter to one child repo",
         "  --since <5m|iso>    Show rows after a relative/ISO timestamp",
@@ -96551,7 +96663,7 @@ async function run45() {
         "",
         "Examples:",
         "  specialists log 49adda",
-        "  specialists log --bead unitAI-123 --limit 500",
+        "  specialists log --issue-ref unitAI-123 --limit 500",
         "  specialists log --specialist reviewer -f",
         `  specialists log -f --json | jq 'select(.forensic_event.event_family == "job")'`,
         "",
@@ -96621,7 +96733,7 @@ async function run45() {
         '  specialists resume a1b2c3 "Focus only on the auth module"',
         "",
         "Workflow:",
-        "  specialists run debugger --bead <id> --keep-alive",
+        "  specialists run debugger --issue-ref <id> --keep-alive",
         "  # \u2192 Job started: a1b2c3  (status: waiting after first turn)",
         "  specialists result a1b2c3          # read first turn output",
         '  specialists resume a1b2c3 "..."    # send next task',
@@ -96765,7 +96877,7 @@ async function run45() {
     if (wantsHelp()) {
       console.log([
         "",
-        "Usage: specialists end [--bead <id>|--epic <id>] [--pr] [--rebuild]",
+        "Usage: specialists end [--issue-ref <id>|--epic <id>] [--pr] [--rebuild] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)",
         "",
         "Session-close publication helper aware of chain/epic lifecycle rules.",
         "",
@@ -96776,7 +96888,7 @@ async function run45() {
         "  - --pr publishes via pull request instead of direct merge",
         "",
         "Examples:",
-        "  specialists end --bead unitAI-abc1",
+        "  specialists end --issue-ref unitAI-abc1",
         "  specialists end --epic unitAI-epic1 --pr",
         "  specialists end --pr",
         ""

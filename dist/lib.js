@@ -17103,6 +17103,7 @@ var SKILL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 var OPTIONALLY_ABSENT_PLACEHOLDERS = new Set([
   "bead_context",
   "gitnexus_summary",
+  "issue_ref",
   "obligations_diff",
   "resolved_tool_contract",
   "reused_worktree_awareness",
@@ -17204,10 +17205,11 @@ ${buildBeadBoundaryInstruction(cwd, input.worktreeBoundary)}`.trim() : input.fal
     ...input.worktreeOwnerJobId ? { worktree_owner_job_id: input.worktreeOwnerJobId } : {},
     ...input.gitnexusSummary ? { gitnexus_summary: input.gitnexusSummary } : {}
   };
-  const beadVariables = beadId ? { bead_context: resolvedPrompt, bead_id: beadId } : {};
+  const beadVariables = beadId ? { bead_context: resolvedPrompt, bead_id: beadId, issue_ref: beadId } : {};
   const beadTemplateVariables = {
     prompt: resolvedPrompt,
     bead_id: beadId ?? "",
+    issue_ref: beadId ?? "",
     ...lineageVariables
   };
   const variables = {
@@ -17215,6 +17217,7 @@ ${buildBeadBoundaryInstruction(cwd, input.worktreeBoundary)}`.trim() : input.fal
     cwd,
     pre_script_output: input.preScriptOutput ?? "",
     bead_id: beadId ?? "",
+    issue_ref: beadId ?? "",
     ...lineageVariables,
     ...input.variables ?? {},
     ...beadVariables
