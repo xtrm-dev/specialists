@@ -3201,9 +3201,11 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     } catch { /* a context that throws on property access is not live */ }
   };
 
-  // Fleet widget above the prompt: the separator + header + bounded one-line
-  // rows, or nothing at all when idle, hidden, or headless — an idle fleet is
-  // silence, not a bare header (the /bg idle rule).
+  // Fleet header widget above the prompt (setWidget defaults to
+  // aboveEditor): the separator + header ONLY. Rows live below the
+  // statusline in the footer section — the two surfaces are separate by
+  // operator directive, never one block. Reuses the section renderer in
+  // collapsed form so header text can never drift from the text reports.
   const paintFleetWidget = () => {
     const ui = fleetUi;
     if (!ui) return;
@@ -3218,13 +3220,51 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
         return;
       }
       ui.setWidget(FLEET_WIDGET_KEY, () => ({
-        render: (width) => renderFleetSection(readFleet(), { expanded: fleetExpanded, nowMs: Date.now() }),
+        render: (width) => renderFleetSection(readFleet(), { expanded: false, nowMs: Date.now() })
+          .map((line) => fitOverlayWidth(line, Math.max(8, Math.floor(width) || 80))),
         invalidate: () => {},
         dispose: () => {},
       }), { placement: 'aboveEditor' });
     } catch {
       /* headless runtimes without widgets; the host stays the truth */
     }
+  };
+
+  // Fleet rows below the statusline: the footer-section half of the split
+  // surface. Header never renders here (it lives in the widget above the
+  // prompt); detail never renders here (it lives in the overlay). Collapsed
+  // hides the rows, leaving the header widget alone. Renders on the footer's
+  // own cycle, so repaints need no driver.
+  let fleetRowsUnregister = null;
+  const renderRowsBelow = (width) => {
+    if (!fleetVisible || !fleetExpanded) return [];
+    const fleet = readFleet();
+    const activations = fleet.activations ?? [];
+    const asks = fleet.asks ?? [];
+    if (activations.length === 0 && asks.length === 0) return [];
+    const nowMs = Date.now();
+    const askIds = new Set(asks.map((a) => a.activation_id));
+    const ordered = [...activations].sort(
+      (a, b) => Number(askIds.has(b.activation_id)) - Number(askIds.has(a.activation_id)),
+    );
+    const lines = [];
+    for (const view of ordered.slice(0, FLEET_MAX_ROWS)) lines.push(...renderFleetRowLines(view, asks, nowMs));
+    if (ordered.length > FLEET_MAX_ROWS) lines.push(`    +${ordered.length - FLEET_MAX_ROWS} more`);
+    return lines;
+  };
+
+  // Seam lookup order: explicit test seam, then the core footer's global hook,
+  // then absent. The core module is not importable from this tree, so the
+  // runtime shares it via globalThis (set by custom-footer when loaded).
+  // Without a seam the rows stay hidden; the header widget above the prompt
+  // is unaffected. Slash commands still report the full block as text.
+  const findFooterSeam = () => {
+    if (typeof options.registerFooterSection === 'function') return options.registerFooterSection;
+    try {
+      const hook = globalThis.__registerFooterSection;
+      if (typeof hook === 'function') return hook;
+    } catch { /* no global — rows stay hidden */ }
+    return null;
   };
 
   // Inspector deferred with UI-4 (unitAI-nmxhg): /specialists inspect prints the
@@ -3376,6 +3416,15 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     followStopped = false;
     captureFleetUi(ctx);
     paintFleetWidget();
+    // Rows below the statusline mount through the footer seam; without one
+    // they stay hidden while the header widget above the prompt is unaffected.
+    if (ctx.hasUI) {
+      const seam = findFooterSeam();
+      if (seam && !fleetRowsUnregister) {
+        try { fleetRowsUnregister = seam(FLEET_WIDGET_KEY, renderRowsBelow) ?? null; }
+        catch { fleetRowsUnregister = null; }
+      }
+    }
     // Repark when a host already lives (never create one here: a null host is
     // an empty fleet, not an error); getHost() kicks on creation.
     if (host) kickFollowLoop();
@@ -3523,7 +3572,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
         .map((value) => ({
           value,
           label: value,
-          description: value === 'show' ? 'Show the Fleet panel.' : value === 'hide' ? 'Hide the Fleet panel.' : value === 'inspect' ? 'Print the expanded Fleet report.' : value === 'expand' ? 'Expand rows in the fleet widget.' : value === 'collapse' ? 'Collapse to one line.' : value === 'status' ? 'Show one activation.' : value === 'result' ? 'Read one activation\'s result.' : 'Read one activation\'s event feed.',
+          description: value === 'show' ? 'Show the Fleet panel.' : value === 'hide' ? 'Hide the Fleet panel.' : value === 'inspect' ? 'Print the expanded Fleet report.' : value === 'expand' ? 'Expand the fleet rows below the statusline.' : value === 'collapse' ? 'Collapse to the header alone.' : value === 'status' ? 'Show one activation.' : value === 'result' ? 'Read one activation\'s result.' : 'Read one activation\'s event feed.',
         }));
       return items.length > 0 ? items : null;
   };
@@ -3701,6 +3750,8 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     // touch the host while its activations are being disposed below.
     followStopped = true;
     closeAllSubstrateDb();
+    try { fleetRowsUnregister?.(); } catch {}
+    fleetRowsUnregister = null;
     if (!host) return;
     if (!host) return;
     for (const snapshot of host.list()) {

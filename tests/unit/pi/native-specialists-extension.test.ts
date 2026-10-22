@@ -1315,28 +1315,35 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     host.fleetChangeEpoch = vi.fn(() => 7);
     host.waitForFleetChange = vi.fn(() => new Promise((resolve) => { waiters.push(resolve); }));
     const flush = async () => { await vi.advanceTimersByTimeAsync(0); };
-    mod.default(pi, { createHost: () => host, openObservability: () => fakeClient });
+    const sections = new Map();
+    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
+    mod.default(pi, { createHost: () => host, openObservability: () => fakeClient, registerFooterSection });
     const ctx = makeFakeCtx({ hasUI: true, mode: 'tui' });
     await pi.fire('session_start', { type: 'session_start' }, ctx);
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     const cmds = pi.getCommands();
     await cmds.find((c) => c.name === 'specialists:feed').handler('act:feed01', ctx);
     await flush();
+    // Rows below the statusline carry the fleet; the widget above the prompt
+    // carries the header alone.
+    const rowsText = () => (sections.get('specialist-fleet')(80) ?? []).map(plain).join('\n');
     const widgetText = () => (ctx.painted.widgets['specialist-fleet'] as unknown as () => { render(w: number): string[] })().render(80).map(plain).join('\n');
-    expect(widgetText()).toContain('feed01');
-    expect(widgetText()).not.toContain('✓');
+    expect(widgetText()).toContain('specialists');
+    expect(widgetText()).not.toContain('feed01');
+    expect(rowsText()).toContain('feed01');
+    expect(rowsText()).not.toContain('✓');
     // One turn advances with no settle and no ask: the change wakes the parked
-    // loop, which repaints the widget and re-reads the feed from the cursor.
+    // loop, which repaints the header widget and refreshes the feed.
     grown = true;
     waiters.splice(0).forEach((resolve) => resolve('change'));
     await flush();
-    expect(widgetText()).toContain('feed01');
-    expect(widgetText()).not.toContain('✓');
+    expect(rowsText()).toContain('feed01');
+    expect(rowsText()).not.toContain('✓');
     // Settling flips the row marker; a further change resolves nothing new.
     host.list.mockReturnValue([{ ...SNAPSHOT, activationId: 'act:feed01', state: 'settled' }]);
     waiters.splice(0).forEach((resolve) => resolve('change'));
     await flush();
-    expect(widgetText()).toContain('✓');
+    expect(rowsText()).toContain('✓');
     // session_shutdown stops background work: the parked waiter is abandoned.
     await pi.fire('session_shutdown', { type: 'session_shutdown', reason: 'quit' });
     expect(host.stop).toHaveBeenCalled();
@@ -1360,9 +1367,12 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     // sink it builds and fire an ask through it — the production wake path.
     let wrapSink;
     const { host } = makeFakeHost();
+    const sections = new Map();
+    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
     mod.default(pi, {
       createHost: ({ wrapSink: w }) => { wrapSink = w; return host; },
       openObservability: () => fakeClient,
+      registerFooterSection,
     });
     const ctx = makeFakeCtx({ hasUI: true, mode: 'tui' });
     await pi.fire('session_start', { type: 'session_start' }, ctx);
@@ -1372,15 +1382,15 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     const cmds = pi.getCommands();
     await cmds.find((c) => c.name === 'specialists:feed').handler('act:feed01', ctx);
     await vi.advanceTimersByTimeAsync(0);
-    const widgetText = () => (ctx.painted.widgets['specialist-fleet'] as unknown as () => { render(w: number): string[] })().render(80).map(plain).join('\n');
-    expect(widgetText()).toContain('feed01');
+    const rowsText = () => (sections.get('specialist-fleet')(80) ?? []).map(plain).join('\n');
+    expect(rowsText()).toContain('feed01');
     // A settlement wake for the selected activation repaints its row: the
     // sink wrapper the host was built with emits activation_completed.
     host.list.mockReturnValue([{ ...SNAPSHOT, activationId: 'act:feed01', state: 'settled' }]);
     const sink = wrapSink({ emit: () => {} });
     sink.emit({ activationId: 'act:feed01', attemptId: 'att:feed01:1', specialist: 'explorer', name: 'activation_completed', payload: { output: 'done report' } });
     await vi.advanceTimersByTimeAsync(0);
-    expect(widgetText()).toContain('✓');
+    expect(rowsText()).toContain('✓');
     expect(pi.sent.some((m) => m.message.customType === 'specialist_settled')).toBe(true);
   });
 
@@ -1400,24 +1410,29 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     const mod = await loadExtension();
     const pi = makeFakePi();
     const { host } = makeFakeHost();
-    mod.default(pi, { createHost: () => host, openObservability: () => fakeClient });
+    const sections = new Map();
+    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
+    mod.default(pi, { createHost: () => host, openObservability: () => fakeClient, registerFooterSection });
     const ctx = makeFakeCtx({ hasUI: true, mode: 'tui' });
     await pi.fire('session_start', { type: 'session_start' }, ctx);
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     host.list.mockReturnValue([{ ...SNAPSHOT, activationId: 'act:feed01', state: 'running', lastActivityAt: Date.now() }]);
     host.pendingAsks.mockReturnValue([]);
     const widgetText = () => (ctx.painted.widgets['specialist-fleet'] as unknown as () => { render(w: number): string[] })().render(80).map(plain).join('\n');
-    // Widget rows carry no detail and no select hint: detail lives in the
-    // overlay and the text commands, never in the slim above-prompt rows.
-    const before = widgetText();
-    expect(before).toContain('specialists');
+    const rowsText = () => (sections.get('specialist-fleet')(80) ?? []).map(plain).join('\n');
+    // Split surface: the widget carries the header alone, rows render below
+    // the statusline, and neither carries detail or a select hint.
+    expect(widgetText()).toContain('specialists');
+    expect(widgetText()).not.toContain('feed01');
+    const before = rowsText();
+    expect(before).toContain('feed01');
     expect(before).not.toContain('select a row');
     expect(before).not.toContain('▾');
-    // Select via command: the widget still shows rows, not detail.
+    // Select via command: rows stay rows, never detail.
     const cmds = pi.getCommands();
     await cmds.find((c) => c.name === 'specialists:feed').handler('act:feed01', ctx);
     await vi.advanceTimersByTimeAsync(0);
-    const after = widgetText();
+    const after = rowsText();
     expect(after).toContain('feed01');
     expect(after).not.toContain('▾');
     // Pure projection units: loading state and settled tail.
@@ -1472,21 +1487,22 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(lines[1]).not.toContain('!');
   });
 
-  it('repaints the widget on fleet change while a feed follows', async () => {
-    const { pi, host, ctx } = await boot();
+  it('rows below the statusline follow fleet change', async () => {
+    const sections = new Map();
+    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
+    const { pi, host, ctx } = await boot(undefined, { registerFooterSection });
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     let waiters: Array<(v: unknown) => void> = [];
     host.fleetChangeEpoch = vi.fn(() => 7);
     host.waitForFleetChange = vi.fn(() => new Promise((resolve) => { waiters.push(resolve); }));
     // Repark against the new primitive: session restarts reseed the loop.
     await pi.fire('session_start', { type: 'session_start', reason: 'resume' }, ctx);
-    const widgetText = () => (ctx.painted.widgets['specialist-fleet'] as unknown as () => { render(w: number): string[] })().render(80).map(plain).join('\n');
-    expect(widgetText()).toContain('explorer');
-    // A fleet change repaints the same rows without losing the selection-free shape.
+    const rowsText = () => (sections.get('specialist-fleet')(80) ?? []).map(plain).join('\n');
+    expect(rowsText()).toContain('explorer');
+    // A fleet change repaints the same rows without losing their shape.
     waiters.splice(0).forEach((resolve) => resolve('change'));
     await command_tick();
-    expect(widgetText()).toContain('explorer');
-    expect(widgetText()).toContain('specialists');
+    expect(rowsText()).toContain('explorer');
   });
 
   it('no widget when headless; idle fleet clears the widget', async () => {
@@ -1566,26 +1582,35 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(ctx.painted.notices.at(-1)[0]).toContain('specialists');
   });
 
-  it('clears the widget when the Fleet is empty rather than painting a bare header', async () => {
-    const { pi, host, ctx, command } = await boot();
+  it('clears the widget and the rows when the Fleet is empty rather than painting a bare header', async () => {
+    const sections = new Map();
+    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
+    const { pi, host, ctx, command } = await boot(undefined, { registerFooterSection });
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     expect(ctx.painted.widgets['specialist-fleet']).toBeDefined();
     host.list.mockReturnValue([]);
     host.pendingAsks.mockReturnValue([]);
     await command('specialists').handler('show', ctx);
     expect(ctx.painted.widgets['specialist-fleet']).toBeUndefined();
+    expect((sections.get('specialist-fleet')(80) ?? []).map(plain).join('\n')).toBe('');
     expect(ctx.painted.statuses['specialist-fleet']).toBeUndefined();
   });
 
-  it('/specialists hide/show toggle the widget and report text', async () => {
-    const { pi, ctx, command } = await boot();
+  it('/specialists hide/show toggle the widget and the rows, and report text', async () => {
+    const sections = new Map();
+    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
+    const { pi, ctx, command } = await boot(undefined, { registerFooterSection });
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
+    const rowsText = () => (sections.get('specialist-fleet')(80) ?? []).map(plain).join('\n');
     expect(ctx.painted.widgets['specialist-fleet']).toBeDefined();
+    expect(rowsText()).toContain('explorer');
     await command('specialists').handler('hide', ctx);
     expect(ctx.painted.widgets['specialist-fleet']).toBeUndefined();
+    expect(rowsText()).toBe('');
     expect(ctx.painted.notices.at(-1)[0]).toContain('specialists');
     await command('specialists').handler('show', ctx);
     expect(ctx.painted.widgets['specialist-fleet']).toBeDefined();
+    expect(rowsText()).toContain('explorer');
     expect(ctx.painted.notices.at(-1)[0]).toContain('specialists');
   });
 
@@ -1641,7 +1666,9 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
   });
 
   it('specialists mapping never yields index-derived elapsed (unitAI-d99hb)', async () => {
-    const { pi, host, ctx, command } = await boot();
+    const sections = new Map();
+    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
+    const { pi, host, ctx, command } = await boot(undefined, { registerFooterSection });
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     const startedAt = Date.now() - 41000;
     host.list.mockReturnValue([0, 1].map((i) => ({
@@ -1653,8 +1680,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     })));
     host.pendingAsks.mockReturnValue([]);
     await command('specialists').handler('show', ctx);
-    const factory = ctx.painted.widgets['specialist-fleet'] as unknown as () => { render(w: number): string[] };
-    const text = factory().render(80).map(plain).join('\n');
+    const text = (sections.get('specialist-fleet')(80) ?? []).map(plain).join('\n');
     // Bare `.map(toActivationView)` passed the element index as nowMs, freezing
     // every entry at 0s. Both entries must show live elapsed, neither 0s.
     expect(text).toMatch(/spec-0[\s\S]*4[12]s/);
