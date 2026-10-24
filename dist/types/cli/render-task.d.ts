@@ -1,3 +1,4 @@
+import { type SpecialistWorkItemBoundary } from '../activation/workitem-store.js';
 import type { Specialist } from '../specialist/schema.js';
 export type Surface = 'pi' | 'claude' | 'codex';
 /** Flags shared by every render verb. `render-task` adds a positional specialist name. */
@@ -12,13 +13,14 @@ export type ErrorCode = 'usage' | 'specialist_not_found' | 'bead_not_found' | 't
 export declare function fail(code: ErrorCode, message: string): never;
 /** Shared flag parsing. Each verb enforces its own required-argument shape. */
 export declare function parseRenderArgs(argv: string[]): RenderArgs;
+export declare function __setWorkItemsForTests(boundary: SpecialistWorkItemBoundary | undefined): void;
 /**
  * Read the bead, run the one shared task-side assembly, and emit the envelope.
  *
  * `specialistName` is null for the roleless render — the key stays present so a
  * single consumer parser covers both verbs.
  */
-export declare function renderAndEmit(specialist: Specialist['specialist'], specialistName: string | null, args: RenderArgs): void;
+export declare function renderAndEmit(specialist: Specialist['specialist'], specialistName: string | null, args: RenderArgs): Promise<void>;
 /**
  * Load a specialist for the requested surface.
  *

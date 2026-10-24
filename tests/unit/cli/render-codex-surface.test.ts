@@ -215,7 +215,7 @@ describe('sp render-bead / sp render-skill-prefix on the codex surface', () => {
   it('renders a roleless codex bead with an empty skill_prefix', async () => {
     argv('render-bead', BEAD.id, '--surface', 'codex');
     const { run } = await import('../../../src/cli/render-bead.js');
-    run();
+    await run();
     const out = JSON.parse(stdout.join(''));
     expect(out.ok).toBe(true);
     expect(out.specialist).toBeNull();

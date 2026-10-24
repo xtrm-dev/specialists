@@ -40,6 +40,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { contractToMarkdown } from './contract-markdown.js';
 import { existsSync } from 'node:fs';
 import { SpecialistLoader, parseNpmSourceName, STALL_DETECTION_DEFAULTS, type StallDetectionConfig } from '../specialist/loader.js';
 import { buildSystemPrompt } from '../specialist/system-prompt.js';
@@ -3881,32 +3882,8 @@ function purposeExcerptFromContract(contract: unknown): string {
   return extractPurposeExcerpt(contractToMarkdown(contract)) ?? '';
 }
 
-/** Render a structured work contract back to the 7-section layout the prompt surface reads. */
-export function contractToMarkdown(contract: unknown): string {
-  if (contract === null || typeof contract !== 'object') return '';
-  const c = contract as Record<string, unknown>;
-  const lines: string[] = [];
-  const text = (v: unknown): string => (typeof v === 'string' ? v : '');
-  const list = (v: unknown): string[] => (Array.isArray(v) ? v.map((x) => (typeof x === 'string' ? x : typeof x === 'object' && x !== null ? Object.values(x as Record<string, unknown>).filter((y) => typeof y === 'string').join(': ') : String(x))) : []);
-  const problem = text(c['problem']);
-  if (problem) lines.push(`PROBLEM: ${problem}`);
-  const success = text(c['success']);
-  if (success) lines.push(`SUCCESS: ${success}`);
-  const sections: Array<[string, unknown]> = [
-    ['SCOPE', c['scope']],
-    ['NON_GOALS', c['nonGoals']],
-    ['CONSTRAINTS', c['constraints']],
-    ['VALIDATION', c['validation']],
-    ['OUTPUT', c['output']],
-  ];
-  for (const [name, value] of sections) {
-    const items = list(value);
-    if (items.length === 0) continue;
-    lines.push(`${name}:`);
-    for (const item of items) lines.push(`- ${item}`);
-  }
-  return lines.join('\n');
-}
+
+export { contractToMarkdown };
 
 /** Structural view of a pi assistant message. */
 interface AssistantMessageLike {

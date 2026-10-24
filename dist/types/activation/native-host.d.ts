@@ -38,6 +38,7 @@
  * Session lifetime deliberately exceeds turn lifetime: reaching `agent_settled` makes a
  * Specialist *waiting and resumable*, never disposed. Disposal is an explicit act.
  */
+import { contractToMarkdown } from './contract-markdown.js';
 import { SpecialistLoader, type StallDetectionConfig } from '../specialist/loader.js';
 import { type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 import { type SpecialistWorkItemBoundary } from './workitem-store.js';
@@ -909,8 +910,7 @@ export declare class NativeActivationHost {
  * An explicit `title` always wins; this is only the default. Exported for tests.
  */
 export declare function defaultInlineTitle(specialist: string, contract: string): string;
-/** Render a structured work contract back to the 7-section layout the prompt surface reads. */
-export declare function contractToMarkdown(contract: unknown): string;
+export { contractToMarkdown };
 /**
  * SPECIALISTS-52: `beads_integration` and `beads_write_notes` are read only by the legacy sp
  * CLI. At their defaults they are noise on every spec; a non-default value is a user's intent

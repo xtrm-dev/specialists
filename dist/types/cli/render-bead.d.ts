@@ -9,5 +9,5 @@ import { type Specialist } from '../specialist/schema.js';
  * mandatory_rules overrides) apply exactly as they would for a real config.
  */
 export declare function rolelessSpecialist(): Specialist['specialist'];
-export declare function run(): void;
+export declare function run(): Promise<void>;
 //# sourceMappingURL=render-bead.d.ts.map

@@ -13,8 +13,10 @@
 // task-side assembly path, and both verbs emit the same envelope shape.
 import { resolveIssueRef } from './issue-ref.js';
 import { SpecialistLoader, SpecialistMissingModelError } from '../specialist/loader.js';
-import { BeadsClient } from '../specialist/beads.js';
+import { BeadsClient, type BeadRecord } from '../specialist/beads.js';
 import { renderTaskPrompt } from '../specialist/task-prompt.js';
+import { openWorkItemBoundary, type SpecialistWorkItemBoundary } from '../activation/workitem-store.js';
+import { contractToMarkdown } from '../activation/contract-markdown.js';
 import type { Specialist } from '../specialist/schema.js';
 
 export type Surface = 'pi' | 'claude' | 'codex';
@@ -80,30 +82,97 @@ export function parseRenderArgs(argv: string[]): RenderArgs {
 }
 
 /**
+ * Test seam: an explicit boundary replaces the real Substrate open (which
+ * needs environment + database). Production never sets this; unit tests set it
+ * per test and reset afterwards so no real store is touched.
+ */
+let workItemsOverride: SpecialistWorkItemBoundary | undefined;
+
+export function __setWorkItemsForTests(boundary: SpecialistWorkItemBoundary | undefined): void {
+  workItemsOverride = boundary;
+}
+
+async function openBoundaryIfAvailable(): Promise<SpecialistWorkItemBoundary | null> {
+  try {
+    return await openWorkItemBoundary();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the work locator for the read-only render surface.
+ *
+ * Order is deliberate: the legacy Beads compat reader goes first so refs
+ * that already resolve keep byte-identical output (and never touch the
+ * store); a Beads miss falls through to the shared Substrate work boundary
+ * that dispatch uses — read-only (`view` + `completedBlockers` only, never
+ * check/bind/journal, so this surface cannot claim or mutate the Issue).
+ * A ref in neither store fails with the stable `bead_not_found` code naming
+ * the ref.
+ */
+async function resolveWorkForRender(
+  ref: string,
+  contextDepth: number,
+): Promise<{ beadId: string; bead: BeadRecord; completedBlockers: BeadRecord[] }> {
+  const beads = new BeadsClient();
+  const legacy = beads.readBead(ref);
+  if (legacy) {
+    return {
+      beadId: ref,
+      bead: legacy,
+      completedBlockers: contextDepth > 0 ? beads.getCompletedBlockers(ref, contextDepth) : [],
+    };
+  }
+
+  const boundary = workItemsOverride ?? await openBoundaryIfAvailable();
+  if (boundary) {
+    try {
+      const view = boundary.view(ref);
+      // The boundary serves depths 1|2 only; clamp the user-facing depth into
+      // its domain instead of silently dropping blocker context at depth 3+.
+      const blockers = contextDepth > 0
+        ? boundary.completedBlockers(ref, Math.min(contextDepth, 2))
+        : [];
+      return {
+        beadId: view.ref,
+        bead: { id: view.ref, title: view.title, description: contractToMarkdown(view.contract) } as BeadRecord,
+        completedBlockers: blockers.map((blocker) => ({
+          id: blocker.ref,
+          title: blocker.title,
+          description: blocker.description,
+        }) as BeadRecord),
+      };
+    } catch {
+      // Not a Substrate ref (or unreadable) — fall through to the truthful failure below.
+    }
+  }
+
+  fail('bead_not_found', `bead '${ref}' not found`);
+}
+
+/**
  * Read the bead, run the one shared task-side assembly, and emit the envelope.
  *
  * `specialistName` is null for the roleless render — the key stays present so a
  * single consumer parser covers both verbs.
  */
-export function renderAndEmit(
+export async function renderAndEmit(
   specialist: Specialist['specialist'],
   specialistName: string | null,
   args: RenderArgs,
-): void {
-  const beads = new BeadsClient();
-  const bead = beads.readBead(args.beadId);
-  if (!bead) fail('bead_not_found', `bead '${args.beadId}' not found`);
-
-  const completedBlockers = args.contextDepth > 0
-    ? beads.getCompletedBlockers(args.beadId, args.contextDepth)
-    : [];
+): Promise<void> {
+  const resolved = await resolveWorkForRender(args.beadId, args.contextDepth);
+  const beadId = resolved.beadId;
+  const bead = resolved.bead;
+  const completedBlockers = resolved.completedBlockers;
 
   let rendered;
   try {
     rendered = renderTaskPrompt({
       specialist,
       cwd: args.cwd,
-      beadId: args.beadId,
+      beadId,
       bead,
       completedBlockers,
       surface: args.surface,
@@ -137,7 +206,7 @@ export function renderAndEmit(
   process.stdout.write(`${JSON.stringify({
     ok: true,
     specialist: specialistName,
-    bead_id: args.beadId,
+    bead_id: beadId,
     surface: args.surface,
     cwd: args.cwd,
     context_depth: args.contextDepth,
@@ -200,5 +269,5 @@ export async function run(): Promise<void> {
     fail('specialist_not_found', `specialist '${name}': ${(error as Error)?.message ?? String(error)}`);
   });
 
-  renderAndEmit(spec.specialist, spec.specialist.metadata.name, args);
+  await renderAndEmit(spec.specialist, spec.specialist.metadata.name, args);
 }

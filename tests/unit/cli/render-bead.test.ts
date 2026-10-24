@@ -33,7 +33,7 @@ function argv(...args: string[]): void {
 async function render(...args: string[]): Promise<Record<string, any>> {
   argv(...args);
   const { run } = await import('../../../src/cli/render-bead.js');
-  run();
+  await run();
   return JSON.parse(stdout.join(''));
 }
 
@@ -137,7 +137,7 @@ describe('sp render-bead', () => {
   it('fails with `usage` when no bead id is given', async () => {
     argv('--surface', 'claude');
     const { run } = await import('../../../src/cli/render-bead.js');
-    expect(() => run()).toThrow('exit:1');
+    await expect(run()).rejects.toThrow('exit:1');
     const out = JSON.parse(stdout.join(''));
     expect(out.ok).toBe(false);
     expect(out.error.code).toBe('usage');
@@ -147,7 +147,7 @@ describe('sp render-bead', () => {
   it('fails with `bead_not_found` for an unknown bead', async () => {
     argv('unitAI-nope');
     const { run } = await import('../../../src/cli/render-bead.js');
-    expect(() => run()).toThrow('exit:1');
+    await expect(run()).rejects.toThrow('exit:1');
     expect(JSON.parse(stdout.join('')).error.code).toBe('bead_not_found');
   });
 
@@ -156,7 +156,7 @@ describe('sp render-bead', () => {
     // unknown surfaces stay usage errors.
     argv(BEAD.id, '--surface', 'codex-exec');
     const { run } = await import('../../../src/cli/render-bead.js');
-    expect(() => run()).toThrow('exit:1');
+    await expect(run()).rejects.toThrow('exit:1');
     expect(JSON.parse(stdout.join('')).error.code).toBe('usage');
   });
 });

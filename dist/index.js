@@ -21299,2757 +21299,16 @@ var init_task_prompt = __esm(() => {
   MUSTACHE_PLACEHOLDER_RE = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
 });
 
-// src/cli/render-task.ts
-function fail(code, message) {
-  process.stdout.write(`${JSON.stringify({ ok: false, error: { code, message } }, null, 2)}
-`);
-  process.exit(1);
-}
-function parseRenderArgs(argv) {
-  const positional = [];
-  let issueRef = "";
-  let beadAlias = "";
-  let beadIdAlias = "";
-  let cwd = process.cwd();
-  let contextDepth = 3;
-  let surface = "pi";
-  for (let i = 0;i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === "--issue-ref")
-      issueRef = argv[++i] ?? "";
-    else if (arg === "--bead")
-      beadAlias = argv[++i] ?? "";
-    else if (arg === "--bead-id")
-      beadIdAlias = argv[++i] ?? "";
-    else if (arg === "--cwd")
-      cwd = argv[++i] ?? cwd;
-    else if (arg === "--context-depth")
-      contextDepth = Number(argv[++i]);
-    else if (arg === "--surface")
-      surface = argv[++i] ?? "pi";
-    else if (!arg.startsWith("-"))
-      positional.push(arg);
-  }
-  if (surface !== "pi" && surface !== "claude" && surface !== "codex") {
-    fail("usage", `--surface must be 'pi', 'claude' or 'codex' (got '${surface}')`);
-  }
-  if (!Number.isFinite(contextDepth) || contextDepth < 0) {
-    fail("usage", `--context-depth must be a non-negative number (got '${contextDepth}')`);
-  }
-  let beadId = "";
-  try {
-    beadId = resolveIssueRef({ issueRef, bead: beadAlias, beadId: beadIdAlias }) ?? "";
-  } catch (error) {
-    fail("usage", error instanceof Error ? error.message : String(error));
-  }
-  return { beadId, cwd, contextDepth: Math.trunc(contextDepth), surface, positional };
-}
-function renderAndEmit(specialist, specialistName, args) {
-  const beads = new BeadsClient;
-  const bead = beads.readBead(args.beadId);
-  if (!bead)
-    fail("bead_not_found", `bead '${args.beadId}' not found`);
-  const completedBlockers = args.contextDepth > 0 ? beads.getCompletedBlockers(args.beadId, args.contextDepth) : [];
-  let rendered;
-  try {
-    rendered = renderTaskPrompt({
-      specialist,
-      cwd: args.cwd,
-      beadId: args.beadId,
-      bead,
-      completedBlockers,
-      surface: args.surface
-    });
-  } catch (error) {
-    fail("template_render_failed", `task_template render failed: ${error?.message ?? String(error)}`);
-  }
-  if (rendered.mandatoryRulesError) {
-    fail("mandatory_rules_failed", rendered.mandatoryRulesError);
-  }
-  const components = [
-    rendered.taskTemplateComponent,
-    ...rendered.beadContextOwn ? [rendered.beadContextOwn] : [],
-    ...rendered.beadContextParent ? [rendered.beadContextParent] : [],
-    ...rendered.beadContextBlockers,
-    ...(rendered.mandatoryRules?.sections ?? []).map((section) => ({
-      kind: "mandatory_rule",
-      name: section.setId,
-      tokens: Math.ceil(section.block.length / 4),
-      bytes: Buffer.byteLength(section.block, "utf8")
-    }))
-  ];
-  process.stdout.write(`${JSON.stringify({
-    ok: true,
-    specialist: specialistName,
-    bead_id: args.beadId,
-    surface: args.surface,
-    cwd: args.cwd,
-    context_depth: args.contextDepth,
-    initial_prompt: rendered.initial_prompt,
-    prompt_hash: rendered.prompt_hash,
-    skill_prefix: rendered.skillPrefix,
-    components,
-    mandatory_rules: rendered.mandatoryRules ? {
-      sets_loaded: rendered.mandatoryRules.setsLoaded,
-      rules_count: rendered.mandatoryRules.ruleCount,
-      inline_rules_count: rendered.mandatoryRules.inlineRulesCount,
-      globals_disabled: rendered.mandatoryRules.globalsDisabled,
-      budget_limit: rendered.mandatoryRules.budgetLimit,
-      candidate_tokens: rendered.mandatoryRules.candidateTokens,
-      injected_tokens: rendered.mandatoryRules.injectedTokens,
-      injected_section_ids: rendered.mandatoryRules.injectedSectionIds,
-      evicted_section_ids: rendered.mandatoryRules.evictedSectionIds,
-      payload_digest: rendered.mandatoryRules.payloadDigest,
-      outcome: rendered.mandatoryRules.outcome
-    } : null,
-    skills: specialist.skills?.paths ?? []
-  }, null, 2)}
-`);
-}
-async function loadSpecialistForSurface(name, surface) {
-  const loader = new SpecialistLoader;
-  if (surface !== "codex")
-    return loader.get(name);
-  const spec = await loader.getEffective(name);
-  if (!spec)
-    throw new Error(`Specialist not found: ${name}`);
-  const execution = spec.specialist.execution;
-  const model = execution.surface_models?.codex ?? execution.model;
-  if (!model)
-    throw new SpecialistMissingModelError(name);
-  return spec;
-}
-async function run5() {
-  const args = parseRenderArgs(process.argv.slice(3));
-  const name = args.positional[0] ?? "";
-  if (!name || !args.beadId)
-    fail("usage", USAGE);
-  const spec = await loadSpecialistForSurface(name, args.surface).catch((error) => {
-    fail("specialist_not_found", `specialist '${name}': ${error?.message ?? String(error)}`);
-  });
-  renderAndEmit(spec.specialist, spec.specialist.metadata.name, args);
-}
-var USAGE = "Usage: specialists render-task <name> --issue-ref <id> [--cwd <path>] [--context-depth <n>] [--surface pi|claude|codex] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)";
-var init_render_task = __esm(() => {
-  init_loader();
-  init_beads();
-  init_task_prompt();
-});
-
-// src/cli/render-bead.ts
-function rolelessSpecialist() {
-  return SpecialistSchema.parse({
-    specialist: {
-      metadata: {
-        name: "roleless",
-        version: "1.0.0",
-        description: "Synthetic roleless render target for `sp render-bead`.",
-        category: "internal"
-      },
-      execution: { model: null },
-      prompt: { task_template: "$prompt" }
-    }
-  }).specialist;
-}
-function run6() {
-  const args = parseRenderArgs(process.argv.slice(3));
-  const beadId = args.beadId || args.positional[0] || "";
-  if (!beadId)
-    fail("usage", USAGE2);
-  renderAndEmit(rolelessSpecialist(), null, { ...args, beadId });
-}
-var USAGE2 = "Usage: specialists render-bead <id> [--issue-ref <id>] [--cwd <path>] [--context-depth <n>] [--surface pi|claude|codex] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)";
-var init_render_bead = __esm(() => {
-  init_schema();
-  init_render_task();
-});
-
-// src/cli/render-skill-prefix.ts
-function fail2(code, message) {
-  process.stdout.write(`${JSON.stringify({ ok: false, error: { code, message } }, null, 2)}
-`);
-  process.exit(1);
-}
-async function run7() {
-  const argv = process.argv.slice(3);
-  const positional = [];
-  let surface = "pi";
-  for (let i = 0;i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === "--surface")
-      surface = argv[++i] ?? "pi";
-    else if (!arg.startsWith("-"))
-      positional.push(arg);
-  }
-  const name = positional[0] ?? "";
-  if (!name)
-    fail2("usage", "Usage: specialists render-skill-prefix <name> [--surface pi|claude|codex]");
-  if (surface !== "pi" && surface !== "claude" && surface !== "codex") {
-    fail2("usage", `--surface must be 'pi', 'claude' or 'codex' (got '${surface}')`);
-  }
-  const spec = await loadSpecialistForSurface(name, surface).catch((error) => {
-    fail2("specialist_not_found", `specialist '${name}': ${error?.message ?? String(error)}`);
-  });
-  process.stdout.write(`${JSON.stringify({
-    ok: true,
-    specialist: spec.specialist.metadata.name,
-    surface,
-    skill_prefix: buildSkillPrefix(spec.specialist, surface)
-  }, null, 2)}
-`);
-}
-var init_render_skill_prefix = __esm(() => {
-  init_render_task();
-  init_task_prompt();
-});
-
-// src/specialist/launch-outcome.ts
-function fail3(code, message) {
-  throw new LaunchOutcomeError(code, message);
-}
-function isObject(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function boundedString(value, field, maxLength, allowEmpty = false) {
-  if (typeof value !== "string")
-    fail3("invalid_outcome", `${field} must be a string`);
-  if (value.length === 0 && !allowEmpty)
-    fail3("invalid_outcome", `${field} must be non-empty`);
-  if (value.length > maxLength)
-    fail3("invalid_outcome", `${field} exceeds ${maxLength} characters`);
-  if (CONTROL_CHARS.test(value))
-    fail3("invalid_outcome", `${field} contains control characters`);
-  return value;
-}
-function patternString(value, field, maxLength, pattern) {
-  const s = boundedString(value, field, maxLength);
-  if (!pattern.test(s))
-    fail3("invalid_outcome", `${field} does not match the contracted pattern`);
-  return s;
-}
-function nullablePatternString(value, field, maxLength, pattern) {
-  if (value === null || value === undefined)
-    return null;
-  return patternString(value, field, maxLength, pattern);
-}
-function enumValue(value, field, allowed) {
-  if (typeof value !== "string" || !allowed.includes(value)) {
-    fail3("invalid_outcome", `${field} must be one of: ${allowed.join(", ")}`);
-  }
-  return value;
-}
-function mutationRecord(value, field) {
-  if (!isObject(value))
-    fail3("invalid_outcome", `${field} must be an object`);
-  if (typeof value.completed !== "boolean")
-    fail3("invalid_outcome", `${field}.completed must be a boolean`);
-  return { completed: value.completed, kind: patternString(value.kind, `${field}.kind`, 96, DOTTED_TOKEN_RE) };
-}
-function parseLaunchOutcome(raw) {
-  try {
-    return JSON.parse(raw);
-  } catch (error) {
-    fail3("invalid_json", `outcome is not valid JSON: ${error?.message ?? String(error)}`);
-  }
-}
-function validateLaunchOutcome(value) {
-  if (!isObject(value))
-    fail3("invalid_outcome", "outcome must be a JSON object");
-  const schemaVersion = value.schema_version;
-  if (typeof schemaVersion !== "string" || schemaVersion.length === 0) {
-    fail3("unsupported_schema", "outcome is missing schema_version");
-  }
-  if (schemaVersion !== LAUNCH_OUTCOME_SCHEMA_VERSION) {
-    fail3("unsupported_schema", `unsupported schema_version '${schemaVersion}' (this consumer accepts '${LAUNCH_OUTCOME_SCHEMA_VERSION}')`);
-  }
-  const outcome = {
-    schema_version: schemaVersion,
-    status: enumValue(value.status, "status", STATUSES),
-    reason_code: patternString(value.reason_code, "reason_code", 64, REASON_CODE_RE),
-    summary: boundedString(value.summary, "summary", 240),
-    runtime: null,
-    identity: null,
-    worktree: null,
-    readiness: null,
-    safety_profile: null,
-    persistence: null,
-    authoritative_mutation: mutationRecord(value.authoritative_mutation, "authoritative_mutation"),
-    side_effects: [],
-    next_actions: []
-  };
-  if (value.runtime !== undefined) {
-    if (!isObject(value.runtime))
-      fail3("invalid_outcome", "runtime must be an object");
-    if (!("version" in value.runtime))
-      fail3("invalid_outcome", "runtime.version is required when runtime is present");
-    outcome.runtime = {
-      name: enumValue(value.runtime.name, "runtime.name", RUNTIMES),
-      version: value.runtime.version === null ? null : boundedString(value.runtime.version, "runtime.version", 128)
-    };
-  }
-  if (value.identity !== undefined) {
-    if (!isObject(value.identity))
-      fail3("invalid_outcome", "identity must be an object");
-    const identity = value.identity;
-    for (const key of ["thread_id", "session_name", "tmux_session_id", "pane_id"]) {
-      if (!(key in identity))
-        fail3("invalid_outcome", `identity.${key} is required when identity is present`);
-    }
-    const nullableId = (field) => {
-      const v = identity[field];
-      if (v === null)
-        return null;
-      return boundedString(v, `identity.${field}`, 256);
-    };
-    outcome.identity = {
-      thread_id: nullableId("thread_id"),
-      session_name: nullableId("session_name"),
-      tmux_session_id: nullablePatternString(identity.tmux_session_id, "identity.tmux_session_id", 32, TMUX_SESSION_ID_RE),
-      pane_id: nullablePatternString(identity.pane_id, "identity.pane_id", 32, PANE_ID_RE)
-    };
-  }
-  if (value.worktree !== undefined) {
-    if (!isObject(value.worktree))
-      fail3("invalid_outcome", "worktree must be an object");
-    if (value.worktree.owner !== "core")
-      fail3("invalid_outcome", "worktree.owner must be 'core' (Core owns launcher worktrees)");
-    outcome.worktree = {
-      path: boundedString(value.worktree.path, "worktree.path", 4096),
-      branch: boundedString(value.worktree.branch, "worktree.branch", 4096),
-      owner: "core"
-    };
-  }
-  if (value.readiness !== undefined) {
-    if (!isObject(value.readiness))
-      fail3("invalid_outcome", "readiness must be an object");
-    outcome.readiness = {
-      status: enumValue(value.readiness.status, "readiness.status", READINESS_STATUSES),
-      source: enumValue(value.readiness.source, "readiness.source", READINESS_SOURCES)
-    };
-  }
-  if (value.safety_profile !== undefined) {
-    if (!isObject(value.safety_profile))
-      fail3("invalid_outcome", "safety_profile must be an object");
-    if (value.safety_profile.hook_trust !== "preserved") {
-      fail3("invalid_outcome", "safety_profile.hook_trust must be 'preserved'");
-    }
-    outcome.safety_profile = {
-      name: patternString(value.safety_profile.name, "safety_profile.name", 64, TOKEN_RE2),
-      sandbox: patternString(value.safety_profile.sandbox, "safety_profile.sandbox", 64, TOKEN_RE2),
-      approvals: patternString(value.safety_profile.approvals, "safety_profile.approvals", 64, TOKEN_RE2),
-      hook_trust: "preserved"
-    };
-  }
-  if (value.persistence !== undefined) {
-    outcome.persistence = mutationRecord(value.persistence, "persistence");
-  }
-  if (!Array.isArray(value.side_effects))
-    fail3("invalid_outcome", "side_effects must be an array");
-  if (value.side_effects.length > 32)
-    fail3("invalid_outcome", "side_effects exceeds 32 entries");
-  for (const [index, effect] of value.side_effects.entries()) {
-    if (!isObject(effect))
-      fail3("invalid_outcome", `side_effects[${index}] must be an object`);
-    const entry = {
-      kind: patternString(effect.kind, `side_effects[${index}].kind`, 96, DOTTED_TOKEN_RE),
-      status: enumValue(effect.status, `side_effects[${index}].status`, SIDE_EFFECT_STATUSES)
-    };
-    if (effect.id !== undefined)
-      entry.id = effect.id === null ? null : boundedString(effect.id, `side_effects[${index}].id`, 256);
-    outcome.side_effects.push(entry);
-  }
-  if (!Array.isArray(value.next_actions))
-    fail3("invalid_outcome", "next_actions must be an array");
-  if (value.next_actions.length > 16)
-    fail3("invalid_outcome", "next_actions exceeds 16 entries");
-  for (const [index, action] of value.next_actions.entries()) {
-    if (!isObject(action))
-      fail3("invalid_outcome", `next_actions[${index}] must be an object`);
-    if (!Array.isArray(action.argv) || action.argv.length === 0) {
-      fail3("invalid_outcome", `next_actions[${index}].argv must be a non-empty array`);
-    }
-    if (action.argv.length > 32)
-      fail3("invalid_outcome", `next_actions[${index}].argv exceeds 32 entries`);
-    if (typeof action.required !== "boolean")
-      fail3("invalid_outcome", `next_actions[${index}].required must be a boolean`);
-    const entry = {
-      kind: enumValue(action.kind, `next_actions[${index}].kind`, ACTION_KINDS),
-      required: action.required,
-      argv: action.argv.map((arg, argIndex) => boundedString(arg, `next_actions[${index}].argv[${argIndex}]`, 4096, true)),
-      display: boundedString(action.display, `next_actions[${index}].display`, 8192),
-      why: boundedString(action.why, `next_actions[${index}].why`, 240)
-    };
-    if (action.cwd !== undefined)
-      entry.cwd = boundedString(action.cwd, `next_actions[${index}].cwd`, 4096);
-    outcome.next_actions.push(entry);
-  }
-  return outcome;
-}
-function projectLaunchOutcome(outcome) {
-  return {
-    schema_version: outcome.schema_version,
-    status: outcome.status,
-    reason_code: outcome.reason_code,
-    summary: outcome.summary,
-    runtime: outcome.runtime ? { name: outcome.runtime.name, version: outcome.runtime.version } : null,
-    identity: outcome.identity ? {
-      thread_id: outcome.identity.thread_id,
-      session_name: outcome.identity.session_name,
-      tmux_session_id: outcome.identity.tmux_session_id,
-      pane_id: outcome.identity.pane_id
-    } : null,
-    worktree: outcome.worktree ? { path: outcome.worktree.path, branch: outcome.worktree.branch, owner: outcome.worktree.owner } : null,
-    readiness: outcome.readiness ? { status: outcome.readiness.status, source: outcome.readiness.source } : null,
-    safety_profile: outcome.safety_profile ? {
-      name: outcome.safety_profile.name,
-      sandbox: outcome.safety_profile.sandbox,
-      approvals: outcome.safety_profile.approvals,
-      hook_trust: outcome.safety_profile.hook_trust
-    } : null,
-    persistence: outcome.persistence ? { completed: outcome.persistence.completed, kind: outcome.persistence.kind } : null,
-    authoritative_mutation: {
-      completed: outcome.authoritative_mutation.completed,
-      kind: outcome.authoritative_mutation.kind
-    },
-    side_effects: outcome.side_effects.map((effect) => ({
-      kind: effect.kind,
-      status: effect.status,
-      ...effect.id !== undefined ? { id: effect.id } : {}
-    })),
-    next_actions: outcome.next_actions.map((action) => ({
-      kind: action.kind,
-      required: action.required,
-      argv: [...action.argv],
-      display: action.display,
-      why: action.why,
-      ...action.cwd !== undefined ? { cwd: action.cwd } : {}
-    }))
-  };
-}
-var LAUNCH_OUTCOME_SCHEMA_VERSION = "xtrm.command-outcome.v1", LaunchOutcomeError, CONTROL_CHARS, REASON_CODE_RE, TOKEN_RE2, DOTTED_TOKEN_RE, TMUX_SESSION_ID_RE, PANE_ID_RE, STATUSES, RUNTIMES, READINESS_STATUSES, READINESS_SOURCES, ACTION_KINDS, SIDE_EFFECT_STATUSES;
-var init_launch_outcome = __esm(() => {
-  LaunchOutcomeError = class LaunchOutcomeError extends Error {
-    code;
-    constructor(code, message) {
-      super(message);
-      this.code = code;
-      this.name = "LaunchOutcomeError";
-    }
-  };
-  CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
-  REASON_CODE_RE = /^[a-z][a-z0-9_]*$/;
-  TOKEN_RE2 = /^[a-z][a-z0-9-]*$/;
-  DOTTED_TOKEN_RE = /^[a-z][a-z0-9.-]*$/;
-  TMUX_SESSION_ID_RE = /^\$[0-9]+$/;
-  PANE_ID_RE = /^%[0-9]+$/;
-  STATUSES = ["ok", "degraded", "noop", "rejected", "failed"];
-  RUNTIMES = ["pi", "claude", "codex"];
-  READINESS_STATUSES = ["ready", "unverified", "not_ready"];
-  READINESS_SOURCES = ["agent.ready", "tmux-pane", "none"];
-  ACTION_KINDS = ["attach", "resume", "repair", "end", "wait", "inspect"];
-  SIDE_EFFECT_STATUSES = ["ok", "degraded", "failed", "skipped"];
-});
-
-// src/cli/launch-outcome.ts
-import { readFileSync as readFileSync11 } from "fs";
-function fail4(code, message) {
-  process.stdout.write(`${JSON.stringify({ ok: false, error: { code, message } }, null, 2)}
-`);
-  process.exit(1);
-}
-async function run8() {
-  const args = process.argv.slice(3).filter((arg) => arg !== "--json");
-  const file = args.find((arg) => !arg.startsWith("-")) ?? "";
-  if (!file)
-    fail4("usage", USAGE3);
-  let raw;
-  try {
-    raw = readFileSync11(file, "utf-8");
-  } catch (error) {
-    fail4("file_not_read", `cannot read outcome file '${file}': ${error?.message ?? String(error)}`);
-  }
-  let projection;
-  try {
-    projection = projectLaunchOutcome(validateLaunchOutcome(parseLaunchOutcome(raw)));
-  } catch (error) {
-    if (error instanceof LaunchOutcomeError)
-      fail4(error.code, error.message);
-    throw error;
-  }
-  process.stdout.write(`${JSON.stringify({ ok: true, ...projection }, null, 2)}
-`);
-}
-var USAGE3 = "Usage: specialists launch-outcome <file>";
-var init_launch_outcome2 = __esm(() => {
-  init_launch_outcome();
-});
-
-// src/cli/view.ts
-import readline2 from "readline/promises";
-import { stdin as input, stdout as output } from "process";
-function permissionBadge2(permission) {
-  if (permission === "READ_ONLY")
-    return green2("[READ_ONLY]");
-  if (permission === "LOW")
-    return cyan2("[LOW]");
-  if (permission === "MEDIUM")
-    return yellow3("[MEDIUM]");
-  return magenta2("[HIGH]");
-}
-function parseArgs3(argv) {
-  const parsed = { raw: false, all: false };
-  for (let index = 0;index < argv.length; index++) {
-    const token = argv[index];
-    if (token === "--raw") {
-      parsed.raw = true;
-      continue;
-    }
-    if (token === "--all") {
-      parsed.all = true;
-      continue;
-    }
-    if (token === "--surface") {
-      const value = argv[index + 1];
-      if (!value) {
-        throw new ArgParseError2("--surface requires a value");
-      }
-      parsed.surface = value;
-      index += 1;
-      continue;
-    }
-    if (token === "--section") {
-      const value = argv[index + 1];
-      if (!value) {
-        throw new ArgParseError2("--section requires a value");
-      }
-      const normalized = SECTION_ALIASES[value.toLowerCase()];
-      if (!normalized) {
-        throw new ArgParseError2(`Unsupported section "${value}"`);
-      }
-      parsed.section = normalized;
-      index += 1;
-      continue;
-    }
-    if (token.startsWith("--")) {
-      throw new ArgParseError2(`Unknown flag: ${token}`);
-    }
-    if (!parsed.name) {
-      parsed.name = token;
-      continue;
-    }
-    throw new ArgParseError2(`Unexpected argument: ${token}`);
-  }
-  if (parsed.all && parsed.name) {
-    throw new ArgParseError2("--all cannot be combined with a specialist name");
-  }
-  return parsed;
-}
-function formatPromptValue(value) {
-  if (!value || value.trim().length === 0) {
-    return dim3("(empty)");
-  }
-  return value;
-}
-function formatValue(value) {
-  if (value === undefined)
-    return dim3("(unset)");
-  if (value === null)
-    return dim3("null");
-  if (typeof value === "string")
-    return value;
-  return JSON.stringify(value, null, 2);
-}
-function printSectionHeader(title, color) {
-  console.log();
-  console.log(color(bold3(title)));
-  console.log(color("\u2500".repeat(title.length)));
-}
-function printPromptSection(prompt) {
-  printSectionHeader("prompt", magenta2);
-  console.log(`${bold3("system")}:`);
-  console.log(formatPromptValue(prompt.system));
-  console.log();
-  console.log(`${bold3("task_template")}:`);
-  console.log(formatPromptValue(prompt.task_template));
-  if (prompt.skill_inherit !== undefined) {
-    console.log();
-    console.log(`${bold3("skill_inherit")}: ${formatValue(prompt.skill_inherit)}`);
-  }
-  if (prompt.output_schema !== undefined) {
-    console.log();
-    console.log(`${bold3("output_schema")}:`);
-    console.log(formatValue(prompt.output_schema));
-  }
-}
-function printGenericSection(title, color, value) {
-  printSectionHeader(title, color);
-  console.log(formatValue(value));
-}
-function printHeader(summary, model = summary.model) {
-  const scope = summary.scope === "default" ? green2("[default]") : summary.scope === "package" ? blue2("[package]") : summary.scope === "home" ? cyan2("[home]") : yellow3("[user]");
-  const source = dim3(summary.source);
-  console.log();
-  console.log(`${bold3(cyan2(summary.name))} ${scope} ${permissionBadge2(summary.permission_required)} ${source}`);
-  console.log(dim3(summary.description));
-  console.log(`${dim3("model:")} ${model || yellow3("(unset)")}`);
-  console.log(`${dim3("version:")} ${summary.version}`);
-  console.log(`${dim3("source:")} ${summary.filePath}`);
-}
-function printCatalog(summaries) {
-  if (summaries.length === 0) {
-    console.log("No specialists found.");
-    return;
-  }
-  const rows = [...summaries].sort((left, right) => left.name.localeCompare(right.name));
-  console.log();
-  console.log(bold3(`Specialists catalog (${rows.length})`));
-  console.log();
-  for (const summary of rows) {
-    const scope = summary.scope === "default" ? green2("[default]") : summary.scope === "package" ? blue2("[package]") : summary.scope === "home" ? cyan2("[home]") : yellow3("[user]");
-    const keepAlive = summary.interactive ? yellow3("[keep-alive]") : dim3("[single-turn]");
-    console.log(`${cyan2(summary.name)} ${scope} ${permissionBadge2(summary.permission_required)} ${keepAlive} ${dim3(summary.source)}`);
-    console.log(`${dim3("  model:")} ${summary.model}`);
-    console.log(`${dim3("  category:")} ${summary.category}  ${dim3("version:")} ${summary.version}`);
-    console.log(`${dim3("  desc:")} ${summary.description}`);
-    console.log();
-  }
-}
-function findSummary(summaries, name) {
-  return summaries.find((summary) => summary.name === name);
-}
-async function selectSpecialistFromCatalog(summaries) {
-  if (!input.isTTY || !output.isTTY) {
-    return null;
-  }
-  console.log(dim3("Enter specialist name to view details (blank to cancel):"));
-  const rl = readline2.createInterface({ input, output });
-  try {
-    const selectedName = (await rl.question("> ")).trim();
-    if (!selectedName)
-      return null;
-    return findSummary(summaries, selectedName) ?? null;
-  } finally {
-    rl.close();
-  }
-}
-function sectionValue(spec, section) {
-  if (section === "beads") {
-    return {
-      beads_integration: spec.specialist.beads_integration,
-      beads_write_notes: spec.specialist.beads_write_notes
-    };
-  }
-  return spec.specialist[section];
-}
-function printBySection(spec, section) {
-  if (section === "prompt") {
-    printPromptSection(spec.specialist.prompt);
-    return;
-  }
-  const color = section === "beads" ? yellow3 : section === "metadata" ? cyan2 : green2;
-  printGenericSection(String(section), color, sectionValue(spec, section));
-}
-function printFullSpecialist(spec) {
-  printBySection(spec, "metadata");
-  printBySection(spec, "execution");
-  printBySection(spec, "prompt");
-  printBySection(spec, "skills");
-  printBySection(spec, "capabilities");
-  printBySection(spec, "communication");
-  printBySection(spec, "validation");
-  printBySection(spec, "stall_detection");
-  printBySection(spec, "mandatory_rules");
-  printBySection(spec, "beads");
-}
-function resolveSurfaceModel(execution, surface) {
-  if (!surface)
-    return execution.model;
-  return execution.surface_models?.[surface] ?? execution.model;
-}
-function withSurfaceModel(spec, surface) {
-  const model = resolveSurfaceModel(spec.specialist.execution, surface);
-  if (!surface || model === spec.specialist.execution.model)
-    return spec;
-  return {
-    ...spec,
-    specialist: {
-      ...spec.specialist,
-      execution: { ...spec.specialist.execution, model }
-    }
-  };
-}
-async function loadForInspection(loader, name) {
-  try {
-    return await loader.get(name);
-  } catch (error) {
-    if (!(error instanceof SpecialistMissingModelError))
-      throw error;
-    const effective = await loader.getEffective(name);
-    if (!effective)
-      throw error;
-    return effective;
-  }
-}
-async function printRaw(summary, loader, surface, section) {
-  const spec = await loader.getEffective(summary.name);
-  if (!spec) {
-    console.error(`Specialist not found: ${summary.name}`);
-    process.exit(1);
-  }
-  const resolved = withSurfaceModel(spec, surface);
-  if (!section) {
-    console.log(JSON.stringify(resolved, null, 2));
-    return;
-  }
-  console.log(JSON.stringify({ specialist: { [section]: sectionValue(resolved, section) } }, null, 2));
-}
-async function run9() {
-  let args;
-  try {
-    args = parseArgs3(process.argv.slice(3));
-  } catch (error) {
-    if (error instanceof ArgParseError2) {
-      console.error(`Error: ${error.message}`);
-      process.exit(1);
-    }
-    throw error;
-  }
-  const loader = new SpecialistLoader;
-  const summaries = await loader.list();
-  if (args.all) {
-    printCatalog(summaries);
-    return;
-  }
-  let selectedSummary;
-  if (args.name) {
-    selectedSummary = findSummary(summaries, args.name);
-    if (!selectedSummary) {
-      console.error(`Specialist not found: ${args.name}`);
-      process.exit(1);
-    }
-  } else {
-    printCatalog(summaries);
-    const chosen = await selectSpecialistFromCatalog(summaries);
-    if (!chosen) {
-      if (!input.isTTY || !output.isTTY) {
-        console.log(dim3("Pass a specialist name to render details (e.g. specialists view <name>)."));
-      }
-      return;
-    }
-    selectedSummary = chosen;
-  }
-  if (args.raw) {
-    await printRaw(selectedSummary, loader, args.surface, args.section);
-    return;
-  }
-  const specialist = withSurfaceModel(await loadForInspection(loader, selectedSummary.name), args.surface);
-  printHeader(selectedSummary, specialist.specialist.execution.model);
-  if (args.section) {
-    printBySection(specialist, args.section);
-    return;
-  }
-  printFullSpecialist(specialist);
-}
-var ANSI_RESET = "\x1B[0m", bold3 = (value) => `\x1B[1m${value}${ANSI_RESET}`, dim3 = (value) => `\x1B[2m${value}${ANSI_RESET}`, cyan2 = (value) => `\x1B[36m${value}${ANSI_RESET}`, green2 = (value) => `\x1B[32m${value}${ANSI_RESET}`, yellow3 = (value) => `\x1B[33m${value}${ANSI_RESET}`, blue2 = (value) => `\x1B[34m${value}${ANSI_RESET}`, magenta2 = (value) => `\x1B[35m${value}${ANSI_RESET}`, SECTION_ALIASES, ArgParseError2;
-var init_view = __esm(() => {
-  init_loader();
-  SECTION_ALIASES = {
-    metadata: "metadata",
-    execution: "execution",
-    prompt: "prompt",
-    skills: "skills",
-    capabilities: "capabilities",
-    communication: "communication",
-    validation: "validation",
-    stall: "stall_detection",
-    "stall-detection": "stall_detection",
-    stall_detection: "stall_detection",
-    mandatory: "mandatory_rules",
-    "mandatory-rules": "mandatory_rules",
-    mandatory_rules: "mandatory_rules",
-    rules: "mandatory_rules",
-    beads: "beads"
-  };
-  ArgParseError2 = class ArgParseError2 extends Error {
-    constructor(message) {
-      super(message);
-      this.name = "ArgParseError";
-    }
-  };
-});
-
-// src/cli/models.ts
-import { spawnSync as spawnSync10 } from "child_process";
-function parsePiModels() {
-  const r = spawnSync10("pi", ["--list-models"], {
-    encoding: "utf8",
-    stdio: "pipe",
-    timeout: 8000
-  });
-  if (r.status !== 0 || r.error)
-    return null;
-  return r.stdout.split(`
-`).slice(1).map((line) => line.trim()).filter(Boolean).map((line) => {
-    const cols = line.split(/\s+/);
-    return {
-      provider: cols[0] ?? "",
-      model: cols[1] ?? "",
-      context: cols[2] ?? "",
-      maxOut: cols[3] ?? "",
-      thinking: cols[4] === "yes",
-      images: cols[5] === "yes"
-    };
-  }).filter((m) => m.provider && m.model);
-}
-function parseArgs4(argv) {
-  const out = {};
-  for (let i = 0;i < argv.length; i++) {
-    if (argv[i] === "--provider" && argv[i + 1]) {
-      out.provider = argv[++i];
-      continue;
-    }
-    if (argv[i] === "--used") {
-      out.used = true;
-      continue;
-    }
-  }
-  return out;
-}
-async function run10() {
-  const args = parseArgs4(process.argv.slice(3));
-  const loader = new SpecialistLoader;
-  const specialists = await loader.list();
-  const usedBy = new Map;
-  for (const s of specialists) {
-    const key = s.model;
-    if (!usedBy.has(key))
-      usedBy.set(key, []);
-    usedBy.get(key).push(s.name);
-  }
-  const allModels = parsePiModels();
-  if (!allModels) {
-    console.error("pi not found or failed \u2014 install and configure pi first");
-    process.exit(1);
-  }
-  let models = allModels;
-  if (args.provider) {
-    models = models.filter((m) => m.provider.toLowerCase().includes(args.provider.toLowerCase()));
-  }
-  if (args.used) {
-    models = models.filter((m) => usedBy.has(`${m.provider}/${m.model}`));
-  }
-  if (models.length === 0) {
-    console.log("No models match.");
-    return;
-  }
-  const byProvider = new Map;
-  for (const m of models) {
-    if (!byProvider.has(m.provider))
-      byProvider.set(m.provider, []);
-    byProvider.get(m.provider).push(m);
-  }
-  const total = models.length;
-  console.log(`
-${bold4(`Models on pi`)}  ${dim4(`(${total} total)`)}
-`);
-  for (const [provider, pModels] of byProvider) {
-    console.log(`  ${cyan3(provider)}  ${dim4(`${pModels.length} model${pModels.length !== 1 ? "s" : ""}`)}`);
-    const modelWidth = Math.max(...pModels.map((m) => m.model.length));
-    for (const m of pModels) {
-      const key = `${m.provider}/${m.model}`;
-      const inUse = usedBy.get(key);
-      const flags = [
-        m.thinking ? green3("thinking") : dim4("\xB7"),
-        m.images ? dim4("images") : ""
-      ].filter(Boolean).join("  ");
-      const ctx = dim4(`ctx ${m.context}`);
-      const usedLabel = inUse ? `  ${yellow4("\u2190")} ${dim4(inUse.join(", "))}` : "";
-      console.log(`    ${m.model.padEnd(modelWidth)}  ${ctx.padEnd(18)}  ${flags}${usedLabel}`);
-    }
-    console.log();
-  }
-  if (!args.used) {
-    console.log(dim4(`  --provider <name>  filter by provider`));
-    console.log(dim4(`  --used             only show models used by your specialists`));
-    console.log();
-  }
-}
-var bold4 = (s) => `\x1B[1m${s}\x1B[0m`, dim4 = (s) => `\x1B[2m${s}\x1B[0m`, cyan3 = (s) => `\x1B[36m${s}\x1B[0m`, yellow4 = (s) => `\x1B[33m${s}\x1B[0m`, green3 = (s) => `\x1B[32m${s}\x1B[0m`;
-var init_models = __esm(() => {
-  init_loader();
-});
-
-// src/pi/native-specialists-registration.ts
-import { existsSync as existsSync13, mkdirSync as mkdirSync7, readFileSync as readFileSync12, writeFileSync as writeFileSync6 } from "fs";
-import { homedir as homedir4 } from "os";
+// src/pi/read-line-numbers-extension.ts
+import { existsSync as existsSync13 } from "fs";
 import { dirname as dirname7, join as join14, resolve as resolve5 } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
-function getNativeSpecialistsExtensionPath() {
-  const here = dirname7(fileURLToPath3(import.meta.url));
-  for (const candidate of [join14(here, "..", REL), join14(here, "..", "..", REL)]) {
-    if (existsSync13(join14(candidate, "index.mjs")))
-      return resolve5(candidate);
-  }
-  return null;
-}
-function getPiSettingsPath(env = process.env) {
-  const agentDir = env.PI_CODING_AGENT_DIR || join14(homedir4(), ".pi", "agent");
-  return join14(agentDir, "settings.json");
-}
-function sourceOf(entry) {
-  const source = typeof entry === "string" ? entry : entry?.source;
-  return typeof source === "string" ? source.replace(/\/+$/, "") : "";
-}
-function withSource(entry, source) {
-  return typeof entry === "string" ? source : { ...entry, source };
-}
-function registerNativeSpecialists(bundledPath = getNativeSpecialistsExtensionPath(), settingsPath = getPiSettingsPath()) {
-  if (!bundledPath)
-    return { status: "skipped", settingsPath, reason: "bundled extension not found" };
-  let settings = {};
-  if (existsSync13(settingsPath)) {
-    try {
-      const parsed = JSON.parse(readFileSync12(settingsPath, "utf8"));
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-        throw new Error("not an object");
-      settings = parsed;
-    } catch (error) {
-      return { status: "skipped", settingsPath, reason: `unreadable settings: ${error.message}` };
-    }
-  }
-  if (settings.packages !== undefined && !Array.isArray(settings.packages)) {
-    return { status: "skipped", settingsPath, reason: "`packages` is not an array" };
-  }
-  const packages = [...settings.packages ?? []];
-  const current = packages.find((entry) => sourceOf(entry).endsWith(CURRENT));
-  let source = current ? sourceOf(current) : bundledPath;
-  let legacyFound = false;
-  const next = [];
-  for (const entry of packages) {
-    const entrySource = sourceOf(entry);
-    if (!entrySource.endsWith(LEGACY)) {
-      next.push(entry);
-      continue;
-    }
-    if (current || legacyFound) {
-      legacyFound = true;
-      continue;
-    }
-    legacyFound = true;
-    const sibling = entrySource.slice(0, -LEGACY.length) + CURRENT;
-    source = existsSync13(join14(sibling, "index.mjs")) ? sibling : bundledPath;
-    next.push(withSource(entry, source));
-  }
-  if (!current && !legacyFound)
-    next.push(bundledPath);
-  const status = legacyFound ? "migrated" : current ? "present" : "added";
-  if (status === "present")
-    return { status, settingsPath, source };
-  settings.packages = next;
-  mkdirSync7(dirname7(settingsPath), { recursive: true });
-  writeFileSync6(settingsPath, `${JSON.stringify(settings, null, 2)}
-`);
-  return { status, settingsPath, source };
-}
-var CURRENT = "/pi-extensions/native-specialists", LEGACY = "/pi-extensions/specialist-subagents", REL;
-var init_native_specialists_registration = __esm(() => {
-  REL = join14("config", "pi-extensions", "native-specialists");
-});
-
-// src/cli/init.ts
-import { copyFileSync, cpSync, existsSync as existsSync14, lstatSync as lstatSync2, mkdirSync as mkdirSync8, readdirSync as readdirSync5, readFileSync as readFileSync13, readlinkSync, renameSync as renameSync3, rmSync as rmSync3, symlinkSync, unlinkSync, writeFileSync as writeFileSync7 } from "fs";
-import { spawnSync as spawnSync11 } from "child_process";
-import { basename as basename4, dirname as dirname8, join as join15, relative as relative2, resolve as resolve6 } from "path";
-function ok(msg) {
-  console.log(`  ${green4("\u2713")} ${msg}`);
-}
-function skip(msg) {
-  console.log(`  ${yellow5("\u25CB")} ${msg}`);
-}
-function warn(msg) {
-  console.warn(`  ${yellow5("!")} ${msg}`);
-}
-function isInstalled(bin) {
-  return spawnSync11("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
-}
-function assertXtrmPrerequisites(cwd) {
-  const hasXtrmDir = existsSync14(join15(cwd, ".xtrm"));
-  const hasXtCli = isInstalled("xt");
-  if (hasXtrmDir && hasXtCli)
-    return;
-  if (!hasXtCli) {
-    console.error("specialists init: missing xt CLI.");
-    console.error("1. Install xtrm-tools globally: npm install -g xtrm-tools");
-    console.error("2. Run xt install");
-    console.error("3. Run xt init in this repo");
-    console.error("4. Verify xt is available: xt --version");
-    process.exit(1);
-  }
-  if (!hasXtrmDir) {
-    console.error("specialists init: missing .xtrm/ in this repo.");
-    console.error("1. Run xt init in this repo");
-    console.error("2. Verify xt is available: xt --version");
-    process.exit(1);
-  }
-}
-function warnMissingOptionalPrerequisites() {
-  const optionalTools = [
-    { name: "pi", install: "npm install -g @earendil-works/pi-coding-agent" },
-    { name: "bd", install: "npm install -g @jaggerxtrm/beads" },
-    { name: "sp", install: "npm install -g @jaggerxtrm/specialists" }
-  ];
-  const missingTools = optionalTools.filter((tool) => !isInstalled(tool.name));
-  if (missingTools.length === 0)
-    return;
-  warn("Optional CLI prerequisites are missing. Init will continue, but workflow commands may fail:");
-  for (const tool of missingTools) {
-    if (tool.name === "bd") {
-      warn(`bd: optional legacy sp/Supervisor compatibility only; install via ${tool.install}`);
-      continue;
-    }
-    warn(`${tool.name}: install via ${tool.install}`);
-  }
-}
-function loadJson(path, fallback) {
-  if (!existsSync14(path))
-    return structuredClone(fallback);
-  try {
-    return JSON.parse(readFileSync13(path, "utf-8"));
-  } catch {
-    return structuredClone(fallback);
-  }
-}
-function saveJson(path, value) {
-  writeFileSync7(path, JSON.stringify(value, null, 2) + `
-`, "utf-8");
-}
-function writeGlobalOverridesGuide(configPath) {
-  const docsDir = resolveCanonicalAssetDir("../docs");
-  const sourcePath = docsDir ? join15(docsDir, "overrides-guide.md") : null;
-  if (!sourcePath || !existsSync14(sourcePath)) {
-    warn("global overrides guide not found in package; see docs/overrides-guide.md on GitHub");
-    return null;
-  }
-  const targetPath = join15(dirname8(configPath), "overrides-guide.md");
-  copyFileSync(sourcePath, targetPath);
-  return targetPath;
-}
-function migrateLegacySpecialists(cwd, scope) {
-  const sourceDir = join15(cwd, ".specialists", scope, "specialists");
-  if (!existsSync14(sourceDir))
-    return;
-  const targetDir = join15(cwd, ".specialists", scope);
-  if (!existsSync14(targetDir)) {
-    mkdirSync8(targetDir, { recursive: true });
-  }
-  const files = readdirSync5(sourceDir).filter((f) => f.endsWith(".specialist.json") || f.endsWith(".specialist.json"));
-  if (files.length === 0)
-    return;
-  let moved = 0;
-  let skipped = 0;
-  for (const file of files) {
-    const src = join15(sourceDir, file);
-    const dest = join15(targetDir, file);
-    if (existsSync14(dest)) {
-      skipped++;
-      continue;
-    }
-    renameSync3(src, dest);
-    moved++;
-  }
-  if (moved > 0) {
-    ok(`migrated ${moved} specialist${moved === 1 ? "" : "s"} from .specialists/${scope}/specialists/ to .specialists/${scope}/`);
-  }
-  if (skipped > 0) {
-    skip(`${skipped} legacy specialist${skipped === 1 ? "" : "s"} already exist in .specialists/${scope}/ (not moved)`);
-  }
-}
-function copyCanonicalSpecialists(cwd) {
-  const sourceDir = resolveCanonicalAssetDir("specialists");
-  if (!sourceDir) {
-    skip("no canonical specialists found in package");
-    return;
-  }
-  const targetDir = join15(cwd, ".specialists", "default");
-  const files = readdirSync5(sourceDir).filter((f) => f.endsWith(".specialist.json"));
-  if (files.length === 0) {
-    skip("no specialist files found in package");
-    return;
-  }
-  if (!existsSync14(targetDir)) {
-    mkdirSync8(targetDir, { recursive: true });
-  }
-  let copied = 0;
-  let refreshed = 0;
-  for (const file of files) {
-    const src = join15(sourceDir, file);
-    const dest = join15(targetDir, file);
-    if (existsSync14(dest)) {
-      copyFileSync(src, dest);
-      refreshed++;
-    } else {
-      copyFileSync(src, dest);
-      copied++;
-    }
-  }
-  if (copied > 0) {
-    ok(`copied ${copied} canonical specialist${copied === 1 ? "" : "s"} to .specialists/default/`);
-  }
-  if (refreshed > 0) {
-    ok(`re-synced ${refreshed} canonical specialist${refreshed === 1 ? "" : "s"} in .specialists/default/`);
-  }
-}
-function copyCanonicalMandatoryRules(cwd) {
-  const sourceDir = resolveCanonicalAssetDir("mandatory-rules");
-  if (!sourceDir) {
-    skip("no canonical mandatory-rules found in package");
-    return;
-  }
-  const targetDir = join15(cwd, ".specialists", "default", "mandatory-rules");
-  const files = readdirSync5(sourceDir).filter((f) => f.endsWith(".md") || f.endsWith(".json"));
-  if (files.length === 0) {
-    skip("no mandatory-rules files found in package");
-    return;
-  }
-  if (!existsSync14(targetDir)) {
-    mkdirSync8(targetDir, { recursive: true });
-  }
-  let copied = 0;
-  let refreshed = 0;
-  for (const file of files) {
-    const src = join15(sourceDir, file);
-    const dest = join15(targetDir, file);
-    if (existsSync14(dest)) {
-      copyFileSync(src, dest);
-      refreshed++;
-    } else {
-      copyFileSync(src, dest);
-      copied++;
-    }
-  }
-  if (copied > 0) {
-    ok(`copied ${copied} mandatory-rule${copied === 1 ? "" : "s"} to .specialists/default/mandatory-rules/`);
-  }
-  if (refreshed > 0) {
-    ok(`re-synced ${refreshed} mandatory-rule${refreshed === 1 ? "" : "s"} in .specialists/default/mandatory-rules/`);
-  }
-}
-function copyCanonicalNodeConfigs(cwd) {
-  const sourceDir = resolveCanonicalAssetDir("nodes");
-  if (!sourceDir) {
-    skip("no canonical node configs found in package");
-    return;
-  }
-  const targetDir = join15(cwd, ".specialists", "default", "nodes");
-  const files = readdirSync5(sourceDir).filter((f) => f.endsWith(".node.json"));
-  if (files.length === 0) {
-    skip("no node config files found in package");
-    return;
-  }
-  if (!existsSync14(targetDir)) {
-    mkdirSync8(targetDir, { recursive: true });
-  }
-  let copied = 0;
-  let refreshed = 0;
-  for (const file of files) {
-    const src = join15(sourceDir, file);
-    const dest = join15(targetDir, file);
-    if (existsSync14(dest)) {
-      copyFileSync(src, dest);
-      refreshed++;
-    } else {
-      copyFileSync(src, dest);
-      copied++;
-    }
-  }
-  if (copied > 0) {
-    ok(`copied ${copied} canonical node config${copied === 1 ? "" : "s"} to .specialists/default/nodes/`);
-  }
-  if (refreshed > 0) {
-    ok(`re-synced ${refreshed} canonical node config${refreshed === 1 ? "" : "s"} in .specialists/default/nodes/`);
-  }
-}
-function ensureRootSymlink(rootPath, expectedTargetPath) {
-  if (!existsSync14(rootPath)) {
-    mkdirSync8(dirname8(rootPath), { recursive: true });
-    const relTarget = relative2(dirname8(rootPath), expectedTargetPath);
-    symlinkSync(relTarget, rootPath);
-    ok(`created ${basename4(dirname8(rootPath))}/${basename4(rootPath)} \u2192 ${relTarget}`);
-    return;
-  }
-  const stats = lstatSync2(rootPath);
-  if (!stats.isSymbolicLink()) {
-    throw new Error(`${rootPath} must be a symlink to ${expectedTargetPath}. Aborting.`);
-  }
-  const linkTarget = readlinkSync(rootPath);
-  const resolvedTarget = resolve6(dirname8(rootPath), linkTarget);
-  const resolvedExpected = resolve6(expectedTargetPath);
-  if (resolvedTarget === resolvedExpected) {
-    return;
-  }
-  const legacyTargets = [
-    resolve6(expectedTargetPath, "claude"),
-    resolve6(expectedTargetPath, "pi")
-  ];
-  if (legacyTargets.includes(resolvedTarget)) {
-    unlinkSync(rootPath);
-    const relTarget = relative2(dirname8(rootPath), expectedTargetPath);
-    symlinkSync(relTarget, rootPath);
-    ok(`rewired ${basename4(dirname8(rootPath))}/${basename4(rootPath)} \u2192 ${relTarget}`);
-    return;
-  }
-  throw new Error(`${rootPath} points to ${linkTarget}, expected ${expectedTargetPath}. Aborting.`);
-}
-function ensureActiveSkillSymlink(defaultSkillPath, activeLinkPath) {
-  let stats;
-  try {
-    stats = lstatSync2(activeLinkPath);
-  } catch (error) {
-    const fileError = error;
-    if (fileError.code === "ENOENT") {
-      const relativeTarget = `../default/${basename4(defaultSkillPath)}`;
-      symlinkSync(relativeTarget, activeLinkPath, "dir");
-      return;
-    }
-    throw error;
-  }
-  if (!stats.isSymbolicLink()) {
-    throw new Error(`${activeLinkPath} already exists and is not a symlink.`);
-  }
-  const currentTarget = resolve6(dirname8(activeLinkPath), readlinkSync(activeLinkPath));
-  if (currentTarget !== resolve6(defaultSkillPath)) {
-    throw new Error(`${activeLinkPath} points to an unexpected target.`);
-  }
-}
-function installProjectSkills(cwd, syncSkills) {
-  const xtrmRoot = join15(cwd, ".xtrm");
-  if (!existsSync14(xtrmRoot)) {
-    throw new Error(".xtrm/ is missing. Install xtrm first, then run specialists init.");
-  }
-  const sourceDir = resolveCanonicalAssetDir("skills");
-  if (!sourceDir) {
-    skip("no canonical skills found in package");
-    return;
-  }
-  const skills = readdirSync5(sourceDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
-  if (skills.length === 0) {
-    skip("no skill directories found in package");
-    return;
-  }
-  const defaultRoot = join15(cwd, ".xtrm", "skills", "default");
-  const activeRoot = join15(cwd, ".xtrm", "skills", "active");
-  mkdirSync8(defaultRoot, { recursive: true });
-  mkdirSync8(activeRoot, { recursive: true });
-  ensureRootSymlink(join15(cwd, ".claude", "skills"), activeRoot);
-  ensureRootSymlink(join15(cwd, ".pi", "skills"), activeRoot);
-  let copied = 0;
-  let refreshed = 0;
-  let pruned = 0;
-  if (syncSkills) {
-    const currentSkills = new Set(skills);
-    for (const entry of readdirSync5(defaultRoot, { withFileTypes: true })) {
-      if (!entry.isDirectory() || currentSkills.has(entry.name))
-        continue;
-      const retiredDefaultPath = join15(defaultRoot, entry.name);
-      const retiredActivePath = join15(activeRoot, entry.name);
-      try {
-        if (lstatSync2(retiredActivePath).isSymbolicLink() && resolve6(dirname8(retiredActivePath), readlinkSync(retiredActivePath)) === resolve6(retiredDefaultPath)) {
-          unlinkSync(retiredActivePath);
-        }
-      } catch {}
-      rmSync3(retiredDefaultPath, { recursive: true, force: true });
-      pruned++;
-    }
-  }
-  for (const skill of skills) {
-    const src = join15(sourceDir, skill);
-    const defaultSkillPath = join15(defaultRoot, skill);
-    if (existsSync14(defaultSkillPath)) {
-      if (syncSkills) {
-        cpSync(src, defaultSkillPath, { recursive: true, force: true });
-        refreshed++;
-      }
-    } else {
-      cpSync(src, defaultSkillPath, { recursive: true });
-      copied++;
-    }
-    ensureActiveSkillSymlink(defaultSkillPath, join15(activeRoot, skill));
-  }
-  if (copied > 0)
-    ok(`copied ${copied} skill${copied === 1 ? "" : "s"} to .xtrm/skills/default/`);
-  if (refreshed > 0)
-    ok(`re-synced ${refreshed} skill${refreshed === 1 ? "" : "s"} in .xtrm/skills/default/`);
-  if (pruned > 0)
-    ok(`pruned ${pruned} retired managed skill${pruned === 1 ? "" : "s"}`);
-  ok("verified active skill symlinks in .xtrm/skills/active/");
-}
-function createSpecialistsDirs(cwd) {
-  const defaultDir = join15(cwd, ".specialists", "default");
-  const userDir = join15(cwd, ".specialists", "user");
-  let created = 0;
-  for (const dir of [defaultDir, userDir]) {
-    if (!existsSync14(dir)) {
-      mkdirSync8(dir, { recursive: true });
-      created++;
-    }
-  }
-  if (created > 0) {
-    ok("created .specialists/default/ and .specialists/user/");
-  }
-}
-function createRuntimeDirs(cwd) {
-  const runtimeDirs = [
-    join15(cwd, ".specialists", "jobs"),
-    join15(cwd, ".specialists", "ready")
-  ];
-  let created = 0;
-  for (const dir of runtimeDirs) {
-    if (!existsSync14(dir)) {
-      mkdirSync8(dir, { recursive: true });
-      created++;
-    }
-  }
-  if (created > 0) {
-    ok("created .specialists/jobs/ and .specialists/ready/");
-  }
-}
-function ensureProjectMcp(cwd) {
-  const mcpPath = join15(cwd, MCP_FILE);
-  const mcp = loadJson(mcpPath, { mcpServers: {} });
-  mcp.mcpServers ??= {};
-  const existing = mcp.mcpServers[MCP_SERVER_NAME];
-  if (existing && existing.command === MCP_SERVER_CONFIG.command && Array.isArray(existing.args) && existing.args.length === MCP_SERVER_CONFIG.args.length) {
-    skip(".mcp.json already registers specialists");
-    return;
-  }
-  mcp.mcpServers[MCP_SERVER_NAME] = MCP_SERVER_CONFIG;
-  saveJson(mcpPath, mcp);
-  ok("registered specialists in project .mcp.json");
-}
-function ensureGitignore(cwd) {
-  const gitignorePath = join15(cwd, ".gitignore");
-  const existing = existsSync14(gitignorePath) ? readFileSync13(gitignorePath, "utf-8") : "";
-  let added = 0;
-  const lines = existing.split(`
-`);
-  for (const entry of GITIGNORE_ENTRIES) {
-    if (!lines.includes(entry)) {
-      lines.push(entry);
-      added++;
-    }
-  }
-  if (added > 0) {
-    writeFileSync7(gitignorePath, lines.join(`
-`) + `
-`, "utf-8");
-    ok("added .specialists/jobs/ and .specialists/ready/ to .gitignore");
-  } else {
-    skip(".gitignore already has runtime entries");
-  }
-}
-function ensureObservabilityDb(cwd) {
-  const location = resolveObservabilityDbLocation(cwd);
-  if (isPathInsideJobsDirectory(location.dbPath, location.gitRoot)) {
-    skip("observability DB path resolves inside jobs directory \u2014 skipped");
-    return;
-  }
-  const alreadyExists = existsSync14(location.dbPath);
-  if (alreadyExists) {
-    skip("observability database already exists (not touched)");
-    return;
-  }
-  const { created } = ensureObservabilityDbFile(location);
-  if (!created) {
-    skip("observability database already exists (not touched)");
-    return;
-  }
-  const client = createObservabilitySqliteClientAtPath(location.dbPath);
-  if (client) {
-    client.close();
-    ok("created observability database (.specialists/db/observability.db)");
-  } else {
-    ok("created observability database file (schema init deferred \u2014 sqlite3/bun not available)");
-  }
-  ensureGitignoreHasObservabilityDbEntries(location.gitRoot);
-}
-function extractSpecialistsBlockSpan(existing) {
-  const start = existing.indexOf("<!-- specialists:start -->");
-  if (start === -1)
-    return null;
-  const endMarker = "<!-- specialists:end -->";
-  const endMarkerIndex = existing.indexOf(endMarker, start);
-  if (endMarkerIndex === -1)
-    return null;
-  return { start, end: endMarkerIndex + endMarker.length };
-}
-function ensureAgentsMd(cwd) {
-  const agentsPath = join15(cwd, "AGENTS.md");
-  if (!existsSync14(agentsPath)) {
-    writeFileSync7(agentsPath, AGENTS_BLOCK, "utf-8");
-    ok("created AGENTS.md with Specialists section");
-    return;
-  }
-  const existing = readFileSync13(agentsPath, "utf-8");
-  const span = extractSpecialistsBlockSpan(existing);
-  if (span) {
-    const next = existing.slice(0, span.start) + AGENTS_BLOCK + existing.slice(span.end);
-    if (next === existing) {
-      skip("AGENTS.md already has Specialists section");
-      return;
-    }
-    writeFileSync7(agentsPath, next, "utf-8");
-    ok("updated Specialists section in AGENTS.md");
-    return;
-  }
-  if (existing.includes(AGENTS_MARKER)) {
-    const markerIndex = existing.indexOf(AGENTS_MARKER);
-    const nextH2Match = /^## /m.exec(existing.slice(markerIndex + AGENTS_MARKER.length));
-    const nextH2Index = nextH2Match ? markerIndex + AGENTS_MARKER.length + nextH2Match.index : existing.length;
-    const next = existing.slice(0, markerIndex).trimEnd() + `
-
-` + AGENTS_BLOCK + (nextH2Index < existing.length ? `
-` + existing.slice(nextH2Index) : "");
-    writeFileSync7(agentsPath, next, "utf-8");
-    ok("migrated Specialists section in AGENTS.md");
-    return;
-  }
-  writeFileSync7(agentsPath, existing.trimEnd() + `
-
-` + AGENTS_BLOCK, "utf-8");
-  ok("appended Specialists section to AGENTS.md");
-}
-function readJsonObject(path) {
-  if (!existsSync14(path))
-    return {};
-  try {
-    return JSON.parse(readFileSync13(path, "utf-8"));
-  } catch {
-    return {};
-  }
-}
-function validateInitPostconditions(cwd) {
-  const warnings = [];
-  const mcp = readJsonObject(join15(cwd, ".mcp.json"));
-  const mcpServers = mcp.mcpServers;
-  const specialistsServer = mcpServers && typeof mcpServers === "object" ? mcpServers.specialists : undefined;
-  if (!specialistsServer || typeof specialistsServer !== "object") {
-    warnings.push(".mcp.json missing mcpServers.specialists registration");
-  }
-  const runtimeDirs = [join15(cwd, ".specialists", "jobs"), join15(cwd, ".specialists", "ready")];
-  for (const runtimeDir of runtimeDirs) {
-    if (!existsSync14(runtimeDir)) {
-      warnings.push(`${relative2(cwd, runtimeDir)} is missing`);
-    }
-  }
-  const defaultSkillsRoot = join15(cwd, ".xtrm", "skills", "default");
-  const defaultSkills = existsSync14(defaultSkillsRoot) ? readdirSync5(defaultSkillsRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory()) : [];
-  if (defaultSkills.length === 0) {
-    warnings.push(".xtrm/skills/default/ is missing or has no skill directories");
-  }
-  const rootSymlinks = [
-    {
-      linkPath: join15(cwd, ".claude", "skills"),
-      expectedTarget: join15(cwd, ".xtrm", "skills", "active")
-    },
-    {
-      linkPath: join15(cwd, ".pi", "skills"),
-      expectedTarget: join15(cwd, ".xtrm", "skills", "active")
-    }
-  ];
-  for (const symlink of rootSymlinks) {
-    if (!existsSync14(symlink.linkPath)) {
-      warnings.push(`${relative2(cwd, symlink.linkPath)} is missing`);
-      continue;
-    }
-    const stats = lstatSync2(symlink.linkPath);
-    if (!stats.isSymbolicLink()) {
-      warnings.push(`${relative2(cwd, symlink.linkPath)} is not a symlink`);
-      continue;
-    }
-    const resolvedTarget = resolve6(dirname8(symlink.linkPath), readlinkSync(symlink.linkPath));
-    if (resolvedTarget !== resolve6(symlink.expectedTarget)) {
-      warnings.push(`${relative2(cwd, symlink.linkPath)} points to an unexpected target`);
-    }
-  }
-  return warnings;
-}
-function cleanupLegacyHookLinks(cwd) {
-  const hooksDir = join15(cwd, ".claude", "hooks");
-  if (!existsSync14(hooksDir))
-    return [];
-  const managedDir = join15(cwd, ".xtrm", "hooks", "specialists");
-  const removed = [];
-  for (const name of readdirSync5(hooksDir).filter((entry) => LEGACY_HOOK_NAME.test(entry))) {
-    const linkPath = join15(hooksDir, name);
-    if (!lstatSync2(linkPath).isSymbolicLink())
-      continue;
-    const target = resolve6(hooksDir, readlinkSync(linkPath));
-    if (existsSync14(linkPath) && !target.startsWith(managedDir + "/"))
-      continue;
-    unlinkSync(linkPath);
-    removed.push(name);
-  }
-  return removed;
-}
-function isStaleLegacyCommand(cwd, command) {
-  if (typeof command !== "string")
-    return false;
-  const match = LEGACY_HOOK_COMMAND.exec(command);
-  return match !== null && !existsSync14(join15(cwd, ".claude", "hooks", match[1]));
-}
-function cleanupLegacySettingsHooks(cwd) {
-  const settingsPath = join15(cwd, ".claude", "settings.json");
-  if (!existsSync14(settingsPath))
-    return 0;
-  const raw = readFileSync13(settingsPath, "utf-8");
-  let settings;
-  try {
-    settings = JSON.parse(raw);
-  } catch {
-    warn(".claude/settings.json is not valid JSON; skipped legacy hook cleanup");
-    return 0;
-  }
-  if (!settings.hooks || typeof settings.hooks !== "object")
-    return 0;
-  let dropped = 0;
-  for (const [event, entries] of Object.entries(settings.hooks)) {
-    if (!Array.isArray(entries))
-      continue;
-    const kept = entries.filter((entry) => {
-      const before = entry.hooks?.length ?? 0;
-      if (!Array.isArray(entry.hooks))
-        return true;
-      entry.hooks = entry.hooks.filter((hook) => !isStaleLegacyCommand(cwd, hook.command));
-      dropped += before - entry.hooks.length;
-      return entry.hooks.length > 0 || before === 0;
-    });
-    if (kept.length === entries.length && dropped === 0)
-      continue;
-    if (kept.length > 0)
-      settings.hooks[event] = kept;
-    else
-      delete settings.hooks[event];
-  }
-  if (dropped === 0)
-    return 0;
-  const indent = /^([ \t]+)"/m.exec(raw)?.[1] ?? 2;
-  writeFileSync7(settingsPath, JSON.stringify(settings, null, indent) + (raw.endsWith(`
-`) ? `
-` : ""), "utf-8");
-  return dropped;
-}
-function cleanupLegacyClaudeHooks(cwd) {
-  const links = cleanupLegacyHookLinks(cwd);
-  const entries = cleanupLegacySettingsHooks(cwd);
-  if (links.length > 0)
-    ok(`removed legacy .claude/hooks links: ${links.join(", ")}`);
-  if (entries > 0)
-    ok(`removed ${entries} stale specialists hook entr${entries === 1 ? "y" : "ies"} from .claude/settings.json`);
-}
-async function runGlobal() {
-  console.log(`
-${bold5("specialists init --global")}
-`);
-  const loader = new SpecialistLoader;
-  const specialists = await loader.list();
-  const shippedNames = specialists.map((spec) => spec.name).sort();
-  const template = buildGlobalUserConfigTemplate(shippedNames);
-  const location = getGlobalUserConfigPath();
-  const existing = readGlobalUserConfig(location);
-  let guidePath = null;
-  if (existing) {
-    const result = mergeGlobalUserConfig(existing, template);
-    writeGlobalUserConfig(location, result.config);
-    guidePath = writeGlobalOverridesGuide(location.path);
-    ok(`using global config at ${location.path} (${location.source})`);
-    if (result.added.length > 0) {
-      ok(`added ${result.added.length} new specialist${result.added.length === 1 ? "" : "s"}: ${result.added.join(", ")}`);
-    } else {
-      skip("no new specialists to add");
-    }
-    if (result.extended.length > 0) {
-      ok(`preserved ${result.extended.length} existing specialist${result.extended.length === 1 ? "" : "s"} (user values kept)`);
-    }
-    for (const removedName of result.removed) {
-      warn(`${removedName} is no longer shipped but kept in file (remove manually if unwanted)`);
-    }
-  } else {
-    writeGlobalUserConfig(location, template);
-    guidePath = writeGlobalOverridesGuide(location.path);
-    ok(`created global config at ${location.path} (${location.source})`);
-    ok(`seeded ${shippedNames.length} specialist${shippedNames.length === 1 ? "" : "s"} with inherit defaults`);
-  }
-  if (guidePath) {
-    ok(`wrote overrides guide at ${guidePath}`);
-  }
-  const pi = registerNativeSpecialists();
-  if (pi.status === "skipped")
-    warn(`native-specialists Pi extension not registered: ${pi.reason}`);
-  else if (pi.status === "present")
-    skip(`native-specialists Pi extension already registered (${pi.source})`);
-  else
-    ok(`native-specialists Pi extension ${pi.status} in ${pi.settingsPath} (${pi.source})`);
-  console.log(`
-${bold5("Done!")}
-`);
-  console.log(`  ${dim5("Override reference:")} ${yellow5(guidePath ?? "./overrides-guide.md")}`);
-  console.log(`  ${dim5("Edit override fields with:")}`);
-  console.log(`  ${yellow5("specialists edit --global <name>.execution.model <value>")}`);
-  console.log(`  ${yellow5("specialists edit --global")} ${dim5("# open in $EDITOR")}
-`);
-  console.log(`  ${dim5("Common override hints:")}`);
-  console.log(`  ${dim5("\u2022 for extension opt-out, set")} ${yellow5("<name>.execution.extensions.gitnexus false")}`);
-  console.log(`  ${dim5("\u2022 for trusted custom extension sources, set")} ${yellow5('<name>.execution.extensions."npm:@scope/pkg" true')}`);
-  console.log(`  ${dim5("\u2022 for system prompt composition, set")} ${yellow5("<name>.prompt.system_prompt_mode append|replace")}`);
-  console.log(`  ${dim5("\u2022 for fallback chains, set")} ${yellow5('<name>.execution.fallback_models ["provider/model", "provider/model"]')}`);
-  console.log(`  ${dim5("\u2022 for preset refs, set model/fallback entries to")} ${yellow5("@preset/cheap")} ${dim5("(or medium, power)")}`);
-  console.log(`  ${dim5("\u2022 for per-specialist mandatory rule sets, set")} ${yellow5('<name>.mandatory_rules.template_sets ["git-workflow-safe", ...]')}`);
-  console.log(`  ${dim5("    (null inherits the shipped sets, [] selects no specialist-specific sets; index required/default sets always load)")}
-`);
-}
-async function run11(opts = {}) {
-  if (opts.global) {
-    return runGlobal();
-  }
-  const cwd = process.cwd();
-  const forceInit = process.env.SPECIALISTS_INIT_FORCE === "1";
-  const inAgentSession = !forceInit && (!process.stdin.isTTY || !!process.env.SPECIALISTS_TMUX_SESSION || !!process.env.SPECIALISTS_JOB_ID || !!process.env.PI_SESSION_ID || !!process.env.PI_RPC_SOCKET);
-  if (inAgentSession) {
-    console.error("specialists init requires an interactive terminal. This is a user-only bootstrap command \u2014 do not invoke from scripts or agent sessions.");
-    process.exit(1);
-  }
-  console.log(`
-${bold5("specialists init")}
-`);
-  const { syncDefaults = false, syncSkills = false, noXtrmCheck = false } = opts;
-  if (!noXtrmCheck) {
-    assertXtrmPrerequisites(cwd);
-  }
-  warnMissingOptionalPrerequisites();
-  if (syncDefaults) {
-    warn("--sync-defaults is deprecated. This creates drift debt; use sp pin <id> for intentional pins.");
-    migrateLegacySpecialists(cwd, "default");
-    copyCanonicalSpecialists(cwd);
-    copyCanonicalMandatoryRules(cwd);
-    copyCanonicalNodeConfigs(cwd);
-  } else {
-    skip(".specialists/default/ not synced (package canonical by default; use sp pin <id> for intentional pins)");
-  }
-  migrateLegacySpecialists(cwd, "user");
-  createSpecialistsDirs(cwd);
-  createRuntimeDirs(cwd);
-  ensureGitignore(cwd);
-  ensureAgentsMd(cwd);
-  ensureProjectMcp(cwd);
-  cleanupLegacyClaudeHooks(cwd);
-  installProjectSkills(cwd, syncSkills);
-  ensureObservabilityDb(cwd);
-  const postconditionWarnings = validateInitPostconditions(cwd);
-  if (postconditionWarnings.length > 0) {
-    warn("Init completed with postcondition warnings:");
-    for (const warningMessage of postconditionWarnings) {
-      warn(warningMessage);
-    }
-  }
-  console.log(`
-${bold5("Done!")}
-`);
-  console.log(`  ${dim5("Project-local installation:")}`);
-  console.log(`  .xtrm/skills/default/  ${dim5("# canonical skills")}`);
-  console.log(`  .xtrm/skills/active/   ${dim5("# flattened active skill root")}`);
-  console.log(`  .claude/skills/        ${dim5("# symlink -> .xtrm/skills/active")}`);
-  console.log(`  .pi/skills/            ${dim5("# symlink -> .xtrm/skills/active")}`);
-  console.log("");
-  console.log(`  ${dim5(".specialists/ structure:")}`);
-  console.log(`  .specialists/`);
-  console.log(`  \u251C\u2500\u2500 default/           ${dim5("# intentional pins only; package canonical by default")}`);
-  console.log(`  \u251C\u2500\u2500 user/              ${dim5("# your custom specialists")}`);
-  console.log(`  \u251C\u2500\u2500 db/                ${dim5("# observability SQLite (gitignored)")}`);
-  console.log(`  \u251C\u2500\u2500 jobs/              ${dim5("# runtime (gitignored)")}`);
-  console.log(`  \u2514\u2500\u2500 ready/             ${dim5("# runtime (gitignored)")}`);
-  console.log(`
-  ${dim5("Next steps:")}`);
-  console.log(`  1. Run ${yellow5("specialists list")} to see available specialists`);
-  console.log(`  2. Add custom specialists to ${yellow5(".specialists/user/")}`);
-  console.log(`  3. Restart Claude Code or pi to pick up changes
-`);
-}
-var bold5 = (s) => `\x1B[1m${s}\x1B[0m`, green4 = (s) => `\x1B[32m${s}\x1B[0m`, yellow5 = (s) => `\x1B[33m${s}\x1B[0m`, dim5 = (s) => `\x1B[2m${s}\x1B[0m`, AGENTS_BLOCK, AGENTS_MARKER = "## Specialists", GITIGNORE_ENTRIES, MCP_FILE = ".mcp.json", MCP_SERVER_NAME = "specialists", MCP_SERVER_CONFIG, LEGACY_HOOK_NAME, LEGACY_HOOK_COMMAND;
-var init_init = __esm(() => {
-  init_observability_db();
-  init_observability_sqlite();
-  init_canonical_asset_resolver();
-  init_loader();
-  init_native_specialists_registration();
-  init_global_config();
-  AGENTS_BLOCK = `
-<!-- specialists:start -->
-## Specialists
-
-Specialists is an XTRM execution backend. Substrate owns durable work.
-
-Native/current tracked flow:
-1. Start from a ready pinned Substrate Issue revision.
-2. Dispatch with the native Specialist surface exposed by the runtime (for example \`specialist_dispatch(issue_ref=...)\`).
-3. Observe persisted status/result/forensics and answer asks through the native control surface.
-4. Verify the result against the pinned contract and current tree/tests.
-5. Record result/provenance through Substrate; settlement/PASS/commit is not Issue Closure.
-6. Closure is explicit and belongs to the authorized durable-work owner.
-
-Core observation/compatibility commands:
-- \`specialists list\`
-- \`specialists ps\` / \`specialists feed\` / \`specialists result\`
-- legacy \`specialists run <name> --issue-ref <id>\` remains available only while XTRM-93 keeps the Supervisor backend reachable (--bead/--bead-id are permanent compatibility aliases for --issue-ref).
-
-Rules:
-- Do not use Beads notes/status as authority for native work.
-- \`--issue-ref\` is the primary spelling; \`--bead\` / \`--bead-id\` / \`bead_id\` are permanent compatibility aliases for the same value; inspect the live surface before inferring backend semantics.
-- Messages coordinate; they do not rewrite SCOPE/SUCCESS/NON_GOALS/CONSTRAINTS/VALIDATION/OUTPUT.
-- Add custom Specialist definitions under \`.specialists/user/\`; current role prompts must preserve pinned-Issue/Journal/settlement/Closure semantics.
-<!-- specialists:end -->
-`.trimStart();
-  GITIGNORE_ENTRIES = [
-    ".specialists/jobs/",
-    ".specialists/ready/",
-    ".specialists/settlements/",
-    ".specialists/db/*.db",
-    ".specialists/db/*.db-wal",
-    ".specialists/db/*.db-shm"
-  ];
-  MCP_SERVER_CONFIG = { command: "specialists", args: [] };
-  LEGACY_HOOK_NAME = /^specialists-[\w.-]+\.mjs$/;
-  LEGACY_HOOK_COMMAND = /\.claude\/hooks\/(specialists-[\w.-]+\.mjs)/;
-});
-
-// src/cli/db.ts
-import { existsSync as existsSync15, mkdirSync as mkdirSync9, readdirSync as readdirSync6, readFileSync as readFileSync14, writeFileSync as writeFileSync8 } from "fs";
-import { dirname as dirname9, join as join16, resolve as resolve7 } from "path";
-function checkpointIsPartial(mode, busy) {
-  return mode !== "PASSIVE" && busy !== 0;
-}
-function formatBytes(bytes) {
-  if (bytes < 1024)
-    return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes;
-  let unitIndex = -1;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  return `${value.toFixed(2)} ${units[unitIndex]}`;
-}
-function parseIsoDate(input) {
-  const parsed = Date.parse(input);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-function parseDuration(input) {
-  const match = input.trim().toLowerCase().match(/^(\d+)([smhdw])$/);
-  if (!match)
-    return null;
-  const amount = Number(match[1]);
-  const unit = match[2];
-  if (!Number.isFinite(amount) || amount <= 0)
-    return null;
-  const multipliers = {
-    s: 1000,
-    m: 60 * 1000,
-    h: 60 * 60 * 1000,
-    d: DAY_MS,
-    w: 7 * DAY_MS
-  };
-  return amount * multipliers[unit];
-}
-function parseBeforeArgument(raw) {
-  const durationMs = parseDuration(raw);
-  if (durationMs !== null)
-    return Date.now() - durationMs;
-  const isoMs = parseIsoDate(raw);
-  if (isoMs !== null)
-    return isoMs;
-  throw new Error(`Invalid --before value '${raw}'. Use ISO date or duration like 7d.`);
-}
-function printDbHelp() {
-  console.log([
-    "",
-    "Usage: specialists db <setup|backfill|vacuum|checkpoint|prune|extract|stats|benchmark-export>",
-    "",
-    "Human-only commands for shared observability SQLite database maintenance and migration.",
-    "",
-    "Commands:",
-    "  [BOOTSTRAP] setup                  Provision database file + schema + .gitignore entries",
-    "  [BOOTSTRAP] init                   Alias for setup",
-    "  [MIGRATION] backfill [--events]    Import historical .specialists/jobs/*/status.json rows",
-    "  [MIGRATION] vacuum                 Run SQLite VACUUM (refuses when running/starting jobs exist)",
-    "  [MAINTENANCE] checkpoint [--truncate]           Checkpoint the WAL (PASSIVE default)",
-    "  [MIGRATION] prune --before <iso|duration>      Prune old rows (default dry-run)",
-    "              [--dry-run] [--apply] [--include-epics] [--skip-extract]",
-    "              [--forensic-before <iso|dur>] [--forensic-mcp-before <iso|dur>] [--node-events-before <iso|dur>]",
-    "  [MIGRATION] extract [--job <id>] [--all-missing] [--since <dur>] [--help]",
-    "  [QUERY] stats [--spec <name>] [--model <glob>] [--since <dur>] [--format json|table] [--with-payload] [--help]",
-    "  [ANALYSIS] benchmark-export [--output <path>] [--include-prep-jobs] [--epic-id <id>]",
-    "",
-    "Behavior:",
-    "  - prune keeps specialist_events last 30 days always",
-    "  - prune removes specialist_results and terminal specialist_jobs older than --before",
-    "  - prune never touches active-chain jobs",
-    "  - prune never touches epic_runs unless --include-epics",
-    "  - prune never touches specialist_forensic_events or node_events unless their own",
-    "    --forensic-before / --node-events-before cutoff is given (audit surface)",
-    "  - forensic per-family retention: --forensic-mcp-before prunes mcp.call.* noise only;",
-    "    recommended mcp 2d, all other forensic families 14d (interim global 7d)",
-    "  - checkpoint PASSIVE is safe against the live shared database at any time",
-    "  - checkpoint --truncate reclaims the -wal file and refuses while jobs are active",
-    "",
-    "Examples:",
-    "  specialists db setup",
-    "  specialists db backfill --events",
-    "  specialists db vacuum",
-    "  specialists db checkpoint",
-    "  specialists db checkpoint --truncate",
-    "  specialists db prune --before 30d --dry-run",
-    "  specialists db prune --before 2026-01-01T00:00:00Z --apply --include-epics",
-    "  specialists db prune --before 90d --forensic-before 14d --apply",
-    ""
-  ].join(`
-`));
-}
-function assertHumanInteractiveTerminal(commandName) {
-  const forceSetup = process.env.SPECIALISTS_DB_SETUP_FORCE === "1";
-  const inAgentSession = !forceSetup && (!process.stdin.isTTY || !!process.env.SPECIALISTS_TMUX_SESSION || !!process.env.SPECIALISTS_JOB_ID || !!process.env.PI_SESSION_ID || !!process.env.PI_RPC_SOCKET);
-  if (!inAgentSession)
-    return;
-  console.error(`specialists db ${commandName} requires interactive terminal. user-only setup command.`);
-  process.exit(1);
-}
-function printSetupResult(created, gitignoreUpdated, location) {
-  console.log(`
-${bold6("specialists db setup")}
-`);
-  console.log(`  ${green5("\u2713")} database path: ${location.dbPath}`);
-  console.log(`  ${green5("\u2713")} mode: chmod 644`);
-  if (location.source === "xdg-data-home") {
-    console.log(`  ${yellow6("\u25CB")} using XDG_DATA_HOME (${location.dbDirectory})`);
-  } else {
-    console.log(`  ${green5("\u2713")} using shared git-root location (${location.dbDirectory})`);
-  }
-  console.log(`  ${created ? green5("\u2713 created database file") : yellow6("\u25CB database file already exists")}`);
-  console.log(`  ${gitignoreUpdated ? green5("\u2713 updated .gitignore for DB artifacts") : yellow6("\u25CB .gitignore already excludes DB artifacts")}`);
-  console.log("");
-}
-function parseBackfillOptions(argv) {
-  let importEvents = false;
-  for (const argument of argv) {
-    if (argument === "--events") {
-      importEvents = true;
-      continue;
-    }
-    throw new Error(`Unknown option for db backfill: '${argument}'`);
-  }
-  return { importEvents };
-}
-function parsePruneOptions(argv) {
-  let beforeValue = null;
-  let forensicBeforeValue = null;
-  let forensicMcpBeforeValue = null;
-  let nodeEventsBeforeValue = null;
-  let apply = false;
-  let dryRun = true;
-  let includeEpics = false;
-  let skipExtract = false;
-  for (let index = 0;index < argv.length; index += 1) {
-    const argument = argv[index];
-    if (argument === "--before") {
-      const value = argv[index + 1];
-      if (!value)
-        throw new Error("Missing value for --before");
-      beforeValue = value;
-      index += 1;
-      continue;
-    }
-    if (argument === "--apply") {
-      apply = true;
-      dryRun = false;
-      continue;
-    }
-    if (argument === "--dry-run") {
-      dryRun = true;
-      apply = false;
-      continue;
-    }
-    if (argument === "--include-epics") {
-      includeEpics = true;
-      continue;
-    }
-    if (argument === "--skip-extract") {
-      skipExtract = true;
-      continue;
-    }
-    if (argument === "--forensic-before") {
-      const value = argv[index + 1];
-      if (!value)
-        throw new Error("Missing value for --forensic-before");
-      forensicBeforeValue = value;
-      index += 1;
-      continue;
-    }
-    if (argument === "--forensic-mcp-before") {
-      const value = argv[index + 1];
-      if (!value)
-        throw new Error("Missing value for --forensic-mcp-before");
-      forensicMcpBeforeValue = value;
-      index += 1;
-      continue;
-    }
-    if (argument === "--node-events-before") {
-      const value = argv[index + 1];
-      if (!value)
-        throw new Error("Missing value for --node-events-before");
-      nodeEventsBeforeValue = value;
-      index += 1;
-      continue;
-    }
-    throw new Error(`Unknown option for db prune: '${argument}'`);
-  }
-  if (!beforeValue)
-    throw new Error("Missing required --before for db prune");
-  return {
-    beforeMs: parseBeforeArgument(beforeValue),
-    apply: apply && !dryRun,
-    includeEpics,
-    skipExtract,
-    forensicBeforeMs: forensicBeforeValue ? parseBeforeArgument(forensicBeforeValue) : undefined,
-    forensicMcpBeforeMs: forensicMcpBeforeValue ? parseBeforeArgument(forensicMcpBeforeValue) : undefined,
-    nodeEventsBeforeMs: nodeEventsBeforeValue ? parseBeforeArgument(nodeEventsBeforeValue) : undefined
-  };
-}
-function printExtractHelp() {
-  console.log([
-    "",
-    "Usage: specialists db extract [--job <id>] [--all-missing] [--since <dur>] [--backfill]",
-    "",
-    "Options:",
-    "  --job <id>        Recompute one job",
-    "  --all-missing     Recompute every status row missing KPI metrics",
-    "  --since <dur>     Limit by started_at_ms, duration like 1h or 7d",
-    "  --backfill        Alias for --all-missing",
-    ""
-  ].join(`
-`));
-}
-function parseExtractOptions(argv) {
-  if (argv.includes("--help") || argv.includes("-h")) {
-    printExtractHelp();
-    process.exit(0);
-  }
-  let jobId;
-  let allMissing = false;
-  let sinceMs;
-  for (let index = 0;index < argv.length; index += 1) {
-    const argument = argv[index];
-    if (argument === "--job" && argv[index + 1]) {
-      jobId = argv[index + 1];
-      index += 1;
-      continue;
-    }
-    if (argument === "--all-missing" || argument === "--backfill") {
-      allMissing = true;
-      continue;
-    }
-    if (argument === "--since" && argv[index + 1]) {
-      const durationMs = parseDuration(argv[index + 1]);
-      if (durationMs === null)
-        throw new Error(`Invalid --since value '${argv[index + 1]}'`);
-      sinceMs = Date.now() - durationMs;
-      index += 1;
-      continue;
-    }
-    throw new Error(`Unknown option for db extract: '${argument}'`);
-  }
-  return { jobId, allMissing, sinceMs };
-}
-function printStatsHelp() {
-  console.log([
-    "",
-    "Usage: specialists db stats [--spec <name>] [--model <glob>] [--since <dur>] [--format json|table] [--with-payload]",
-    "",
-    "Options:",
-    "  --spec <name>        Filter by specialist name",
-    "  --model <glob>       Filter by model glob",
-    "  --since <dur>        Filter by start time, duration like 1h or 7d",
-    "  --format <json|table> Output format",
-    "  --with-payload       Include payload_kb and payload_tokens columns",
-    ""
-  ].join(`
-`));
-}
-function parseStatsOptions(argv) {
-  if (argv.includes("--help") || argv.includes("-h")) {
-    printStatsHelp();
-    process.exit(0);
-  }
-  let spec;
-  let model;
-  let sinceMs;
-  let format = "table";
-  let withPayload = false;
-  for (let index = 0;index < argv.length; index += 1) {
-    const argument = argv[index];
-    if (argument === "--spec" && argv[index + 1]) {
-      spec = argv[index + 1];
-      index += 1;
-      continue;
-    }
-    if (argument === "--model" && argv[index + 1]) {
-      model = argv[index + 1];
-      index += 1;
-      continue;
-    }
-    if (argument === "--since" && argv[index + 1]) {
-      const durationMs = parseDuration(argv[index + 1]);
-      if (durationMs === null)
-        throw new Error(`Invalid --since value '${argv[index + 1]}'`);
-      sinceMs = Date.now() - durationMs;
-      index += 1;
-      continue;
-    }
-    if (argument === "--format" && argv[index + 1]) {
-      const value = argv[index + 1];
-      if (value !== "json" && value !== "table")
-        throw new Error(`Invalid --format value '${value}'`);
-      format = value;
-      index += 1;
-      continue;
-    }
-    if (argument === "--with-payload") {
-      withPayload = true;
-      continue;
-    }
-    throw new Error(`Unknown option for db stats: '${argument}'`);
-  }
-  return { spec, model, sinceMs, format, withPayload };
-}
-function parseStatusFile(jobDirectoryPath, fallbackJobId) {
-  const statusPath = join16(jobDirectoryPath, "status.json");
-  const statusRaw = readFileSync14(statusPath, "utf-8");
-  const parsed = JSON.parse(statusRaw);
-  const jobId = typeof parsed.id === "string" && parsed.id.length > 0 ? parsed.id : fallbackJobId;
-  const specialist = typeof parsed.specialist === "string" && parsed.specialist.length > 0 ? parsed.specialist : "unknown";
-  const status = typeof parsed.status === "string" && parsed.status.length > 0 ? parsed.status : "starting";
-  const startedAtMs = typeof parsed.started_at_ms === "number" ? parsed.started_at_ms : Date.now();
-  return {
-    ...parsed,
-    id: jobId,
-    specialist,
-    status,
-    started_at_ms: startedAtMs
-  };
-}
-function replayEvents(eventsPath, sqliteClient, status) {
-  if (!existsSync15(eventsPath))
-    return 0;
-  const rawContent = readFileSync14(eventsPath, "utf-8");
-  const lines = rawContent.split(`
-`).map((line) => line.trim()).filter((line) => line.length > 0);
-  let importedEvents = 0;
-  for (const line of lines) {
-    const event = parseTimelineEvent(line);
-    if (!event)
-      continue;
-    sqliteClient.appendEvent(status.id, status.specialist, status.bead_id, event);
-    importedEvents += 1;
-  }
-  return importedEvents;
-}
-function runBackfill(options) {
-  const sqliteClient = createObservabilitySqliteClient();
-  if (!sqliteClient) {
-    throw new Error("Failed to initialize observability SQLite schema. Run `specialists db setup` first and ensure sqlite3 is installed.");
-  }
-  const summary = {
-    jobsBackfilled: 0,
-    jobsSkipped: 0,
-    jobsFailed: 0,
-    eventsImported: 0
-  };
-  try {
-    const jobsDirectoryPath = resolveJobsDir(process.cwd());
-    if (!existsSync15(jobsDirectoryPath)) {
-      console.log("No jobs directory found. Nothing to backfill.");
-      return;
-    }
-    const jobEntries = readdirSync6(jobsDirectoryPath, { withFileTypes: true });
-    for (const jobEntry of jobEntries) {
-      if (!jobEntry.isDirectory())
-        continue;
-      const jobDirectoryPath = join16(jobsDirectoryPath, jobEntry.name);
-      const statusPath = join16(jobDirectoryPath, "status.json");
-      if (!existsSync15(statusPath))
-        continue;
-      try {
-        const status = parseStatusFile(jobDirectoryPath, jobEntry.name);
-        const existingStatus = sqliteClient.readStatus(status.id);
-        if (existingStatus) {
-          summary.jobsSkipped += 1;
-          continue;
-        }
-        const chainIdentity = derivePersistedChainIdentity(status);
-        const normalizedStatus = {
-          ...status,
-          chain_kind: chainIdentity.chain_kind,
-          chain_id: chainIdentity.chain_id,
-          chain_root_job_id: chainIdentity.chain_root_job_id,
-          chain_root_bead_id: chainIdentity.chain_root_bead_id
-        };
-        sqliteClient.upsertStatus(normalizedStatus);
-        if (normalizedStatus.epic_id && normalizedStatus.chain_id) {
-          sqliteClient.upsertEpicRun({
-            epic_id: normalizedStatus.epic_id,
-            status: "open",
-            updated_at_ms: Date.now(),
-            status_json: JSON.stringify({
-              epic_id: normalizedStatus.epic_id,
-              status: "open",
-              source: "db-backfill",
-              chain_id: normalizedStatus.chain_id
-            })
-          });
-          sqliteClient.upsertEpicChainMembership({
-            epic_id: normalizedStatus.epic_id,
-            chain_id: normalizedStatus.chain_id,
-            chain_root_bead_id: normalizedStatus.chain_root_bead_id,
-            chain_root_job_id: normalizedStatus.chain_root_job_id,
-            updated_at_ms: Date.now()
-          });
-        }
-        summary.jobsBackfilled += 1;
-        if (options.importEvents) {
-          const eventsPath = join16(jobDirectoryPath, "events.jsonl");
-          summary.eventsImported += replayEvents(eventsPath, sqliteClient, status);
-        }
-      } catch {
-        summary.jobsFailed += 1;
-      }
-    }
-  } finally {
-    sqliteClient.close();
-  }
-  console.log(`
-${bold6("specialists db backfill")}
-`);
-  console.log(`  ${green5("\u2713")} jobs backfilled: ${summary.jobsBackfilled}`);
-  console.log(`  ${yellow6("\u25CB")} jobs skipped (already in DB): ${summary.jobsSkipped}`);
-  console.log(`  ${summary.jobsFailed > 0 ? yellow6("\u25CB") : green5("\u2713")} jobs failed: ${summary.jobsFailed}`);
-  if (options.importEvents) {
-    console.log(`  ${green5("\u2713")} events imported: ${summary.eventsImported}`);
-  }
-  console.log("");
-}
-function runVacuum() {
-  const sqliteClient = createObservabilitySqliteClient();
-  if (!sqliteClient) {
-    throw new Error("Failed to initialize observability SQLite schema. Run `specialists db setup` first and ensure sqlite3 is installed.");
-  }
-  try {
-    const activeJobs = sqliteClient.listActiveJobs(["running", "starting"]);
-    if (activeJobs.length > 0) {
-      const listing = activeJobs.slice(0, 5).map((job) => `${job.job_id}:${job.status}`).join(", ");
-      throw new Error(`Refusing vacuum while active jobs exist (${activeJobs.length}): ${listing}`);
-    }
-    const { beforeBytes, afterBytes } = sqliteClient.vacuumDatabase();
-    const savedBytes = Math.max(0, beforeBytes - afterBytes);
-    console.log(`
-${bold6("specialists db vacuum")}
-`);
-    console.log(`  ${green5("\u2713")} before: ${formatBytes(beforeBytes)} (${beforeBytes} bytes)`);
-    console.log(`  ${green5("\u2713")} after:  ${formatBytes(afterBytes)} (${afterBytes} bytes)`);
-    console.log(`  ${green5("\u2713")} saved:  ${formatBytes(savedBytes)} (${savedBytes} bytes)`);
-    console.log("");
-  } finally {
-    sqliteClient.close();
-  }
-}
-function runCheckpoint(argv) {
-  let mode = "PASSIVE";
-  for (const argument of argv) {
-    if (argument === "--truncate") {
-      mode = "TRUNCATE";
-      continue;
-    }
-    if (argument === "--restart") {
-      mode = "RESTART";
-      continue;
-    }
-    if (argument === "--passive") {
-      mode = "PASSIVE";
-      continue;
-    }
-    throw new Error(`Unknown option for db checkpoint: '${argument}'`);
-  }
-  const sqliteClient = createObservabilitySqliteClient();
-  if (!sqliteClient) {
-    throw new Error("Failed to initialize observability SQLite schema. Run `specialists db setup` first and ensure sqlite3 is installed.");
-  }
-  try {
-    const activeJobs = sqliteClient.listActiveJobs(["running", "starting"]);
-    if (mode === "TRUNCATE" && activeJobs.length > 0) {
-      const listing = activeJobs.slice(0, 5).map((job) => `${job.job_id}:${job.status}`).join(", ");
-      throw new Error(`Refusing TRUNCATE checkpoint while active jobs exist (${activeJobs.length}): ${listing}`);
-    }
-    const report = sqliteClient.checkpointWal(mode);
-    const partial = checkpointIsPartial(report.mode, report.busy);
-    console.log(`
-${bold6("specialists db checkpoint")}
-`);
-    console.log(`  ${green5("\u2713")} mode: ${report.mode}`);
-    if (partial) {
-      console.log(`  ${yellow6("\u25CB partial")} wal frames: ${report.checkpointedFrames}/${report.logFrames} checkpointed (busy: ${report.busy} - a reader holds an old snapshot)`);
-    } else {
-      console.log(`  ${green5("\u2713")} wal frames: ${report.checkpointedFrames}/${report.logFrames} checkpointed${report.busy ? ` (busy: ${report.busy} - a reader holds an old snapshot)` : ""}`);
-    }
-    console.log(`  ${green5("\u2713")} wal size: ${formatBytes(report.beforeWalBytes)} -> ${formatBytes(report.afterWalBytes)}`);
-    console.log("");
-    if (partial)
-      process.exitCode = 1;
-  } finally {
-    sqliteClient.close();
-  }
-}
-function runPrune(options) {
-  const sqliteClient = createObservabilitySqliteClient();
-  if (!sqliteClient) {
-    throw new Error("Failed to initialize observability SQLite schema. Run `specialists db setup` first and ensure sqlite3 is installed.");
-  }
-  try {
-    const report = sqliteClient.pruneObservabilityData({
-      beforeMs: options.beforeMs,
-      includeEpics: options.includeEpics,
-      apply: options.apply,
-      skipExtract: options.skipExtract,
-      forensicBeforeMs: options.forensicBeforeMs,
-      forensicMcpBeforeMs: options.forensicMcpBeforeMs,
-      nodeEventsBeforeMs: options.nodeEventsBeforeMs
-    });
-    console.log(`
-${bold6("specialists db prune")}
-`);
-    console.log(`  ${report.dryRun ? yellow6("\u25CB dry-run") : green5("\u2713 applied")}`);
-    console.log(`  ${green5("\u2713")} before: ${new Date(report.beforeMs).toISOString()}`);
-    console.log(`  ${green5("\u2713")} events cutoff (fixed 30d): ${new Date(report.eventsCutoffMs).toISOString()}`);
-    console.log(`  ${green5("\u2713")} specialist_events: ${report.deletedEvents}`);
-    console.log(`  ${green5("\u2713")} specialist_results: ${report.deletedResults}`);
-    console.log(`  ${green5("\u2713")} specialist_jobs: ${report.deletedJobs}`);
-    console.log(`  ${green5("\u2713")} extracted jobs: ${report.extractedJobs}`);
-    console.log(`  ${report.forensicBeforeMs === null && report.forensicMcpBeforeMs === null ? yellow6("\u25CB") : green5("\u2713")} specialist_forensic_events: ${report.deletedForensicEvents} ${report.forensicBeforeMs === null && report.forensicMcpBeforeMs === null ? "(untouched, use --forensic-before)" : `(before ${report.forensicBeforeMs === null ? "-" : new Date(report.forensicBeforeMs).toISOString()}${report.forensicMcpBeforeMs === null ? "" : `, mcp before ${new Date(report.forensicMcpBeforeMs).toISOString()}`})`}`);
-    console.log(`  ${report.nodeEventsBeforeMs === null ? yellow6("\u25CB") : green5("\u2713")} node_events: ${report.deletedNodeEvents} ${report.nodeEventsBeforeMs === null ? "(untouched, use --node-events-before)" : `(before ${new Date(report.nodeEventsBeforeMs).toISOString()})`}`);
-    console.log(`  ${report.includeEpics ? green5("\u2713") : yellow6("\u25CB")} epic_runs: ${report.deletedEpicRuns} ${report.includeEpics ? "" : "(skipped, use --include-epics)"}`);
-    console.log(`  ${yellow6("\u25CB")} skipped active-chain jobs: ${report.skippedActiveChainJobs}`);
-    console.log("");
-  } finally {
-    sqliteClient.close();
-  }
-}
-function runExtract(options) {
-  const sqliteClient = createObservabilitySqliteClient();
-  if (!sqliteClient) {
-    throw new Error("Failed to initialize observability SQLite schema. Run `specialists db setup` first and ensure sqlite3 is installed.");
-  }
-  try {
-    const statusRows = options.jobId ? sqliteClient.listStatuses().filter((status) => status.id === options.jobId) : sqliteClient.listStatuses().filter((status) => options.sinceMs === undefined || status.started_at_ms >= options.sinceMs);
-    const jobIds = options.allMissing ? statusRows.filter((status) => !sqliteClient.listJobMetrics({ spec: status.specialist }).some((row) => row.job_id === status.id)).map((status) => status.id) : options.jobId ? [options.jobId] : statusRows.map((status) => status.id);
-    let extracted = 0;
-    for (const jobId of jobIds) {
-      const metrics = sqliteClient.aggregateJobMetrics(jobId);
-      if (!metrics)
-        continue;
-      extracted += 1;
-    }
-    console.log(`
-${bold6("specialists db extract")}
-`);
-    console.log(`  ${green5("\u2713")} extracted jobs: ${extracted}`);
-    console.log("");
-  } finally {
-    sqliteClient.close();
-  }
-}
-function formatPayloadMetric(payloadJson) {
-  if (!payloadJson)
-    return { payload_kb: "", payload_tokens: "" };
-  try {
-    const payload = JSON.parse(payloadJson);
-    const bytes = payload.totals?.bytes;
-    const tokens = payload.totals?.tokens;
-    return {
-      payload_kb: Number.isFinite(bytes) ? `${((bytes ?? 0) / 1024).toFixed(1)}kb` : "",
-      payload_tokens: Number.isFinite(tokens) ? `${Math.round(tokens ?? 0)}t` : ""
-    };
-  } catch {
-    return { payload_kb: "", payload_tokens: "" };
-  }
-}
-function formatStatsTable(rows, withPayload) {
-  const headers = withPayload ? ["job_id", "specialist", "model", "status", "payload_kb", "payload_tokens", "active_s", "waiting_s", "total_s", "elapsed_ms", "total_tools", "total_turns"] : ["job_id", "specialist", "model", "status", "active_s", "waiting_s", "total_s", "elapsed_ms", "total_tools", "total_turns"];
-  const tableRows = rows.map((row) => headers.map((header) => String(row[header] ?? "")));
-  const widths = headers.map((header, index) => Math.max(header.length, ...tableRows.map((row) => row[index].length)));
-  const line = (cells) => `| ${cells.map((cell, index) => cell.padEnd(widths[index])).join(" | ")} |`;
-  return [line(headers), `| ${widths.map((width) => "-".repeat(width)).join(" | ")} |`, ...tableRows.map(line)].join(`
-`);
-}
-function runStats(options) {
-  const sqliteClient = createObservabilitySqliteClient();
-  if (!sqliteClient) {
-    throw new Error("Failed to initialize observability SQLite schema. Run `specialists db setup` first and ensure sqlite3 is installed.");
-  }
-  try {
-    const rows = sqliteClient.listJobMetrics({ spec: options.spec, model: options.model, sinceMs: options.sinceMs });
-    const displayRows = rows.map((row) => ({
-      ...row,
-      active_s: row.active_runtime_ms === null ? "" : (row.active_runtime_ms / 1000).toFixed(1),
-      waiting_s: row.waiting_ms === null ? "" : (row.waiting_ms / 1000).toFixed(1),
-      total_s: row.elapsed_ms === null ? "" : (row.elapsed_ms / 1000).toFixed(1),
-      ...options.withPayload ? formatPayloadMetric(row.startup_payload_json) : {}
-    }));
-    if (options.format === "json") {
-      console.log(JSON.stringify({ rows: displayRows, count: rows.length }, null, 2));
-      return;
-    }
-    console.log(`
-${bold6("specialists db stats")}
-`);
-    console.log(formatStatsTable(displayRows, options.withPayload));
-    console.log("");
-  } finally {
-    sqliteClient.close();
-  }
-}
-function parseBenchmarkExportOptions(argv) {
-  const defaultOutput = resolve7(process.cwd(), ".specialists/benchmarks/executor-benchmark-rows.jsonl");
-  let outputPath = defaultOutput;
-  let epicId;
-  let includePrepJobs = false;
-  for (let i = 0;i < argv.length; i += 1) {
-    const argument = argv[i];
-    if (argument === "--output" && argv[i + 1]) {
-      outputPath = resolve7(process.cwd(), argv[i + 1]);
-      i += 1;
-      continue;
-    }
-    if (argument === "--epic" && argv[i + 1]) {
-      epicId = argv[i + 1];
-      i += 1;
-      continue;
-    }
-    if (argument === "--include-prep") {
-      includePrepJobs = true;
-      continue;
-    }
-    throw new Error(`Unknown option for db benchmark-export: '${argument}'`);
-  }
-  return { outputPath, epicId, includePrepJobs };
-}
-function parseReviewerVerdict2(output) {
-  if (!output)
-    return "MISSING";
-  const match = output.match(/Verdict:\s*(PASS|PARTIAL|FAIL)/i);
-  if (!match?.[1])
-    return "MISSING";
-  return match[1].toUpperCase();
-}
-function parseReviewerScore(output) {
-  if (!output)
-    return null;
-  const match = output.match(/(?:Reviewer\s+)?Score(?:\s*\(0-100\))?\s*[:=]\s*(\d+(?:\.\d+)?)/i);
-  return match?.[1] ? Number(match[1]) : null;
-}
-function parseGateResult(output, key) {
-  if (!output)
-    return null;
-  const regex = key === "lint" ? /(?:lint_pass|lint)\s*[:=]\s*(true|false|pass|fail)/i : /(?:tsc_pass|tsc(?:\s*--noEmit)?)\s*[:=]\s*(true|false|pass|fail)/i;
-  const match = output.match(regex);
-  if (!match?.[1])
-    return null;
-  const normalized = match[1].toLowerCase();
-  return normalized === "true" || normalized === "pass";
-}
-function readLatestRunCompleteEvent(events) {
-  for (let index = events.length - 1;index >= 0; index -= 1) {
-    const event = events[index];
-    if (event?.type === "run_complete") {
-      return event;
-    }
-  }
-  return null;
-}
-function inferFailureNotes(input) {
-  const notes = [];
-  if (input.runComplete?.status === "ERROR") {
-    notes.push(`run_complete_status=ERROR${input.runComplete.error ? `: ${input.runComplete.error}` : ""}`);
-  }
-  if (input.runComplete?.status === "CANCELLED") {
-    notes.push("run_complete_status=CANCELLED");
-  }
-  if (input.runComplete?.exit_reason) {
-    notes.push(`exit_reason=${input.runComplete.exit_reason}`);
-  }
-  if (input.runComplete?.finish_reason) {
-    notes.push(`finish_reason=${input.runComplete.finish_reason}`);
-  }
-  if (input.status.error) {
-    notes.push(`status_error=${input.status.error}`);
-  }
-  if (input.reviewerVerdict !== "PASS" && input.hasLaterExecutorInChain) {
-    notes.push("fix_loop_rerun_detected_after_non_pass_review");
-  }
-  if (!input.runComplete) {
-    notes.push("missing_run_complete_event_fallback_to_status_metrics");
-  }
-  return notes;
-}
-function runBenchmarkExport(options) {
-  const sqliteClient = createObservabilitySqliteClient();
-  if (!sqliteClient) {
-    throw new Error("Failed to initialize observability SQLite schema. Run `specialists db setup` first and ensure sqlite3 is installed.");
-  }
-  try {
-    const statuses = sqliteClient.listStatuses().filter((status) => options.includePrepJobs || status.chain_kind === "chain").filter((status) => !options.epicId || status.epic_id === options.epicId);
-    const byChain = new Map;
-    for (const status of statuses) {
-      const chainId = status.chain_id ?? `job:${status.id}`;
-      const group = byChain.get(chainId) ?? [];
-      group.push(status);
-      byChain.set(chainId, group);
-    }
-    const rows = [];
-    for (const chainStatuses of byChain.values()) {
-      const ordered = [...chainStatuses].sort((a, b) => a.started_at_ms - b.started_at_ms);
-      const executorStatuses = ordered.filter((status) => status.specialist === "executor");
-      const reviewerStatuses = ordered.filter((status) => status.specialist === "reviewer");
-      executorStatuses.forEach((executorStatus, executorIndex) => {
-        const nextExecutor = executorStatuses[executorIndex + 1];
-        const reviewer = reviewerStatuses.find((candidate) => {
-          if (candidate.started_at_ms < executorStatus.started_at_ms)
-            return false;
-          if (!nextExecutor)
-            return true;
-          return candidate.started_at_ms < nextExecutor.started_at_ms;
-        }) ?? null;
-        const runComplete = readLatestRunCompleteEvent(sqliteClient.readEvents(executorStatus.id));
-        const reviewerOutput = reviewer ? sqliteClient.readResult(reviewer.id) : null;
-        const reviewerVerdict = parseReviewerVerdict2(reviewerOutput);
-        const totalTokens = runComplete?.token_usage?.total_tokens ?? runComplete?.metrics?.token_usage?.total_tokens ?? executorStatus.metrics?.token_usage?.total_tokens ?? null;
-        const elapsedMs = runComplete ? Math.round(runComplete.elapsed_s * 1000) : typeof executorStatus.elapsed_s === "number" ? Math.round(executorStatus.elapsed_s * 1000) : null;
-        const hasLaterExecutorInChain = Boolean(nextExecutor);
-        const failureNotes = inferFailureNotes({
-          status: executorStatus,
-          runComplete,
-          reviewerVerdict,
-          hasLaterExecutorInChain
-        });
-        rows.push({
-          task_id: executorStatus.chain_root_bead_id ?? executorStatus.bead_id ?? "unknown_task",
-          model_id: executorStatus.model ?? null,
-          executor_job_id: executorStatus.id,
-          reviewer_job_id: reviewer?.id ?? null,
-          lint_pass: parseGateResult(reviewerOutput, "lint"),
-          tsc_pass: parseGateResult(reviewerOutput, "tsc"),
-          reviewer_verdict: reviewerVerdict,
-          reviewer_score_if_present: parseReviewerScore(reviewerOutput),
-          total_tokens: totalTokens,
-          elapsed_ms: elapsedMs,
-          failure_notes: failureNotes,
-          source_of_truth: {
-            task_id: "specialist_jobs.chain_root_bead_id fallback bead_id",
-            model_id: "specialist_jobs.status_json.model",
-            executor_job_id: "specialist_jobs.job_id",
-            reviewer_job_id: "specialist_jobs.job_id where specialist=reviewer in same chain window",
-            lint_pass: "reviewer specialist_results.output regex parse; null when absent",
-            tsc_pass: "reviewer specialist_results.output regex parse; null when absent",
-            reviewer_verdict: "reviewer specialist_results.output Verdict: PASS|PARTIAL|FAIL",
-            reviewer_score_if_present: "reviewer specialist_results.output score regex; null when absent",
-            total_tokens: runComplete ? "specialist_events.type=run_complete.token_usage.total_tokens" : "status_json.metrics.token_usage.total_tokens fallback",
-            elapsed_ms: runComplete ? "specialist_events.type=run_complete.elapsed_s * 1000" : "status_json.elapsed_s * 1000 fallback",
-            failure_notes: "run_complete.error/status + status_json.error + chain sequencing heuristics"
-          }
-        });
-      });
-    }
-    rows.sort((a, b) => a.task_id.localeCompare(b.task_id) || a.executor_job_id.localeCompare(b.executor_job_id));
-    const outputDirectory = dirname9(options.outputPath);
-    mkdirSync9(outputDirectory, { recursive: true });
-    const jsonl = rows.map((row) => JSON.stringify(row)).join(`
-`);
-    writeFileSync8(options.outputPath, rows.length > 0 ? `${jsonl}
-` : "", "utf-8");
-    console.log(`
-${bold6("specialists db benchmark-export")}
-`);
-    console.log(`  ${green5("\u2713")} rows exported: ${rows.length}`);
-    console.log(`  ${green5("\u2713")} output: ${options.outputPath}`);
-    if (options.epicId) {
-      console.log(`  ${green5("\u2713")} epic filter: ${options.epicId}`);
-    }
-    console.log("");
-  } finally {
-    sqliteClient.close();
-  }
-}
-function runSetup() {
-  const location = resolveObservabilityDbLocation(process.cwd());
-  if (isPathInsideJobsDirectory(location.dbPath, location.gitRoot)) {
-    throw new Error(`Refusing to place observability DB inside jobs directory: ${location.dbPath}`);
-  }
-  const setupResult = ensureObservabilityDbFile(location);
-  const sqliteClient = createObservabilitySqliteClientAtPath(location.dbPath);
-  if (!sqliteClient) {
-    throw new Error("Failed to initialize observability SQLite schema. Ensure sqlite3 is installed and retry.");
-  }
-  sqliteClient.close();
-  const gitignoreResult = ensureGitignoreHasObservabilityDbEntries(location.gitRoot);
-  printSetupResult(setupResult.created, gitignoreResult.changed, location);
-}
-async function run12(argv = process.argv.slice(3)) {
-  const subcommand = argv[0];
-  if (!subcommand || subcommand === "--help" || subcommand === "-h" || argv.slice(1).some((arg) => arg === "--help" || arg === "-h")) {
-    printDbHelp();
-    return;
-  }
-  if (subcommand === "setup" || subcommand === "init") {
-    assertHumanInteractiveTerminal("setup");
-    runSetup();
-    return;
-  }
-  if (subcommand === "backfill") {
-    assertHumanInteractiveTerminal("backfill");
-    const options = parseBackfillOptions(argv.slice(1));
-    runBackfill(options);
-    return;
-  }
-  if (subcommand === "vacuum") {
-    runVacuum();
-    return;
-  }
-  if (subcommand === "checkpoint") {
-    runCheckpoint(argv.slice(1));
-    return;
-  }
-  if (subcommand === "prune") {
-    const options = parsePruneOptions(argv.slice(1));
-    runPrune(options);
-    return;
-  }
-  if (subcommand === "extract") {
-    const options = parseExtractOptions(argv.slice(1));
-    runExtract(options);
-    return;
-  }
-  if (subcommand === "stats") {
-    const options = parseStatsOptions(argv.slice(1));
-    runStats(options);
-    return;
-  }
-  if (subcommand === "benchmark-export") {
-    const options = parseBenchmarkExportOptions(argv.slice(1));
-    runBenchmarkExport(options);
-    return;
-  }
-  console.error(`Unknown db subcommand: '${subcommand}'`);
-  printDbHelp();
-  process.exit(1);
-}
-var DAY_MS, bold6 = (s) => `\x1B[1m${s}\x1B[0m`, green5 = (s) => `\x1B[32m${s}\x1B[0m`, yellow6 = (s) => `\x1B[33m${s}\x1B[0m`;
-var init_db = __esm(() => {
-  init_observability_db();
-  init_job_root();
-  init_observability_sqlite();
-  init_chain_identity();
-  init_timeline_events();
-  DAY_MS = 24 * 60 * 60 * 1000;
-});
-
-// src/specialist/branch-integration-events.ts
-function createBranchIntegrationEvent(options) {
-  const tUnixMs = options.t_unix_ms ?? Date.now();
-  const target = {
-    branch: options.target.branch,
-    worktree: options.target.worktree
-  };
-  if (options.target.role)
-    target.role = options.target.role;
-  return {
-    schema_version: BRANCH_INTEGRATION_SCHEMA_VERSION,
-    timestamp: options.timestamp ?? new Date(tUnixMs).toISOString(),
-    t_unix_ms: tUnixMs,
-    source: {
-      job_id: options.source.job_id,
-      branch: options.source.branch,
-      worktree: options.source.worktree
-    },
-    target,
-    status: options.status ?? "merged",
-    commit: options.commit
-  };
-}
-var BRANCH_INTEGRATION_SCHEMA_VERSION = "xtrm.branch.integration.v1";
-
-// src/cli/integration.ts
-import { resolve as resolve8 } from "path";
-function fail5(code, message, json) {
-  if (json) {
-    process.stdout.write(`${JSON.stringify({ ok: false, error: { code, message } }, null, 2)}
-`);
-  } else {
-    console.error(`error (${code}): ${message}`);
-  }
-  process.exit(1);
-}
-function parseArgs5(argv) {
-  const values = new Map;
-  let json = false;
-  for (let i = 0;i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === "--json")
-      json = true;
-    else if (arg.startsWith("--"))
-      values.set(arg.slice(2), argv[++i] ?? "");
-  }
-  const required = (name) => {
-    const value = values.get(name)?.trim();
-    if (value?.startsWith("--"))
-      fail5("usage", `--${name} is required
-${USAGE4}`, json);
-    if (!value)
-      fail5("usage", `--${name} is required
-${USAGE4}`, json);
-    return value;
-  };
-  const commit = required("commit");
-  if (!COMMIT_PATTERN.test(commit)) {
-    fail5("usage", `--commit must be a 7-40 char hex sha (got '${commit}')`, json);
-  }
-  const status = values.get("status")?.trim();
-  if (status && status !== "merged") {
-    fail5("usage", `--status must be 'merged' (got '${status}')`, json);
-  }
-  return {
-    sourceJobId: values.get("source-job-id")?.trim() || MANUAL_JOB_ID,
-    sourceBranch: required("source-branch"),
-    sourceWorktree: resolve8(required("source-worktree")),
-    targetBranch: required("target-branch"),
-    targetWorktree: resolve8(required("target-worktree")),
-    targetRole: values.get("target-role")?.trim() || undefined,
-    commit,
-    cwd: values.get("cwd")?.trim() || process.cwd(),
-    json
-  };
-}
-function runRecord() {
-  const args = parseArgs5(process.argv.slice(4));
-  const client = createObservabilitySqliteClient(args.cwd);
-  if (!client) {
-    fail5("observability_db_missing", `no observability db at ${resolveObservabilityDbLocation(args.cwd).dbPath} (run a specialist first)`, args.json);
-  }
-  const event = createBranchIntegrationEvent({
-    source: { job_id: args.sourceJobId, branch: args.sourceBranch, worktree: args.sourceWorktree },
-    target: { branch: args.targetBranch, worktree: args.targetWorktree, role: args.targetRole },
-    status: "merged",
-    commit: args.commit
-  });
-  try {
-    client.recordBranchIntegration(event);
-  } catch (error) {
-    fail5("record_failed", error?.message ?? String(error), args.json);
-  } finally {
-    client.close();
-  }
-  if (args.json) {
-    process.stdout.write(`${JSON.stringify({ ok: true, event }, null, 2)}
-`);
-    return;
-  }
-  console.log(`recorded ${event.schema_version}: ${event.source.branch} \u2192 ${event.target.branch} @ ${event.commit}`);
-}
-function parseIntegrationListArgs(argv) {
-  const options = { json: false, limit: DEFAULT_LIMIT };
-  for (let i = 0;i < argv.length; i += 1) {
-    const token = argv[i];
-    if (token === "--json") {
-      options.json = true;
-      continue;
-    }
-    if (token === "--target-branch") {
-      const value = argv[i + 1];
-      if (!value)
-        throw new Error("--target-branch requires a value");
-      options.targetBranch = value;
-      i += 1;
-      continue;
-    }
-    if (token === "--job") {
-      const value = argv[i + 1];
-      if (!value)
-        throw new Error("--job requires a value");
-      options.sourceJobId = value;
-      i += 1;
-      continue;
-    }
-    if (token === "--limit") {
-      const value = argv[i + 1];
-      if (!value)
-        throw new Error("--limit requires a value");
-      const parsed = Number(value);
-      if (!Number.isInteger(parsed) || parsed <= 0)
-        throw new Error(`Invalid --limit value: ${value}`);
-      options.limit = parsed;
-      i += 1;
-      continue;
-    }
-    throw new Error(`Unknown integration list option: ${token}`);
-  }
-  return options;
-}
-function formatIntegrationRow(t, event) {
-  const role = event.target.role ? ` role=${event.target.role}` : "";
-  return `${new Date(t).toISOString()} ${event.status} ${event.source.branch} -> ${event.target.branch}${role} commit=${event.commit.slice(0, 12)} job=${event.source.job_id}`;
-}
-function renderIntegrationRows(rows, options) {
-  if (options.json)
-    return rows.map((row) => JSON.stringify(row.event));
-  if (rows.length === 0)
-    return ["No branch integrations recorded."];
-  return rows.map((row) => formatIntegrationRow(row.t, row.event));
-}
-async function runList() {
-  const options = parseIntegrationListArgs(process.argv.slice(4));
-  const client = createObservabilitySqliteClient();
-  if (!client)
-    throw new Error("Observability SQLite is unavailable; run under Bun with an initialized specialists database.");
-  try {
-    for (const line of renderIntegrationRows(client.listBranchIntegrations(options), options)) {
-      console.log(line);
-    }
-  } finally {
-    client.close();
-  }
-}
-var MANUAL_JOB_ID = "manual", COMMIT_PATTERN, USAGE4, DEFAULT_LIMIT = 100;
-var init_integration = __esm(() => {
-  init_observability_sqlite();
-  init_observability_db();
-  COMMIT_PATTERN = /^[0-9a-f]{7,40}$/i;
-  USAGE4 = "Usage: specialists integration record --source-branch <b> --source-worktree <p> " + "--target-branch <b> --target-worktree <p> --commit <sha> " + "[--source-job-id <id>] [--target-role <role>] [--status merged] [--cwd <path>] [--json]";
-});
-
-// src/pi/read-line-numbers-extension.ts
-import { existsSync as existsSync16 } from "fs";
-import { dirname as dirname10, join as join17, resolve as resolve9 } from "path";
-import { fileURLToPath as fileURLToPath4 } from "url";
 function getReadLineNumbersExtensionPath() {
   if (cached !== undefined)
     return cached;
   for (const candidate of CANDIDATES) {
-    if (existsSync16(join17(candidate, "index.mjs"))) {
-      cached = resolve9(candidate);
+    if (existsSync13(join14(candidate, "index.mjs"))) {
+      cached = resolve5(candidate);
       return cached;
     }
   }
@@ -24058,27 +21317,27 @@ function getReadLineNumbersExtensionPath() {
 `);
   return cached;
 }
-var HERE, REL2, CANDIDATES, cached;
+var HERE, REL, CANDIDATES, cached;
 var init_read_line_numbers_extension = __esm(() => {
-  HERE = dirname10(fileURLToPath4(import.meta.url));
-  REL2 = join17("config", "pi-extensions", "read-line-numbers");
+  HERE = dirname7(fileURLToPath3(import.meta.url));
+  REL = join14("config", "pi-extensions", "read-line-numbers");
   CANDIDATES = [
-    join17(HERE, "..", REL2),
-    join17(HERE, "..", "..", REL2),
-    join17(HERE, "..", "..", "..", REL2)
+    join14(HERE, "..", REL),
+    join14(HERE, "..", "..", REL),
+    join14(HERE, "..", "..", "..", REL)
   ];
 });
 
 // src/pi/extension-tool-policy-extension.ts
-import { existsSync as existsSync17 } from "fs";
-import { dirname as dirname11, join as join18, resolve as resolve10 } from "path";
-import { fileURLToPath as fileURLToPath5 } from "url";
+import { existsSync as existsSync14 } from "fs";
+import { dirname as dirname8, join as join15, resolve as resolve6 } from "path";
+import { fileURLToPath as fileURLToPath4 } from "url";
 function getExtensionToolPolicyExtensionPath() {
   if (cached2 !== undefined)
     return cached2;
   for (const candidate of CANDIDATES2) {
-    if (existsSync17(join18(candidate, "index.mjs"))) {
-      cached2 = resolve10(candidate);
+    if (existsSync14(join15(candidate, "index.mjs"))) {
+      cached2 = resolve6(candidate);
       return cached2;
     }
   }
@@ -24087,27 +21346,27 @@ function getExtensionToolPolicyExtensionPath() {
 `);
   return cached2;
 }
-var HERE2, REL3, CANDIDATES2, cached2, NATIVE_TOOLS_ENV_KEY = "PI_SPECIALIST_ALLOWED_NATIVE_TOOLS", REQUIRED_EXTENSION_TOOLS_ENV_KEY = "PI_SPECIALIST_REQUIRED_EXTENSION_TOOLS";
+var HERE2, REL2, CANDIDATES2, cached2, NATIVE_TOOLS_ENV_KEY = "PI_SPECIALIST_ALLOWED_NATIVE_TOOLS", REQUIRED_EXTENSION_TOOLS_ENV_KEY = "PI_SPECIALIST_REQUIRED_EXTENSION_TOOLS";
 var init_extension_tool_policy_extension = __esm(() => {
-  HERE2 = dirname11(fileURLToPath5(import.meta.url));
-  REL3 = join18("config", "pi-extensions", "extension-tool-policy");
+  HERE2 = dirname8(fileURLToPath4(import.meta.url));
+  REL2 = join15("config", "pi-extensions", "extension-tool-policy");
   CANDIDATES2 = [
-    join18(HERE2, "..", REL3),
-    join18(HERE2, "..", "..", REL3),
-    join18(HERE2, "..", "..", "..", REL3)
+    join15(HERE2, "..", REL2),
+    join15(HERE2, "..", "..", REL2),
+    join15(HERE2, "..", "..", "..", REL2)
   ];
 });
 
 // src/pi/permission-guard-extension.ts
-import { existsSync as existsSync18 } from "fs";
-import { dirname as dirname12, join as join19, resolve as resolve11 } from "path";
-import { fileURLToPath as fileURLToPath6 } from "url";
+import { existsSync as existsSync15 } from "fs";
+import { dirname as dirname9, join as join16, resolve as resolve7 } from "path";
+import { fileURLToPath as fileURLToPath5 } from "url";
 function getPermissionGuardExtensionPath() {
   if (cached3 !== undefined)
     return cached3;
   for (const candidate of CANDIDATES3) {
-    if (existsSync18(join19(candidate, "index.mjs"))) {
-      cached3 = resolve11(candidate);
+    if (existsSync15(join16(candidate, "index.mjs"))) {
+      cached3 = resolve7(candidate);
       return cached3;
     }
   }
@@ -24137,24 +21396,24 @@ function resolvePermissionGuardForSpawn(tier) {
   }
   return { path, tierEnv: { [PERMISSION_GUARD_TIER_ENV_KEY]: "READ_ONLY" } };
 }
-var HERE3, REL4, CANDIDATES3, PERMISSION_GUARD_ENV_KEY = "SPECIALISTS_PERMISSION_GUARD", PERMISSION_GUARD_TIER_ENV_KEY = "PI_SPECIALIST_PERMISSION_TIER", cached3;
+var HERE3, REL3, CANDIDATES3, PERMISSION_GUARD_ENV_KEY = "SPECIALISTS_PERMISSION_GUARD", PERMISSION_GUARD_TIER_ENV_KEY = "PI_SPECIALIST_PERMISSION_TIER", cached3;
 var init_permission_guard_extension = __esm(() => {
-  HERE3 = dirname12(fileURLToPath6(import.meta.url));
-  REL4 = join19("config", "pi-extensions", "permission-guard");
+  HERE3 = dirname9(fileURLToPath5(import.meta.url));
+  REL3 = join16("config", "pi-extensions", "permission-guard");
   CANDIDATES3 = [
-    join19(HERE3, "..", REL4),
-    join19(HERE3, "..", "..", REL4),
-    join19(HERE3, "..", "..", "..", REL4)
+    join16(HERE3, "..", REL3),
+    join16(HERE3, "..", "..", REL3),
+    join16(HERE3, "..", "..", "..", REL3)
   ];
 });
 
 // src/pi/python-kernel-extension.ts
-import { existsSync as existsSync19 } from "fs";
-import { dirname as dirname13, join as join20, resolve as resolve12 } from "path";
-import { fileURLToPath as fileURLToPath7 } from "url";
+import { existsSync as existsSync16 } from "fs";
+import { dirname as dirname10, join as join17, resolve as resolve8 } from "path";
+import { fileURLToPath as fileURLToPath6 } from "url";
 function findGlobalEntry(...segments) {
-  const found = resolveGlobalNodeModulesDirs().map((root) => join20(root, ...segments)).find((candidate) => existsSync19(candidate));
-  return found ? resolve12(found) : null;
+  const found = resolveGlobalNodeModulesDirs().map((root) => join17(root, ...segments)).find((candidate) => existsSync16(candidate));
+  return found ? resolve8(found) : null;
 }
 function getPiExtensionsPythonKernelPath() {
   if (cached4 !== undefined)
@@ -24168,10 +21427,10 @@ function resolvePiExtensionsPythonKernelPath() {
 var HERE4, PACKAGE_DIR, EXT_REL, cached4, SK_PACKAGE_DIR;
 var init_python_kernel_extension = __esm(() => {
   init_session();
-  HERE4 = dirname13(fileURLToPath7(import.meta.url));
-  PACKAGE_DIR = join20("@jaggerxtrm", "pi-extensions");
-  EXT_REL = join20("extensions", "python-kernel", "index.ts");
-  SK_PACKAGE_DIR = join20("@jaggerxtrm", "pi-service-knowledge");
+  HERE4 = dirname10(fileURLToPath6(import.meta.url));
+  PACKAGE_DIR = join17("@jaggerxtrm", "pi-extensions");
+  EXT_REL = join17("extensions", "python-kernel", "index.ts");
+  SK_PACKAGE_DIR = join17("@jaggerxtrm", "pi-service-knowledge");
 });
 
 // src/pi/backendMap.ts
@@ -24826,9 +22085,9 @@ var init_session_metrics_contract = __esm(() => {
 // src/pi/session.ts
 import { createHash as createHash3 } from "crypto";
 import { spawn as spawn2, execFileSync as execFileSync2 } from "child_process";
-import { existsSync as existsSync20, lstatSync as lstatSync3, mkdirSync as mkdirSync10, readdirSync as readdirSync7, readFileSync as readFileSync15, realpathSync as realpathSync3, statSync as statSync4, writeFileSync as writeFileSync9 } from "fs";
-import { homedir as homedir5, tmpdir } from "os";
-import { isAbsolute as isAbsolute2, resolve as resolve13, sep as sep3, join as join21, dirname as dirname14 } from "path";
+import { existsSync as existsSync17, lstatSync as lstatSync2, mkdirSync as mkdirSync7, readdirSync as readdirSync5, readFileSync as readFileSync11, realpathSync as realpathSync3, statSync as statSync4, writeFileSync as writeFileSync6 } from "fs";
+import { homedir as homedir4, tmpdir } from "os";
+import { isAbsolute as isAbsolute2, resolve as resolve9, sep as sep3, join as join18, dirname as dirname11 } from "path";
 function toRuntimeToolCatalogs(catalogIndex) {
   return catalogIndex.catalogs.map((catalog) => ({
     catalog: catalog.catalog,
@@ -24842,10 +22101,10 @@ function toRuntimeToolCatalogs(catalogIndex) {
   }));
 }
 function loadSharedToolCatalogIndex(cwd) {
-  const overridePath = resolve13(cwd, ".specialists", "catalog", "index.json");
+  const overridePath = resolve9(cwd, ".specialists", "catalog", "index.json");
   let overrideExists = false;
   try {
-    lstatSync3(overridePath);
+    lstatSync2(overridePath);
     overrideExists = true;
   } catch (error) {
     if (error.code !== "ENOENT") {
@@ -24854,7 +22113,7 @@ function loadSharedToolCatalogIndex(cwd) {
   }
   if (overrideExists) {
     try {
-      return loadToolCatalogIndex(readFileSync15(overridePath, "utf8"));
+      return loadToolCatalogIndex(readFileSync11(overridePath, "utf8"));
     } catch {
       throw new RuntimeToolCatalogResolutionError("project_catalog_invalid");
     }
@@ -24868,16 +22127,16 @@ function loadSharedToolCatalogIndex(cwd) {
   if (!canonicalDir) {
     throw new RuntimeToolCatalogResolutionError("canonical_catalog_unavailable");
   }
-  const canonicalPath = resolve13(canonicalDir, "index.json");
+  const canonicalPath = resolve9(canonicalDir, "index.json");
   try {
-    return loadToolCatalogIndex(readFileSync15(canonicalPath, "utf8"));
+    return loadToolCatalogIndex(readFileSync11(canonicalPath, "utf8"));
   } catch {
     throw new RuntimeToolCatalogResolutionError("canonical_catalog_invalid");
   }
 }
 function readPackageVersion(packageJsonPath) {
   try {
-    const pkg = JSON.parse(readFileSync15(packageJsonPath, "utf8"));
+    const pkg = JSON.parse(readFileSync11(packageJsonPath, "utf8"));
     return typeof pkg.version === "string" ? pkg.version : undefined;
   } catch {
     return;
@@ -24899,7 +22158,7 @@ function resolveGitnexusRuntime(options) {
       extensionState: { enabled: true, health: "not_installed", catalogCompatible: false }
     };
   }
-  const packageJsonPath = join21(packagePath, "package.json");
+  const packageJsonPath = join18(packagePath, "package.json");
   const installedVersion = readPackageVersion(packageJsonPath);
   if (!installedVersion) {
     return {
@@ -24940,10 +22199,10 @@ function resolvePiExtensionsPythonKernelRuntime(options) {
       extensionState: { enabled: true, health: "not_installed", catalogCompatible: false }
     };
   }
-  const packageJsonPath = join21(packagePath, "package.json");
+  const packageJsonPath = join18(packagePath, "package.json");
   const installedVersion = readPackageVersion(packageJsonPath);
-  const extPath = join21(packagePath, "extensions", "python-kernel", "index.ts");
-  if (!installedVersion || !existsSync20(extPath)) {
+  const extPath = join18(packagePath, "extensions", "python-kernel", "index.ts");
+  if (!installedVersion || !existsSync17(extPath)) {
     return {
       packageName,
       packagePath,
@@ -24973,7 +22232,7 @@ function resolveRuntimeToolContract(options) {
   if (tier !== "READ_ONLY" && tier !== "LOW" && tier !== "MEDIUM" && tier !== "HIGH") {
     throw new RuntimeToolCatalogResolutionError("invalid_permission_tier");
   }
-  const catalogIndex = loadSharedToolCatalogIndex(resolve13(options.cwd ?? process.cwd()));
+  const catalogIndex = loadSharedToolCatalogIndex(resolve9(options.cwd ?? process.cwd()));
   const specialistOverride = options.specialistPermissions?.[tier];
   const gitnexusRuntime = resolveGitnexusRuntime({
     catalogIndex,
@@ -25049,8 +22308,8 @@ function canonicalizeLocalExtensionIdentity(source) {
   try {
     const stat = statSync4(candidate);
     if (stat.isDirectory()) {
-      const indexCandidate = join21(candidate, "index.ts");
-      if (existsSync20(indexCandidate))
+      const indexCandidate = join18(candidate, "index.ts");
+      if (existsSync17(indexCandidate))
         candidate = indexCandidate;
     }
   } catch {
@@ -25060,7 +22319,7 @@ function canonicalizeLocalExtensionIdentity(source) {
     return realpathSync3(candidate);
   } catch {
     try {
-      return resolve13(candidate);
+      return resolve9(candidate);
     } catch {
       return null;
     }
@@ -25124,24 +22383,24 @@ function resolveExecutionExtensionSelection(extensions) {
 }
 function resolveCuratedExtensionPaths(options) {
   const all = [];
-  const piExtDir = join21(homedir5(), ".pi", "agent", "extensions");
+  const piExtDir = join18(homedir4(), ".pi", "agent", "extensions");
   const permLevel = (options.permissionLevel ?? "").toUpperCase();
   if (permLevel !== "READ_ONLY") {
-    const qgPath = join21(piExtDir, "quality-gates");
-    if (existsSync20(qgPath))
+    const qgPath = join18(piExtDir, "quality-gates");
+    if (existsSync17(qgPath))
       all.push(qgPath);
   }
   const pyKernelPath = resolvePiExtensionsPythonKernelPath();
   if (pyKernelPath && permLevel !== "READ_ONLY")
     all.push(pyKernelPath);
-  const cavemanPath = join21(piExtDir, "caveman");
-  if (existsSync20(cavemanPath))
+  const cavemanPath = join18(piExtDir, "caveman");
+  if (existsSync17(cavemanPath))
     all.push(cavemanPath);
-  const nvidiaNimPath = join21(homedir5(), ".pi", "agent", "git", "github.com", "xRyul", "pi-nvidia-nim");
-  if (existsSync20(nvidiaNimPath))
+  const nvidiaNimPath = join18(homedir4(), ".pi", "agent", "git", "github.com", "xRyul", "pi-nvidia-nim");
+  if (existsSync17(nvidiaNimPath))
     all.push(nvidiaNimPath);
   const gitnexusContract = options.resolvedToolContract?.extensions.gitnexus;
-  if (gitnexusContract?.status === "available" && gitnexusContract.packagePath && existsSync20(gitnexusContract.packagePath)) {
+  if (gitnexusContract?.status === "available" && gitnexusContract.packagePath && existsSync17(gitnexusContract.packagePath)) {
     all.push(gitnexusContract.packagePath);
   }
   if ((options.resolvedToolContract?.nativeTools ?? []).includes("codemode")) {
@@ -25173,7 +22432,7 @@ function resolvePiVersion() {
   try {
     const packageDir = resolveGlobalPackageDir("@earendil-works/pi-coding-agent");
     if (packageDir) {
-      const parsed = JSON.parse(readFileSync15(join21(packageDir, "package.json"), "utf-8"));
+      const parsed = JSON.parse(readFileSync11(join18(packageDir, "package.json"), "utf-8"));
       if (typeof parsed.version === "string" && parsed.version.length > 0) {
         cachedPiVersion = parsed.version;
         return cachedPiVersion;
@@ -25184,31 +22443,31 @@ function resolvePiVersion() {
 }
 function resolveGlobalNodeModulesDirs(deps = {}) {
   const env = deps.env ?? process.env;
-  const home = deps.home ?? homedir5();
+  const home = deps.home ?? homedir4();
   const execPath = deps.execPath ?? process.execPath;
-  const exists = deps.exists ?? existsSync20;
-  const readDir = deps.readDir ?? ((path) => readdirSync7(path));
+  const exists = deps.exists ?? existsSync17;
+  const readDir = deps.readDir ?? ((path) => readdirSync5(path));
   const candidates = [
     env.PI_NPM_GLOBAL_DIR,
-    env.NPM_CONFIG_PREFIX ? join21(env.NPM_CONFIG_PREFIX, "lib", "node_modules") : undefined,
-    env.npm_config_prefix ? join21(env.npm_config_prefix, "lib", "node_modules") : undefined,
-    env.NVM_BIN ? join21(dirname14(env.NVM_BIN), "lib", "node_modules") : undefined,
-    join21(dirname14(dirname14(execPath)), "lib", "node_modules"),
-    env.BUN_INSTALL ? join21(env.BUN_INSTALL, "install", "global", "node_modules") : undefined,
-    join21(home, ".bun", "install", "global", "node_modules"),
-    join21(home, ".nvm/versions/node", process.version, "lib", "node_modules"),
+    env.NPM_CONFIG_PREFIX ? join18(env.NPM_CONFIG_PREFIX, "lib", "node_modules") : undefined,
+    env.npm_config_prefix ? join18(env.npm_config_prefix, "lib", "node_modules") : undefined,
+    env.NVM_BIN ? join18(dirname11(env.NVM_BIN), "lib", "node_modules") : undefined,
+    join18(dirname11(dirname11(execPath)), "lib", "node_modules"),
+    env.BUN_INSTALL ? join18(env.BUN_INSTALL, "install", "global", "node_modules") : undefined,
+    join18(home, ".bun", "install", "global", "node_modules"),
+    join18(home, ".nvm/versions/node", process.version, "lib", "node_modules"),
     ...nvmNodeModulesDirs(home, readDir)
   ].filter((candidate) => Boolean(candidate));
   return [...new Set(candidates)].filter((candidate) => exists(candidate));
 }
 function resolveGlobalPackageDir(packageName, deps = {}) {
-  const exists = deps.exists ?? existsSync20;
-  return resolveGlobalNodeModulesDirs(deps).map((root) => join21(root, packageName)).find((dir) => exists(join21(dir, "package.json")));
+  const exists = deps.exists ?? existsSync17;
+  return resolveGlobalNodeModulesDirs(deps).map((root) => join18(root, packageName)).find((dir) => exists(join18(dir, "package.json")));
 }
 function nvmNodeModulesDirs(home, readDir) {
-  const root = join21(home, ".nvm", "versions", "node");
+  const root = join18(home, ".nvm", "versions", "node");
   try {
-    return readDir(root).filter((version) => version.startsWith("v")).sort().reverse().map((version) => join21(root, version, "lib", "node_modules"));
+    return readDir(root).filter((version) => version.startsWith("v")).sort().reverse().map((version) => join18(root, version, "lib", "node_modules"));
   } catch {
     return [];
   }
@@ -25399,17 +22658,17 @@ function isTestCommand(command) {
   return TEST_COMMAND_PATTERNS.some((pattern) => pattern.test(command));
 }
 function getWorktreeBoundaryExtensionPath(worktreeBoundary) {
-  const boundaryHash = createHash3("sha256").update(resolve13(worktreeBoundary)).digest("hex").slice(0, 16);
-  const extensionsDir = join21(tmpdir(), "specialists-pi-extensions");
+  const boundaryHash = createHash3("sha256").update(resolve9(worktreeBoundary)).digest("hex").slice(0, 16);
+  const extensionsDir = join18(tmpdir(), "specialists-pi-extensions");
   try {
-    mkdirSync10(extensionsDir, { recursive: true });
+    mkdirSync7(extensionsDir, { recursive: true });
   } catch (err) {
     process.stderr.write(`[worktree-boundary] WARN: could not create extensions directory at ${extensionsDir}: ${err.message}. ` + `Boundary enforcement will NOT apply for this session.
 `);
     return null;
   }
-  const extensionPath = join21(extensionsDir, `worktree-boundary-${boundaryHash}.mjs`);
-  if (existsSync20(extensionPath))
+  const extensionPath = join18(extensionsDir, `worktree-boundary-${boundaryHash}.mjs`);
+  if (existsSync17(extensionPath))
     return extensionPath;
   const extensionSource = `
 import { isAbsolute, resolve } from 'node:path';
@@ -25448,7 +22707,7 @@ export default function(pi) {
 }
 `.trimStart();
   try {
-    writeFileSync9(extensionPath, extensionSource, "utf-8");
+    writeFileSync6(extensionPath, extensionSource, "utf-8");
   } catch (err) {
     process.stderr.write(`[worktree-boundary] WARN: could not write extension file at ${extensionPath}: ${err.message}. ` + `Boundary enforcement will NOT apply for this session.
 `);
@@ -25557,7 +22816,7 @@ class PiAgentSession {
       const systemPromptFlag = this.options.systemPromptMode === "replace" ? "--system-prompt" : "--append-system-prompt";
       args.push(systemPromptFlag, this.options.systemPrompt);
     }
-    const worktreeBoundary = this.options.worktreeBoundary ? resolve13(this.options.worktreeBoundary) : undefined;
+    const worktreeBoundary = this.options.worktreeBoundary ? resolve9(this.options.worktreeBoundary) : undefined;
     if (worktreeBoundary) {
       const boundaryExtPath = getWorktreeBoundaryExtensionPath(worktreeBoundary);
       if (boundaryExtPath) {
@@ -25584,7 +22843,7 @@ class PiAgentSession {
       this._metrics.pi_version = this._piVersion;
       this.options.onMetric?.({ type: "pi_version", pi_version: this._piVersion });
     }
-    const sessionCwd = resolve13(this.options.cwd ?? process.cwd());
+    const sessionCwd = resolve9(this.options.cwd ?? process.cwd());
     this.proc = spawn2("pi", args, {
       stdio: ["pipe", "pipe", "pipe"],
       cwd: sessionCwd,
@@ -26217,6 +23476,3337 @@ var init_session = __esm(() => {
   WRITE_BOUNDARY_TOOL_NAMES = new Set(["edit", "write", "multiEdit", "notebookEdit"]);
 });
 
+// src/activation/authority-store.ts
+import { mkdirSync as mkdirSync8 } from "fs";
+import { createRequire as createRequire3 } from "module";
+import { homedir as homedir5 } from "os";
+import { dirname as dirname12, join as join19 } from "path";
+function resolveAuthorityDbPath(env = process.env) {
+  const substrate = (env.SUBSTRATE_DB ?? "").trim();
+  if (substrate)
+    return substrate;
+  const legacy = (env.XTRM_STATE_DB ?? "").trim();
+  if (legacy)
+    return legacy;
+  return join19(homedir5(), ".xtrm", "state.db");
+}
+function openAuthorityDb(dbPath) {
+  try {
+    const bun = require3("bun:sqlite");
+    if (bun?.Database)
+      return new bun.Database(dbPath);
+  } catch {}
+  try {
+    const node = require3("node:sqlite");
+    if (node?.DatabaseSync) {
+      const DatabaseSync = node.DatabaseSync;
+      const inner = new DatabaseSync(dbPath);
+      return {
+        exec: (sql) => inner.exec(sql),
+        prepare: (sql) => {
+          const stmt = inner.prepare(sql);
+          return { run: (...params) => stmt.run(...params.map((v) => v === undefined ? null : v)) };
+        },
+        close: () => inner.close()
+      };
+    }
+  } catch {}
+  return null;
+}
+function createFileAuthorityWriter(dbPath = resolveAuthorityDbPath()) {
+  return {
+    record(snapshot) {
+      try {
+        mkdirSync8(dirname12(dbPath), { recursive: true });
+        const db = openAuthorityDb(dbPath);
+        if (!db)
+          return;
+        try {
+          db.exec(ACTIVATIONS_DDL);
+          db.prepare(`INSERT OR REPLACE INTO activations
+               (activation_id, specialist, state, bead_id, last_activity_at)
+             VALUES (?, ?, ?, ?, ?)`).run(snapshot.activationId, snapshot.specialist, snapshot.state, snapshot.issueRef, snapshot.lastActivityAt);
+        } finally {
+          db.close();
+        }
+      } catch {}
+    },
+    remove(activationId) {
+      try {
+        const db = openAuthorityDb(dbPath);
+        if (!db)
+          return;
+        try {
+          db.exec(ACTIVATIONS_DDL);
+          db.prepare("DELETE FROM activations WHERE activation_id = ?").run(activationId);
+        } finally {
+          db.close();
+        }
+      } catch {}
+    }
+  };
+}
+var require3, ACTIVATIONS_DDL = `CREATE TABLE IF NOT EXISTS activations (
+  activation_id TEXT PRIMARY KEY,
+  specialist TEXT NOT NULL,
+  state TEXT NOT NULL,
+  bead_id TEXT,
+  last_activity_at INTEGER NOT NULL
+)`, NULL_AUTHORITY_WRITER;
+var init_authority_store = __esm(() => {
+  require3 = createRequire3(import.meta.url);
+  NULL_AUTHORITY_WRITER = { record: () => {}, remove: () => {} };
+});
+
+// src/activation/workitem-store.ts
+import { existsSync as existsSync18 } from "fs";
+import { createRequire as createRequire4 } from "module";
+import { homedir as homedir6 } from "os";
+import { dirname as dirname13, join as join20 } from "path";
+import { pathToFileURL } from "url";
+function resolveSubstrateDir(explicit, resolveInstalled) {
+  const trimmed = explicit.trim();
+  if (trimmed)
+    return trimmed;
+  if (resolveInstalled)
+    return resolveInstalled();
+  try {
+    return dirname13(require4.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
+  } catch {}
+  return resolveSubstrateFromGlobalPrefix();
+}
+function resolveSubstrateFromGlobalPrefix(libDirs) {
+  const runtimePrefix = dirname13(dirname13(process.execPath));
+  const candidates = uniqueExistingLibDirs(libDirs ?? [
+    ...resolveGlobalNodeModulesDirs().map((modulesDir) => dirname13(modulesDir)),
+    join20(runtimePrefix, "lib"),
+    join20(homedir6(), ".bun", "install", "global")
+  ]);
+  for (const libDir of candidates) {
+    try {
+      return dirname13(require4.resolve(`${SUBSTRATE_PACKAGE}/package.json`, { paths: [libDir] }));
+    } catch {}
+  }
+  return null;
+}
+function uniqueExistingLibDirs(candidates) {
+  const seen = new Set;
+  const out = [];
+  for (const candidate of candidates) {
+    if (!candidate)
+      continue;
+    const normalized = join20(candidate);
+    if (seen.has(normalized))
+      continue;
+    seen.add(normalized);
+    try {
+      if (existsSync18(normalized))
+        out.push(normalized);
+    } catch {}
+  }
+  return out;
+}
+function resolveWorkItemDbPath(env = process.env) {
+  return resolveAuthorityDbPath(env);
+}
+function openSubstrateDb(dbPath) {
+  const applyPragmas = (db) => {
+    db.exec("PRAGMA journal_mode = WAL");
+    db.exec("PRAGMA busy_timeout = 5000");
+    db.exec("PRAGMA synchronous = FULL");
+    db.exec("PRAGMA foreign_keys = ON");
+  };
+  const failures = [];
+  try {
+    const bun = require4("bun:sqlite");
+    if (bun?.Database) {
+      const db = new bun.Database(dbPath);
+      applyPragmas(db);
+      return db;
+    }
+    failures.push("bun:sqlite: module exposes no Database export");
+  } catch (error) {
+    failures.push(`bun:sqlite: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  try {
+    const node = require4("node:sqlite");
+    if (node?.DatabaseSync) {
+      const db = new node.DatabaseSync(dbPath);
+      applyPragmas(db);
+      return db;
+    }
+    failures.push("node:sqlite: module exposes no DatabaseSync export");
+  } catch (error) {
+    failures.push(`node:sqlite: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  throw new Error(`work-item store: cannot open the sqlite store at ${dbPath} ` + `(bun:sqlite and node:sqlite both unavailable: ${failures.join("; ")})`);
+}
+function defaultKindForOutputType(outputType) {
+  return outputType === "research" || outputType === "analysis" ? "research" : "task";
+}
+function attemptOfEntry(entry) {
+  return entry.executionContext?.specialist?.attemptId ?? entry.attemptId ?? null;
+}
+function createWorkItemBoundary(ports) {
+  const { issues, provenance, store, gate, journalService, provenanceService } = ports;
+  const viewOf = (ref) => {
+    const v = store.get(ref);
+    return {
+      ref: v.issue.humanRef,
+      issueId: v.issue.id,
+      revision: v.issue.currentRevision,
+      contractHash: v.issue.currentContractHash,
+      lifecycleState: v.issue.lifecycleState,
+      title: v.issue.title,
+      contract: v.contract,
+      readinessState: v.readinessState,
+      dispatchable: v.dispatchable,
+      reasons: v.reasons
+    };
+  };
+  return {
+    view(ref) {
+      return viewOf(ref);
+    },
+    epicAncestors(ref, depth) {
+      if (depth !== 1 && depth !== 2)
+        return [];
+      const ancestors = [];
+      const seen = new Set;
+      let childId = issues.resolveRef(ref).id;
+      for (let i = 0;i < depth; i += 1) {
+        const parent = issues.getParent(childId);
+        if (!parent)
+          break;
+        if (seen.has(parent.id))
+          break;
+        seen.add(parent.id);
+        const rev = issues.getRevision(parent.id, parent.currentRevision);
+        ancestors.push({
+          ref: parent.humanRef,
+          title: parent.title,
+          description: typeof rev.contract === "object" && rev.contract !== null ? String(rev.contract.problem ?? "") : undefined
+        });
+        childId = parent.id;
+      }
+      return ancestors;
+    },
+    completedBlockers(ref, depth) {
+      if (depth !== 1 && depth !== 2)
+        return [];
+      if (!issues.getBlockers)
+        return [];
+      const collected = [];
+      const seen = new Set;
+      let frontier = [issues.resolveRef(ref).id];
+      for (let hop = 0;hop < depth && frontier.length > 0; hop += 1) {
+        const next = [];
+        for (const id of frontier) {
+          for (const blocker of issues.getBlockers(id)) {
+            if (seen.has(blocker.id))
+              continue;
+            seen.add(blocker.id);
+            if (!SATISFIED_BLOCKER_STATES.has(blocker.lifecycleState))
+              continue;
+            const rev = issues.getRevision(blocker.id, blocker.currentRevision);
+            collected.push({
+              ref: blocker.humanRef,
+              title: blocker.title,
+              description: typeof rev.contract === "object" && rev.contract !== null ? String(rev.contract.problem ?? "") : undefined
+            });
+            next.push(blocker.id);
+          }
+        }
+        frontier = next;
+      }
+      return collected;
+    },
+    check(req) {
+      const check = gate.check(issues, req);
+      return { issueId: check.issueId, revision: check.revision, contractHash: check.contractHash, report: check.report };
+    },
+    bind(req) {
+      const issueId = issues.resolveRef(req.ref).id;
+      const active = issues.getActiveClaim(issueId);
+      if (active) {
+        if (active.holder !== req.holder) {
+          throw new Error(`dispatch refused: issue is claimed by '${active.holder}' \u2014 holder '${req.holder}' must claim first`);
+        }
+        const claimActivation = active.activationId ?? null;
+        const reqActivation = req.activationId ?? null;
+        if (claimActivation !== reqActivation) {
+          throw new Error("dispatch refused: claim activation does not match dispatch activation \u2014 claim with the dispatching activation id");
+        }
+        if (req.claimId != null && req.claimId !== active.id) {
+          throw new Error(`dispatch refused: supplied claim ${req.claimId} is not the active claim ${active.id}`);
+        }
+      }
+      const claimId = active?.id ?? req.claimId ?? undefined;
+      const out = gate.dispatch(issues, provenance, { ...req, claimId });
+      return out.binding;
+    },
+    inlineCreate(contract, opts = {}) {
+      const validation = validateContractText(contract);
+      if (!validation.ok) {
+        throw new Error(`${validation.reason}: ${validation.missing.join(", ")}`);
+      }
+      const sections = extractSections(contract);
+      const scrutiny = scrutinyLevel(contract) ?? "MEDIUM";
+      const problem = sections.get("PROBLEM") ?? "";
+      const firstLine = problem.split(`
+`).map((s) => s.trim()).find(Boolean);
+      const contractObj = {
+        problem,
+        success: sections.get("SUCCESS") ?? "",
+        scope: splitLines(sections.get("SCOPE")),
+        nonGoals: splitLines(sections.get("NON_GOALS")),
+        constraints: splitLines(sections.get("CONSTRAINTS")),
+        validation: splitLines(sections.get("VALIDATION")).map((check) => ({ check })),
+        output: splitLines(sections.get("OUTPUT")).map((artifact) => ({ artifact }))
+      };
+      const kind = opts.kind ?? "task";
+      if (!INLINE_ISSUE_KINDS.includes(kind)) {
+        throw new Error(`inline contract kind '${kind}' is not creatable \u2014 an ad hoc dispatch creates one of ${INLINE_ISSUE_KINDS.join(", ")}, never epic`);
+      }
+      const holder = opts.holder ?? "adapter::specialists";
+      const { projectId } = issues.resolveProject({ gitRoot: process.cwd() });
+      const issue = issues.createIssue({
+        projectId,
+        title: opts.title ?? (firstLine ?? "Specialist dispatch contract").slice(0, 72),
+        kind,
+        contract: contractObj,
+        scrutiny,
+        authoredBy: holder,
+        ...opts.parentId ? { parentId: opts.parentId } : {}
+      });
+      const { claim } = issues.claimReady(issue.id, holder, { outcome: "ready", policy: "default", attestedBy: holder }, { activationId: opts.activationId });
+      return { ref: issues.resolveRef(issue.id).humanRef, issueId: issue.id, claimId: claim.id };
+    },
+    releaseInlineClaim(ref, opts = {}) {
+      const issueId = issues.resolveRef(ref).id;
+      const active = issues.getActiveClaim(issueId);
+      if (!active || !issues.releaseClaim)
+        return false;
+      if (opts.activationId && active.activationId !== opts.activationId)
+        return false;
+      const released = issues.releaseClaim(issueId, active.holder, active.activationId ? { activationId: active.activationId } : {});
+      return released !== null;
+    },
+    journal(ref, kind, opts = {}) {
+      if (opts.summary !== undefined && journalService) {
+        const issueId = issues.resolveRef(ref).id;
+        journalService.appendEntry(issueId, {
+          kind,
+          semantic: { summary: opts.summary },
+          ...opts.participantId ? { participantId: opts.participantId } : {},
+          ...opts.activationId ? { activationId: opts.activationId } : {}
+        });
+        return;
+      }
+      const { summary: _evidence, ...storeOpts } = opts;
+      store.addJournal(ref, kind, storeOpts);
+    },
+    ...journalService || provenanceService ? {
+      appendResult(ref, input) {
+        if (!journalService)
+          throw new Error("settlement unavailable: no journal service on this boundary");
+        const issueId = issues.resolveRef(ref).id;
+        const entry = journalService.appendEntry(issueId, {
+          kind: "result",
+          result: input.result,
+          executionContext: input.executionContext ?? null,
+          refs: input.refs ?? [],
+          participantId: input.participantId,
+          activationId: input.activationId,
+          sessionId: input.sessionId
+        });
+        return { entryId: entry.id, sequence: entry.sequence };
+      },
+      allocateReceipt(bindingId) {
+        if (!provenanceService)
+          throw new Error("settlement unavailable: no provenance service on this boundary");
+        const receipt = provenanceService.allocateReceipt(bindingId);
+        return {
+          id: receipt.id,
+          executionBindingId: receipt.executionBindingId,
+          issueId: receipt.issueId,
+          issueRevision: receipt.issueRevision,
+          contractHash: receipt.contractHash
+        };
+      },
+      attachArtifact(receiptId, kind, value) {
+        if (!provenanceService)
+          throw new Error("settlement unavailable: no provenance service on this boundary");
+        const attached = provenanceService.attachArtifact(receiptId, kind, value);
+        return {
+          receiptId: attached.receiptId ?? receiptId,
+          kind: attached.kind ?? kind,
+          value: attached.value ?? value
+        };
+      },
+      findResultEntry(ref, key) {
+        if (!journalService?.listEntries) {
+          return { status: "unavailable", reason: "journal service exposes no entry listing" };
+        }
+        try {
+          const entries = journalService.listEntries(issues.resolveRef(ref).id, { kind: "result" });
+          const forActivation = entries.filter((entry) => entry.activationId === key.activationId);
+          const match = forActivation.find((entry) => attemptOfEntry(entry) === key.attemptId);
+          if (match)
+            return { status: "found", value: { entryId: match.id } };
+          const unattributed = forActivation.filter((entry) => attemptOfEntry(entry) === null);
+          if (unattributed.length > 0) {
+            return {
+              status: "unavailable",
+              reason: `${unattributed.length} Journal result(s) for this activation carry no attempt attribution`
+            };
+          }
+          return { status: "absent" };
+        } catch (error) {
+          return { status: "unavailable", reason: error instanceof Error ? error.message : String(error) };
+        }
+      },
+      findReceiptForBinding(ref, bindingId) {
+        if (!provenanceService?.listReceipts) {
+          return { status: "unavailable", reason: "provenance service exposes no receipt listing" };
+        }
+        try {
+          const rows = provenanceService.listReceipts(issues.resolveRef(ref).id);
+          const match = rows.find((receipt) => receipt.executionBindingId === bindingId);
+          return match ? { status: "found", value: { receiptId: match.id } } : { status: "absent" };
+        } catch (error) {
+          return { status: "unavailable", reason: error instanceof Error ? error.message : String(error) };
+        }
+      }
+    } : {}
+  };
+}
+function splitLines(body) {
+  if (!body)
+    return [];
+  return body.split(`
+`).map((l) => l.trim().replace(/^[-*\u2022]\s*/, "").replace(/^\d+[.)]\s*/, "").trim()).filter((l) => l.length > 0);
+}
+function resolveSubstrateModule(substrateDir, rel) {
+  const source = join20(substrateDir, rel);
+  if (existsSync18(source))
+    return source;
+  const built = join20(substrateDir, "dist", rel.replace(/\.ts$/, ".js"));
+  return existsSync18(built) ? built : null;
+}
+async function openWorkItemBoundary(opts = {}) {
+  const env = opts.env ?? process.env;
+  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "", opts.resolveInstalled);
+  if (!substrateDir) {
+    throw new Error(`work_item_store_unavailable: no Substrate package configured (install ${SUBSTRATE_PACKAGE}, ` + "or set XTRM_SUBSTRATE_DIR to a checkout of it)");
+  }
+  let pkgName;
+  try {
+    const pkgRaw = await import(pathToFileURL(join20(substrateDir, "package.json")).href, { with: { type: "json" } });
+    pkgName = pkgRaw.default?.name;
+  } catch (error) {
+    throw new Error(`work_item_store_unavailable: cannot read Substrate package identity at ${substrateDir}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (pkgName !== SUBSTRATE_PACKAGE) {
+    throw new Error(`work_item_store_unavailable: expected ${SUBSTRATE_PACKAGE} at ${substrateDir}, found ${JSON.stringify(pkgName) ?? "no name"}`);
+  }
+  const load = async (rel) => {
+    const modulePath = resolveSubstrateModule(substrateDir, rel);
+    if (!modulePath) {
+      throw new Error(`work_item_store_unavailable: cannot load Substrate module ${rel}: neither ${rel} nor dist/${rel.replace(/\.ts$/, ".js")} exists under ${substrateDir}`);
+    }
+    try {
+      return await import(pathToFileURL(modulePath).href);
+    } catch (error) {
+      throw new Error(`work_item_store_unavailable: cannot load Substrate module ${rel}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  const [runner, issueSvcMod, journalMod, provMod, storeMod, gateMod] = await Promise.all(SUBSTRATE_REQUIRED_MODULES.map((rel) => load(rel)));
+  for (const [mod, name] of [
+    [runner, "migrate"],
+    [issueSvcMod, "IssueService"],
+    [journalMod, "JournalService"],
+    [provMod, "ProvenanceService"],
+    [storeMod, "SubstrateIssueStore"],
+    [gateMod, "checkDispatch"],
+    [gateMod, "dispatchToSpecialist"]
+  ]) {
+    if (typeof mod[name] === "undefined") {
+      throw new Error(`work_item_store_unavailable: Substrate module is missing export ${name}`);
+    }
+  }
+  const dbPath = opts.dbPath ?? resolveWorkItemDbPath(env);
+  const storeRefusal = (error) => new Error(`work_item_store_unavailable: cannot open the Substrate store at ${dbPath} (set SUBSTRATE_DB or XTRM_STATE_DB to a writable database path, or install ${SUBSTRATE_PACKAGE}): ${error instanceof Error ? error.message : String(error)}`);
+  let db;
+  try {
+    db = openSubstrateDb(dbPath);
+    runner.migrate(db);
+  } catch (error) {
+    throw storeRefusal(error);
+  }
+  let issueService;
+  let journalSvc;
+  let provenance;
+  let store;
+  try {
+    issueService = new issueSvcMod.IssueService(db);
+    journalSvc = new journalMod.JournalService(db, issueService);
+    provenance = new provMod.ProvenanceService(db, issueService, journalSvc);
+    store = new storeMod.SubstrateIssueStore(issueService, journalSvc);
+  } catch (error) {
+    throw storeRefusal(error);
+  }
+  issueService.getBlockers = (childId) => issueService.listActiveEdges().filter((edge) => edge.active && edge.kind === "blocks" && edge.toIssue === childId).map((edge) => {
+    const issue = issueService.getIssue(edge.fromIssue);
+    return {
+      id: issue.id,
+      humanRef: issue.humanRef,
+      title: issue.title,
+      currentRevision: issue.currentRevision,
+      lifecycleState: issue.lifecycleState
+    };
+  });
+  const issues = issueService;
+  return createWorkItemBoundary({
+    issues,
+    provenance,
+    store,
+    gate: {
+      check: (i, r) => gateMod.checkDispatch(i, r),
+      dispatch: (i, p, r) => gateMod.dispatchToSpecialist(i, p, r)
+    },
+    journalService: journalSvc,
+    provenanceService: provenance
+  });
+}
+var require4, SUBSTRATE_PACKAGE = "@jaggerxtrm/substrate", SATISFIED_BLOCKER_STATES, INLINE_PARENT_TERMINAL_STATES, INLINE_ISSUE_KINDS, SUBSTRATE_REQUIRED_MODULES;
+var init_workitem_store = __esm(() => {
+  init_session();
+  init_contract_sections();
+  init_authority_store();
+  require4 = createRequire4(import.meta.url);
+  SATISFIED_BLOCKER_STATES = new Set(["done", "archived"]);
+  INLINE_PARENT_TERMINAL_STATES = new Set(["done", "cancelled", "archived"]);
+  INLINE_ISSUE_KINDS = ["task", "bug", "research", "decision", "followup"];
+  SUBSTRATE_REQUIRED_MODULES = [
+    "src/store/migrations/runner.ts",
+    "src/service/issue-service.ts",
+    "src/service/journal-service.ts",
+    "src/service/provenance-service.ts",
+    "src/workitems/substrate-store.ts",
+    "src/workitems/dispatch-gate.ts"
+  ];
+});
+
+// src/activation/contract-markdown.ts
+function contractToMarkdown(contract) {
+  if (contract === null || typeof contract !== "object")
+    return "";
+  const c = contract;
+  const lines = [];
+  const text = (v) => typeof v === "string" ? v : "";
+  const list = (v) => Array.isArray(v) ? v.map((x) => typeof x === "string" ? x : typeof x === "object" && x !== null ? Object.values(x).filter((y) => typeof y === "string").join(": ") : String(x)) : [];
+  const problem = text(c["problem"]);
+  if (problem)
+    lines.push(`PROBLEM: ${problem}`);
+  const success = text(c["success"]);
+  if (success)
+    lines.push(`SUCCESS: ${success}`);
+  const sections = [
+    ["SCOPE", c["scope"]],
+    ["NON_GOALS", c["nonGoals"]],
+    ["CONSTRAINTS", c["constraints"]],
+    ["VALIDATION", c["validation"]],
+    ["OUTPUT", c["output"]]
+  ];
+  for (const [name, value] of sections) {
+    const items = list(value);
+    if (items.length === 0)
+      continue;
+    lines.push(`${name}:`);
+    for (const item of items)
+      lines.push(`- ${item}`);
+  }
+  return lines.join(`
+`);
+}
+
+// src/cli/render-task.ts
+function fail(code, message) {
+  process.stdout.write(`${JSON.stringify({ ok: false, error: { code, message } }, null, 2)}
+`);
+  process.exit(1);
+}
+function parseRenderArgs(argv) {
+  const positional = [];
+  let issueRef = "";
+  let beadAlias = "";
+  let beadIdAlias = "";
+  let cwd = process.cwd();
+  let contextDepth = 3;
+  let surface = "pi";
+  for (let i = 0;i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--issue-ref")
+      issueRef = argv[++i] ?? "";
+    else if (arg === "--bead")
+      beadAlias = argv[++i] ?? "";
+    else if (arg === "--bead-id")
+      beadIdAlias = argv[++i] ?? "";
+    else if (arg === "--cwd")
+      cwd = argv[++i] ?? cwd;
+    else if (arg === "--context-depth")
+      contextDepth = Number(argv[++i]);
+    else if (arg === "--surface")
+      surface = argv[++i] ?? "pi";
+    else if (!arg.startsWith("-"))
+      positional.push(arg);
+  }
+  if (surface !== "pi" && surface !== "claude" && surface !== "codex") {
+    fail("usage", `--surface must be 'pi', 'claude' or 'codex' (got '${surface}')`);
+  }
+  if (!Number.isFinite(contextDepth) || contextDepth < 0) {
+    fail("usage", `--context-depth must be a non-negative number (got '${contextDepth}')`);
+  }
+  let beadId = "";
+  try {
+    beadId = resolveIssueRef({ issueRef, bead: beadAlias, beadId: beadIdAlias }) ?? "";
+  } catch (error) {
+    fail("usage", error instanceof Error ? error.message : String(error));
+  }
+  return { beadId, cwd, contextDepth: Math.trunc(contextDepth), surface, positional };
+}
+async function openBoundaryIfAvailable() {
+  try {
+    return await openWorkItemBoundary();
+  } catch {
+    return null;
+  }
+}
+async function resolveWorkForRender(ref, contextDepth) {
+  const beads = new BeadsClient;
+  const legacy = beads.readBead(ref);
+  if (legacy) {
+    return {
+      beadId: ref,
+      bead: legacy,
+      completedBlockers: contextDepth > 0 ? beads.getCompletedBlockers(ref, contextDepth) : []
+    };
+  }
+  const boundary = workItemsOverride ?? await openBoundaryIfAvailable();
+  if (boundary) {
+    try {
+      const view = boundary.view(ref);
+      const blockers = contextDepth > 0 ? boundary.completedBlockers(ref, Math.min(contextDepth, 2)) : [];
+      return {
+        beadId: view.ref,
+        bead: { id: view.ref, title: view.title, description: contractToMarkdown(view.contract) },
+        completedBlockers: blockers.map((blocker) => ({
+          id: blocker.ref,
+          title: blocker.title,
+          description: blocker.description
+        }))
+      };
+    } catch {}
+  }
+  fail("bead_not_found", `bead '${ref}' not found`);
+}
+async function renderAndEmit(specialist, specialistName, args) {
+  const resolved = await resolveWorkForRender(args.beadId, args.contextDepth);
+  const beadId = resolved.beadId;
+  const bead = resolved.bead;
+  const completedBlockers = resolved.completedBlockers;
+  let rendered;
+  try {
+    rendered = renderTaskPrompt({
+      specialist,
+      cwd: args.cwd,
+      beadId,
+      bead,
+      completedBlockers,
+      surface: args.surface
+    });
+  } catch (error) {
+    fail("template_render_failed", `task_template render failed: ${error?.message ?? String(error)}`);
+  }
+  if (rendered.mandatoryRulesError) {
+    fail("mandatory_rules_failed", rendered.mandatoryRulesError);
+  }
+  const components = [
+    rendered.taskTemplateComponent,
+    ...rendered.beadContextOwn ? [rendered.beadContextOwn] : [],
+    ...rendered.beadContextParent ? [rendered.beadContextParent] : [],
+    ...rendered.beadContextBlockers,
+    ...(rendered.mandatoryRules?.sections ?? []).map((section) => ({
+      kind: "mandatory_rule",
+      name: section.setId,
+      tokens: Math.ceil(section.block.length / 4),
+      bytes: Buffer.byteLength(section.block, "utf8")
+    }))
+  ];
+  process.stdout.write(`${JSON.stringify({
+    ok: true,
+    specialist: specialistName,
+    bead_id: beadId,
+    surface: args.surface,
+    cwd: args.cwd,
+    context_depth: args.contextDepth,
+    initial_prompt: rendered.initial_prompt,
+    prompt_hash: rendered.prompt_hash,
+    skill_prefix: rendered.skillPrefix,
+    components,
+    mandatory_rules: rendered.mandatoryRules ? {
+      sets_loaded: rendered.mandatoryRules.setsLoaded,
+      rules_count: rendered.mandatoryRules.ruleCount,
+      inline_rules_count: rendered.mandatoryRules.inlineRulesCount,
+      globals_disabled: rendered.mandatoryRules.globalsDisabled,
+      budget_limit: rendered.mandatoryRules.budgetLimit,
+      candidate_tokens: rendered.mandatoryRules.candidateTokens,
+      injected_tokens: rendered.mandatoryRules.injectedTokens,
+      injected_section_ids: rendered.mandatoryRules.injectedSectionIds,
+      evicted_section_ids: rendered.mandatoryRules.evictedSectionIds,
+      payload_digest: rendered.mandatoryRules.payloadDigest,
+      outcome: rendered.mandatoryRules.outcome
+    } : null,
+    skills: specialist.skills?.paths ?? []
+  }, null, 2)}
+`);
+}
+async function loadSpecialistForSurface(name, surface) {
+  const loader = new SpecialistLoader;
+  if (surface !== "codex")
+    return loader.get(name);
+  const spec = await loader.getEffective(name);
+  if (!spec)
+    throw new Error(`Specialist not found: ${name}`);
+  const execution = spec.specialist.execution;
+  const model = execution.surface_models?.codex ?? execution.model;
+  if (!model)
+    throw new SpecialistMissingModelError(name);
+  return spec;
+}
+async function run5() {
+  const args = parseRenderArgs(process.argv.slice(3));
+  const name = args.positional[0] ?? "";
+  if (!name || !args.beadId)
+    fail("usage", USAGE);
+  const spec = await loadSpecialistForSurface(name, args.surface).catch((error) => {
+    fail("specialist_not_found", `specialist '${name}': ${error?.message ?? String(error)}`);
+  });
+  await renderAndEmit(spec.specialist, spec.specialist.metadata.name, args);
+}
+var workItemsOverride, USAGE = "Usage: specialists render-task <name> --issue-ref <id> [--cwd <path>] [--context-depth <n>] [--surface pi|claude|codex] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)";
+var init_render_task = __esm(() => {
+  init_loader();
+  init_beads();
+  init_task_prompt();
+  init_workitem_store();
+});
+
+// src/cli/render-bead.ts
+function rolelessSpecialist() {
+  return SpecialistSchema.parse({
+    specialist: {
+      metadata: {
+        name: "roleless",
+        version: "1.0.0",
+        description: "Synthetic roleless render target for `sp render-bead`.",
+        category: "internal"
+      },
+      execution: { model: null },
+      prompt: { task_template: "$prompt" }
+    }
+  }).specialist;
+}
+async function run6() {
+  const args = parseRenderArgs(process.argv.slice(3));
+  const beadId = args.beadId || args.positional[0] || "";
+  if (!beadId)
+    fail("usage", USAGE2);
+  await renderAndEmit(rolelessSpecialist(), null, { ...args, beadId });
+}
+var USAGE2 = "Usage: specialists render-bead <id> [--issue-ref <id>] [--cwd <path>] [--context-depth <n>] [--surface pi|claude|codex] (--bead/--bead-id are permanent compatibility aliases for --issue-ref)";
+var init_render_bead = __esm(() => {
+  init_schema();
+  init_render_task();
+});
+
+// src/cli/render-skill-prefix.ts
+function fail2(code, message) {
+  process.stdout.write(`${JSON.stringify({ ok: false, error: { code, message } }, null, 2)}
+`);
+  process.exit(1);
+}
+async function run7() {
+  const argv = process.argv.slice(3);
+  const positional = [];
+  let surface = "pi";
+  for (let i = 0;i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--surface")
+      surface = argv[++i] ?? "pi";
+    else if (!arg.startsWith("-"))
+      positional.push(arg);
+  }
+  const name = positional[0] ?? "";
+  if (!name)
+    fail2("usage", "Usage: specialists render-skill-prefix <name> [--surface pi|claude|codex]");
+  if (surface !== "pi" && surface !== "claude" && surface !== "codex") {
+    fail2("usage", `--surface must be 'pi', 'claude' or 'codex' (got '${surface}')`);
+  }
+  const spec = await loadSpecialistForSurface(name, surface).catch((error) => {
+    fail2("specialist_not_found", `specialist '${name}': ${error?.message ?? String(error)}`);
+  });
+  process.stdout.write(`${JSON.stringify({
+    ok: true,
+    specialist: spec.specialist.metadata.name,
+    surface,
+    skill_prefix: buildSkillPrefix(spec.specialist, surface)
+  }, null, 2)}
+`);
+}
+var init_render_skill_prefix = __esm(() => {
+  init_render_task();
+  init_task_prompt();
+});
+
+// src/specialist/launch-outcome.ts
+function fail3(code, message) {
+  throw new LaunchOutcomeError(code, message);
+}
+function isObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function boundedString(value, field, maxLength, allowEmpty = false) {
+  if (typeof value !== "string")
+    fail3("invalid_outcome", `${field} must be a string`);
+  if (value.length === 0 && !allowEmpty)
+    fail3("invalid_outcome", `${field} must be non-empty`);
+  if (value.length > maxLength)
+    fail3("invalid_outcome", `${field} exceeds ${maxLength} characters`);
+  if (CONTROL_CHARS.test(value))
+    fail3("invalid_outcome", `${field} contains control characters`);
+  return value;
+}
+function patternString(value, field, maxLength, pattern) {
+  const s = boundedString(value, field, maxLength);
+  if (!pattern.test(s))
+    fail3("invalid_outcome", `${field} does not match the contracted pattern`);
+  return s;
+}
+function nullablePatternString(value, field, maxLength, pattern) {
+  if (value === null || value === undefined)
+    return null;
+  return patternString(value, field, maxLength, pattern);
+}
+function enumValue(value, field, allowed) {
+  if (typeof value !== "string" || !allowed.includes(value)) {
+    fail3("invalid_outcome", `${field} must be one of: ${allowed.join(", ")}`);
+  }
+  return value;
+}
+function mutationRecord(value, field) {
+  if (!isObject(value))
+    fail3("invalid_outcome", `${field} must be an object`);
+  if (typeof value.completed !== "boolean")
+    fail3("invalid_outcome", `${field}.completed must be a boolean`);
+  return { completed: value.completed, kind: patternString(value.kind, `${field}.kind`, 96, DOTTED_TOKEN_RE) };
+}
+function parseLaunchOutcome(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    fail3("invalid_json", `outcome is not valid JSON: ${error?.message ?? String(error)}`);
+  }
+}
+function validateLaunchOutcome(value) {
+  if (!isObject(value))
+    fail3("invalid_outcome", "outcome must be a JSON object");
+  const schemaVersion = value.schema_version;
+  if (typeof schemaVersion !== "string" || schemaVersion.length === 0) {
+    fail3("unsupported_schema", "outcome is missing schema_version");
+  }
+  if (schemaVersion !== LAUNCH_OUTCOME_SCHEMA_VERSION) {
+    fail3("unsupported_schema", `unsupported schema_version '${schemaVersion}' (this consumer accepts '${LAUNCH_OUTCOME_SCHEMA_VERSION}')`);
+  }
+  const outcome = {
+    schema_version: schemaVersion,
+    status: enumValue(value.status, "status", STATUSES),
+    reason_code: patternString(value.reason_code, "reason_code", 64, REASON_CODE_RE),
+    summary: boundedString(value.summary, "summary", 240),
+    runtime: null,
+    identity: null,
+    worktree: null,
+    readiness: null,
+    safety_profile: null,
+    persistence: null,
+    authoritative_mutation: mutationRecord(value.authoritative_mutation, "authoritative_mutation"),
+    side_effects: [],
+    next_actions: []
+  };
+  if (value.runtime !== undefined) {
+    if (!isObject(value.runtime))
+      fail3("invalid_outcome", "runtime must be an object");
+    if (!("version" in value.runtime))
+      fail3("invalid_outcome", "runtime.version is required when runtime is present");
+    outcome.runtime = {
+      name: enumValue(value.runtime.name, "runtime.name", RUNTIMES),
+      version: value.runtime.version === null ? null : boundedString(value.runtime.version, "runtime.version", 128)
+    };
+  }
+  if (value.identity !== undefined) {
+    if (!isObject(value.identity))
+      fail3("invalid_outcome", "identity must be an object");
+    const identity = value.identity;
+    for (const key of ["thread_id", "session_name", "tmux_session_id", "pane_id"]) {
+      if (!(key in identity))
+        fail3("invalid_outcome", `identity.${key} is required when identity is present`);
+    }
+    const nullableId = (field) => {
+      const v = identity[field];
+      if (v === null)
+        return null;
+      return boundedString(v, `identity.${field}`, 256);
+    };
+    outcome.identity = {
+      thread_id: nullableId("thread_id"),
+      session_name: nullableId("session_name"),
+      tmux_session_id: nullablePatternString(identity.tmux_session_id, "identity.tmux_session_id", 32, TMUX_SESSION_ID_RE),
+      pane_id: nullablePatternString(identity.pane_id, "identity.pane_id", 32, PANE_ID_RE)
+    };
+  }
+  if (value.worktree !== undefined) {
+    if (!isObject(value.worktree))
+      fail3("invalid_outcome", "worktree must be an object");
+    if (value.worktree.owner !== "core")
+      fail3("invalid_outcome", "worktree.owner must be 'core' (Core owns launcher worktrees)");
+    outcome.worktree = {
+      path: boundedString(value.worktree.path, "worktree.path", 4096),
+      branch: boundedString(value.worktree.branch, "worktree.branch", 4096),
+      owner: "core"
+    };
+  }
+  if (value.readiness !== undefined) {
+    if (!isObject(value.readiness))
+      fail3("invalid_outcome", "readiness must be an object");
+    outcome.readiness = {
+      status: enumValue(value.readiness.status, "readiness.status", READINESS_STATUSES),
+      source: enumValue(value.readiness.source, "readiness.source", READINESS_SOURCES)
+    };
+  }
+  if (value.safety_profile !== undefined) {
+    if (!isObject(value.safety_profile))
+      fail3("invalid_outcome", "safety_profile must be an object");
+    if (value.safety_profile.hook_trust !== "preserved") {
+      fail3("invalid_outcome", "safety_profile.hook_trust must be 'preserved'");
+    }
+    outcome.safety_profile = {
+      name: patternString(value.safety_profile.name, "safety_profile.name", 64, TOKEN_RE2),
+      sandbox: patternString(value.safety_profile.sandbox, "safety_profile.sandbox", 64, TOKEN_RE2),
+      approvals: patternString(value.safety_profile.approvals, "safety_profile.approvals", 64, TOKEN_RE2),
+      hook_trust: "preserved"
+    };
+  }
+  if (value.persistence !== undefined) {
+    outcome.persistence = mutationRecord(value.persistence, "persistence");
+  }
+  if (!Array.isArray(value.side_effects))
+    fail3("invalid_outcome", "side_effects must be an array");
+  if (value.side_effects.length > 32)
+    fail3("invalid_outcome", "side_effects exceeds 32 entries");
+  for (const [index, effect] of value.side_effects.entries()) {
+    if (!isObject(effect))
+      fail3("invalid_outcome", `side_effects[${index}] must be an object`);
+    const entry = {
+      kind: patternString(effect.kind, `side_effects[${index}].kind`, 96, DOTTED_TOKEN_RE),
+      status: enumValue(effect.status, `side_effects[${index}].status`, SIDE_EFFECT_STATUSES)
+    };
+    if (effect.id !== undefined)
+      entry.id = effect.id === null ? null : boundedString(effect.id, `side_effects[${index}].id`, 256);
+    outcome.side_effects.push(entry);
+  }
+  if (!Array.isArray(value.next_actions))
+    fail3("invalid_outcome", "next_actions must be an array");
+  if (value.next_actions.length > 16)
+    fail3("invalid_outcome", "next_actions exceeds 16 entries");
+  for (const [index, action] of value.next_actions.entries()) {
+    if (!isObject(action))
+      fail3("invalid_outcome", `next_actions[${index}] must be an object`);
+    if (!Array.isArray(action.argv) || action.argv.length === 0) {
+      fail3("invalid_outcome", `next_actions[${index}].argv must be a non-empty array`);
+    }
+    if (action.argv.length > 32)
+      fail3("invalid_outcome", `next_actions[${index}].argv exceeds 32 entries`);
+    if (typeof action.required !== "boolean")
+      fail3("invalid_outcome", `next_actions[${index}].required must be a boolean`);
+    const entry = {
+      kind: enumValue(action.kind, `next_actions[${index}].kind`, ACTION_KINDS),
+      required: action.required,
+      argv: action.argv.map((arg, argIndex) => boundedString(arg, `next_actions[${index}].argv[${argIndex}]`, 4096, true)),
+      display: boundedString(action.display, `next_actions[${index}].display`, 8192),
+      why: boundedString(action.why, `next_actions[${index}].why`, 240)
+    };
+    if (action.cwd !== undefined)
+      entry.cwd = boundedString(action.cwd, `next_actions[${index}].cwd`, 4096);
+    outcome.next_actions.push(entry);
+  }
+  return outcome;
+}
+function projectLaunchOutcome(outcome) {
+  return {
+    schema_version: outcome.schema_version,
+    status: outcome.status,
+    reason_code: outcome.reason_code,
+    summary: outcome.summary,
+    runtime: outcome.runtime ? { name: outcome.runtime.name, version: outcome.runtime.version } : null,
+    identity: outcome.identity ? {
+      thread_id: outcome.identity.thread_id,
+      session_name: outcome.identity.session_name,
+      tmux_session_id: outcome.identity.tmux_session_id,
+      pane_id: outcome.identity.pane_id
+    } : null,
+    worktree: outcome.worktree ? { path: outcome.worktree.path, branch: outcome.worktree.branch, owner: outcome.worktree.owner } : null,
+    readiness: outcome.readiness ? { status: outcome.readiness.status, source: outcome.readiness.source } : null,
+    safety_profile: outcome.safety_profile ? {
+      name: outcome.safety_profile.name,
+      sandbox: outcome.safety_profile.sandbox,
+      approvals: outcome.safety_profile.approvals,
+      hook_trust: outcome.safety_profile.hook_trust
+    } : null,
+    persistence: outcome.persistence ? { completed: outcome.persistence.completed, kind: outcome.persistence.kind } : null,
+    authoritative_mutation: {
+      completed: outcome.authoritative_mutation.completed,
+      kind: outcome.authoritative_mutation.kind
+    },
+    side_effects: outcome.side_effects.map((effect) => ({
+      kind: effect.kind,
+      status: effect.status,
+      ...effect.id !== undefined ? { id: effect.id } : {}
+    })),
+    next_actions: outcome.next_actions.map((action) => ({
+      kind: action.kind,
+      required: action.required,
+      argv: [...action.argv],
+      display: action.display,
+      why: action.why,
+      ...action.cwd !== undefined ? { cwd: action.cwd } : {}
+    }))
+  };
+}
+var LAUNCH_OUTCOME_SCHEMA_VERSION = "xtrm.command-outcome.v1", LaunchOutcomeError, CONTROL_CHARS, REASON_CODE_RE, TOKEN_RE2, DOTTED_TOKEN_RE, TMUX_SESSION_ID_RE, PANE_ID_RE, STATUSES, RUNTIMES, READINESS_STATUSES, READINESS_SOURCES, ACTION_KINDS, SIDE_EFFECT_STATUSES;
+var init_launch_outcome = __esm(() => {
+  LaunchOutcomeError = class LaunchOutcomeError extends Error {
+    code;
+    constructor(code, message) {
+      super(message);
+      this.code = code;
+      this.name = "LaunchOutcomeError";
+    }
+  };
+  CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
+  REASON_CODE_RE = /^[a-z][a-z0-9_]*$/;
+  TOKEN_RE2 = /^[a-z][a-z0-9-]*$/;
+  DOTTED_TOKEN_RE = /^[a-z][a-z0-9.-]*$/;
+  TMUX_SESSION_ID_RE = /^\$[0-9]+$/;
+  PANE_ID_RE = /^%[0-9]+$/;
+  STATUSES = ["ok", "degraded", "noop", "rejected", "failed"];
+  RUNTIMES = ["pi", "claude", "codex"];
+  READINESS_STATUSES = ["ready", "unverified", "not_ready"];
+  READINESS_SOURCES = ["agent.ready", "tmux-pane", "none"];
+  ACTION_KINDS = ["attach", "resume", "repair", "end", "wait", "inspect"];
+  SIDE_EFFECT_STATUSES = ["ok", "degraded", "failed", "skipped"];
+});
+
+// src/cli/launch-outcome.ts
+import { readFileSync as readFileSync12 } from "fs";
+function fail4(code, message) {
+  process.stdout.write(`${JSON.stringify({ ok: false, error: { code, message } }, null, 2)}
+`);
+  process.exit(1);
+}
+async function run8() {
+  const args = process.argv.slice(3).filter((arg) => arg !== "--json");
+  const file = args.find((arg) => !arg.startsWith("-")) ?? "";
+  if (!file)
+    fail4("usage", USAGE3);
+  let raw;
+  try {
+    raw = readFileSync12(file, "utf-8");
+  } catch (error) {
+    fail4("file_not_read", `cannot read outcome file '${file}': ${error?.message ?? String(error)}`);
+  }
+  let projection;
+  try {
+    projection = projectLaunchOutcome(validateLaunchOutcome(parseLaunchOutcome(raw)));
+  } catch (error) {
+    if (error instanceof LaunchOutcomeError)
+      fail4(error.code, error.message);
+    throw error;
+  }
+  process.stdout.write(`${JSON.stringify({ ok: true, ...projection }, null, 2)}
+`);
+}
+var USAGE3 = "Usage: specialists launch-outcome <file>";
+var init_launch_outcome2 = __esm(() => {
+  init_launch_outcome();
+});
+
+// src/cli/view.ts
+import readline2 from "readline/promises";
+import { stdin as input, stdout as output } from "process";
+function permissionBadge2(permission) {
+  if (permission === "READ_ONLY")
+    return green2("[READ_ONLY]");
+  if (permission === "LOW")
+    return cyan2("[LOW]");
+  if (permission === "MEDIUM")
+    return yellow3("[MEDIUM]");
+  return magenta2("[HIGH]");
+}
+function parseArgs3(argv) {
+  const parsed = { raw: false, all: false };
+  for (let index = 0;index < argv.length; index++) {
+    const token = argv[index];
+    if (token === "--raw") {
+      parsed.raw = true;
+      continue;
+    }
+    if (token === "--all") {
+      parsed.all = true;
+      continue;
+    }
+    if (token === "--surface") {
+      const value = argv[index + 1];
+      if (!value) {
+        throw new ArgParseError2("--surface requires a value");
+      }
+      parsed.surface = value;
+      index += 1;
+      continue;
+    }
+    if (token === "--section") {
+      const value = argv[index + 1];
+      if (!value) {
+        throw new ArgParseError2("--section requires a value");
+      }
+      const normalized = SECTION_ALIASES[value.toLowerCase()];
+      if (!normalized) {
+        throw new ArgParseError2(`Unsupported section "${value}"`);
+      }
+      parsed.section = normalized;
+      index += 1;
+      continue;
+    }
+    if (token.startsWith("--")) {
+      throw new ArgParseError2(`Unknown flag: ${token}`);
+    }
+    if (!parsed.name) {
+      parsed.name = token;
+      continue;
+    }
+    throw new ArgParseError2(`Unexpected argument: ${token}`);
+  }
+  if (parsed.all && parsed.name) {
+    throw new ArgParseError2("--all cannot be combined with a specialist name");
+  }
+  return parsed;
+}
+function formatPromptValue(value) {
+  if (!value || value.trim().length === 0) {
+    return dim3("(empty)");
+  }
+  return value;
+}
+function formatValue(value) {
+  if (value === undefined)
+    return dim3("(unset)");
+  if (value === null)
+    return dim3("null");
+  if (typeof value === "string")
+    return value;
+  return JSON.stringify(value, null, 2);
+}
+function printSectionHeader(title, color) {
+  console.log();
+  console.log(color(bold3(title)));
+  console.log(color("\u2500".repeat(title.length)));
+}
+function printPromptSection(prompt) {
+  printSectionHeader("prompt", magenta2);
+  console.log(`${bold3("system")}:`);
+  console.log(formatPromptValue(prompt.system));
+  console.log();
+  console.log(`${bold3("task_template")}:`);
+  console.log(formatPromptValue(prompt.task_template));
+  if (prompt.skill_inherit !== undefined) {
+    console.log();
+    console.log(`${bold3("skill_inherit")}: ${formatValue(prompt.skill_inherit)}`);
+  }
+  if (prompt.output_schema !== undefined) {
+    console.log();
+    console.log(`${bold3("output_schema")}:`);
+    console.log(formatValue(prompt.output_schema));
+  }
+}
+function printGenericSection(title, color, value) {
+  printSectionHeader(title, color);
+  console.log(formatValue(value));
+}
+function printHeader(summary, model = summary.model) {
+  const scope = summary.scope === "default" ? green2("[default]") : summary.scope === "package" ? blue2("[package]") : summary.scope === "home" ? cyan2("[home]") : yellow3("[user]");
+  const source = dim3(summary.source);
+  console.log();
+  console.log(`${bold3(cyan2(summary.name))} ${scope} ${permissionBadge2(summary.permission_required)} ${source}`);
+  console.log(dim3(summary.description));
+  console.log(`${dim3("model:")} ${model || yellow3("(unset)")}`);
+  console.log(`${dim3("version:")} ${summary.version}`);
+  console.log(`${dim3("source:")} ${summary.filePath}`);
+}
+function printCatalog(summaries) {
+  if (summaries.length === 0) {
+    console.log("No specialists found.");
+    return;
+  }
+  const rows = [...summaries].sort((left, right) => left.name.localeCompare(right.name));
+  console.log();
+  console.log(bold3(`Specialists catalog (${rows.length})`));
+  console.log();
+  for (const summary of rows) {
+    const scope = summary.scope === "default" ? green2("[default]") : summary.scope === "package" ? blue2("[package]") : summary.scope === "home" ? cyan2("[home]") : yellow3("[user]");
+    const keepAlive = summary.interactive ? yellow3("[keep-alive]") : dim3("[single-turn]");
+    console.log(`${cyan2(summary.name)} ${scope} ${permissionBadge2(summary.permission_required)} ${keepAlive} ${dim3(summary.source)}`);
+    console.log(`${dim3("  model:")} ${summary.model}`);
+    console.log(`${dim3("  category:")} ${summary.category}  ${dim3("version:")} ${summary.version}`);
+    console.log(`${dim3("  desc:")} ${summary.description}`);
+    console.log();
+  }
+}
+function findSummary(summaries, name) {
+  return summaries.find((summary) => summary.name === name);
+}
+async function selectSpecialistFromCatalog(summaries) {
+  if (!input.isTTY || !output.isTTY) {
+    return null;
+  }
+  console.log(dim3("Enter specialist name to view details (blank to cancel):"));
+  const rl = readline2.createInterface({ input, output });
+  try {
+    const selectedName = (await rl.question("> ")).trim();
+    if (!selectedName)
+      return null;
+    return findSummary(summaries, selectedName) ?? null;
+  } finally {
+    rl.close();
+  }
+}
+function sectionValue(spec, section) {
+  if (section === "beads") {
+    return {
+      beads_integration: spec.specialist.beads_integration,
+      beads_write_notes: spec.specialist.beads_write_notes
+    };
+  }
+  return spec.specialist[section];
+}
+function printBySection(spec, section) {
+  if (section === "prompt") {
+    printPromptSection(spec.specialist.prompt);
+    return;
+  }
+  const color = section === "beads" ? yellow3 : section === "metadata" ? cyan2 : green2;
+  printGenericSection(String(section), color, sectionValue(spec, section));
+}
+function printFullSpecialist(spec) {
+  printBySection(spec, "metadata");
+  printBySection(spec, "execution");
+  printBySection(spec, "prompt");
+  printBySection(spec, "skills");
+  printBySection(spec, "capabilities");
+  printBySection(spec, "communication");
+  printBySection(spec, "validation");
+  printBySection(spec, "stall_detection");
+  printBySection(spec, "mandatory_rules");
+  printBySection(spec, "beads");
+}
+function resolveSurfaceModel(execution, surface) {
+  if (!surface)
+    return execution.model;
+  return execution.surface_models?.[surface] ?? execution.model;
+}
+function withSurfaceModel(spec, surface) {
+  const model = resolveSurfaceModel(spec.specialist.execution, surface);
+  if (!surface || model === spec.specialist.execution.model)
+    return spec;
+  return {
+    ...spec,
+    specialist: {
+      ...spec.specialist,
+      execution: { ...spec.specialist.execution, model }
+    }
+  };
+}
+async function loadForInspection(loader, name) {
+  try {
+    return await loader.get(name);
+  } catch (error) {
+    if (!(error instanceof SpecialistMissingModelError))
+      throw error;
+    const effective = await loader.getEffective(name);
+    if (!effective)
+      throw error;
+    return effective;
+  }
+}
+async function printRaw(summary, loader, surface, section) {
+  const spec = await loader.getEffective(summary.name);
+  if (!spec) {
+    console.error(`Specialist not found: ${summary.name}`);
+    process.exit(1);
+  }
+  const resolved = withSurfaceModel(spec, surface);
+  if (!section) {
+    console.log(JSON.stringify(resolved, null, 2));
+    return;
+  }
+  console.log(JSON.stringify({ specialist: { [section]: sectionValue(resolved, section) } }, null, 2));
+}
+async function run9() {
+  let args;
+  try {
+    args = parseArgs3(process.argv.slice(3));
+  } catch (error) {
+    if (error instanceof ArgParseError2) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
+    throw error;
+  }
+  const loader = new SpecialistLoader;
+  const summaries = await loader.list();
+  if (args.all) {
+    printCatalog(summaries);
+    return;
+  }
+  let selectedSummary;
+  if (args.name) {
+    selectedSummary = findSummary(summaries, args.name);
+    if (!selectedSummary) {
+      console.error(`Specialist not found: ${args.name}`);
+      process.exit(1);
+    }
+  } else {
+    printCatalog(summaries);
+    const chosen = await selectSpecialistFromCatalog(summaries);
+    if (!chosen) {
+      if (!input.isTTY || !output.isTTY) {
+        console.log(dim3("Pass a specialist name to render details (e.g. specialists view <name>)."));
+      }
+      return;
+    }
+    selectedSummary = chosen;
+  }
+  if (args.raw) {
+    await printRaw(selectedSummary, loader, args.surface, args.section);
+    return;
+  }
+  const specialist = withSurfaceModel(await loadForInspection(loader, selectedSummary.name), args.surface);
+  printHeader(selectedSummary, specialist.specialist.execution.model);
+  if (args.section) {
+    printBySection(specialist, args.section);
+    return;
+  }
+  printFullSpecialist(specialist);
+}
+var ANSI_RESET = "\x1B[0m", bold3 = (value) => `\x1B[1m${value}${ANSI_RESET}`, dim3 = (value) => `\x1B[2m${value}${ANSI_RESET}`, cyan2 = (value) => `\x1B[36m${value}${ANSI_RESET}`, green2 = (value) => `\x1B[32m${value}${ANSI_RESET}`, yellow3 = (value) => `\x1B[33m${value}${ANSI_RESET}`, blue2 = (value) => `\x1B[34m${value}${ANSI_RESET}`, magenta2 = (value) => `\x1B[35m${value}${ANSI_RESET}`, SECTION_ALIASES, ArgParseError2;
+var init_view = __esm(() => {
+  init_loader();
+  SECTION_ALIASES = {
+    metadata: "metadata",
+    execution: "execution",
+    prompt: "prompt",
+    skills: "skills",
+    capabilities: "capabilities",
+    communication: "communication",
+    validation: "validation",
+    stall: "stall_detection",
+    "stall-detection": "stall_detection",
+    stall_detection: "stall_detection",
+    mandatory: "mandatory_rules",
+    "mandatory-rules": "mandatory_rules",
+    mandatory_rules: "mandatory_rules",
+    rules: "mandatory_rules",
+    beads: "beads"
+  };
+  ArgParseError2 = class ArgParseError2 extends Error {
+    constructor(message) {
+      super(message);
+      this.name = "ArgParseError";
+    }
+  };
+});
+
+// src/cli/models.ts
+import { spawnSync as spawnSync10 } from "child_process";
+function parsePiModels() {
+  const r = spawnSync10("pi", ["--list-models"], {
+    encoding: "utf8",
+    stdio: "pipe",
+    timeout: 8000
+  });
+  if (r.status !== 0 || r.error)
+    return null;
+  return r.stdout.split(`
+`).slice(1).map((line) => line.trim()).filter(Boolean).map((line) => {
+    const cols = line.split(/\s+/);
+    return {
+      provider: cols[0] ?? "",
+      model: cols[1] ?? "",
+      context: cols[2] ?? "",
+      maxOut: cols[3] ?? "",
+      thinking: cols[4] === "yes",
+      images: cols[5] === "yes"
+    };
+  }).filter((m) => m.provider && m.model);
+}
+function parseArgs4(argv) {
+  const out = {};
+  for (let i = 0;i < argv.length; i++) {
+    if (argv[i] === "--provider" && argv[i + 1]) {
+      out.provider = argv[++i];
+      continue;
+    }
+    if (argv[i] === "--used") {
+      out.used = true;
+      continue;
+    }
+  }
+  return out;
+}
+async function run10() {
+  const args = parseArgs4(process.argv.slice(3));
+  const loader = new SpecialistLoader;
+  const specialists = await loader.list();
+  const usedBy = new Map;
+  for (const s of specialists) {
+    const key = s.model;
+    if (!usedBy.has(key))
+      usedBy.set(key, []);
+    usedBy.get(key).push(s.name);
+  }
+  const allModels = parsePiModels();
+  if (!allModels) {
+    console.error("pi not found or failed \u2014 install and configure pi first");
+    process.exit(1);
+  }
+  let models = allModels;
+  if (args.provider) {
+    models = models.filter((m) => m.provider.toLowerCase().includes(args.provider.toLowerCase()));
+  }
+  if (args.used) {
+    models = models.filter((m) => usedBy.has(`${m.provider}/${m.model}`));
+  }
+  if (models.length === 0) {
+    console.log("No models match.");
+    return;
+  }
+  const byProvider = new Map;
+  for (const m of models) {
+    if (!byProvider.has(m.provider))
+      byProvider.set(m.provider, []);
+    byProvider.get(m.provider).push(m);
+  }
+  const total = models.length;
+  console.log(`
+${bold4(`Models on pi`)}  ${dim4(`(${total} total)`)}
+`);
+  for (const [provider, pModels] of byProvider) {
+    console.log(`  ${cyan3(provider)}  ${dim4(`${pModels.length} model${pModels.length !== 1 ? "s" : ""}`)}`);
+    const modelWidth = Math.max(...pModels.map((m) => m.model.length));
+    for (const m of pModels) {
+      const key = `${m.provider}/${m.model}`;
+      const inUse = usedBy.get(key);
+      const flags = [
+        m.thinking ? green3("thinking") : dim4("\xB7"),
+        m.images ? dim4("images") : ""
+      ].filter(Boolean).join("  ");
+      const ctx = dim4(`ctx ${m.context}`);
+      const usedLabel = inUse ? `  ${yellow4("\u2190")} ${dim4(inUse.join(", "))}` : "";
+      console.log(`    ${m.model.padEnd(modelWidth)}  ${ctx.padEnd(18)}  ${flags}${usedLabel}`);
+    }
+    console.log();
+  }
+  if (!args.used) {
+    console.log(dim4(`  --provider <name>  filter by provider`));
+    console.log(dim4(`  --used             only show models used by your specialists`));
+    console.log();
+  }
+}
+var bold4 = (s) => `\x1B[1m${s}\x1B[0m`, dim4 = (s) => `\x1B[2m${s}\x1B[0m`, cyan3 = (s) => `\x1B[36m${s}\x1B[0m`, yellow4 = (s) => `\x1B[33m${s}\x1B[0m`, green3 = (s) => `\x1B[32m${s}\x1B[0m`;
+var init_models = __esm(() => {
+  init_loader();
+});
+
+// src/pi/native-specialists-registration.ts
+import { existsSync as existsSync19, mkdirSync as mkdirSync9, readFileSync as readFileSync13, writeFileSync as writeFileSync7 } from "fs";
+import { homedir as homedir7 } from "os";
+import { dirname as dirname14, join as join21, resolve as resolve10 } from "path";
+import { fileURLToPath as fileURLToPath7 } from "url";
+function getNativeSpecialistsExtensionPath() {
+  const here = dirname14(fileURLToPath7(import.meta.url));
+  for (const candidate of [join21(here, "..", REL4), join21(here, "..", "..", REL4)]) {
+    if (existsSync19(join21(candidate, "index.mjs")))
+      return resolve10(candidate);
+  }
+  return null;
+}
+function getPiSettingsPath(env = process.env) {
+  const agentDir = env.PI_CODING_AGENT_DIR || join21(homedir7(), ".pi", "agent");
+  return join21(agentDir, "settings.json");
+}
+function sourceOf(entry) {
+  const source = typeof entry === "string" ? entry : entry?.source;
+  return typeof source === "string" ? source.replace(/\/+$/, "") : "";
+}
+function withSource(entry, source) {
+  return typeof entry === "string" ? source : { ...entry, source };
+}
+function registerNativeSpecialists(bundledPath = getNativeSpecialistsExtensionPath(), settingsPath = getPiSettingsPath()) {
+  if (!bundledPath)
+    return { status: "skipped", settingsPath, reason: "bundled extension not found" };
+  let settings = {};
+  if (existsSync19(settingsPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync13(settingsPath, "utf8"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+        throw new Error("not an object");
+      settings = parsed;
+    } catch (error) {
+      return { status: "skipped", settingsPath, reason: `unreadable settings: ${error.message}` };
+    }
+  }
+  if (settings.packages !== undefined && !Array.isArray(settings.packages)) {
+    return { status: "skipped", settingsPath, reason: "`packages` is not an array" };
+  }
+  const packages = [...settings.packages ?? []];
+  const current = packages.find((entry) => sourceOf(entry).endsWith(CURRENT));
+  let source = current ? sourceOf(current) : bundledPath;
+  let legacyFound = false;
+  const next = [];
+  for (const entry of packages) {
+    const entrySource = sourceOf(entry);
+    if (!entrySource.endsWith(LEGACY)) {
+      next.push(entry);
+      continue;
+    }
+    if (current || legacyFound) {
+      legacyFound = true;
+      continue;
+    }
+    legacyFound = true;
+    const sibling = entrySource.slice(0, -LEGACY.length) + CURRENT;
+    source = existsSync19(join21(sibling, "index.mjs")) ? sibling : bundledPath;
+    next.push(withSource(entry, source));
+  }
+  if (!current && !legacyFound)
+    next.push(bundledPath);
+  const status = legacyFound ? "migrated" : current ? "present" : "added";
+  if (status === "present")
+    return { status, settingsPath, source };
+  settings.packages = next;
+  mkdirSync9(dirname14(settingsPath), { recursive: true });
+  writeFileSync7(settingsPath, `${JSON.stringify(settings, null, 2)}
+`);
+  return { status, settingsPath, source };
+}
+var CURRENT = "/pi-extensions/native-specialists", LEGACY = "/pi-extensions/specialist-subagents", REL4;
+var init_native_specialists_registration = __esm(() => {
+  REL4 = join21("config", "pi-extensions", "native-specialists");
+});
+
+// src/cli/init.ts
+import { copyFileSync, cpSync, existsSync as existsSync20, lstatSync as lstatSync3, mkdirSync as mkdirSync10, readdirSync as readdirSync6, readFileSync as readFileSync14, readlinkSync, renameSync as renameSync3, rmSync as rmSync3, symlinkSync, unlinkSync, writeFileSync as writeFileSync8 } from "fs";
+import { spawnSync as spawnSync11 } from "child_process";
+import { basename as basename4, dirname as dirname15, join as join22, relative as relative2, resolve as resolve11 } from "path";
+function ok(msg) {
+  console.log(`  ${green4("\u2713")} ${msg}`);
+}
+function skip(msg) {
+  console.log(`  ${yellow5("\u25CB")} ${msg}`);
+}
+function warn(msg) {
+  console.warn(`  ${yellow5("!")} ${msg}`);
+}
+function isInstalled(bin) {
+  return spawnSync11("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
+}
+function assertXtrmPrerequisites(cwd) {
+  const hasXtrmDir = existsSync20(join22(cwd, ".xtrm"));
+  const hasXtCli = isInstalled("xt");
+  if (hasXtrmDir && hasXtCli)
+    return;
+  if (!hasXtCli) {
+    console.error("specialists init: missing xt CLI.");
+    console.error("1. Install xtrm-tools globally: npm install -g xtrm-tools");
+    console.error("2. Run xt install");
+    console.error("3. Run xt init in this repo");
+    console.error("4. Verify xt is available: xt --version");
+    process.exit(1);
+  }
+  if (!hasXtrmDir) {
+    console.error("specialists init: missing .xtrm/ in this repo.");
+    console.error("1. Run xt init in this repo");
+    console.error("2. Verify xt is available: xt --version");
+    process.exit(1);
+  }
+}
+function warnMissingOptionalPrerequisites() {
+  const optionalTools = [
+    { name: "pi", install: "npm install -g @earendil-works/pi-coding-agent" },
+    { name: "bd", install: "npm install -g @jaggerxtrm/beads" },
+    { name: "sp", install: "npm install -g @jaggerxtrm/specialists" }
+  ];
+  const missingTools = optionalTools.filter((tool) => !isInstalled(tool.name));
+  if (missingTools.length === 0)
+    return;
+  warn("Optional CLI prerequisites are missing. Init will continue, but workflow commands may fail:");
+  for (const tool of missingTools) {
+    if (tool.name === "bd") {
+      warn(`bd: optional legacy sp/Supervisor compatibility only; install via ${tool.install}`);
+      continue;
+    }
+    warn(`${tool.name}: install via ${tool.install}`);
+  }
+}
+function loadJson(path, fallback) {
+  if (!existsSync20(path))
+    return structuredClone(fallback);
+  try {
+    return JSON.parse(readFileSync14(path, "utf-8"));
+  } catch {
+    return structuredClone(fallback);
+  }
+}
+function saveJson(path, value) {
+  writeFileSync8(path, JSON.stringify(value, null, 2) + `
+`, "utf-8");
+}
+function writeGlobalOverridesGuide(configPath) {
+  const docsDir = resolveCanonicalAssetDir("../docs");
+  const sourcePath = docsDir ? join22(docsDir, "overrides-guide.md") : null;
+  if (!sourcePath || !existsSync20(sourcePath)) {
+    warn("global overrides guide not found in package; see docs/overrides-guide.md on GitHub");
+    return null;
+  }
+  const targetPath = join22(dirname15(configPath), "overrides-guide.md");
+  copyFileSync(sourcePath, targetPath);
+  return targetPath;
+}
+function migrateLegacySpecialists(cwd, scope) {
+  const sourceDir = join22(cwd, ".specialists", scope, "specialists");
+  if (!existsSync20(sourceDir))
+    return;
+  const targetDir = join22(cwd, ".specialists", scope);
+  if (!existsSync20(targetDir)) {
+    mkdirSync10(targetDir, { recursive: true });
+  }
+  const files = readdirSync6(sourceDir).filter((f) => f.endsWith(".specialist.json") || f.endsWith(".specialist.json"));
+  if (files.length === 0)
+    return;
+  let moved = 0;
+  let skipped = 0;
+  for (const file of files) {
+    const src = join22(sourceDir, file);
+    const dest = join22(targetDir, file);
+    if (existsSync20(dest)) {
+      skipped++;
+      continue;
+    }
+    renameSync3(src, dest);
+    moved++;
+  }
+  if (moved > 0) {
+    ok(`migrated ${moved} specialist${moved === 1 ? "" : "s"} from .specialists/${scope}/specialists/ to .specialists/${scope}/`);
+  }
+  if (skipped > 0) {
+    skip(`${skipped} legacy specialist${skipped === 1 ? "" : "s"} already exist in .specialists/${scope}/ (not moved)`);
+  }
+}
+function copyCanonicalSpecialists(cwd) {
+  const sourceDir = resolveCanonicalAssetDir("specialists");
+  if (!sourceDir) {
+    skip("no canonical specialists found in package");
+    return;
+  }
+  const targetDir = join22(cwd, ".specialists", "default");
+  const files = readdirSync6(sourceDir).filter((f) => f.endsWith(".specialist.json"));
+  if (files.length === 0) {
+    skip("no specialist files found in package");
+    return;
+  }
+  if (!existsSync20(targetDir)) {
+    mkdirSync10(targetDir, { recursive: true });
+  }
+  let copied = 0;
+  let refreshed = 0;
+  for (const file of files) {
+    const src = join22(sourceDir, file);
+    const dest = join22(targetDir, file);
+    if (existsSync20(dest)) {
+      copyFileSync(src, dest);
+      refreshed++;
+    } else {
+      copyFileSync(src, dest);
+      copied++;
+    }
+  }
+  if (copied > 0) {
+    ok(`copied ${copied} canonical specialist${copied === 1 ? "" : "s"} to .specialists/default/`);
+  }
+  if (refreshed > 0) {
+    ok(`re-synced ${refreshed} canonical specialist${refreshed === 1 ? "" : "s"} in .specialists/default/`);
+  }
+}
+function copyCanonicalMandatoryRules(cwd) {
+  const sourceDir = resolveCanonicalAssetDir("mandatory-rules");
+  if (!sourceDir) {
+    skip("no canonical mandatory-rules found in package");
+    return;
+  }
+  const targetDir = join22(cwd, ".specialists", "default", "mandatory-rules");
+  const files = readdirSync6(sourceDir).filter((f) => f.endsWith(".md") || f.endsWith(".json"));
+  if (files.length === 0) {
+    skip("no mandatory-rules files found in package");
+    return;
+  }
+  if (!existsSync20(targetDir)) {
+    mkdirSync10(targetDir, { recursive: true });
+  }
+  let copied = 0;
+  let refreshed = 0;
+  for (const file of files) {
+    const src = join22(sourceDir, file);
+    const dest = join22(targetDir, file);
+    if (existsSync20(dest)) {
+      copyFileSync(src, dest);
+      refreshed++;
+    } else {
+      copyFileSync(src, dest);
+      copied++;
+    }
+  }
+  if (copied > 0) {
+    ok(`copied ${copied} mandatory-rule${copied === 1 ? "" : "s"} to .specialists/default/mandatory-rules/`);
+  }
+  if (refreshed > 0) {
+    ok(`re-synced ${refreshed} mandatory-rule${refreshed === 1 ? "" : "s"} in .specialists/default/mandatory-rules/`);
+  }
+}
+function copyCanonicalNodeConfigs(cwd) {
+  const sourceDir = resolveCanonicalAssetDir("nodes");
+  if (!sourceDir) {
+    skip("no canonical node configs found in package");
+    return;
+  }
+  const targetDir = join22(cwd, ".specialists", "default", "nodes");
+  const files = readdirSync6(sourceDir).filter((f) => f.endsWith(".node.json"));
+  if (files.length === 0) {
+    skip("no node config files found in package");
+    return;
+  }
+  if (!existsSync20(targetDir)) {
+    mkdirSync10(targetDir, { recursive: true });
+  }
+  let copied = 0;
+  let refreshed = 0;
+  for (const file of files) {
+    const src = join22(sourceDir, file);
+    const dest = join22(targetDir, file);
+    if (existsSync20(dest)) {
+      copyFileSync(src, dest);
+      refreshed++;
+    } else {
+      copyFileSync(src, dest);
+      copied++;
+    }
+  }
+  if (copied > 0) {
+    ok(`copied ${copied} canonical node config${copied === 1 ? "" : "s"} to .specialists/default/nodes/`);
+  }
+  if (refreshed > 0) {
+    ok(`re-synced ${refreshed} canonical node config${refreshed === 1 ? "" : "s"} in .specialists/default/nodes/`);
+  }
+}
+function ensureRootSymlink(rootPath, expectedTargetPath) {
+  if (!existsSync20(rootPath)) {
+    mkdirSync10(dirname15(rootPath), { recursive: true });
+    const relTarget = relative2(dirname15(rootPath), expectedTargetPath);
+    symlinkSync(relTarget, rootPath);
+    ok(`created ${basename4(dirname15(rootPath))}/${basename4(rootPath)} \u2192 ${relTarget}`);
+    return;
+  }
+  const stats = lstatSync3(rootPath);
+  if (!stats.isSymbolicLink()) {
+    throw new Error(`${rootPath} must be a symlink to ${expectedTargetPath}. Aborting.`);
+  }
+  const linkTarget = readlinkSync(rootPath);
+  const resolvedTarget = resolve11(dirname15(rootPath), linkTarget);
+  const resolvedExpected = resolve11(expectedTargetPath);
+  if (resolvedTarget === resolvedExpected) {
+    return;
+  }
+  const legacyTargets = [
+    resolve11(expectedTargetPath, "claude"),
+    resolve11(expectedTargetPath, "pi")
+  ];
+  if (legacyTargets.includes(resolvedTarget)) {
+    unlinkSync(rootPath);
+    const relTarget = relative2(dirname15(rootPath), expectedTargetPath);
+    symlinkSync(relTarget, rootPath);
+    ok(`rewired ${basename4(dirname15(rootPath))}/${basename4(rootPath)} \u2192 ${relTarget}`);
+    return;
+  }
+  throw new Error(`${rootPath} points to ${linkTarget}, expected ${expectedTargetPath}. Aborting.`);
+}
+function ensureActiveSkillSymlink(defaultSkillPath, activeLinkPath) {
+  let stats;
+  try {
+    stats = lstatSync3(activeLinkPath);
+  } catch (error) {
+    const fileError = error;
+    if (fileError.code === "ENOENT") {
+      const relativeTarget = `../default/${basename4(defaultSkillPath)}`;
+      symlinkSync(relativeTarget, activeLinkPath, "dir");
+      return;
+    }
+    throw error;
+  }
+  if (!stats.isSymbolicLink()) {
+    throw new Error(`${activeLinkPath} already exists and is not a symlink.`);
+  }
+  const currentTarget = resolve11(dirname15(activeLinkPath), readlinkSync(activeLinkPath));
+  if (currentTarget !== resolve11(defaultSkillPath)) {
+    throw new Error(`${activeLinkPath} points to an unexpected target.`);
+  }
+}
+function installProjectSkills(cwd, syncSkills) {
+  const xtrmRoot = join22(cwd, ".xtrm");
+  if (!existsSync20(xtrmRoot)) {
+    throw new Error(".xtrm/ is missing. Install xtrm first, then run specialists init.");
+  }
+  const sourceDir = resolveCanonicalAssetDir("skills");
+  if (!sourceDir) {
+    skip("no canonical skills found in package");
+    return;
+  }
+  const skills = readdirSync6(sourceDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+  if (skills.length === 0) {
+    skip("no skill directories found in package");
+    return;
+  }
+  const defaultRoot = join22(cwd, ".xtrm", "skills", "default");
+  const activeRoot = join22(cwd, ".xtrm", "skills", "active");
+  mkdirSync10(defaultRoot, { recursive: true });
+  mkdirSync10(activeRoot, { recursive: true });
+  ensureRootSymlink(join22(cwd, ".claude", "skills"), activeRoot);
+  ensureRootSymlink(join22(cwd, ".pi", "skills"), activeRoot);
+  let copied = 0;
+  let refreshed = 0;
+  let pruned = 0;
+  if (syncSkills) {
+    const currentSkills = new Set(skills);
+    for (const entry of readdirSync6(defaultRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory() || currentSkills.has(entry.name))
+        continue;
+      const retiredDefaultPath = join22(defaultRoot, entry.name);
+      const retiredActivePath = join22(activeRoot, entry.name);
+      try {
+        if (lstatSync3(retiredActivePath).isSymbolicLink() && resolve11(dirname15(retiredActivePath), readlinkSync(retiredActivePath)) === resolve11(retiredDefaultPath)) {
+          unlinkSync(retiredActivePath);
+        }
+      } catch {}
+      rmSync3(retiredDefaultPath, { recursive: true, force: true });
+      pruned++;
+    }
+  }
+  for (const skill of skills) {
+    const src = join22(sourceDir, skill);
+    const defaultSkillPath = join22(defaultRoot, skill);
+    if (existsSync20(defaultSkillPath)) {
+      if (syncSkills) {
+        cpSync(src, defaultSkillPath, { recursive: true, force: true });
+        refreshed++;
+      }
+    } else {
+      cpSync(src, defaultSkillPath, { recursive: true });
+      copied++;
+    }
+    ensureActiveSkillSymlink(defaultSkillPath, join22(activeRoot, skill));
+  }
+  if (copied > 0)
+    ok(`copied ${copied} skill${copied === 1 ? "" : "s"} to .xtrm/skills/default/`);
+  if (refreshed > 0)
+    ok(`re-synced ${refreshed} skill${refreshed === 1 ? "" : "s"} in .xtrm/skills/default/`);
+  if (pruned > 0)
+    ok(`pruned ${pruned} retired managed skill${pruned === 1 ? "" : "s"}`);
+  ok("verified active skill symlinks in .xtrm/skills/active/");
+}
+function createSpecialistsDirs(cwd) {
+  const defaultDir = join22(cwd, ".specialists", "default");
+  const userDir = join22(cwd, ".specialists", "user");
+  let created = 0;
+  for (const dir of [defaultDir, userDir]) {
+    if (!existsSync20(dir)) {
+      mkdirSync10(dir, { recursive: true });
+      created++;
+    }
+  }
+  if (created > 0) {
+    ok("created .specialists/default/ and .specialists/user/");
+  }
+}
+function createRuntimeDirs(cwd) {
+  const runtimeDirs = [
+    join22(cwd, ".specialists", "jobs"),
+    join22(cwd, ".specialists", "ready")
+  ];
+  let created = 0;
+  for (const dir of runtimeDirs) {
+    if (!existsSync20(dir)) {
+      mkdirSync10(dir, { recursive: true });
+      created++;
+    }
+  }
+  if (created > 0) {
+    ok("created .specialists/jobs/ and .specialists/ready/");
+  }
+}
+function ensureProjectMcp(cwd) {
+  const mcpPath = join22(cwd, MCP_FILE);
+  const mcp = loadJson(mcpPath, { mcpServers: {} });
+  mcp.mcpServers ??= {};
+  const existing = mcp.mcpServers[MCP_SERVER_NAME];
+  if (existing && existing.command === MCP_SERVER_CONFIG.command && Array.isArray(existing.args) && existing.args.length === MCP_SERVER_CONFIG.args.length) {
+    skip(".mcp.json already registers specialists");
+    return;
+  }
+  mcp.mcpServers[MCP_SERVER_NAME] = MCP_SERVER_CONFIG;
+  saveJson(mcpPath, mcp);
+  ok("registered specialists in project .mcp.json");
+}
+function ensureGitignore(cwd) {
+  const gitignorePath = join22(cwd, ".gitignore");
+  const existing = existsSync20(gitignorePath) ? readFileSync14(gitignorePath, "utf-8") : "";
+  let added = 0;
+  const lines = existing.split(`
+`);
+  for (const entry of GITIGNORE_ENTRIES) {
+    if (!lines.includes(entry)) {
+      lines.push(entry);
+      added++;
+    }
+  }
+  if (added > 0) {
+    writeFileSync8(gitignorePath, lines.join(`
+`) + `
+`, "utf-8");
+    ok("added .specialists/jobs/ and .specialists/ready/ to .gitignore");
+  } else {
+    skip(".gitignore already has runtime entries");
+  }
+}
+function ensureObservabilityDb(cwd) {
+  const location = resolveObservabilityDbLocation(cwd);
+  if (isPathInsideJobsDirectory(location.dbPath, location.gitRoot)) {
+    skip("observability DB path resolves inside jobs directory \u2014 skipped");
+    return;
+  }
+  const alreadyExists = existsSync20(location.dbPath);
+  if (alreadyExists) {
+    skip("observability database already exists (not touched)");
+    return;
+  }
+  const { created } = ensureObservabilityDbFile(location);
+  if (!created) {
+    skip("observability database already exists (not touched)");
+    return;
+  }
+  const client = createObservabilitySqliteClientAtPath(location.dbPath);
+  if (client) {
+    client.close();
+    ok("created observability database (.specialists/db/observability.db)");
+  } else {
+    ok("created observability database file (schema init deferred \u2014 sqlite3/bun not available)");
+  }
+  ensureGitignoreHasObservabilityDbEntries(location.gitRoot);
+}
+function extractSpecialistsBlockSpan(existing) {
+  const start = existing.indexOf("<!-- specialists:start -->");
+  if (start === -1)
+    return null;
+  const endMarker = "<!-- specialists:end -->";
+  const endMarkerIndex = existing.indexOf(endMarker, start);
+  if (endMarkerIndex === -1)
+    return null;
+  return { start, end: endMarkerIndex + endMarker.length };
+}
+function ensureAgentsMd(cwd) {
+  const agentsPath = join22(cwd, "AGENTS.md");
+  if (!existsSync20(agentsPath)) {
+    writeFileSync8(agentsPath, AGENTS_BLOCK, "utf-8");
+    ok("created AGENTS.md with Specialists section");
+    return;
+  }
+  const existing = readFileSync14(agentsPath, "utf-8");
+  const span = extractSpecialistsBlockSpan(existing);
+  if (span) {
+    const next = existing.slice(0, span.start) + AGENTS_BLOCK + existing.slice(span.end);
+    if (next === existing) {
+      skip("AGENTS.md already has Specialists section");
+      return;
+    }
+    writeFileSync8(agentsPath, next, "utf-8");
+    ok("updated Specialists section in AGENTS.md");
+    return;
+  }
+  if (existing.includes(AGENTS_MARKER)) {
+    const markerIndex = existing.indexOf(AGENTS_MARKER);
+    const nextH2Match = /^## /m.exec(existing.slice(markerIndex + AGENTS_MARKER.length));
+    const nextH2Index = nextH2Match ? markerIndex + AGENTS_MARKER.length + nextH2Match.index : existing.length;
+    const next = existing.slice(0, markerIndex).trimEnd() + `
+
+` + AGENTS_BLOCK + (nextH2Index < existing.length ? `
+` + existing.slice(nextH2Index) : "");
+    writeFileSync8(agentsPath, next, "utf-8");
+    ok("migrated Specialists section in AGENTS.md");
+    return;
+  }
+  writeFileSync8(agentsPath, existing.trimEnd() + `
+
+` + AGENTS_BLOCK, "utf-8");
+  ok("appended Specialists section to AGENTS.md");
+}
+function readJsonObject(path) {
+  if (!existsSync20(path))
+    return {};
+  try {
+    return JSON.parse(readFileSync14(path, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+function validateInitPostconditions(cwd) {
+  const warnings = [];
+  const mcp = readJsonObject(join22(cwd, ".mcp.json"));
+  const mcpServers = mcp.mcpServers;
+  const specialistsServer = mcpServers && typeof mcpServers === "object" ? mcpServers.specialists : undefined;
+  if (!specialistsServer || typeof specialistsServer !== "object") {
+    warnings.push(".mcp.json missing mcpServers.specialists registration");
+  }
+  const runtimeDirs = [join22(cwd, ".specialists", "jobs"), join22(cwd, ".specialists", "ready")];
+  for (const runtimeDir of runtimeDirs) {
+    if (!existsSync20(runtimeDir)) {
+      warnings.push(`${relative2(cwd, runtimeDir)} is missing`);
+    }
+  }
+  const defaultSkillsRoot = join22(cwd, ".xtrm", "skills", "default");
+  const defaultSkills = existsSync20(defaultSkillsRoot) ? readdirSync6(defaultSkillsRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory()) : [];
+  if (defaultSkills.length === 0) {
+    warnings.push(".xtrm/skills/default/ is missing or has no skill directories");
+  }
+  const rootSymlinks = [
+    {
+      linkPath: join22(cwd, ".claude", "skills"),
+      expectedTarget: join22(cwd, ".xtrm", "skills", "active")
+    },
+    {
+      linkPath: join22(cwd, ".pi", "skills"),
+      expectedTarget: join22(cwd, ".xtrm", "skills", "active")
+    }
+  ];
+  for (const symlink of rootSymlinks) {
+    if (!existsSync20(symlink.linkPath)) {
+      warnings.push(`${relative2(cwd, symlink.linkPath)} is missing`);
+      continue;
+    }
+    const stats = lstatSync3(symlink.linkPath);
+    if (!stats.isSymbolicLink()) {
+      warnings.push(`${relative2(cwd, symlink.linkPath)} is not a symlink`);
+      continue;
+    }
+    const resolvedTarget = resolve11(dirname15(symlink.linkPath), readlinkSync(symlink.linkPath));
+    if (resolvedTarget !== resolve11(symlink.expectedTarget)) {
+      warnings.push(`${relative2(cwd, symlink.linkPath)} points to an unexpected target`);
+    }
+  }
+  return warnings;
+}
+function cleanupLegacyHookLinks(cwd) {
+  const hooksDir = join22(cwd, ".claude", "hooks");
+  if (!existsSync20(hooksDir))
+    return [];
+  const managedDir = join22(cwd, ".xtrm", "hooks", "specialists");
+  const removed = [];
+  for (const name of readdirSync6(hooksDir).filter((entry) => LEGACY_HOOK_NAME.test(entry))) {
+    const linkPath = join22(hooksDir, name);
+    if (!lstatSync3(linkPath).isSymbolicLink())
+      continue;
+    const target = resolve11(hooksDir, readlinkSync(linkPath));
+    if (existsSync20(linkPath) && !target.startsWith(managedDir + "/"))
+      continue;
+    unlinkSync(linkPath);
+    removed.push(name);
+  }
+  return removed;
+}
+function isStaleLegacyCommand(cwd, command) {
+  if (typeof command !== "string")
+    return false;
+  const match = LEGACY_HOOK_COMMAND.exec(command);
+  return match !== null && !existsSync20(join22(cwd, ".claude", "hooks", match[1]));
+}
+function cleanupLegacySettingsHooks(cwd) {
+  const settingsPath = join22(cwd, ".claude", "settings.json");
+  if (!existsSync20(settingsPath))
+    return 0;
+  const raw = readFileSync14(settingsPath, "utf-8");
+  let settings;
+  try {
+    settings = JSON.parse(raw);
+  } catch {
+    warn(".claude/settings.json is not valid JSON; skipped legacy hook cleanup");
+    return 0;
+  }
+  if (!settings.hooks || typeof settings.hooks !== "object")
+    return 0;
+  let dropped = 0;
+  for (const [event, entries] of Object.entries(settings.hooks)) {
+    if (!Array.isArray(entries))
+      continue;
+    const kept = entries.filter((entry) => {
+      const before = entry.hooks?.length ?? 0;
+      if (!Array.isArray(entry.hooks))
+        return true;
+      entry.hooks = entry.hooks.filter((hook) => !isStaleLegacyCommand(cwd, hook.command));
+      dropped += before - entry.hooks.length;
+      return entry.hooks.length > 0 || before === 0;
+    });
+    if (kept.length === entries.length && dropped === 0)
+      continue;
+    if (kept.length > 0)
+      settings.hooks[event] = kept;
+    else
+      delete settings.hooks[event];
+  }
+  if (dropped === 0)
+    return 0;
+  const indent = /^([ \t]+)"/m.exec(raw)?.[1] ?? 2;
+  writeFileSync8(settingsPath, JSON.stringify(settings, null, indent) + (raw.endsWith(`
+`) ? `
+` : ""), "utf-8");
+  return dropped;
+}
+function cleanupLegacyClaudeHooks(cwd) {
+  const links = cleanupLegacyHookLinks(cwd);
+  const entries = cleanupLegacySettingsHooks(cwd);
+  if (links.length > 0)
+    ok(`removed legacy .claude/hooks links: ${links.join(", ")}`);
+  if (entries > 0)
+    ok(`removed ${entries} stale specialists hook entr${entries === 1 ? "y" : "ies"} from .claude/settings.json`);
+}
+async function runGlobal() {
+  console.log(`
+${bold5("specialists init --global")}
+`);
+  const loader = new SpecialistLoader;
+  const specialists = await loader.list();
+  const shippedNames = specialists.map((spec) => spec.name).sort();
+  const template = buildGlobalUserConfigTemplate(shippedNames);
+  const location = getGlobalUserConfigPath();
+  const existing = readGlobalUserConfig(location);
+  let guidePath = null;
+  if (existing) {
+    const result = mergeGlobalUserConfig(existing, template);
+    writeGlobalUserConfig(location, result.config);
+    guidePath = writeGlobalOverridesGuide(location.path);
+    ok(`using global config at ${location.path} (${location.source})`);
+    if (result.added.length > 0) {
+      ok(`added ${result.added.length} new specialist${result.added.length === 1 ? "" : "s"}: ${result.added.join(", ")}`);
+    } else {
+      skip("no new specialists to add");
+    }
+    if (result.extended.length > 0) {
+      ok(`preserved ${result.extended.length} existing specialist${result.extended.length === 1 ? "" : "s"} (user values kept)`);
+    }
+    for (const removedName of result.removed) {
+      warn(`${removedName} is no longer shipped but kept in file (remove manually if unwanted)`);
+    }
+  } else {
+    writeGlobalUserConfig(location, template);
+    guidePath = writeGlobalOverridesGuide(location.path);
+    ok(`created global config at ${location.path} (${location.source})`);
+    ok(`seeded ${shippedNames.length} specialist${shippedNames.length === 1 ? "" : "s"} with inherit defaults`);
+  }
+  if (guidePath) {
+    ok(`wrote overrides guide at ${guidePath}`);
+  }
+  const pi = registerNativeSpecialists();
+  if (pi.status === "skipped")
+    warn(`native-specialists Pi extension not registered: ${pi.reason}`);
+  else if (pi.status === "present")
+    skip(`native-specialists Pi extension already registered (${pi.source})`);
+  else
+    ok(`native-specialists Pi extension ${pi.status} in ${pi.settingsPath} (${pi.source})`);
+  console.log(`
+${bold5("Done!")}
+`);
+  console.log(`  ${dim5("Override reference:")} ${yellow5(guidePath ?? "./overrides-guide.md")}`);
+  console.log(`  ${dim5("Edit override fields with:")}`);
+  console.log(`  ${yellow5("specialists edit --global <name>.execution.model <value>")}`);
+  console.log(`  ${yellow5("specialists edit --global")} ${dim5("# open in $EDITOR")}
+`);
+  console.log(`  ${dim5("Common override hints:")}`);
+  console.log(`  ${dim5("\u2022 for extension opt-out, set")} ${yellow5("<name>.execution.extensions.gitnexus false")}`);
+  console.log(`  ${dim5("\u2022 for trusted custom extension sources, set")} ${yellow5('<name>.execution.extensions."npm:@scope/pkg" true')}`);
+  console.log(`  ${dim5("\u2022 for system prompt composition, set")} ${yellow5("<name>.prompt.system_prompt_mode append|replace")}`);
+  console.log(`  ${dim5("\u2022 for fallback chains, set")} ${yellow5('<name>.execution.fallback_models ["provider/model", "provider/model"]')}`);
+  console.log(`  ${dim5("\u2022 for preset refs, set model/fallback entries to")} ${yellow5("@preset/cheap")} ${dim5("(or medium, power)")}`);
+  console.log(`  ${dim5("\u2022 for per-specialist mandatory rule sets, set")} ${yellow5('<name>.mandatory_rules.template_sets ["git-workflow-safe", ...]')}`);
+  console.log(`  ${dim5("    (null inherits the shipped sets, [] selects no specialist-specific sets; index required/default sets always load)")}
+`);
+}
+async function run11(opts = {}) {
+  if (opts.global) {
+    return runGlobal();
+  }
+  const cwd = process.cwd();
+  const forceInit = process.env.SPECIALISTS_INIT_FORCE === "1";
+  const inAgentSession = !forceInit && (!process.stdin.isTTY || !!process.env.SPECIALISTS_TMUX_SESSION || !!process.env.SPECIALISTS_JOB_ID || !!process.env.PI_SESSION_ID || !!process.env.PI_RPC_SOCKET);
+  if (inAgentSession) {
+    console.error("specialists init requires an interactive terminal. This is a user-only bootstrap command \u2014 do not invoke from scripts or agent sessions.");
+    process.exit(1);
+  }
+  console.log(`
+${bold5("specialists init")}
+`);
+  const { syncDefaults = false, syncSkills = false, noXtrmCheck = false } = opts;
+  if (!noXtrmCheck) {
+    assertXtrmPrerequisites(cwd);
+  }
+  warnMissingOptionalPrerequisites();
+  if (syncDefaults) {
+    warn("--sync-defaults is deprecated. This creates drift debt; use sp pin <id> for intentional pins.");
+    migrateLegacySpecialists(cwd, "default");
+    copyCanonicalSpecialists(cwd);
+    copyCanonicalMandatoryRules(cwd);
+    copyCanonicalNodeConfigs(cwd);
+  } else {
+    skip(".specialists/default/ not synced (package canonical by default; use sp pin <id> for intentional pins)");
+  }
+  migrateLegacySpecialists(cwd, "user");
+  createSpecialistsDirs(cwd);
+  createRuntimeDirs(cwd);
+  ensureGitignore(cwd);
+  ensureAgentsMd(cwd);
+  ensureProjectMcp(cwd);
+  cleanupLegacyClaudeHooks(cwd);
+  installProjectSkills(cwd, syncSkills);
+  ensureObservabilityDb(cwd);
+  const postconditionWarnings = validateInitPostconditions(cwd);
+  if (postconditionWarnings.length > 0) {
+    warn("Init completed with postcondition warnings:");
+    for (const warningMessage of postconditionWarnings) {
+      warn(warningMessage);
+    }
+  }
+  console.log(`
+${bold5("Done!")}
+`);
+  console.log(`  ${dim5("Project-local installation:")}`);
+  console.log(`  .xtrm/skills/default/  ${dim5("# canonical skills")}`);
+  console.log(`  .xtrm/skills/active/   ${dim5("# flattened active skill root")}`);
+  console.log(`  .claude/skills/        ${dim5("# symlink -> .xtrm/skills/active")}`);
+  console.log(`  .pi/skills/            ${dim5("# symlink -> .xtrm/skills/active")}`);
+  console.log("");
+  console.log(`  ${dim5(".specialists/ structure:")}`);
+  console.log(`  .specialists/`);
+  console.log(`  \u251C\u2500\u2500 default/           ${dim5("# intentional pins only; package canonical by default")}`);
+  console.log(`  \u251C\u2500\u2500 user/              ${dim5("# your custom specialists")}`);
+  console.log(`  \u251C\u2500\u2500 db/                ${dim5("# observability SQLite (gitignored)")}`);
+  console.log(`  \u251C\u2500\u2500 jobs/              ${dim5("# runtime (gitignored)")}`);
+  console.log(`  \u2514\u2500\u2500 ready/             ${dim5("# runtime (gitignored)")}`);
+  console.log(`
+  ${dim5("Next steps:")}`);
+  console.log(`  1. Run ${yellow5("specialists list")} to see available specialists`);
+  console.log(`  2. Add custom specialists to ${yellow5(".specialists/user/")}`);
+  console.log(`  3. Restart Claude Code or pi to pick up changes
+`);
+}
+var bold5 = (s) => `\x1B[1m${s}\x1B[0m`, green4 = (s) => `\x1B[32m${s}\x1B[0m`, yellow5 = (s) => `\x1B[33m${s}\x1B[0m`, dim5 = (s) => `\x1B[2m${s}\x1B[0m`, AGENTS_BLOCK, AGENTS_MARKER = "## Specialists", GITIGNORE_ENTRIES, MCP_FILE = ".mcp.json", MCP_SERVER_NAME = "specialists", MCP_SERVER_CONFIG, LEGACY_HOOK_NAME, LEGACY_HOOK_COMMAND;
+var init_init = __esm(() => {
+  init_observability_db();
+  init_observability_sqlite();
+  init_canonical_asset_resolver();
+  init_loader();
+  init_native_specialists_registration();
+  init_global_config();
+  AGENTS_BLOCK = `
+<!-- specialists:start -->
+## Specialists
+
+Specialists is an XTRM execution backend. Substrate owns durable work.
+
+Native/current tracked flow:
+1. Start from a ready pinned Substrate Issue revision.
+2. Dispatch with the native Specialist surface exposed by the runtime (for example \`specialist_dispatch(issue_ref=...)\`).
+3. Observe persisted status/result/forensics and answer asks through the native control surface.
+4. Verify the result against the pinned contract and current tree/tests.
+5. Record result/provenance through Substrate; settlement/PASS/commit is not Issue Closure.
+6. Closure is explicit and belongs to the authorized durable-work owner.
+
+Core observation/compatibility commands:
+- \`specialists list\`
+- \`specialists ps\` / \`specialists feed\` / \`specialists result\`
+- legacy \`specialists run <name> --issue-ref <id>\` remains available only while XTRM-93 keeps the Supervisor backend reachable (--bead/--bead-id are permanent compatibility aliases for --issue-ref).
+
+Rules:
+- Do not use Beads notes/status as authority for native work.
+- \`--issue-ref\` is the primary spelling; \`--bead\` / \`--bead-id\` / \`bead_id\` are permanent compatibility aliases for the same value; inspect the live surface before inferring backend semantics.
+- Messages coordinate; they do not rewrite SCOPE/SUCCESS/NON_GOALS/CONSTRAINTS/VALIDATION/OUTPUT.
+- Add custom Specialist definitions under \`.specialists/user/\`; current role prompts must preserve pinned-Issue/Journal/settlement/Closure semantics.
+<!-- specialists:end -->
+`.trimStart();
+  GITIGNORE_ENTRIES = [
+    ".specialists/jobs/",
+    ".specialists/ready/",
+    ".specialists/settlements/",
+    ".specialists/db/*.db",
+    ".specialists/db/*.db-wal",
+    ".specialists/db/*.db-shm"
+  ];
+  MCP_SERVER_CONFIG = { command: "specialists", args: [] };
+  LEGACY_HOOK_NAME = /^specialists-[\w.-]+\.mjs$/;
+  LEGACY_HOOK_COMMAND = /\.claude\/hooks\/(specialists-[\w.-]+\.mjs)/;
+});
+
+// src/cli/db.ts
+import { existsSync as existsSync21, mkdirSync as mkdirSync11, readdirSync as readdirSync7, readFileSync as readFileSync15, writeFileSync as writeFileSync9 } from "fs";
+import { dirname as dirname16, join as join23, resolve as resolve12 } from "path";
+function checkpointIsPartial(mode, busy) {
+  return mode !== "PASSIVE" && busy !== 0;
+}
+function formatBytes(bytes) {
+  if (bytes < 1024)
+    return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unitIndex = -1;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(2)} ${units[unitIndex]}`;
+}
+function parseIsoDate(input) {
+  const parsed = Date.parse(input);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+function parseDuration(input) {
+  const match = input.trim().toLowerCase().match(/^(\d+)([smhdw])$/);
+  if (!match)
+    return null;
+  const amount = Number(match[1]);
+  const unit = match[2];
+  if (!Number.isFinite(amount) || amount <= 0)
+    return null;
+  const multipliers = {
+    s: 1000,
+    m: 60 * 1000,
+    h: 60 * 60 * 1000,
+    d: DAY_MS,
+    w: 7 * DAY_MS
+  };
+  return amount * multipliers[unit];
+}
+function parseBeforeArgument(raw) {
+  const durationMs = parseDuration(raw);
+  if (durationMs !== null)
+    return Date.now() - durationMs;
+  const isoMs = parseIsoDate(raw);
+  if (isoMs !== null)
+    return isoMs;
+  throw new Error(`Invalid --before value '${raw}'. Use ISO date or duration like 7d.`);
+}
+function printDbHelp() {
+  console.log([
+    "",
+    "Usage: specialists db <setup|backfill|vacuum|checkpoint|prune|extract|stats|benchmark-export>",
+    "",
+    "Human-only commands for shared observability SQLite database maintenance and migration.",
+    "",
+    "Commands:",
+    "  [BOOTSTRAP] setup                  Provision database file + schema + .gitignore entries",
+    "  [BOOTSTRAP] init                   Alias for setup",
+    "  [MIGRATION] backfill [--events]    Import historical .specialists/jobs/*/status.json rows",
+    "  [MIGRATION] vacuum                 Run SQLite VACUUM (refuses when running/starting jobs exist)",
+    "  [MAINTENANCE] checkpoint [--truncate]           Checkpoint the WAL (PASSIVE default)",
+    "  [MIGRATION] prune --before <iso|duration>      Prune old rows (default dry-run)",
+    "              [--dry-run] [--apply] [--include-epics] [--skip-extract]",
+    "              [--forensic-before <iso|dur>] [--forensic-mcp-before <iso|dur>] [--node-events-before <iso|dur>]",
+    "  [MIGRATION] extract [--job <id>] [--all-missing] [--since <dur>] [--help]",
+    "  [QUERY] stats [--spec <name>] [--model <glob>] [--since <dur>] [--format json|table] [--with-payload] [--help]",
+    "  [ANALYSIS] benchmark-export [--output <path>] [--include-prep-jobs] [--epic-id <id>]",
+    "",
+    "Behavior:",
+    "  - prune keeps specialist_events last 30 days always",
+    "  - prune removes specialist_results and terminal specialist_jobs older than --before",
+    "  - prune never touches active-chain jobs",
+    "  - prune never touches epic_runs unless --include-epics",
+    "  - prune never touches specialist_forensic_events or node_events unless their own",
+    "    --forensic-before / --node-events-before cutoff is given (audit surface)",
+    "  - forensic per-family retention: --forensic-mcp-before prunes mcp.call.* noise only;",
+    "    recommended mcp 2d, all other forensic families 14d (interim global 7d)",
+    "  - checkpoint PASSIVE is safe against the live shared database at any time",
+    "  - checkpoint --truncate reclaims the -wal file and refuses while jobs are active",
+    "",
+    "Examples:",
+    "  specialists db setup",
+    "  specialists db backfill --events",
+    "  specialists db vacuum",
+    "  specialists db checkpoint",
+    "  specialists db checkpoint --truncate",
+    "  specialists db prune --before 30d --dry-run",
+    "  specialists db prune --before 2026-01-01T00:00:00Z --apply --include-epics",
+    "  specialists db prune --before 90d --forensic-before 14d --apply",
+    ""
+  ].join(`
+`));
+}
+function assertHumanInteractiveTerminal(commandName) {
+  const forceSetup = process.env.SPECIALISTS_DB_SETUP_FORCE === "1";
+  const inAgentSession = !forceSetup && (!process.stdin.isTTY || !!process.env.SPECIALISTS_TMUX_SESSION || !!process.env.SPECIALISTS_JOB_ID || !!process.env.PI_SESSION_ID || !!process.env.PI_RPC_SOCKET);
+  if (!inAgentSession)
+    return;
+  console.error(`specialists db ${commandName} requires interactive terminal. user-only setup command.`);
+  process.exit(1);
+}
+function printSetupResult(created, gitignoreUpdated, location) {
+  console.log(`
+${bold6("specialists db setup")}
+`);
+  console.log(`  ${green5("\u2713")} database path: ${location.dbPath}`);
+  console.log(`  ${green5("\u2713")} mode: chmod 644`);
+  if (location.source === "xdg-data-home") {
+    console.log(`  ${yellow6("\u25CB")} using XDG_DATA_HOME (${location.dbDirectory})`);
+  } else {
+    console.log(`  ${green5("\u2713")} using shared git-root location (${location.dbDirectory})`);
+  }
+  console.log(`  ${created ? green5("\u2713 created database file") : yellow6("\u25CB database file already exists")}`);
+  console.log(`  ${gitignoreUpdated ? green5("\u2713 updated .gitignore for DB artifacts") : yellow6("\u25CB .gitignore already excludes DB artifacts")}`);
+  console.log("");
+}
+function parseBackfillOptions(argv) {
+  let importEvents = false;
+  for (const argument of argv) {
+    if (argument === "--events") {
+      importEvents = true;
+      continue;
+    }
+    throw new Error(`Unknown option for db backfill: '${argument}'`);
+  }
+  return { importEvents };
+}
+function parsePruneOptions(argv) {
+  let beforeValue = null;
+  let forensicBeforeValue = null;
+  let forensicMcpBeforeValue = null;
+  let nodeEventsBeforeValue = null;
+  let apply = false;
+  let dryRun = true;
+  let includeEpics = false;
+  let skipExtract = false;
+  for (let index = 0;index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "--before") {
+      const value = argv[index + 1];
+      if (!value)
+        throw new Error("Missing value for --before");
+      beforeValue = value;
+      index += 1;
+      continue;
+    }
+    if (argument === "--apply") {
+      apply = true;
+      dryRun = false;
+      continue;
+    }
+    if (argument === "--dry-run") {
+      dryRun = true;
+      apply = false;
+      continue;
+    }
+    if (argument === "--include-epics") {
+      includeEpics = true;
+      continue;
+    }
+    if (argument === "--skip-extract") {
+      skipExtract = true;
+      continue;
+    }
+    if (argument === "--forensic-before") {
+      const value = argv[index + 1];
+      if (!value)
+        throw new Error("Missing value for --forensic-before");
+      forensicBeforeValue = value;
+      index += 1;
+      continue;
+    }
+    if (argument === "--forensic-mcp-before") {
+      const value = argv[index + 1];
+      if (!value)
+        throw new Error("Missing value for --forensic-mcp-before");
+      forensicMcpBeforeValue = value;
+      index += 1;
+      continue;
+    }
+    if (argument === "--node-events-before") {
+      const value = argv[index + 1];
+      if (!value)
+        throw new Error("Missing value for --node-events-before");
+      nodeEventsBeforeValue = value;
+      index += 1;
+      continue;
+    }
+    throw new Error(`Unknown option for db prune: '${argument}'`);
+  }
+  if (!beforeValue)
+    throw new Error("Missing required --before for db prune");
+  return {
+    beforeMs: parseBeforeArgument(beforeValue),
+    apply: apply && !dryRun,
+    includeEpics,
+    skipExtract,
+    forensicBeforeMs: forensicBeforeValue ? parseBeforeArgument(forensicBeforeValue) : undefined,
+    forensicMcpBeforeMs: forensicMcpBeforeValue ? parseBeforeArgument(forensicMcpBeforeValue) : undefined,
+    nodeEventsBeforeMs: nodeEventsBeforeValue ? parseBeforeArgument(nodeEventsBeforeValue) : undefined
+  };
+}
+function printExtractHelp() {
+  console.log([
+    "",
+    "Usage: specialists db extract [--job <id>] [--all-missing] [--since <dur>] [--backfill]",
+    "",
+    "Options:",
+    "  --job <id>        Recompute one job",
+    "  --all-missing     Recompute every status row missing KPI metrics",
+    "  --since <dur>     Limit by started_at_ms, duration like 1h or 7d",
+    "  --backfill        Alias for --all-missing",
+    ""
+  ].join(`
+`));
+}
+function parseExtractOptions(argv) {
+  if (argv.includes("--help") || argv.includes("-h")) {
+    printExtractHelp();
+    process.exit(0);
+  }
+  let jobId;
+  let allMissing = false;
+  let sinceMs;
+  for (let index = 0;index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "--job" && argv[index + 1]) {
+      jobId = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    if (argument === "--all-missing" || argument === "--backfill") {
+      allMissing = true;
+      continue;
+    }
+    if (argument === "--since" && argv[index + 1]) {
+      const durationMs = parseDuration(argv[index + 1]);
+      if (durationMs === null)
+        throw new Error(`Invalid --since value '${argv[index + 1]}'`);
+      sinceMs = Date.now() - durationMs;
+      index += 1;
+      continue;
+    }
+    throw new Error(`Unknown option for db extract: '${argument}'`);
+  }
+  return { jobId, allMissing, sinceMs };
+}
+function printStatsHelp() {
+  console.log([
+    "",
+    "Usage: specialists db stats [--spec <name>] [--model <glob>] [--since <dur>] [--format json|table] [--with-payload]",
+    "",
+    "Options:",
+    "  --spec <name>        Filter by specialist name",
+    "  --model <glob>       Filter by model glob",
+    "  --since <dur>        Filter by start time, duration like 1h or 7d",
+    "  --format <json|table> Output format",
+    "  --with-payload       Include payload_kb and payload_tokens columns",
+    ""
+  ].join(`
+`));
+}
+function parseStatsOptions(argv) {
+  if (argv.includes("--help") || argv.includes("-h")) {
+    printStatsHelp();
+    process.exit(0);
+  }
+  let spec;
+  let model;
+  let sinceMs;
+  let format = "table";
+  let withPayload = false;
+  for (let index = 0;index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "--spec" && argv[index + 1]) {
+      spec = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    if (argument === "--model" && argv[index + 1]) {
+      model = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    if (argument === "--since" && argv[index + 1]) {
+      const durationMs = parseDuration(argv[index + 1]);
+      if (durationMs === null)
+        throw new Error(`Invalid --since value '${argv[index + 1]}'`);
+      sinceMs = Date.now() - durationMs;
+      index += 1;
+      continue;
+    }
+    if (argument === "--format" && argv[index + 1]) {
+      const value = argv[index + 1];
+      if (value !== "json" && value !== "table")
+        throw new Error(`Invalid --format value '${value}'`);
+      format = value;
+      index += 1;
+      continue;
+    }
+    if (argument === "--with-payload") {
+      withPayload = true;
+      continue;
+    }
+    throw new Error(`Unknown option for db stats: '${argument}'`);
+  }
+  return { spec, model, sinceMs, format, withPayload };
+}
+function parseStatusFile(jobDirectoryPath, fallbackJobId) {
+  const statusPath = join23(jobDirectoryPath, "status.json");
+  const statusRaw = readFileSync15(statusPath, "utf-8");
+  const parsed = JSON.parse(statusRaw);
+  const jobId = typeof parsed.id === "string" && parsed.id.length > 0 ? parsed.id : fallbackJobId;
+  const specialist = typeof parsed.specialist === "string" && parsed.specialist.length > 0 ? parsed.specialist : "unknown";
+  const status = typeof parsed.status === "string" && parsed.status.length > 0 ? parsed.status : "starting";
+  const startedAtMs = typeof parsed.started_at_ms === "number" ? parsed.started_at_ms : Date.now();
+  return {
+    ...parsed,
+    id: jobId,
+    specialist,
+    status,
+    started_at_ms: startedAtMs
+  };
+}
+function replayEvents(eventsPath, sqliteClient, status) {
+  if (!existsSync21(eventsPath))
+    return 0;
+  const rawContent = readFileSync15(eventsPath, "utf-8");
+  const lines = rawContent.split(`
+`).map((line) => line.trim()).filter((line) => line.length > 0);
+  let importedEvents = 0;
+  for (const line of lines) {
+    const event = parseTimelineEvent(line);
+    if (!event)
+      continue;
+    sqliteClient.appendEvent(status.id, status.specialist, status.bead_id, event);
+    importedEvents += 1;
+  }
+  return importedEvents;
+}
+function runBackfill(options) {
+  const sqliteClient = createObservabilitySqliteClient();
+  if (!sqliteClient) {
+    throw new Error("Failed to initialize observability SQLite schema. Run `specialists db setup` first and ensure sqlite3 is installed.");
+  }
+  const summary = {
+    jobsBackfilled: 0,
+    jobsSkipped: 0,
+    jobsFailed: 0,
+    eventsImported: 0
+  };
+  try {
+    const jobsDirectoryPath = resolveJobsDir(process.cwd());
+    if (!existsSync21(jobsDirectoryPath)) {
+      console.log("No jobs directory found. Nothing to backfill.");
+      return;
+    }
+    const jobEntries = readdirSync7(jobsDirectoryPath, { withFileTypes: true });
+    for (const jobEntry of jobEntries) {
+      if (!jobEntry.isDirectory())
+        continue;
+      const jobDirectoryPath = join23(jobsDirectoryPath, jobEntry.name);
+      const statusPath = join23(jobDirectoryPath, "status.json");
+      if (!existsSync21(statusPath))
+        continue;
+      try {
+        const status = parseStatusFile(jobDirectoryPath, jobEntry.name);
+        const existingStatus = sqliteClient.readStatus(status.id);
+        if (existingStatus) {
+          summary.jobsSkipped += 1;
+          continue;
+        }
+        const chainIdentity = derivePersistedChainIdentity(status);
+        const normalizedStatus = {
+          ...status,
+          chain_kind: chainIdentity.chain_kind,
+          chain_id: chainIdentity.chain_id,
+          chain_root_job_id: chainIdentity.chain_root_job_id,
+          chain_root_bead_id: chainIdentity.chain_root_bead_id
+        };
+        sqliteClient.upsertStatus(normalizedStatus);
+        if (normalizedStatus.epic_id && normalizedStatus.chain_id) {
+          sqliteClient.upsertEpicRun({
+            epic_id: normalizedStatus.epic_id,
+            status: "open",
+            updated_at_ms: Date.now(),
+            status_json: JSON.stringify({
+              epic_id: normalizedStatus.epic_id,
+              status: "open",
+              source: "db-backfill",
+              chain_id: normalizedStatus.chain_id
+            })
+          });
+          sqliteClient.upsertEpicChainMembership({
+            epic_id: normalizedStatus.epic_id,
+            chain_id: normalizedStatus.chain_id,
+            chain_root_bead_id: normalizedStatus.chain_root_bead_id,
+            chain_root_job_id: normalizedStatus.chain_root_job_id,
+            updated_at_ms: Date.now()
+          });
+        }
+        summary.jobsBackfilled += 1;
+        if (options.importEvents) {
+          const eventsPath = join23(jobDirectoryPath, "events.jsonl");
+          summary.eventsImported += replayEvents(eventsPath, sqliteClient, status);
+        }
+      } catch {
+        summary.jobsFailed += 1;
+      }
+    }
+  } finally {
+    sqliteClient.close();
+  }
+  console.log(`
+${bold6("specialists db backfill")}
+`);
+  console.log(`  ${green5("\u2713")} jobs backfilled: ${summary.jobsBackfilled}`);
+  console.log(`  ${yellow6("\u25CB")} jobs skipped (already in DB): ${summary.jobsSkipped}`);
+  console.log(`  ${summary.jobsFailed > 0 ? yellow6("\u25CB") : green5("\u2713")} jobs failed: ${summary.jobsFailed}`);
+  if (options.importEvents) {
+    console.log(`  ${green5("\u2713")} events imported: ${summary.eventsImported}`);
+  }
+  console.log("");
+}
+function runVacuum() {
+  const sqliteClient = createObservabilitySqliteClient();
+  if (!sqliteClient) {
+    throw new Error("Failed to initialize observability SQLite schema. Run `specialists db setup` first and ensure sqlite3 is installed.");
+  }
+  try {
+    const activeJobs = sqliteClient.listActiveJobs(["running", "starting"]);
+    if (activeJobs.length > 0) {
+      const listing = activeJobs.slice(0, 5).map((job) => `${job.job_id}:${job.status}`).join(", ");
+      throw new Error(`Refusing vacuum while active jobs exist (${activeJobs.length}): ${listing}`);
+    }
+    const { beforeBytes, afterBytes } = sqliteClient.vacuumDatabase();
+    const savedBytes = Math.max(0, beforeBytes - afterBytes);
+    console.log(`
+${bold6("specialists db vacuum")}
+`);
+    console.log(`  ${green5("\u2713")} before: ${formatBytes(beforeBytes)} (${beforeBytes} bytes)`);
+    console.log(`  ${green5("\u2713")} after:  ${formatBytes(afterBytes)} (${afterBytes} bytes)`);
+    console.log(`  ${green5("\u2713")} saved:  ${formatBytes(savedBytes)} (${savedBytes} bytes)`);
+    console.log("");
+  } finally {
+    sqliteClient.close();
+  }
+}
+function runCheckpoint(argv) {
+  let mode = "PASSIVE";
+  for (const argument of argv) {
+    if (argument === "--truncate") {
+      mode = "TRUNCATE";
+      continue;
+    }
+    if (argument === "--restart") {
+      mode = "RESTART";
+      continue;
+    }
+    if (argument === "--passive") {
+      mode = "PASSIVE";
+      continue;
+    }
+    throw new Error(`Unknown option for db checkpoint: '${argument}'`);
+  }
+  const sqliteClient = createObservabilitySqliteClient();
+  if (!sqliteClient) {
+    throw new Error("Failed to initialize observability SQLite schema. Run `specialists db setup` first and ensure sqlite3 is installed.");
+  }
+  try {
+    const activeJobs = sqliteClient.listActiveJobs(["running", "starting"]);
+    if (mode === "TRUNCATE" && activeJobs.length > 0) {
+      const listing = activeJobs.slice(0, 5).map((job) => `${job.job_id}:${job.status}`).join(", ");
+      throw new Error(`Refusing TRUNCATE checkpoint while active jobs exist (${activeJobs.length}): ${listing}`);
+    }
+    const report = sqliteClient.checkpointWal(mode);
+    const partial = checkpointIsPartial(report.mode, report.busy);
+    console.log(`
+${bold6("specialists db checkpoint")}
+`);
+    console.log(`  ${green5("\u2713")} mode: ${report.mode}`);
+    if (partial) {
+      console.log(`  ${yellow6("\u25CB partial")} wal frames: ${report.checkpointedFrames}/${report.logFrames} checkpointed (busy: ${report.busy} - a reader holds an old snapshot)`);
+    } else {
+      console.log(`  ${green5("\u2713")} wal frames: ${report.checkpointedFrames}/${report.logFrames} checkpointed${report.busy ? ` (busy: ${report.busy} - a reader holds an old snapshot)` : ""}`);
+    }
+    console.log(`  ${green5("\u2713")} wal size: ${formatBytes(report.beforeWalBytes)} -> ${formatBytes(report.afterWalBytes)}`);
+    console.log("");
+    if (partial)
+      process.exitCode = 1;
+  } finally {
+    sqliteClient.close();
+  }
+}
+function runPrune(options) {
+  const sqliteClient = createObservabilitySqliteClient();
+  if (!sqliteClient) {
+    throw new Error("Failed to initialize observability SQLite schema. Run `specialists db setup` first and ensure sqlite3 is installed.");
+  }
+  try {
+    const report = sqliteClient.pruneObservabilityData({
+      beforeMs: options.beforeMs,
+      includeEpics: options.includeEpics,
+      apply: options.apply,
+      skipExtract: options.skipExtract,
+      forensicBeforeMs: options.forensicBeforeMs,
+      forensicMcpBeforeMs: options.forensicMcpBeforeMs,
+      nodeEventsBeforeMs: options.nodeEventsBeforeMs
+    });
+    console.log(`
+${bold6("specialists db prune")}
+`);
+    console.log(`  ${report.dryRun ? yellow6("\u25CB dry-run") : green5("\u2713 applied")}`);
+    console.log(`  ${green5("\u2713")} before: ${new Date(report.beforeMs).toISOString()}`);
+    console.log(`  ${green5("\u2713")} events cutoff (fixed 30d): ${new Date(report.eventsCutoffMs).toISOString()}`);
+    console.log(`  ${green5("\u2713")} specialist_events: ${report.deletedEvents}`);
+    console.log(`  ${green5("\u2713")} specialist_results: ${report.deletedResults}`);
+    console.log(`  ${green5("\u2713")} specialist_jobs: ${report.deletedJobs}`);
+    console.log(`  ${green5("\u2713")} extracted jobs: ${report.extractedJobs}`);
+    console.log(`  ${report.forensicBeforeMs === null && report.forensicMcpBeforeMs === null ? yellow6("\u25CB") : green5("\u2713")} specialist_forensic_events: ${report.deletedForensicEvents} ${report.forensicBeforeMs === null && report.forensicMcpBeforeMs === null ? "(untouched, use --forensic-before)" : `(before ${report.forensicBeforeMs === null ? "-" : new Date(report.forensicBeforeMs).toISOString()}${report.forensicMcpBeforeMs === null ? "" : `, mcp before ${new Date(report.forensicMcpBeforeMs).toISOString()}`})`}`);
+    console.log(`  ${report.nodeEventsBeforeMs === null ? yellow6("\u25CB") : green5("\u2713")} node_events: ${report.deletedNodeEvents} ${report.nodeEventsBeforeMs === null ? "(untouched, use --node-events-before)" : `(before ${new Date(report.nodeEventsBeforeMs).toISOString()})`}`);
+    console.log(`  ${report.includeEpics ? green5("\u2713") : yellow6("\u25CB")} epic_runs: ${report.deletedEpicRuns} ${report.includeEpics ? "" : "(skipped, use --include-epics)"}`);
+    console.log(`  ${yellow6("\u25CB")} skipped active-chain jobs: ${report.skippedActiveChainJobs}`);
+    console.log("");
+  } finally {
+    sqliteClient.close();
+  }
+}
+function runExtract(options) {
+  const sqliteClient = createObservabilitySqliteClient();
+  if (!sqliteClient) {
+    throw new Error("Failed to initialize observability SQLite schema. Run `specialists db setup` first and ensure sqlite3 is installed.");
+  }
+  try {
+    const statusRows = options.jobId ? sqliteClient.listStatuses().filter((status) => status.id === options.jobId) : sqliteClient.listStatuses().filter((status) => options.sinceMs === undefined || status.started_at_ms >= options.sinceMs);
+    const jobIds = options.allMissing ? statusRows.filter((status) => !sqliteClient.listJobMetrics({ spec: status.specialist }).some((row) => row.job_id === status.id)).map((status) => status.id) : options.jobId ? [options.jobId] : statusRows.map((status) => status.id);
+    let extracted = 0;
+    for (const jobId of jobIds) {
+      const metrics = sqliteClient.aggregateJobMetrics(jobId);
+      if (!metrics)
+        continue;
+      extracted += 1;
+    }
+    console.log(`
+${bold6("specialists db extract")}
+`);
+    console.log(`  ${green5("\u2713")} extracted jobs: ${extracted}`);
+    console.log("");
+  } finally {
+    sqliteClient.close();
+  }
+}
+function formatPayloadMetric(payloadJson) {
+  if (!payloadJson)
+    return { payload_kb: "", payload_tokens: "" };
+  try {
+    const payload = JSON.parse(payloadJson);
+    const bytes = payload.totals?.bytes;
+    const tokens = payload.totals?.tokens;
+    return {
+      payload_kb: Number.isFinite(bytes) ? `${((bytes ?? 0) / 1024).toFixed(1)}kb` : "",
+      payload_tokens: Number.isFinite(tokens) ? `${Math.round(tokens ?? 0)}t` : ""
+    };
+  } catch {
+    return { payload_kb: "", payload_tokens: "" };
+  }
+}
+function formatStatsTable(rows, withPayload) {
+  const headers = withPayload ? ["job_id", "specialist", "model", "status", "payload_kb", "payload_tokens", "active_s", "waiting_s", "total_s", "elapsed_ms", "total_tools", "total_turns"] : ["job_id", "specialist", "model", "status", "active_s", "waiting_s", "total_s", "elapsed_ms", "total_tools", "total_turns"];
+  const tableRows = rows.map((row) => headers.map((header) => String(row[header] ?? "")));
+  const widths = headers.map((header, index) => Math.max(header.length, ...tableRows.map((row) => row[index].length)));
+  const line = (cells) => `| ${cells.map((cell, index) => cell.padEnd(widths[index])).join(" | ")} |`;
+  return [line(headers), `| ${widths.map((width) => "-".repeat(width)).join(" | ")} |`, ...tableRows.map(line)].join(`
+`);
+}
+function runStats(options) {
+  const sqliteClient = createObservabilitySqliteClient();
+  if (!sqliteClient) {
+    throw new Error("Failed to initialize observability SQLite schema. Run `specialists db setup` first and ensure sqlite3 is installed.");
+  }
+  try {
+    const rows = sqliteClient.listJobMetrics({ spec: options.spec, model: options.model, sinceMs: options.sinceMs });
+    const displayRows = rows.map((row) => ({
+      ...row,
+      active_s: row.active_runtime_ms === null ? "" : (row.active_runtime_ms / 1000).toFixed(1),
+      waiting_s: row.waiting_ms === null ? "" : (row.waiting_ms / 1000).toFixed(1),
+      total_s: row.elapsed_ms === null ? "" : (row.elapsed_ms / 1000).toFixed(1),
+      ...options.withPayload ? formatPayloadMetric(row.startup_payload_json) : {}
+    }));
+    if (options.format === "json") {
+      console.log(JSON.stringify({ rows: displayRows, count: rows.length }, null, 2));
+      return;
+    }
+    console.log(`
+${bold6("specialists db stats")}
+`);
+    console.log(formatStatsTable(displayRows, options.withPayload));
+    console.log("");
+  } finally {
+    sqliteClient.close();
+  }
+}
+function parseBenchmarkExportOptions(argv) {
+  const defaultOutput = resolve12(process.cwd(), ".specialists/benchmarks/executor-benchmark-rows.jsonl");
+  let outputPath = defaultOutput;
+  let epicId;
+  let includePrepJobs = false;
+  for (let i = 0;i < argv.length; i += 1) {
+    const argument = argv[i];
+    if (argument === "--output" && argv[i + 1]) {
+      outputPath = resolve12(process.cwd(), argv[i + 1]);
+      i += 1;
+      continue;
+    }
+    if (argument === "--epic" && argv[i + 1]) {
+      epicId = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    if (argument === "--include-prep") {
+      includePrepJobs = true;
+      continue;
+    }
+    throw new Error(`Unknown option for db benchmark-export: '${argument}'`);
+  }
+  return { outputPath, epicId, includePrepJobs };
+}
+function parseReviewerVerdict2(output) {
+  if (!output)
+    return "MISSING";
+  const match = output.match(/Verdict:\s*(PASS|PARTIAL|FAIL)/i);
+  if (!match?.[1])
+    return "MISSING";
+  return match[1].toUpperCase();
+}
+function parseReviewerScore(output) {
+  if (!output)
+    return null;
+  const match = output.match(/(?:Reviewer\s+)?Score(?:\s*\(0-100\))?\s*[:=]\s*(\d+(?:\.\d+)?)/i);
+  return match?.[1] ? Number(match[1]) : null;
+}
+function parseGateResult(output, key) {
+  if (!output)
+    return null;
+  const regex = key === "lint" ? /(?:lint_pass|lint)\s*[:=]\s*(true|false|pass|fail)/i : /(?:tsc_pass|tsc(?:\s*--noEmit)?)\s*[:=]\s*(true|false|pass|fail)/i;
+  const match = output.match(regex);
+  if (!match?.[1])
+    return null;
+  const normalized = match[1].toLowerCase();
+  return normalized === "true" || normalized === "pass";
+}
+function readLatestRunCompleteEvent(events) {
+  for (let index = events.length - 1;index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.type === "run_complete") {
+      return event;
+    }
+  }
+  return null;
+}
+function inferFailureNotes(input) {
+  const notes = [];
+  if (input.runComplete?.status === "ERROR") {
+    notes.push(`run_complete_status=ERROR${input.runComplete.error ? `: ${input.runComplete.error}` : ""}`);
+  }
+  if (input.runComplete?.status === "CANCELLED") {
+    notes.push("run_complete_status=CANCELLED");
+  }
+  if (input.runComplete?.exit_reason) {
+    notes.push(`exit_reason=${input.runComplete.exit_reason}`);
+  }
+  if (input.runComplete?.finish_reason) {
+    notes.push(`finish_reason=${input.runComplete.finish_reason}`);
+  }
+  if (input.status.error) {
+    notes.push(`status_error=${input.status.error}`);
+  }
+  if (input.reviewerVerdict !== "PASS" && input.hasLaterExecutorInChain) {
+    notes.push("fix_loop_rerun_detected_after_non_pass_review");
+  }
+  if (!input.runComplete) {
+    notes.push("missing_run_complete_event_fallback_to_status_metrics");
+  }
+  return notes;
+}
+function runBenchmarkExport(options) {
+  const sqliteClient = createObservabilitySqliteClient();
+  if (!sqliteClient) {
+    throw new Error("Failed to initialize observability SQLite schema. Run `specialists db setup` first and ensure sqlite3 is installed.");
+  }
+  try {
+    const statuses = sqliteClient.listStatuses().filter((status) => options.includePrepJobs || status.chain_kind === "chain").filter((status) => !options.epicId || status.epic_id === options.epicId);
+    const byChain = new Map;
+    for (const status of statuses) {
+      const chainId = status.chain_id ?? `job:${status.id}`;
+      const group = byChain.get(chainId) ?? [];
+      group.push(status);
+      byChain.set(chainId, group);
+    }
+    const rows = [];
+    for (const chainStatuses of byChain.values()) {
+      const ordered = [...chainStatuses].sort((a, b) => a.started_at_ms - b.started_at_ms);
+      const executorStatuses = ordered.filter((status) => status.specialist === "executor");
+      const reviewerStatuses = ordered.filter((status) => status.specialist === "reviewer");
+      executorStatuses.forEach((executorStatus, executorIndex) => {
+        const nextExecutor = executorStatuses[executorIndex + 1];
+        const reviewer = reviewerStatuses.find((candidate) => {
+          if (candidate.started_at_ms < executorStatus.started_at_ms)
+            return false;
+          if (!nextExecutor)
+            return true;
+          return candidate.started_at_ms < nextExecutor.started_at_ms;
+        }) ?? null;
+        const runComplete = readLatestRunCompleteEvent(sqliteClient.readEvents(executorStatus.id));
+        const reviewerOutput = reviewer ? sqliteClient.readResult(reviewer.id) : null;
+        const reviewerVerdict = parseReviewerVerdict2(reviewerOutput);
+        const totalTokens = runComplete?.token_usage?.total_tokens ?? runComplete?.metrics?.token_usage?.total_tokens ?? executorStatus.metrics?.token_usage?.total_tokens ?? null;
+        const elapsedMs = runComplete ? Math.round(runComplete.elapsed_s * 1000) : typeof executorStatus.elapsed_s === "number" ? Math.round(executorStatus.elapsed_s * 1000) : null;
+        const hasLaterExecutorInChain = Boolean(nextExecutor);
+        const failureNotes = inferFailureNotes({
+          status: executorStatus,
+          runComplete,
+          reviewerVerdict,
+          hasLaterExecutorInChain
+        });
+        rows.push({
+          task_id: executorStatus.chain_root_bead_id ?? executorStatus.bead_id ?? "unknown_task",
+          model_id: executorStatus.model ?? null,
+          executor_job_id: executorStatus.id,
+          reviewer_job_id: reviewer?.id ?? null,
+          lint_pass: parseGateResult(reviewerOutput, "lint"),
+          tsc_pass: parseGateResult(reviewerOutput, "tsc"),
+          reviewer_verdict: reviewerVerdict,
+          reviewer_score_if_present: parseReviewerScore(reviewerOutput),
+          total_tokens: totalTokens,
+          elapsed_ms: elapsedMs,
+          failure_notes: failureNotes,
+          source_of_truth: {
+            task_id: "specialist_jobs.chain_root_bead_id fallback bead_id",
+            model_id: "specialist_jobs.status_json.model",
+            executor_job_id: "specialist_jobs.job_id",
+            reviewer_job_id: "specialist_jobs.job_id where specialist=reviewer in same chain window",
+            lint_pass: "reviewer specialist_results.output regex parse; null when absent",
+            tsc_pass: "reviewer specialist_results.output regex parse; null when absent",
+            reviewer_verdict: "reviewer specialist_results.output Verdict: PASS|PARTIAL|FAIL",
+            reviewer_score_if_present: "reviewer specialist_results.output score regex; null when absent",
+            total_tokens: runComplete ? "specialist_events.type=run_complete.token_usage.total_tokens" : "status_json.metrics.token_usage.total_tokens fallback",
+            elapsed_ms: runComplete ? "specialist_events.type=run_complete.elapsed_s * 1000" : "status_json.elapsed_s * 1000 fallback",
+            failure_notes: "run_complete.error/status + status_json.error + chain sequencing heuristics"
+          }
+        });
+      });
+    }
+    rows.sort((a, b) => a.task_id.localeCompare(b.task_id) || a.executor_job_id.localeCompare(b.executor_job_id));
+    const outputDirectory = dirname16(options.outputPath);
+    mkdirSync11(outputDirectory, { recursive: true });
+    const jsonl = rows.map((row) => JSON.stringify(row)).join(`
+`);
+    writeFileSync9(options.outputPath, rows.length > 0 ? `${jsonl}
+` : "", "utf-8");
+    console.log(`
+${bold6("specialists db benchmark-export")}
+`);
+    console.log(`  ${green5("\u2713")} rows exported: ${rows.length}`);
+    console.log(`  ${green5("\u2713")} output: ${options.outputPath}`);
+    if (options.epicId) {
+      console.log(`  ${green5("\u2713")} epic filter: ${options.epicId}`);
+    }
+    console.log("");
+  } finally {
+    sqliteClient.close();
+  }
+}
+function runSetup() {
+  const location = resolveObservabilityDbLocation(process.cwd());
+  if (isPathInsideJobsDirectory(location.dbPath, location.gitRoot)) {
+    throw new Error(`Refusing to place observability DB inside jobs directory: ${location.dbPath}`);
+  }
+  const setupResult = ensureObservabilityDbFile(location);
+  const sqliteClient = createObservabilitySqliteClientAtPath(location.dbPath);
+  if (!sqliteClient) {
+    throw new Error("Failed to initialize observability SQLite schema. Ensure sqlite3 is installed and retry.");
+  }
+  sqliteClient.close();
+  const gitignoreResult = ensureGitignoreHasObservabilityDbEntries(location.gitRoot);
+  printSetupResult(setupResult.created, gitignoreResult.changed, location);
+}
+async function run12(argv = process.argv.slice(3)) {
+  const subcommand = argv[0];
+  if (!subcommand || subcommand === "--help" || subcommand === "-h" || argv.slice(1).some((arg) => arg === "--help" || arg === "-h")) {
+    printDbHelp();
+    return;
+  }
+  if (subcommand === "setup" || subcommand === "init") {
+    assertHumanInteractiveTerminal("setup");
+    runSetup();
+    return;
+  }
+  if (subcommand === "backfill") {
+    assertHumanInteractiveTerminal("backfill");
+    const options = parseBackfillOptions(argv.slice(1));
+    runBackfill(options);
+    return;
+  }
+  if (subcommand === "vacuum") {
+    runVacuum();
+    return;
+  }
+  if (subcommand === "checkpoint") {
+    runCheckpoint(argv.slice(1));
+    return;
+  }
+  if (subcommand === "prune") {
+    const options = parsePruneOptions(argv.slice(1));
+    runPrune(options);
+    return;
+  }
+  if (subcommand === "extract") {
+    const options = parseExtractOptions(argv.slice(1));
+    runExtract(options);
+    return;
+  }
+  if (subcommand === "stats") {
+    const options = parseStatsOptions(argv.slice(1));
+    runStats(options);
+    return;
+  }
+  if (subcommand === "benchmark-export") {
+    const options = parseBenchmarkExportOptions(argv.slice(1));
+    runBenchmarkExport(options);
+    return;
+  }
+  console.error(`Unknown db subcommand: '${subcommand}'`);
+  printDbHelp();
+  process.exit(1);
+}
+var DAY_MS, bold6 = (s) => `\x1B[1m${s}\x1B[0m`, green5 = (s) => `\x1B[32m${s}\x1B[0m`, yellow6 = (s) => `\x1B[33m${s}\x1B[0m`;
+var init_db = __esm(() => {
+  init_observability_db();
+  init_job_root();
+  init_observability_sqlite();
+  init_chain_identity();
+  init_timeline_events();
+  DAY_MS = 24 * 60 * 60 * 1000;
+});
+
+// src/specialist/branch-integration-events.ts
+function createBranchIntegrationEvent(options) {
+  const tUnixMs = options.t_unix_ms ?? Date.now();
+  const target = {
+    branch: options.target.branch,
+    worktree: options.target.worktree
+  };
+  if (options.target.role)
+    target.role = options.target.role;
+  return {
+    schema_version: BRANCH_INTEGRATION_SCHEMA_VERSION,
+    timestamp: options.timestamp ?? new Date(tUnixMs).toISOString(),
+    t_unix_ms: tUnixMs,
+    source: {
+      job_id: options.source.job_id,
+      branch: options.source.branch,
+      worktree: options.source.worktree
+    },
+    target,
+    status: options.status ?? "merged",
+    commit: options.commit
+  };
+}
+var BRANCH_INTEGRATION_SCHEMA_VERSION = "xtrm.branch.integration.v1";
+
+// src/cli/integration.ts
+import { resolve as resolve13 } from "path";
+function fail5(code, message, json) {
+  if (json) {
+    process.stdout.write(`${JSON.stringify({ ok: false, error: { code, message } }, null, 2)}
+`);
+  } else {
+    console.error(`error (${code}): ${message}`);
+  }
+  process.exit(1);
+}
+function parseArgs5(argv) {
+  const values = new Map;
+  let json = false;
+  for (let i = 0;i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--json")
+      json = true;
+    else if (arg.startsWith("--"))
+      values.set(arg.slice(2), argv[++i] ?? "");
+  }
+  const required = (name) => {
+    const value = values.get(name)?.trim();
+    if (value?.startsWith("--"))
+      fail5("usage", `--${name} is required
+${USAGE4}`, json);
+    if (!value)
+      fail5("usage", `--${name} is required
+${USAGE4}`, json);
+    return value;
+  };
+  const commit = required("commit");
+  if (!COMMIT_PATTERN.test(commit)) {
+    fail5("usage", `--commit must be a 7-40 char hex sha (got '${commit}')`, json);
+  }
+  const status = values.get("status")?.trim();
+  if (status && status !== "merged") {
+    fail5("usage", `--status must be 'merged' (got '${status}')`, json);
+  }
+  return {
+    sourceJobId: values.get("source-job-id")?.trim() || MANUAL_JOB_ID,
+    sourceBranch: required("source-branch"),
+    sourceWorktree: resolve13(required("source-worktree")),
+    targetBranch: required("target-branch"),
+    targetWorktree: resolve13(required("target-worktree")),
+    targetRole: values.get("target-role")?.trim() || undefined,
+    commit,
+    cwd: values.get("cwd")?.trim() || process.cwd(),
+    json
+  };
+}
+function runRecord() {
+  const args = parseArgs5(process.argv.slice(4));
+  const client = createObservabilitySqliteClient(args.cwd);
+  if (!client) {
+    fail5("observability_db_missing", `no observability db at ${resolveObservabilityDbLocation(args.cwd).dbPath} (run a specialist first)`, args.json);
+  }
+  const event = createBranchIntegrationEvent({
+    source: { job_id: args.sourceJobId, branch: args.sourceBranch, worktree: args.sourceWorktree },
+    target: { branch: args.targetBranch, worktree: args.targetWorktree, role: args.targetRole },
+    status: "merged",
+    commit: args.commit
+  });
+  try {
+    client.recordBranchIntegration(event);
+  } catch (error) {
+    fail5("record_failed", error?.message ?? String(error), args.json);
+  } finally {
+    client.close();
+  }
+  if (args.json) {
+    process.stdout.write(`${JSON.stringify({ ok: true, event }, null, 2)}
+`);
+    return;
+  }
+  console.log(`recorded ${event.schema_version}: ${event.source.branch} \u2192 ${event.target.branch} @ ${event.commit}`);
+}
+function parseIntegrationListArgs(argv) {
+  const options = { json: false, limit: DEFAULT_LIMIT };
+  for (let i = 0;i < argv.length; i += 1) {
+    const token = argv[i];
+    if (token === "--json") {
+      options.json = true;
+      continue;
+    }
+    if (token === "--target-branch") {
+      const value = argv[i + 1];
+      if (!value)
+        throw new Error("--target-branch requires a value");
+      options.targetBranch = value;
+      i += 1;
+      continue;
+    }
+    if (token === "--job") {
+      const value = argv[i + 1];
+      if (!value)
+        throw new Error("--job requires a value");
+      options.sourceJobId = value;
+      i += 1;
+      continue;
+    }
+    if (token === "--limit") {
+      const value = argv[i + 1];
+      if (!value)
+        throw new Error("--limit requires a value");
+      const parsed = Number(value);
+      if (!Number.isInteger(parsed) || parsed <= 0)
+        throw new Error(`Invalid --limit value: ${value}`);
+      options.limit = parsed;
+      i += 1;
+      continue;
+    }
+    throw new Error(`Unknown integration list option: ${token}`);
+  }
+  return options;
+}
+function formatIntegrationRow(t, event) {
+  const role = event.target.role ? ` role=${event.target.role}` : "";
+  return `${new Date(t).toISOString()} ${event.status} ${event.source.branch} -> ${event.target.branch}${role} commit=${event.commit.slice(0, 12)} job=${event.source.job_id}`;
+}
+function renderIntegrationRows(rows, options) {
+  if (options.json)
+    return rows.map((row) => JSON.stringify(row.event));
+  if (rows.length === 0)
+    return ["No branch integrations recorded."];
+  return rows.map((row) => formatIntegrationRow(row.t, row.event));
+}
+async function runList() {
+  const options = parseIntegrationListArgs(process.argv.slice(4));
+  const client = createObservabilitySqliteClient();
+  if (!client)
+    throw new Error("Observability SQLite is unavailable; run under Bun with an initialized specialists database.");
+  try {
+    for (const line of renderIntegrationRows(client.listBranchIntegrations(options), options)) {
+      console.log(line);
+    }
+  } finally {
+    client.close();
+  }
+}
+var MANUAL_JOB_ID = "manual", COMMIT_PATTERN, USAGE4, DEFAULT_LIMIT = 100;
+var init_integration = __esm(() => {
+  init_observability_sqlite();
+  init_observability_db();
+  COMMIT_PATTERN = /^[0-9a-f]{7,40}$/i;
+  USAGE4 = "Usage: specialists integration record --source-branch <b> --source-worktree <p> " + "--target-branch <b> --target-worktree <p> --commit <sha> " + "[--source-job-id <id>] [--target-role <role>] [--status merged] [--cwd <path>] [--json]";
+});
+
 // src/specialist/required-platform-rules.ts
 function buildRequiredPlatformRulesInjection(cwd, budgetLimit = Number.POSITIVE_INFINITY) {
   const resolved = buildMandatoryRulesInjection({
@@ -26450,7 +27040,7 @@ var init_memory_retrieval = __esm(() => {
 
 // src/specialist/system-prompt.ts
 import { execSync } from "child_process";
-import { existsSync as existsSync21 } from "fs";
+import { existsSync as existsSync22 } from "fs";
 import { resolve as resolve14 } from "path";
 function buildOutputContractInstruction(responseFormat, outputType, outputSchema) {
   if (responseFormat === "text")
@@ -26482,7 +27072,7 @@ function sanitizeBeadIdForPrompt(beadId) {
   return withoutBackticks.replace(/[^A-Za-z0-9-]/g, "");
 }
 function defaultHasGitnexusIndex(cwd) {
-  return existsSync21(resolve14(cwd, ".gitnexus/meta.json"));
+  return existsSync22(resolve14(cwd, ".gitnexus/meta.json"));
 }
 function defaultQueryGitnexusSymbol(cwd, symbol) {
   try {
@@ -26677,9 +27267,9 @@ __export(exports_runner, {
 });
 import { createHash as createHash4 } from "crypto";
 import { execSync as execSync2, spawnSync as spawnSync12 } from "child_process";
-import { existsSync as existsSync22, readFileSync as readFileSync16 } from "fs";
+import { existsSync as existsSync23, readFileSync as readFileSync16 } from "fs";
 import { basename as basename5, resolve as resolve15 } from "path";
-import { homedir as homedir6 } from "os";
+import { homedir as homedir8 } from "os";
 function sanitizeScriptName(name) {
   const cleaned = name.replace(/[\u0000-\u001f\u007f-\u009f"\\<>]/g, "").slice(0, 128);
   return /^[A-Za-z0-9:][A-Za-z0-9._:-]{0,127}$/.test(cleaned) ? cleaned : "unknown";
@@ -26846,7 +27436,7 @@ ${blocks}
 </pre_flight_context>`;
 }
 function resolvePath2(p) {
-  return p.startsWith("~/") ? resolve15(homedir6(), p.slice(2)) : resolve15(p);
+  return p.startsWith("~/") ? resolve15(homedir8(), p.slice(2)) : resolve15(p);
 }
 function commandExists(cmd) {
   const result = spawnSync12("which", [cmd], { stdio: "ignore" });
@@ -26884,7 +27474,7 @@ function validateBeforeRun(spec, permissionLevel, resolvedToolContract) {
   const warnings = [];
   for (const p of spec.specialist.skills?.paths ?? []) {
     const abs = resolvePath2(p);
-    if (!existsSync22(abs)) {
+    if (!existsSync23(abs)) {
       errors.push(`  \u2717 skills.paths: skill not found: ${p}
 ` + `    resolved to: ${abs}
 ` + `    canonical global skills live in ~/.xtrm/skills/default/<skill>/`);
@@ -26897,7 +27487,7 @@ function validateBeforeRun(spec, permissionLevel, resolvedToolContract) {
     const isFilePath = run.startsWith("./") || run.startsWith("../") || run.startsWith("/") || run.startsWith("~/");
     if (isFilePath) {
       const abs = resolvePath2(run);
-      if (!existsSync22(abs)) {
+      if (!existsSync23(abs)) {
         errors.push(`  \u2717 skills.scripts: script not found: ${run}`);
       } else {
         validateShebang(abs, errors);
@@ -27944,15 +28534,15 @@ import {
   accessSync as accessSync2,
   closeSync as closeSync2,
   constants as constants2,
-  existsSync as existsSync23,
+  existsSync as existsSync24,
   fstatSync,
   lstatSync as lstatSync4,
   openSync as openSync2,
   readFileSync as readFileSync17,
   realpathSync as realpathSync4
 } from "fs";
-import { homedir as homedir7 } from "os";
-import { isAbsolute as isAbsolute3, join as join22, relative as relative3, resolve as resolve16 } from "path";
+import { homedir as homedir9 } from "os";
+import { isAbsolute as isAbsolute3, join as join24, relative as relative3, resolve as resolve16 } from "path";
 function normalizePath(path, baseDir) {
   if (isAbsolute3(path))
     return path;
@@ -27986,7 +28576,7 @@ function canonicalizeSkillPath(field, path, baseDir) {
       throw new Error("not a file or directory");
     accessSync2(canonical, stat.isDirectory() ? constants2.R_OK | constants2.X_OK : constants2.R_OK);
     if (stat.isDirectory()) {
-      const skillFile = join22(canonical, "SKILL.md");
+      const skillFile = join24(canonical, "SKILL.md");
       const skillStat = lstatSync4(skillFile);
       if (skillStat.isSymbolicLink() || !skillStat.isFile())
         throw new Error("invalid SKILL.md");
@@ -28066,7 +28656,7 @@ function readSkillSourceBytes(path, noFollowFlag) {
   const declaredStat = lstatSync4(path);
   if (declaredStat.isSymbolicLink())
     throw new Error("symlinked skill source");
-  const sourcePath = declaredStat.isDirectory() ? join22(path, "SKILL.md") : path;
+  const sourcePath = declaredStat.isDirectory() ? join24(path, "SKILL.md") : path;
   if (realpathSync4(sourcePath) !== sourcePath)
     throw new Error("skill file canonical path changed");
   const sourceStat = lstatSync4(sourcePath);
@@ -28754,17 +29344,17 @@ function appendExtensionArgs(args, spec, resolvedToolContract, extensionSources 
   const readLineNumbersPath = getReadLineNumbersExtensionPath();
   if (readLineNumbersPath)
     args.push("-e", readLineNumbersPath);
-  const piExtDir = join22(homedir7(), ".pi", "agent", "extensions");
+  const piExtDir = join24(homedir9(), ".pi", "agent", "extensions");
   if (permissionLevel !== "READ_ONLY") {
-    const qualityGatesPath = join22(piExtDir, "quality-gates");
-    if (existsSync23(qualityGatesPath))
+    const qualityGatesPath = join24(piExtDir, "quality-gates");
+    if (existsSync24(qualityGatesPath))
       args.push("-e", qualityGatesPath);
   }
-  const cavemanPath = join22(piExtDir, "caveman");
-  if (existsSync23(cavemanPath))
+  const cavemanPath = join24(piExtDir, "caveman");
+  if (existsSync24(cavemanPath))
     args.push("-e", cavemanPath);
   const gitnexusContract = resolvedToolContract?.extensions.gitnexus;
-  if (gitnexusContract?.status === "available" && gitnexusContract.packagePath && existsSync23(gitnexusContract.packagePath)) {
+  if (gitnexusContract?.status === "available" && gitnexusContract.packagePath && existsSync24(gitnexusContract.packagePath)) {
     args.push("-e", gitnexusContract.packagePath);
   }
   for (const source of extensionSources) {
@@ -29089,7 +29679,7 @@ var init_script_runner = __esm(() => {
 
 // src/cli/validate.ts
 import { readFile as readFile2 } from "fs/promises";
-import { existsSync as existsSync24 } from "fs";
+import { existsSync as existsSync25 } from "fs";
 function parseArgs6(argv) {
   const value = argv[0];
   if (!value || value.startsWith("--")) {
@@ -29164,7 +29754,7 @@ async function run13() {
     }
     process.exit(1);
   }
-  if (!existsSync24(summary.filePath)) {
+  if (!existsSync25(summary.filePath)) {
     const message = `Failed to read file: ${summary.filePath}`;
     if (args.json) {
       console.log(JSON.stringify({ valid: false, errors: [{ path: "file", message, code: "read_error" }] }));
@@ -29227,9 +29817,9 @@ var init_validate = __esm(() => {
 });
 
 // src/cli/edit.ts
-import { existsSync as existsSync25, mkdirSync as mkdirSync11, readFileSync as readFileSync18, writeFileSync as writeFileSync10 } from "fs";
+import { existsSync as existsSync26, mkdirSync as mkdirSync12, readFileSync as readFileSync18, writeFileSync as writeFileSync10 } from "fs";
 import { spawnSync as spawnSync13 } from "child_process";
-import { join as join23 } from "path";
+import { join as join25 } from "path";
 function usage() {
   const aliasList = Object.keys(LEGACY_FIELD_ALIASES).map((v) => `--${v}`).join(", ");
   return [
@@ -29471,7 +30061,7 @@ ${usage()}`);
   if (action === "get" && (pendingArrayOp || filePath)) {
     fail6("Error: --get cannot be combined with --append/--remove/--file");
   }
-  if (filePath && !existsSync25(filePath)) {
+  if (filePath && !existsSync26(filePath)) {
     fail6(`Error: file not found: ${filePath}`);
   }
   return { name, all, scope, dryRun, action, path, value, filePath, preset, forkFrom, global };
@@ -29692,9 +30282,9 @@ function readJsonFile2(filePath) {
 function createUserFork(source, targetName) {
   if (source.scope === "user")
     return source;
-  const targetDir = join23(process.cwd(), ".specialists", "user");
-  mkdirSync11(targetDir, { recursive: true });
-  const targetFile = join23(targetDir, `${targetName}.specialist.json`);
+  const targetDir = join25(process.cwd(), ".specialists", "user");
+  mkdirSync12(targetDir, { recursive: true });
+  const targetFile = join25(targetDir, `${targetName}.specialist.json`);
   const doc = readJsonFile2(source.filePath);
   doc.specialist = doc.specialist ?? {};
   doc.specialist.metadata = doc.specialist.metadata ?? {};
@@ -29970,9 +30560,9 @@ var init_edit = __esm(() => {
 
 // src/specialist/resolution-diagnostics.ts
 import { readFile as readFile3 } from "fs/promises";
-import { createRequire as createRequire3 } from "module";
+import { createRequire as createRequire5 } from "module";
 import { execSync as execSync3 } from "child_process";
-import { join as join24 } from "path";
+import { join as join26 } from "path";
 function globalNodeModules() {
   if (cachedGlobalNodeModules !== undefined)
     return cachedGlobalNodeModules;
@@ -29990,13 +30580,13 @@ function resolveAcrossGlobals(packageName, ...subpaths) {
   if (globalRoot)
     paths.push(globalRoot);
   try {
-    return require3.resolve(target, paths.length > 0 ? { paths } : undefined);
+    return require5.resolve(target, paths.length > 0 ? { paths } : undefined);
   } catch {
     return;
   }
 }
 function readJsonFile3(path) {
-  return JSON.parse(require3("node:fs").readFileSync(path, "utf-8"));
+  return JSON.parse(require5("node:fs").readFileSync(path, "utf-8"));
 }
 function resolvePackageVersion(packageName) {
   const packageJsonPath = resolveAcrossGlobals(packageName, "package.json");
@@ -30066,7 +30656,7 @@ function probeHealth(catalog) {
   return classifyExtensionProbe(catalog, { installedVersion, entrypointExists });
 }
 async function loadResolvedConfigReport(args) {
-  const manifest = readJsonFile3(join24(args.projectDir, "config", "specialists", `${args.specialistName}.specialist.json`));
+  const manifest = readJsonFile3(join26(args.projectDir, "config", "specialists", `${args.specialistName}.specialist.json`));
   const index = loadToolCatalogIndex(await readFile3(args.catalogsPath, "utf-8"));
   const catalogs = index.catalogs;
   const probes = catalogs.map(probeHealth);
@@ -30135,18 +30725,18 @@ function formatResolvedConfigReport(report) {
   return lines.join(`
 `);
 }
-var require3, cachedGlobalNodeModules;
+var require5, cachedGlobalNodeModules;
 var init_resolution_diagnostics = __esm(() => {
   init_tool_catalog();
   init_manifest_resolver();
   init_resolved_tool_contract();
-  require3 = createRequire3(import.meta.url);
+  require5 = createRequire5(import.meta.url);
 });
 
 // src/cli/config.ts
-import { existsSync as existsSync26, readFileSync as readFileSync19 } from "fs";
+import { existsSync as existsSync27, readFileSync as readFileSync19 } from "fs";
 import { spawnSync as spawnSync14 } from "child_process";
-import { dirname as dirname15, join as join25 } from "path";
+import { dirname as dirname17, join as join27 } from "path";
 import { fileURLToPath as fileURLToPath8 } from "url";
 function usage2() {
   return [
@@ -30192,8 +30782,8 @@ function getGitTopLevel(projectDir) {
   return result.stdout.trim() || undefined;
 }
 function getRuntimePackageVersion() {
-  const runtimeDir = dirname15(fileURLToPath8(import.meta.url));
-  const packageJsonPath = runtimeDir.includes("/dist/") ? join25(runtimeDir, "..", "package.json") : join25(runtimeDir, "..", "..", "package.json");
+  const runtimeDir = dirname17(fileURLToPath8(import.meta.url));
+  const packageJsonPath = runtimeDir.includes("/dist/") ? join27(runtimeDir, "..", "package.json") : join27(runtimeDir, "..", "..", "package.json");
   return readPackageVersion2(packageJsonPath);
 }
 function shouldWarnAboutSourceMode(projectDir) {
@@ -30203,7 +30793,7 @@ function shouldWarnAboutSourceMode(projectDir) {
   const commonDir = getGitCommonDir(projectDir);
   if (!topLevel || !commonDir || topLevel === commonDir)
     return false;
-  const packageVersion = readPackageVersion2(join25(projectDir, "package.json"));
+  const packageVersion = readPackageVersion2(join27(projectDir, "package.json"));
   const runtimeVersion = getRuntimePackageVersion();
   return Boolean(packageVersion && runtimeVersion && packageVersion !== runtimeVersion);
 }
@@ -30284,12 +30874,12 @@ ${usage2()}`);
 ${usage2()}`);
   }
   const projectDir = process.cwd();
-  const legacyCatalogsPath = join25(projectDir, ".specialists", "catalog", "index.json");
+  const legacyCatalogsPath = join27(projectDir, ".specialists", "catalog", "index.json");
   let catalogsPath = legacyCatalogsPath;
-  if (!existsSync26(catalogsPath)) {
+  if (!existsSync27(catalogsPath)) {
     const canonicalDir = resolveCanonicalAssetDir("catalog");
     if (canonicalDir) {
-      catalogsPath = join25(canonicalDir, "index.json");
+      catalogsPath = join27(canonicalDir, "index.json");
     }
   }
   if (!flags.has("--from-source") && shouldWarnAboutSourceMode(projectDir)) {
@@ -36065,7 +36655,7 @@ var init_stdin_buffer = __esm(() => {
 
 // node_modules/@earendil-works/pi-tui/dist/terminal.js
 import * as fs2 from "fs";
-import { createRequire as createRequire4 } from "module";
+import { createRequire as createRequire6 } from "module";
 import * as path2 from "path";
 import { fileURLToPath as fileURLToPath9 } from "url";
 
@@ -36300,7 +36890,7 @@ var cjsRequire, TERMINAL_PROGRESS_KEEPALIVE_MS = 1000, TERMINAL_PROGRESS_ACTIVE_
 var init_terminal = __esm(() => {
   init_keys();
   init_stdin_buffer();
-  cjsRequire = createRequire4(import.meta.url);
+  cjsRequire = createRequire6(import.meta.url);
 });
 
 // node_modules/@earendil-works/pi-tui/dist/index.js
@@ -36411,18 +37001,18 @@ var init_feed = __esm(() => {
 });
 
 // src/specialist/status-load.ts
-import { appendFileSync as appendFileSync4, existsSync as existsSync27, mkdirSync as mkdirSync13, readdirSync as readdirSync8, readFileSync as readFileSync20, renameSync as renameSync4, writeFileSync as writeFileSync13 } from "fs";
-import { join as join28 } from "path";
+import { appendFileSync as appendFileSync4, existsSync as existsSync28, mkdirSync as mkdirSync14, readdirSync as readdirSync8, readFileSync as readFileSync20, renameSync as renameSync4, writeFileSync as writeFileSync13 } from "fs";
+import { join as join30 } from "path";
 function hasStatusId(status) {
   return typeof status.id === "string" && status.id.trim().length > 0;
 }
 function readStatusesFromFiles(jobsDir) {
-  if (!existsSync27(jobsDir))
+  if (!existsSync28(jobsDir))
     return [];
   const statuses = [];
   for (const entry of readdirSync8(jobsDir)) {
-    const statusPath = join28(jobsDir, entry, "status.json");
-    if (!existsSync27(statusPath))
+    const statusPath = join30(jobsDir, entry, "status.json");
+    if (!existsSync28(statusPath))
       continue;
     try {
       const status = JSON.parse(readFileSync20(statusPath, "utf-8"));
@@ -36433,8 +37023,8 @@ function readStatusesFromFiles(jobsDir) {
   return statuses.sort((a, b) => b.started_at_ms - a.started_at_ms);
 }
 function readLastToolEventFromFile(jobsDir, jobId) {
-  const eventsPath = join28(jobsDir, jobId, "events.jsonl");
-  if (!existsSync27(eventsPath))
+  const eventsPath = join30(jobsDir, jobId, "events.jsonl");
+  if (!existsSync28(eventsPath))
     return;
   try {
     const lines = readFileSync20(eventsPath, "utf-8").split(`
@@ -36579,13 +37169,13 @@ function persistRecoveryToFiles(jobsDir, status, event) {
   if (!isJobFileOutputEnabled())
     return;
   try {
-    const dir = join28(jobsDir, status.id);
-    mkdirSync13(dir, { recursive: true });
-    const statusPath = join28(dir, "status.json");
+    const dir = join30(jobsDir, status.id);
+    mkdirSync14(dir, { recursive: true });
+    const statusPath = join30(dir, "status.json");
     const tmpPath = `${statusPath}.tmp`;
     writeFileSync13(tmpPath, JSON.stringify(status, null, 2), "utf-8");
     renameSync4(tmpPath, statusPath);
-    appendFileSync4(join28(dir, "events.jsonl"), `${JSON.stringify(event)}
+    appendFileSync4(join30(dir, "events.jsonl"), `${JSON.stringify(event)}
 `, "utf-8");
   } catch {}
 }
@@ -38204,8 +38794,8 @@ function consoleHelpText() {
 }
 
 // src/specialist/process-health.ts
-import { existsSync as existsSync28, readdirSync as readdirSync9, readFileSync as readFileSync22, readlinkSync as readlinkSync2 } from "fs";
-import { join as join29 } from "path";
+import { existsSync as existsSync29, readdirSync as readdirSync9, readFileSync as readFileSync22, readlinkSync as readlinkSync2 } from "fs";
+import { join as join31 } from "path";
 function parseThreshold(raw, fallback) {
   if (!raw)
     return fallback;
@@ -38239,7 +38829,7 @@ function readProcStringOrNull(path) {
 }
 function readProcCwdOrNull(pid, procRoot) {
   try {
-    return readlinkSync2(join29(procRoot, String(pid), "cwd"));
+    return readlinkSync2(join31(procRoot, String(pid), "cwd"));
   } catch {
     return null;
   }
@@ -38259,7 +38849,7 @@ function parseStat(stat) {
 }
 function readProcUptimeSecondsOrNull(procRoot) {
   try {
-    const match = /^(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)$/.exec(readFileSync22(join29(procRoot, "uptime"), "utf-8").trim());
+    const match = /^(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)$/.exec(readFileSync22(join31(procRoot, "uptime"), "utf-8").trim());
     if (!match)
       return null;
     return Number(match[1]);
@@ -38268,7 +38858,7 @@ function readProcUptimeSecondsOrNull(procRoot) {
   }
 }
 function readProcessLiveness(pid, procRoot) {
-  if (!existsSync28(join29(procRoot, String(pid))))
+  if (!existsSync29(join31(procRoot, String(pid))))
     return "dead";
   try {
     process.kill(pid, 0);
@@ -38280,19 +38870,19 @@ function readProcessLiveness(pid, procRoot) {
   }
 }
 function readProcessSnapshot(pid, procRoot, uptimeSeconds) {
-  const basePath = join29(procRoot, String(pid));
-  const cmdlineRaw = readProcStringOrNull(join29(basePath, "cmdline"));
+  const basePath = join31(procRoot, String(pid));
+  const cmdlineRaw = readProcStringOrNull(join31(basePath, "cmdline"));
   if (!cmdlineRaw)
     return null;
   const cmdline = cmdlineRaw.replace(/\0/g, " ").trim();
   if (!cmdline)
     return null;
-  const comm = (readProcStringOrNull(join29(basePath, "comm")) ?? "").trim();
-  const stat = readProcStringOrNull(join29(basePath, "stat"));
+  const comm = (readProcStringOrNull(join31(basePath, "comm")) ?? "").trim();
+  const stat = readProcStringOrNull(join31(basePath, "stat"));
   const parsedStat = stat ? parseStat(stat) : null;
   if (!parsedStat)
     return null;
-  const status = readProcStringOrNull(join29(basePath, "status")) ?? "";
+  const status = readProcStringOrNull(join31(basePath, "status")) ?? "";
   const rssMatch = /VmRSS:\s+(\d+)\s+kB/m.exec(status);
   const rssBytes = rssMatch ? Number(rssMatch[1]) * 1024 : 0;
   const cwd = readProcCwdOrNull(pid, procRoot);
@@ -38302,7 +38892,7 @@ function readProcessSnapshot(pid, procRoot, uptimeSeconds) {
   return { pid, ppid: parsedStat.ppid, cmdline, comm, cwd, rssBytes, cpuPct, ageSeconds };
 }
 function listPids(procRoot) {
-  if (!existsSync28(procRoot))
+  if (!existsSync29(procRoot))
     return [];
   const pids = [];
   for (const entry of readdirSync9(procRoot, { withFileTypes: true })) {
@@ -38508,9 +39098,9 @@ function collectStaleSpecialistJobs(options = {}) {
         candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: null, ageMs, reason: "dead-pid" });
         continue;
       }
-      const basePath = join29(procRoot, String(pid));
-      const cmdlineRaw = readProcStringOrNull(join29(basePath, "cmdline"));
-      const statRaw = readProcStringOrNull(join29(basePath, "stat"));
+      const basePath = join31(procRoot, String(pid));
+      const cmdlineRaw = readProcStringOrNull(join31(basePath, "cmdline"));
+      const statRaw = readProcStringOrNull(join31(basePath, "stat"));
       const parsedStat = statRaw ? parseStat(statRaw) : null;
       if (status.status === "waiting" && parsedStat?.ppid === 1 && cmdlineRaw && isSpecialistRunCommand(cmdlineRaw.replace(/\0/g, " "))) {
         candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: readProcCwdOrNull(pid, procRoot), ageMs, reason: "orphaned-keep-alive" });
@@ -39376,29 +39966,29 @@ var init_log = __esm(() => {
 
 // src/cli/console/repo-config.ts
 import {
-  existsSync as existsSync29,
-  mkdirSync as mkdirSync14,
+  existsSync as existsSync30,
+  mkdirSync as mkdirSync15,
   readFileSync as readFileSync23,
   renameSync as renameSync5,
   rmSync as rmSync4,
   statSync as statSync6,
   writeFileSync as writeFileSync15
 } from "fs";
-import { homedir as homedir9 } from "os";
-import { dirname as dirname18, join as join30 } from "path";
+import { homedir as homedir11 } from "os";
+import { dirname as dirname20, join as join32 } from "path";
 function getConsoleConfigPath() {
-  const home = process.env.HOME?.trim() || homedir9();
+  const home = process.env.HOME?.trim() || homedir11();
   const xdgConfigHome = process.env.XDG_CONFIG_HOME?.trim();
   if (xdgConfigHome) {
-    const xdgPath = join30(xdgConfigHome, SPECIALISTS_SUBDIR2, CONFIG_FILENAME2);
-    return { path: xdgPath, exists: existsSync29(xdgPath), source: "xdg" };
+    const xdgPath = join32(xdgConfigHome, SPECIALISTS_SUBDIR2, CONFIG_FILENAME2);
+    return { path: xdgPath, exists: existsSync30(xdgPath), source: "xdg" };
   }
-  const configHomePath = join30(home, ".config", SPECIALISTS_SUBDIR2, CONFIG_FILENAME2);
-  if (existsSync29(configHomePath)) {
+  const configHomePath = join32(home, ".config", SPECIALISTS_SUBDIR2, CONFIG_FILENAME2);
+  if (existsSync30(configHomePath)) {
     return { path: configHomePath, exists: true, source: "config-home" };
   }
-  const legacyPath = join30(home, ".specialists", CONFIG_FILENAME2);
-  if (existsSync29(legacyPath)) {
+  const legacyPath = join32(home, ".specialists", CONFIG_FILENAME2);
+  if (existsSync30(legacyPath)) {
     return { path: legacyPath, exists: true, source: "legacy" };
   }
   return { path: configHomePath, exists: false, source: "config-home" };
@@ -39439,8 +40029,8 @@ function normalizeConfig(raw) {
 }
 function writeConsoleConfig(config, cookie = `${process.pid}.${Math.floor(performance.now() * 1000)}`) {
   const location = getConsoleConfigPath();
-  const dir = dirname18(location.path);
-  mkdirSync14(dir, { recursive: true });
+  const dir = dirname20(location.path);
+  mkdirSync15(dir, { recursive: true });
   const payload = `${JSON.stringify(config, null, 2)}
 `;
   const tmpPath = `${location.path}.tmp.${cookie}`;
@@ -39474,15 +40064,15 @@ var init_repo_config = __esm(() => {
 });
 
 // src/cli/console/repo-discovery.ts
-import { existsSync as existsSync30, readdirSync as readdirSync10, statSync as statSync7 } from "fs";
-import { homedir as homedir10 } from "os";
-import { join as join31 } from "path";
+import { existsSync as existsSync31, readdirSync as readdirSync10, statSync as statSync7 } from "fs";
+import { homedir as homedir12 } from "os";
+import { join as join33 } from "path";
 function expandHomePath(p) {
-  const home = process.env.HOME?.trim() || homedir10();
+  const home = process.env.HOME?.trim() || homedir12();
   if (p === "~")
     return home;
   if (p.startsWith("~/"))
-    return join31(home, p.slice(2));
+    return join33(home, p.slice(2));
   return p;
 }
 function discoverRepos(baseDirCandidates = DEFAULT_BASE_DIR_CANDIDATES) {
@@ -39511,7 +40101,7 @@ function walk(dir, depth, seen, repos) {
   for (const entry of entries) {
     if (entry.startsWith("."))
       continue;
-    const root = join31(dir, entry);
+    const root = join33(dir, entry);
     if (!safeIsDirectory(root))
       continue;
     if (isWorktreeDir(root))
@@ -39530,8 +40120,8 @@ function walk(dir, depth, seen, repos) {
 }
 function isWorktreeDir(path) {
   try {
-    const gitPath = join31(path, ".git");
-    if (!existsSync30(gitPath))
+    const gitPath = join33(path, ".git");
+    if (!existsSync31(gitPath))
       return false;
     return !statSync7(gitPath).isDirectory();
   } catch {
@@ -39540,7 +40130,7 @@ function isWorktreeDir(path) {
 }
 function safeIsDirectory(path) {
   try {
-    return existsSync30(path) && statSync7(path).isDirectory();
+    return existsSync31(path) && statSync7(path).isDirectory();
   } catch {
     return false;
   }
@@ -39548,10 +40138,10 @@ function safeIsDirectory(path) {
 function looksLikeSpecialistsRepo(root) {
   try {
     const location = resolveObservabilityDbLocation(root);
-    if (existsSync30(location.dbPath))
+    if (existsSync31(location.dbPath))
       return true;
     const jobsDir = resolveJobsDir(root);
-    if (existsSync30(jobsDir))
+    if (existsSync31(jobsDir))
       return true;
   } catch {
     return false;
@@ -39572,13 +40162,13 @@ var init_repo_discovery = __esm(() => {
 });
 
 // src/cli/console/config-source.ts
-import { homedir as homedir11 } from "os";
-import { join as join32 } from "path";
-import { existsSync as existsSync31, readFileSync as readFileSync24, statSync as statSync8 } from "fs";
+import { homedir as homedir13 } from "os";
+import { join as join34 } from "path";
+import { existsSync as existsSync32, readFileSync as readFileSync24, statSync as statSync8 } from "fs";
 function readGlobalConfigSnapshot(loader) {
   const location = getGlobalUserConfigPath();
-  const exists = existsSync31(location.path);
-  const home = homedir11();
+  const exists = existsSync32(location.path);
+  const home = homedir13();
   const displayPath = home && location.path.startsWith(home) ? location.path.replace(home, "~") : location.path;
   if (!exists) {
     return {
@@ -39636,8 +40226,8 @@ function readPackageSpec(name) {
     const dir = resolveCanonicalAssetDir("specialists");
     if (!dir)
       return;
-    const specPath = join32(dir, `${name}.specialist.json`);
-    if (!existsSync31(specPath))
+    const specPath = join34(dir, `${name}.specialist.json`);
+    if (!existsSync32(specPath))
       return;
     return JSON.parse(readFileSync24(specPath, "utf-8"));
   } catch {
@@ -39937,7 +40527,7 @@ function applyFieldEdit(raw, specialist, path, value) {
 }
 function writeGlobalConfigSafe(rawObj, expectedMtimeMs) {
   const location = getGlobalUserConfigPath();
-  if (typeof expectedMtimeMs === "number" && existsSync31(location.path)) {
+  if (typeof expectedMtimeMs === "number" && existsSync32(location.path)) {
     try {
       const stat = statSync8(location.path);
       if (Math.floor(stat.mtimeMs) !== Math.floor(expectedMtimeMs)) {
@@ -39994,8 +40584,8 @@ var init_config_source = __esm(() => {
 
 // src/cli/console/runtime.ts
 import { spawnSync as spawnSync16 } from "child_process";
-import { existsSync as existsSync32, readdirSync as readdirSync11, readFileSync as readFileSync25, statSync as statSync9 } from "fs";
-import { basename as basename7, dirname as dirname19, join as join33 } from "path";
+import { existsSync as existsSync33, readdirSync as readdirSync11, readFileSync as readFileSync25, statSync as statSync9 } from "fs";
+import { basename as basename7, dirname as dirname21, join as join35 } from "path";
 function createRuntimeClient(cwd = process.cwd()) {
   return new LocalRuntimeClient(cwd);
 }
@@ -40296,7 +40886,7 @@ class LocalRuntimeClient {
   async readRawGlobalConfig() {
     await Promise.resolve().then(() => init_global_config());
     const location = getGlobalUserConfigPath();
-    if (!existsSync32(location.path))
+    if (!existsSync33(location.path))
       return { raw: {}, exists: false };
     try {
       const raw = JSON.parse(readFileSync25(location.path, "utf-8"));
@@ -40328,7 +40918,7 @@ class LocalRuntimeClient {
     if (!job)
       return null;
     const path = job.worktree_path;
-    if (!path || !existsSync32(path))
+    if (!path || !existsSync33(path))
       return null;
     const branch = job.branch;
     const base = resolveDiffBase(path, branch);
@@ -40575,7 +41165,7 @@ function parseBdShowJson(beadId, stdout) {
   return { beadId, fields, sections };
 }
 function scanSiblingsForRepos(repoRoot) {
-  const parent = dirname19(repoRoot);
+  const parent = dirname21(repoRoot);
   if (parent === repoRoot)
     return [];
   let entries;
@@ -40589,7 +41179,7 @@ function scanSiblingsForRepos(repoRoot) {
   for (const entry of entries) {
     if (entry.startsWith("."))
       continue;
-    const root = join33(parent, entry);
+    const root = join35(parent, entry);
     if (seen.has(root))
       continue;
     try {
@@ -40694,7 +41284,7 @@ function buildRepoConfigRow(entry, current) {
   if (exists) {
     try {
       const location = resolveObservabilityDbLocation(entry.path);
-      if (existsSync32(location.dbPath)) {
+      if (existsSync33(location.dbPath)) {
         const st = statSync9(location.dbPath);
         dbExists = true;
         dbSizeBytes = st.size;
@@ -40751,13 +41341,13 @@ function parseConfiguredRepos() {
 function resolveRepoRef(path, current, nameOverride) {
   const location = resolveObservabilityDbLocation(path);
   const jobsDir = resolveJobsDir(path);
-  if (!existsSync32(location.dbPath) && !existsSync32(jobsDir))
+  if (!existsSync33(location.dbPath) && !existsSync33(jobsDir))
     return null;
   const name = nameOverride ?? basename7(location.gitRoot || path);
   return { id: name, name, path: location.gitRoot || path, dbPath: location.dbPath, current };
 }
 function openClient(repo) {
-  if (repo.dbPath && existsSync32(repo.dbPath))
+  if (repo.dbPath && existsSync33(repo.dbPath))
     return createObservabilitySqliteClientAtPath(repo.dbPath);
   return createObservabilitySqliteClient(repo.path);
 }
@@ -40780,11 +41370,11 @@ function readStatuses(repo) {
   }
 }
 function readFileStatuses(jobsDir) {
-  if (!existsSync32(jobsDir))
+  if (!existsSync33(jobsDir))
     return [];
   return readdirSync11(jobsDir).flatMap((entry) => {
-    const path = join33(jobsDir, entry, "status.json");
-    if (!existsSync32(path))
+    const path = join35(jobsDir, entry, "status.json");
+    if (!existsSync33(path))
       return [];
     try {
       return [JSON.parse(readFileSync25(path, "utf-8"))];
@@ -40802,8 +41392,8 @@ function readEvents(repo, jobId) {
   } catch {} finally {
     client?.close();
   }
-  const eventsPath = join33(resolveJobsDir(repo.path), jobId, "events.jsonl");
-  if (!existsSync32(eventsPath))
+  const eventsPath = join35(resolveJobsDir(repo.path), jobId, "events.jsonl");
+  if (!existsSync33(eventsPath))
     return [];
   return readFileSync25(eventsPath, "utf-8").split(`
 `).map((line) => line.trim()).filter(Boolean).map((line) => parseTimelineEvent(line)).filter((event) => event !== null).sort(compareTimelineEvents);
@@ -40817,8 +41407,8 @@ function readResultOutput(repo, jobId, events) {
   } catch {} finally {
     client?.close();
   }
-  const resultPath = join33(resolveJobsDir(repo.path), jobId, "result.txt");
-  if (existsSync32(resultPath))
+  const resultPath = join35(resolveJobsDir(repo.path), jobId, "result.txt");
+  if (existsSync33(resultPath))
     return readFileSync25(resultPath, "utf-8");
   for (let i = events.length - 1;i >= 0; i -= 1) {
     const event = events[i];
@@ -42893,7 +43483,7 @@ var init_console = __esm(() => {
 
 // src/specialist/hooks.ts
 import { appendFile, mkdir } from "fs/promises";
-import { dirname as dirname20 } from "path";
+import { dirname as dirname22 } from "path";
 
 class HookEmitter {
   tracePath;
@@ -42901,7 +43491,7 @@ class HookEmitter {
   ready;
   constructor(options) {
     this.tracePath = options.tracePath;
-    this.ready = mkdir(dirname20(options.tracePath), { recursive: true }).then(() => {});
+    this.ready = mkdir(dirname22(options.tracePath), { recursive: true }).then(() => {});
   }
   async emit(hook, invocationId, specialistName, specialistVersion, payload) {
     await this.ready;
@@ -42928,8 +43518,8 @@ class HookEmitter {
 var init_hooks = () => {};
 
 // src/specialist/worktree.ts
-import { existsSync as existsSync33, symlinkSync as symlinkSync2, mkdirSync as mkdirSync15, rmSync as rmSync5 } from "fs";
-import { join as join34, resolve as resolve17 } from "path";
+import { existsSync as existsSync34, symlinkSync as symlinkSync2, mkdirSync as mkdirSync16, rmSync as rmSync5 } from "fs";
+import { join as join36, resolve as resolve17 } from "path";
 import { spawnSync as spawnSync17, execFileSync as execFileSync3 } from "child_process";
 function deriveBranchName(beadId, specialistName) {
   return `feature/${beadId}-${slugify(specialistName)}`;
@@ -42996,9 +43586,9 @@ function provisionWorktree(options) {
   if (existingPath) {
     return { branch, worktreePath: resolve17(existingPath), reused: true };
   }
-  const worktreeBase = options.worktreeBase ?? join34(commonRoot, ".worktrees", options.beadId);
+  const worktreeBase = options.worktreeBase ?? join36(commonRoot, ".worktrees", options.beadId);
   const worktreeName = deriveWorktreeName(options.beadId, options.specialistName);
-  const worktreePath = resolve17(join34(worktreeBase, worktreeName));
+  const worktreePath = resolve17(join36(worktreeBase, worktreeName));
   createWorktreeViaBd(worktreePath, branch, commonRoot);
   const coordinatorBase = resolveCoordinatorBase(commonRoot);
   const baseBranch = coordinatorBase && coordinatorBase !== branch ? coordinatorBase : undefined;
@@ -43007,7 +43597,7 @@ function provisionWorktree(options) {
   }
   normalizeParentHooksPath(commonRoot);
   try {
-    rmSync5(join34(worktreePath, ".beads"), { recursive: true, force: true });
+    rmSync5(join36(worktreePath, ".beads"), { recursive: true, force: true });
     markBeadsSkipWorktree(worktreePath);
   } catch {}
   symlinkPiNpmCache(commonRoot, worktreePath);
@@ -43028,7 +43618,7 @@ function normalizeParentHooksPath(mainRepoRoot) {
       return;
     if (current !== ".beads/hooks" && current !== "./.beads/hooks")
       return;
-    const absolute = join34(mainRepoRoot, ".beads", "hooks");
+    const absolute = join36(mainRepoRoot, ".beads", "hooks");
     spawnSync17("git", ["-C", mainRepoRoot, "config", "core.hooksPath", absolute], { stdio: "pipe" });
   } catch {}
 }
@@ -43052,12 +43642,12 @@ function markBeadsSkipWorktree(worktreePath) {
   } catch {}
 }
 function symlinkPiNpmCache(commonRoot, worktreePath) {
-  const source = join34(commonRoot, ".pi", "npm");
-  const target = join34(worktreePath, ".pi", "npm");
-  if (!existsSync33(source) || existsSync33(target))
+  const source = join36(commonRoot, ".pi", "npm");
+  const target = join36(worktreePath, ".pi", "npm");
+  if (!existsSync34(source) || existsSync34(target))
     return;
   try {
-    mkdirSync15(join34(worktreePath, ".pi"), { recursive: true });
+    mkdirSync16(join36(worktreePath, ".pi"), { recursive: true });
     symlinkSync2(source, target);
   } catch {}
 }
@@ -43097,13 +43687,13 @@ var init_worktree = __esm(() => {
 });
 
 // src/specialist/epic-reconciler.ts
-import { mkdirSync as mkdirSync16, openSync as openSync3, readFileSync as readFileSync26, rmSync as rmSync6, writeFileSync as writeFileSync16 } from "fs";
-import { join as join35 } from "path";
+import { mkdirSync as mkdirSync17, openSync as openSync3, readFileSync as readFileSync26, rmSync as rmSync6, writeFileSync as writeFileSync16 } from "fs";
+import { join as join37 } from "path";
 function buildEpicLockPath(epicId) {
   const location = resolveObservabilityDbLocation();
-  const lockDir = join35(location.dbDirectory, "locks");
-  mkdirSync16(lockDir, { recursive: true });
-  return join35(lockDir, `epic-${epicId}.lock`);
+  const lockDir = join37(location.dbDirectory, "locks");
+  mkdirSync17(lockDir, { recursive: true });
+  return join37(lockDir, `epic-${epicId}.lock`);
 }
 function withEpicAdvisoryLock(epicId, action) {
   const lockPath = buildEpicLockPath(epicId);
@@ -43309,8 +43899,8 @@ var init_epic_reconciler = __esm(() => {
 
 // src/cli/merge.ts
 import { spawnSync as spawnSync18 } from "child_process";
-import { existsSync as existsSync34, readFileSync as readFileSync27, readdirSync as readdirSync12 } from "fs";
-import { join as join36 } from "path";
+import { existsSync as existsSync35, readFileSync as readFileSync27, readdirSync as readdirSync12 } from "fs";
+import { join as join38 } from "path";
 function parseOptions(argv) {
   let target = "";
   let rebuild = false;
@@ -43549,13 +44139,13 @@ function readAllJobStatuses() {
       sqliteClient.close();
     }
   }
-  const jobsDir = join36(process.cwd(), ".specialists", "jobs");
-  if (!existsSync34(jobsDir))
+  const jobsDir = join38(process.cwd(), ".specialists", "jobs");
+  if (!existsSync35(jobsDir))
     return [];
   const statuses = [];
   for (const jobId of readdirSync12(jobsDir)) {
-    const statusFile = join36(jobsDir, jobId, "status.json");
-    if (!existsSync34(statusFile))
+    const statusFile = join38(jobsDir, jobId, "status.json");
+    if (!existsSync35(statusFile))
       continue;
     try {
       const raw = JSON.parse(readFileSync27(statusFile, "utf-8"));
@@ -43912,7 +44502,7 @@ ${conflicts.map((file) => `- ${file}`).join(`
   throw new Error(`Merge conflict while merging '${branch}'.${context}`);
 }
 function runTypecheckGate(cwd = process.cwd()) {
-  const hasTypeScriptConfig = existsSync34(join36(cwd, "tsconfig.json")) || readdirSync12(cwd).some((entry) => entry.startsWith("tsconfig") && entry.endsWith(".json"));
+  const hasTypeScriptConfig = existsSync35(join38(cwd, "tsconfig.json")) || readdirSync12(cwd).some((entry) => entry.startsWith("tsconfig") && entry.endsWith(".json"));
   if (!hasTypeScriptConfig) {
     console.log("TypeScript gate: skipped (no tsconfig \u2014 non-TS repo)");
     return;
@@ -43926,8 +44516,8 @@ function runTypecheckGate(cwd = process.cwd()) {
 ${stderr || stdout || "Unknown tsc error"}`);
 }
 function hasNodeBuildScript(cwd) {
-  const packageJsonPath = join36(cwd, "package.json");
-  if (!existsSync34(packageJsonPath))
+  const packageJsonPath = join38(cwd, "package.json");
+  if (!existsSync35(packageJsonPath))
     return false;
   try {
     const pkg = JSON.parse(readFileSync27(packageJsonPath, "utf8"));
@@ -44335,8 +44925,8 @@ function createPiJsonProjector(context) {
 }
 
 // src/cli/run.ts
-import { dirname as dirname21, join as join37, resolve as resolve18, sep as sep4 } from "path";
-import { constants as fsConstants, existsSync as existsSync35, fstatSync as fstatSync2, openSync as openSync4, readFileSync as readFileSync28, readSync, readdirSync as readdirSync13, realpathSync as realpathSync5, statSync as statSync10, closeSync as closeSync3 } from "fs";
+import { dirname as dirname23, join as join39, resolve as resolve18, sep as sep4 } from "path";
+import { constants as fsConstants, existsSync as existsSync36, fstatSync as fstatSync2, openSync as openSync4, readFileSync as readFileSync28, readSync, readdirSync as readdirSync13, realpathSync as realpathSync5, statSync as statSync10, closeSync as closeSync3 } from "fs";
 import { randomBytes } from "crypto";
 import { spawn as cpSpawn, execFileSync as execFileSync4, execSync as execSync5 } from "child_process";
 function formatBackgroundLaunchLine(opts) {
@@ -44616,7 +45206,7 @@ function resolveNewestJobIdFromDb(cwd, jobsDir, specialist, previousLatest, minS
     const newest = sqliteClient.listStatuses().filter((status) => {
       if (status.specialist !== specialist || status.id === previousLatest || status.started_at_ms < minStartedAtMs)
         return false;
-      return existsSync35(join37(jobsDir, status.id, "status.json"));
+      return existsSync36(join39(jobsDir, status.id, "status.json"));
     }).sort((left, right) => right.started_at_ms - left.started_at_ms || left.id.localeCompare(right.id))[0];
     return newest?.id ?? "";
   } catch {
@@ -44628,8 +45218,8 @@ function resolveNewestJobIdFromDb(cwd, jobsDir, specialist, previousLatest, minS
 function resolveNewestJobIdFromJobsDir(jobsDir, previousLatest, minMtimeMs) {
   try {
     const entries = readdirSync13(jobsDir, { withFileTypes: true }).filter((entry) => entry.isDirectory() && /^[a-f0-9]{6}$/.test(entry.name) && entry.name !== previousLatest).map((entry) => {
-      const dirPath = join37(jobsDir, entry.name);
-      const statusPath = join37(dirPath, "status.json");
+      const dirPath = join39(jobsDir, entry.name);
+      const statusPath = join39(dirPath, "status.json");
       const stats = statSync10(dirPath);
       const statusStats = statSync10(statusPath);
       return {
@@ -44743,7 +45333,7 @@ function resolveWorkingDirectory(args, jobsDir, permissionRequired, readStatus) 
   return {};
 }
 function startEventTailer(jobId, jobsDir, mode, _specialist, _beadId) {
-  const eventsPath = join37(jobsDir, jobId, "events.jsonl");
+  const eventsPath = join39(jobsDir, jobId, "events.jsonl");
   const sqliteClient = createObservabilitySqliteClient(process.cwd());
   let linesRead = 0;
   let lastSeq = 0;
@@ -45278,7 +45868,7 @@ function readSafeSnapshotFile(cwd, file, maxBytes, fsApi = snapshotReaderFs) {
     const lexicalContainment = candidatePath === resolvedCwd || candidatePath.startsWith(`${resolvedCwd}${sep4}`);
     if (!lexicalContainment)
       return { ok: false, output: "" };
-    const realParentPath = fsApi.realpathSync.native(dirname21(candidatePath));
+    const realParentPath = fsApi.realpathSync.native(dirname23(candidatePath));
     const parentContained = realParentPath === resolvedCwd || realParentPath.startsWith(`${resolvedCwd}${sep4}`);
     if (!parentContained)
       return { ok: false, output: "" };
@@ -45696,7 +46286,7 @@ async function run19() {
   const ambientRuntimeOrigin = propagatedOrigin ?? ambientCapture;
   if (args.background) {
     const jobsDir = resolveJobsDir();
-    const latestPath = join37(jobsDir, "latest");
+    const latestPath = join39(jobsDir, "latest");
     const oldLatest = (() => {
       try {
         return readFileSync28(latestPath, "utf-8").trim();
@@ -45719,7 +46309,7 @@ async function run19() {
       const suffix = randomBytes(3).toString("hex");
       const sessionName = buildSessionName(args.name, suffix);
       tmuxSessionName = sessionName;
-      handoffPath = join37(jobsDir, `.bg-job-id-${sessionName}`);
+      handoffPath = join39(jobsDir, `.bg-job-id-${sessionName}`);
       const feedCommandPrefix = [process.execPath, process.argv[1], "feed"].map(shellQuote2).join(" ");
       const tmuxCmd = buildTmuxLiveFeedCommand({
         cwd,
@@ -45841,7 +46431,7 @@ async function run19() {
     process.exit(0);
   }
   const circuitBreaker = new CircuitBreaker;
-  const hooks = new HookEmitter({ tracePath: join37(process.cwd(), ".specialists", "trace.jsonl") });
+  const hooks = new HookEmitter({ tracePath: join39(process.cwd(), ".specialists", "trace.jsonl") });
   const beadsClient = args.noBeads ? undefined : new BeadsClient;
   const beadReader = beadsClient ?? new BeadsClient;
   let prompt = args.prompt;
@@ -46052,8 +46642,8 @@ var init_node_resolve = __esm(() => {
 });
 
 // src/specialist/job-control.ts
-import { existsSync as existsSync36, readFileSync as readFileSync29, writeFileSync as writeFileSync18 } from "fs";
-import { join as join38 } from "path";
+import { existsSync as existsSync37, readFileSync as readFileSync29, writeFileSync as writeFileSync18 } from "fs";
+import { join as join40 } from "path";
 
 class JobControl {
   supervisor;
@@ -46132,7 +46722,7 @@ class JobControl {
         return sqliteResult;
     } catch {}
     const resultPath = this.resultPath(jobId);
-    if (!existsSync36(resultPath))
+    if (!existsSync37(resultPath))
       return null;
     try {
       return readFileSync29(resultPath, "utf-8");
@@ -46171,7 +46761,7 @@ class JobControl {
     writeFileSync18(status.fifo_path, jsonLine, { flag: "a" });
   }
   resultPath(jobId) {
-    return join38(this.jobsDir, jobId, "result.txt");
+    return join40(this.jobsDir, jobId, "result.txt");
   }
 }
 var TERMINAL_STATUSES2, INITIAL_BACKOFF_MS = 100, MAX_BACKOFF_MS = 2000;
@@ -48245,9 +48835,9 @@ var init_node_supervisor = __esm(() => {
 });
 
 // src/cli/node.ts
-import { existsSync as existsSync37, readFileSync as readFileSync30, readdirSync as readdirSync14 } from "fs";
+import { existsSync as existsSync38, readFileSync as readFileSync30, readdirSync as readdirSync14 } from "fs";
 import { randomUUID as randomUUID3 } from "crypto";
-import { basename as basename8, join as join39, resolve as resolve19 } from "path";
+import { basename as basename8, join as join41, resolve as resolve19 } from "path";
 function parseNodeArgs(argv) {
   const command = argv[0];
   const supportedCommands = new Set(["run", "list", "promote", "members", "memory", "stop", "spawn-member", "create-bead", "complete", "wait-phase"]);
@@ -48448,11 +49038,11 @@ function discoverNodeConfigs(cwd) {
   const discoveredByName = new Map;
   for (const directory of NODE_DISCOVERY_DIRS) {
     const absoluteDir = resolve19(cwd, directory.path);
-    if (!existsSync37(absoluteDir))
+    if (!existsSync38(absoluteDir))
       continue;
     const files = readdirSync14(absoluteDir).filter((fileName) => fileName.endsWith(NODE_CONFIG_SUFFIX));
     for (const fileName of files) {
-      const path = join39(absoluteDir, fileName);
+      const path = join41(absoluteDir, fileName);
       const name = toNodeName(fileName);
       if (discoveredByName.has(name))
         continue;
@@ -48470,7 +49060,7 @@ function getNodeDiscoverySummary() {
 }
 function resolveNodeConfigPath(cwd, input) {
   const explicitPath = resolve19(cwd, input);
-  if (existsSync37(explicitPath)) {
+  if (existsSync38(explicitPath)) {
     return { name: toNodeName(explicitPath), path: explicitPath, source: "repo" };
   }
   const normalizedName = input.endsWith(NODE_CONFIG_SUFFIX) ? input.slice(0, -NODE_CONFIG_SUFFIX.length) : input;
@@ -48576,7 +49166,7 @@ async function handleNodeRun(args) {
     const loader = new SpecialistLoader;
     const runner = new SpecialistRunner({
       loader,
-      hooks: new HookEmitter({ tracePath: join39(process.cwd(), ".specialists", "trace.jsonl") }),
+      hooks: new HookEmitter({ tracePath: join41(process.cwd(), ".specialists", "trace.jsonl") }),
       circuitBreaker: new CircuitBreaker
     });
     const nodeId = `${config.name}-${randomUUID3().slice(0, 8)}`;
@@ -48937,7 +49527,7 @@ async function createNodeActionRunnerDependencies() {
   const loader = new SpecialistLoader;
   const runner = new SpecialistRunner({
     loader,
-    hooks: new HookEmitter({ tracePath: join39(process.cwd(), ".specialists", "trace.jsonl") }),
+    hooks: new HookEmitter({ tracePath: join41(process.cwd(), ".specialists", "trace.jsonl") }),
     circuitBreaker: new CircuitBreaker
   });
   return { loader, runner };
@@ -49835,8 +50425,8 @@ var init_epic = __esm(() => {
 
 // src/cli/status.ts
 import { spawnSync as spawnSync21 } from "child_process";
-import { existsSync as existsSync38, readFileSync as readFileSync31 } from "fs";
-import { join as join40 } from "path";
+import { existsSync as existsSync39, readFileSync as readFileSync31 } from "fs";
+import { join as join42 } from "path";
 function ok2(msg) {
   console.log(`  ${green9("\u2713")} ${msg}`);
 }
@@ -49933,8 +50523,8 @@ function countJobEvents(sqliteClient, jobsDir, jobId) {
   if (detectJobOutputMode() !== "on") {
     return 0;
   }
-  const eventsFile = join40(jobsDir, jobId, "events.jsonl");
-  if (!existsSync38(eventsFile))
+  const eventsFile = join42(jobsDir, jobId, "events.jsonl");
+  if (!existsSync39(eventsFile))
     return 0;
   const raw = readFileSync31(eventsFile, "utf-8").trim();
   if (!raw)
@@ -49970,8 +50560,8 @@ function getLatestContextSnapshot(sqliteClient, jobsDir, jobId) {
   if (detectJobOutputMode() !== "on") {
     return null;
   }
-  const eventsFile = join40(jobsDir, jobId, "events.jsonl");
-  if (!existsSync38(eventsFile))
+  const eventsFile = join42(jobsDir, jobId, "events.jsonl");
+  if (!existsSync39(eventsFile))
     return null;
   const lines = readFileSync31(eventsFile, "utf-8").split(`
 `);
@@ -50071,12 +50661,12 @@ async function run20() {
 `).slice(1).map((line) => line.split(/\s+/)[0]).filter(Boolean)) : new Set;
     const bdInstalled = isInstalled2("bd");
     const bdVersion = bdInstalled ? cmd("bd", ["--version"]) : null;
-    const beadsPresent = existsSync38(join40(process.cwd(), ".beads"));
+    const beadsPresent = existsSync39(join42(process.cwd(), ".beads"));
     const specialistsBin = cmd("which", ["specialists"]);
     const jobsDir = resolveJobsDir();
     const jobFileOutputMode = detectJobFileOutputMode();
     let jobs = [];
-    if (existsSync38(jobsDir)) {
+    if (existsSync39(jobsDir)) {
       supervisor = new Supervisor({
         runner: null,
         runOptions: null,
@@ -50414,90 +51004,8 @@ function formatActivationAge(nowMs, atMs) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-// src/activation/authority-store.ts
-import { mkdirSync as mkdirSync17 } from "fs";
-import { createRequire as createRequire5 } from "module";
-import { homedir as homedir12 } from "os";
-import { dirname as dirname22, join as join41 } from "path";
-function resolveAuthorityDbPath(env = process.env) {
-  const substrate = (env.SUBSTRATE_DB ?? "").trim();
-  if (substrate)
-    return substrate;
-  const legacy = (env.XTRM_STATE_DB ?? "").trim();
-  if (legacy)
-    return legacy;
-  return join41(homedir12(), ".xtrm", "state.db");
-}
-function openAuthorityDb(dbPath) {
-  try {
-    const bun = require4("bun:sqlite");
-    if (bun?.Database)
-      return new bun.Database(dbPath);
-  } catch {}
-  try {
-    const node = require4("node:sqlite");
-    if (node?.DatabaseSync) {
-      const DatabaseSync = node.DatabaseSync;
-      const inner = new DatabaseSync(dbPath);
-      return {
-        exec: (sql) => inner.exec(sql),
-        prepare: (sql) => {
-          const stmt = inner.prepare(sql);
-          return { run: (...params) => stmt.run(...params.map((v) => v === undefined ? null : v)) };
-        },
-        close: () => inner.close()
-      };
-    }
-  } catch {}
-  return null;
-}
-function createFileAuthorityWriter(dbPath = resolveAuthorityDbPath()) {
-  return {
-    record(snapshot) {
-      try {
-        mkdirSync17(dirname22(dbPath), { recursive: true });
-        const db = openAuthorityDb(dbPath);
-        if (!db)
-          return;
-        try {
-          db.exec(ACTIVATIONS_DDL);
-          db.prepare(`INSERT OR REPLACE INTO activations
-               (activation_id, specialist, state, bead_id, last_activity_at)
-             VALUES (?, ?, ?, ?, ?)`).run(snapshot.activationId, snapshot.specialist, snapshot.state, snapshot.issueRef, snapshot.lastActivityAt);
-        } finally {
-          db.close();
-        }
-      } catch {}
-    },
-    remove(activationId) {
-      try {
-        const db = openAuthorityDb(dbPath);
-        if (!db)
-          return;
-        try {
-          db.exec(ACTIVATIONS_DDL);
-          db.prepare("DELETE FROM activations WHERE activation_id = ?").run(activationId);
-        } finally {
-          db.close();
-        }
-      } catch {}
-    }
-  };
-}
-var require4, ACTIVATIONS_DDL = `CREATE TABLE IF NOT EXISTS activations (
-  activation_id TEXT PRIMARY KEY,
-  specialist TEXT NOT NULL,
-  state TEXT NOT NULL,
-  bead_id TEXT,
-  last_activity_at INTEGER NOT NULL
-)`, NULL_AUTHORITY_WRITER;
-var init_authority_store = __esm(() => {
-  require4 = createRequire5(import.meta.url);
-  NULL_AUTHORITY_WRITER = { record: () => {}, remove: () => {} };
-});
-
 // src/specialist/native-activation-ownership.ts
-import { existsSync as existsSync39 } from "fs";
+import { existsSync as existsSync40 } from "fs";
 function resolveSessionHolder(env = process.env) {
   for (const key of ["XTRM_SESSION_NAME", "XTRM_SESSION_ID"]) {
     const value = (env[key] ?? "").trim();
@@ -50540,7 +51048,7 @@ function resolveNativeActivationOwnership(opts = {}) {
     };
   }
   const dbPath = opts.dbPath ?? resolveAuthorityDbPath(opts.env);
-  if (!existsSync39(dbPath)) {
+  if (!existsSync40(dbPath)) {
     return {
       kind: "unavailable",
       reason: "authority_store_absent",
@@ -51739,8 +52247,8 @@ var init_ps = __esm(() => {
 });
 
 // src/cli/result.ts
-import { existsSync as existsSync40, readFileSync as readFileSync32 } from "fs";
-import { join as join42 } from "path";
+import { existsSync as existsSync41, readFileSync as readFileSync32 } from "fs";
+import { join as join43 } from "path";
 function isNativeActivationId(ref) {
   return /^act:[^:]+$/.test(ref);
 }
@@ -51884,8 +52392,8 @@ function readTimelineEventsForResult(sqliteClient, jobsDir, jobId) {
       return sqliteClient.readEvents(jobId);
     } catch {}
   }
-  const eventsPath = join42(jobsDir, jobId, "events.jsonl");
-  if (!existsSync40(eventsPath))
+  const eventsPath = join43(jobsDir, jobId, "events.jsonl");
+  if (!existsSync41(eventsPath))
     return [];
   return readFileSync32(eventsPath, "utf-8").split(`
 `).map((line) => line.trim()).filter(Boolean).map((line) => parseTimelineEvent(line)).filter((event) => event !== null);
@@ -52030,7 +52538,7 @@ async function run22() {
       error
     }, null, 2));
   };
-  const jobsDir = join42(process.cwd(), ".specialists", "jobs");
+  const jobsDir = join43(process.cwd(), ".specialists", "jobs");
   const supervisor = new Supervisor({ runner: null, runOptions: null, jobsDir });
   const sqliteClient = createObservabilitySqliteClient();
   const emitHumanResult = (output, status, startupContext, trailingFooter) => {
@@ -52132,7 +52640,7 @@ async function run22() {
         process.exit(1);
       }
     }
-    const resultPath = join42(jobsDir, jobId, "result.txt");
+    const resultPath = join43(jobsDir, jobId, "result.txt");
     const readResultOutput = () => {
       try {
         const sqliteResult = sqliteClient?.readResult(jobId) ?? null;
@@ -52141,7 +52649,7 @@ async function run22() {
       } catch (error) {
         console.warn(`SQLite result read failed for job ${jobId}; falling back to result.txt`, error);
       }
-      if (existsSync40(resultPath)) {
+      if (existsSync41(resultPath)) {
         return readFileSync32(resultPath, "utf-8");
       }
       try {
@@ -52360,8 +52868,8 @@ var init_result = __esm(() => {
 });
 
 // src/specialist/timeline-query.ts
-import { existsSync as existsSync41, readdirSync as readdirSync15, readFileSync as readFileSync33 } from "fs";
-import { basename as basename9, join as join43 } from "path";
+import { existsSync as existsSync42, readdirSync as readdirSync15, readFileSync as readFileSync33 } from "fs";
+import { basename as basename9, join as join44 } from "path";
 function readJobEvents(jobDir) {
   const jobId = basename9(jobDir);
   try {
@@ -52373,8 +52881,8 @@ function readJobEvents(jobDir) {
   } catch {}
   if (process.env.SPECIALISTS_JOB_FILE_OUTPUT !== "on")
     return [];
-  const eventsPath = join43(jobDir, "events.jsonl");
-  if (!existsSync41(eventsPath))
+  const eventsPath = join44(jobDir, "events.jsonl");
+  if (!existsSync42(eventsPath))
     return [];
   const content = readFileSync33(eventsPath, "utf-8");
   const lines = content.split(`
@@ -52420,12 +52928,12 @@ function readAllJobEvents(jobsDir, jobId) {
   } catch {}
   if (process.env.SPECIALISTS_JOB_FILE_OUTPUT !== "on")
     return [];
-  if (!existsSync41(jobsDir))
+  if (!existsSync42(jobsDir))
     return [];
   const batches = [];
   const entries = readdirSync15(jobsDir);
   for (const entry of entries) {
-    const jobDir = join43(jobsDir, entry);
+    const jobDir = join44(jobsDir, entry);
     try {
       const stat = __require("fs").statSync(jobDir);
       if (!stat.isDirectory())
@@ -52434,10 +52942,10 @@ function readAllJobEvents(jobsDir, jobId) {
       continue;
     }
     const jobId = entry;
-    const statusPath = join43(jobDir, "status.json");
+    const statusPath = join44(jobDir, "status.json");
     let specialist = "unknown";
     let beadId;
-    if (existsSync41(statusPath)) {
+    if (existsSync42(statusPath)) {
       try {
         const status = JSON.parse(readFileSync33(statusPath, "utf-8"));
         specialist = status.specialist ?? "unknown";
@@ -52504,13 +53012,13 @@ var init_timeline_query = __esm(() => {
 // src/cli/feed.ts
 import {
   closeSync as closeSync4,
-  existsSync as existsSync42,
+  existsSync as existsSync43,
   openSync as openSync5,
   readFileSync as readFileSync34,
   readdirSync as readdirSync16,
   statSync as statSync11
 } from "fs";
-import { join as join44 } from "path";
+import { join as join45 } from "path";
 function getHumanEventKey2(event) {
   switch (event.type) {
     case "meta":
@@ -52715,7 +53223,7 @@ function readStatusJson(sqliteClient, jobsDir, jobId) {
   } catch (error) {
     console.warn(`SQLite status read failed for job ${jobId}; falling back to status.json`, error);
   }
-  const statusPath = join44(jobsDir, jobId, "status.json");
+  const statusPath = join45(jobsDir, jobId, "status.json");
   const raw = readFileFresh(statusPath);
   if (!raw)
     return null;
@@ -52988,9 +53496,9 @@ function listMatchingJobIds(sqliteClient, jobsDir, options) {
       jobIds.add(status.id);
     }
   } catch {}
-  if (existsSync42(jobsDir)) {
+  if (existsSync43(jobsDir)) {
     for (const entry of readdirSync16(jobsDir)) {
-      const jobDir = join44(jobsDir, entry);
+      const jobDir = join45(jobsDir, entry);
       try {
         if (!statSync11(jobDir).isDirectory())
           continue;
@@ -53032,7 +53540,7 @@ function readJobEventsFresh(sqliteClient, jobsDir, jobId) {
   } catch (error) {
     console.warn(`SQLite events read failed for job ${jobId}; falling back to events.jsonl`, error);
   }
-  const eventsPath = join44(jobsDir, jobId, "events.jsonl");
+  const eventsPath = join45(jobsDir, jobId, "events.jsonl");
   const content = readFileFresh(eventsPath);
   if (!content)
     return [];
@@ -53056,7 +53564,7 @@ function readJobEventsIncremental(sqliteClient, jobsDir, jobId, afterSeq, fileCa
   } catch (error) {
     console.warn(`SQLite incremental events read failed for job ${jobId}; falling back to events.jsonl`, error);
   }
-  const eventsPath = join44(jobsDir, jobId, "events.jsonl");
+  const eventsPath = join45(jobsDir, jobId, "events.jsonl");
   let stats;
   try {
     stats = statSync11(eventsPath);
@@ -53222,7 +53730,7 @@ async function run23() {
   const options = parseArgs12(process.argv.slice(3));
   const sqliteClient = createObservabilitySqliteClient();
   try {
-    const jobsDir = join44(process.cwd(), ".specialists", "jobs");
+    const jobsDir = join45(process.cwd(), ".specialists", "jobs");
     const hasSqliteStatuses = (() => {
       try {
         return (sqliteClient?.listStatuses?.() ?? []).length > 0;
@@ -53230,7 +53738,7 @@ async function run23() {
         return false;
       }
     })();
-    if (!existsSync42(jobsDir) && !hasSqliteStatuses) {
+    if (!existsSync43(jobsDir) && !hasSqliteStatuses) {
       if (options.jobId && sqliteClient) {
         console.log(dim9(`job ${options.jobId} not found in .specialists/db/observability.db`));
       } else {
@@ -54147,8 +54655,8 @@ var init_metrics = __esm(() => {
 });
 
 // src/cli/log.ts
-import { existsSync as existsSync43, readdirSync as readdirSync17, statSync as statSync12 } from "fs";
-import { basename as basename11, join as join45 } from "path";
+import { existsSync as existsSync44, readdirSync as readdirSync17, statSync as statSync12 } from "fs";
+import { basename as basename11, join as join46 } from "path";
 function parseSince4(value) {
   if (value.includes("T") || value.includes("-"))
     return new Date(value).getTime();
@@ -54239,7 +54747,7 @@ function parseArgs15(argv) {
 }
 function discoverDbTargets(cwd, repoFilter) {
   const cwdLocation = resolveObservabilityDbLocation(cwd);
-  if (existsSync43(cwdLocation.dbPath)) {
+  if (existsSync44(cwdLocation.dbPath)) {
     const repo = basename11(cwdLocation.gitRoot);
     if (!repoFilter || repo === repoFilter) {
       return [{ repo, root: cwdLocation.gitRoot, dbPath: cwdLocation.dbPath, source: "cwd" }];
@@ -54254,15 +54762,15 @@ function discoverDbTargets(cwd, repoFilter) {
     return [];
   }
   for (const entry of entries) {
-    const root = join45(cwd, entry);
+    const root = join46(cwd, entry);
     try {
       if (!statSync12(root).isDirectory())
         continue;
     } catch {
       continue;
     }
-    const dbPath = join45(root, ".specialists", "db", "observability.db");
-    if (!existsSync43(dbPath))
+    const dbPath = join46(root, ".specialists", "db", "observability.db");
+    if (!existsSync44(dbPath))
       continue;
     if (repoFilter && entry !== repoFilter)
       continue;
@@ -54980,12 +55488,12 @@ async function run30() {
 }
 
 // src/specialist/worktree-gc.ts
-import { existsSync as existsSync44, readdirSync as readdirSync18, readFileSync as readFileSync35 } from "fs";
-import { join as join46 } from "path";
+import { existsSync as existsSync45, readdirSync as readdirSync18, readFileSync as readFileSync35 } from "fs";
+import { join as join47 } from "path";
 import { spawnSync as spawnSync24 } from "child_process";
 function readJobStatus2(jobDir) {
-  const statusPath = join46(jobDir, "status.json");
-  if (!existsSync44(statusPath))
+  const statusPath = join47(jobDir, "status.json");
+  if (!existsSync45(statusPath))
     return null;
   try {
     return JSON.parse(readFileSync35(statusPath, "utf-8"));
@@ -55010,7 +55518,7 @@ function collectWorktreeGcCandidates(jobsDir) {
       const worktreePath = status.worktree_path;
       if (!worktreePath)
         return null;
-      if (!existsSync44(worktreePath))
+      if (!existsSync45(worktreePath))
         return null;
       return {
         jobId: status.id,
@@ -55022,13 +55530,13 @@ function collectWorktreeGcCandidates(jobsDir) {
   }
   if (!getFileFallbackEnabled())
     return [];
-  if (!existsSync44(jobsDir))
+  if (!existsSync45(jobsDir))
     return [];
   const candidates = [];
   for (const entry of readdirSync18(jobsDir, { withFileTypes: true })) {
     if (!entry.isDirectory())
       continue;
-    const status = readJobStatus2(join46(jobsDir, entry.name));
+    const status = readJobStatus2(join47(jobsDir, entry.name));
     if (!status)
       continue;
     if (isActive(status.status))
@@ -55038,7 +55546,7 @@ function collectWorktreeGcCandidates(jobsDir) {
     const { worktree_path: worktreePath, branch } = status;
     if (!worktreePath)
       continue;
-    if (!existsSync44(worktreePath))
+    if (!existsSync45(worktreePath))
       continue;
     candidates.push({
       jobId: status.id,
@@ -55080,8 +55588,8 @@ var init_worktree_gc = __esm(() => {
 });
 
 // src/cli/clean.ts
-import { existsSync as existsSync45, readFileSync as readFileSync36, readdirSync as readdirSync19, rmSync as rmSync7, statSync as statSync13 } from "fs";
-import { join as join47 } from "path";
+import { existsSync as existsSync46, readFileSync as readFileSync36, readdirSync as readdirSync19, rmSync as rmSync7, statSync as statSync13 } from "fs";
+import { join as join48 } from "path";
 function parseDuration2(raw) {
   const match = /^(\d+)(ms|s|m|h|d)$/i.exec(raw.trim());
   if (!match)
@@ -55236,7 +55744,7 @@ function parseOptions2(argv) {
 function readDirectorySizeBytes(directoryPath) {
   let totalBytes = 0;
   for (const entry of readdirSync19(directoryPath, { withFileTypes: true })) {
-    const entryPath = join47(directoryPath, entry.name);
+    const entryPath = join48(directoryPath, entry.name);
     const stats = statSync13(entryPath);
     totalBytes += stats.isDirectory() ? readDirectorySizeBytes(entryPath) : stats.size;
   }
@@ -55244,7 +55752,7 @@ function readDirectorySizeBytes(directoryPath) {
 }
 function containsProtectedSqliteArtifact(directoryPath) {
   for (const entry of readdirSync19(directoryPath, { withFileTypes: true })) {
-    const entryPath = join47(directoryPath, entry.name);
+    const entryPath = join48(directoryPath, entry.name);
     if (entry.isDirectory()) {
       if (containsProtectedSqliteArtifact(entryPath))
         return true;
@@ -55265,11 +55773,11 @@ function getJobTimestamps(status) {
 function readCompletedJobDirectory(baseDirectory, entry) {
   if (!entry.isDirectory())
     return null;
-  const directoryPath = join47(baseDirectory, entry.name);
+  const directoryPath = join48(baseDirectory, entry.name);
   if (containsProtectedSqliteArtifact(directoryPath))
     return null;
-  const statusFilePath = join47(directoryPath, "status.json");
-  if (!existsSync45(statusFilePath))
+  const statusFilePath = join48(directoryPath, "status.json");
+  if (!existsSync46(statusFilePath))
     return null;
   let statusData;
   try {
@@ -55287,8 +55795,8 @@ function collectCompletedJobs(jobsDirectoryPath) {
   const statuses = sqliteClient?.listStatuses() ?? [];
   if (statuses.length > 0) {
     return statuses.filter((status) => COMPLETED_STATUSES.has(status.status)).map((status) => {
-      const directoryPath = join47(jobsDirectoryPath, status.id);
-      if (!existsSync45(directoryPath) || containsProtectedSqliteArtifact(directoryPath))
+      const directoryPath = join48(jobsDirectoryPath, status.id);
+      if (!existsSync46(directoryPath) || containsProtectedSqliteArtifact(directoryPath))
         return null;
       const { createdAtMs, completedAtMs } = getJobTimestamps(status);
       return { id: status.id, directoryPath, completedAtMs, createdAtMs, sizeBytes: readDirectorySizeBytes(directoryPath) };
@@ -55642,7 +56150,7 @@ async function run31() {
     console.log(`Hid ${hiddenCount} terminal row(s) from default ps.`);
     return;
   }
-  if (!existsSync45(jobsDirectoryPath)) {
+  if (!existsSync46(jobsDirectoryPath)) {
     console.log("No jobs directory found.");
     return;
   }
@@ -56157,15 +56665,15 @@ var init_attach = __esm(() => {
 });
 
 // src/specialist/drift-detector.ts
-import { existsSync as existsSync46, readFileSync as readFileSync37, readdirSync as readdirSync20, rmSync as rmSync8 } from "fs";
-import { join as join48, resolve as resolve20, relative as relative4 } from "path";
+import { existsSync as existsSync47, readFileSync as readFileSync37, readdirSync as readdirSync20, rmSync as rmSync8 } from "fs";
+import { join as join49, resolve as resolve20, relative as relative4 } from "path";
 function listFiles(root) {
-  if (!existsSync46(root))
+  if (!existsSync47(root))
     return [];
   const out = [];
   const visit = (dir) => {
     for (const entry of readdirSync20(dir, { withFileTypes: true })) {
-      const full = join48(dir, entry.name);
+      const full = join49(dir, entry.name);
       if (entry.isDirectory()) {
         visit(full);
         continue;
@@ -56200,12 +56708,12 @@ function detectDriftForRepo(repoRoot) {
       { scope: "user", dir: resolve20(repoRoot, ".specialists/user") }
     ];
     for (const { scope, dir } of scopes) {
-      if (!existsSync46(dir))
+      if (!existsSync47(dir))
         continue;
       for (const file of listFiles(dir)) {
         const rel = relPath(file, dir);
-        const canonicalPath = join48(asset.canonicalDir, rel);
-        if (!existsSync46(canonicalPath))
+        const canonicalPath = join49(asset.canonicalDir, rel);
+        if (!existsSync47(canonicalPath))
           continue;
         const bytesEqual = readFileSync37(file).equals(readFileSync37(canonicalPath));
         findings.push(makeFinding(repoRoot, asset.kind, scope, file, canonicalPath, bytesEqual));
@@ -56231,7 +56739,7 @@ function detectDriftUnderRoot(root) {
         continue;
       if (entry.name === "node_modules" || entry.name === ".git")
         continue;
-      visit(join48(dir, entry.name));
+      visit(join49(dir, entry.name));
     }
   };
   visit(resolve20(root));
@@ -56626,8 +57134,8 @@ ${detail.missing.map((m) => `  - ${m}`).join(`
 // src/activation/workspace-lease.ts
 import { execFileSync as execFileSync5, spawnSync as spawnSync26 } from "child_process";
 import { createHash as createHash8 } from "crypto";
-import { appendFileSync as appendFileSync6, existsSync as existsSync47, linkSync, mkdirSync as mkdirSync18, readFileSync as readFileSync38, realpathSync as realpathSync6, renameSync as renameSync6, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync21 } from "fs";
-import { dirname as dirname23, join as join49 } from "path";
+import { appendFileSync as appendFileSync6, existsSync as existsSync48, linkSync, mkdirSync as mkdirSync18, readFileSync as readFileSync38, realpathSync as realpathSync6, renameSync as renameSync6, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync21 } from "fs";
+import { dirname as dirname24, join as join50 } from "path";
 function workspaceIdentityFor(cwd) {
   return { repositoryRoot: cwd, worktreePath: cwd };
 }
@@ -56643,9 +57151,9 @@ function provisionWriterWorkspace(cwd, issueRef) {
     let worktreePath = existing?.match(/^worktree (.+)$/m)?.[1];
     let created = false;
     if (!worktreePath) {
-      const mainRoot = dirname23(git("rev-parse", "--path-format=absolute", "--git-common-dir"));
-      worktreePath = join49(mainRoot, ".worktrees", slug);
-      if (spawnSync26("git", ["check-ignore", "-q", join49(worktreePath, "x")], { cwd: mainRoot }).status !== 0) {
+      const mainRoot = dirname24(git("rev-parse", "--path-format=absolute", "--git-common-dir"));
+      worktreePath = join50(mainRoot, ".worktrees", slug);
+      if (spawnSync26("git", ["check-ignore", "-q", join50(worktreePath, "x")], { cwd: mainRoot }).status !== 0) {
         appendFileSync6(git("rev-parse", "--path-format=absolute", "--git-path", "info/exclude"), `
 /.worktrees/
 `);
@@ -56671,7 +57179,7 @@ function removeWriterWorkspace(cwd, workspace) {
 }
 function procLeaseProbe() {
   return {
-    canVerify: () => existsSync47("/proc/self/stat"),
+    canVerify: () => existsSync48("/proc/self/stat"),
     startTicks(pid) {
       try {
         const stat = readFileSync38(`/proc/${pid}/stat`, "utf-8");
@@ -56699,14 +57207,14 @@ function workspaceKey(workspace) {
   return createHash8("sha256").update(resolved).digest("hex").slice(0, 16);
 }
 function leaseDir(workspace) {
-  return join49(workspace.gitCommonDir ?? workspace.repositoryRoot, ".specialists", "leases");
+  return join50(workspace.gitCommonDir ?? workspace.repositoryRoot, ".specialists", "leases");
 }
 function leasePath(workspace) {
-  return join49(leaseDir(workspace), `${workspaceKey(workspace)}.json`);
+  return join50(leaseDir(workspace), `${workspaceKey(workspace)}.json`);
 }
 function inspect(workspace, probe = procLeaseProbe()) {
   const path = leasePath(workspace);
-  if (!existsSync47(path))
+  if (!existsSync48(path))
     return { state: "free" };
   let lease;
   try {
@@ -56866,9 +57374,9 @@ var init_workspace_lease = __esm(() => {
 });
 
 // src/activation/workspace-reconcile.ts
-import { appendFileSync as appendFileSync7, existsSync as existsSync48, mkdirSync as mkdirSync19, readdirSync as readdirSync21, readFileSync as readFileSync39, unlinkSync as unlinkSync3 } from "fs";
+import { appendFileSync as appendFileSync7, existsSync as existsSync49, mkdirSync as mkdirSync19, readdirSync as readdirSync21, readFileSync as readFileSync39, unlinkSync as unlinkSync3 } from "fs";
 import { userInfo } from "os";
-import { join as join50 } from "path";
+import { join as join51 } from "path";
 function reconcile(workspace, request, options = {}) {
   const probe = options.probe ?? procLeaseProbe();
   const now = options.now ?? Date.now;
@@ -56944,7 +57452,7 @@ function appendRecord(workspace, record) {
 `, { mode: 384 });
 }
 function readLogAt(path) {
-  if (!existsSync48(path))
+  if (!existsSync49(path))
     return [];
   const out = [];
   for (const line of readFileSync39(path, "utf-8").split(`
@@ -56992,18 +57500,18 @@ function leaseScopeFor(cwd) {
 }
 function projectUncertainWorkspaces(scope, probe = procLeaseProbe()) {
   const dir = leaseDir(scope);
-  if (!existsSync48(dir))
+  if (!existsSync49(dir))
     return [];
   const out = [];
   for (const entry of readdirSync21(dir)) {
     if (!entry.endsWith(".json"))
       continue;
     const key = entry.slice(0, -".json".length);
-    const lease = readLeaseFile(join50(dir, entry));
+    const lease = readLeaseFile(join51(dir, entry));
     const status = lease ? inspect({ ...scope, worktreePath: lease.worktreePath }, probe) : { state: "uncertain", uncertainReason: "unreadable_record" };
     if (status.state !== "uncertain")
       continue;
-    const log = readLogAt(join50(dir, `${key}.reconcile.jsonl`));
+    const log = readLogAt(join51(dir, `${key}.reconcile.jsonl`));
     const last = log[log.length - 1];
     out.push({
       workspace_key: key,
@@ -57340,9 +57848,9 @@ var init_dead_job_audit = __esm(() => {
 });
 
 // src/specialist/channel-doctor.ts
-import { existsSync as existsSync49, readFileSync as readFileSync40 } from "fs";
+import { existsSync as existsSync50, readFileSync as readFileSync40 } from "fs";
 function readJson2(path) {
-  if (!existsSync49(path))
+  if (!existsSync50(path))
     return { exists: false, value: null, parseError: null };
   try {
     return { exists: true, value: JSON.parse(readFileSync40(path, "utf8")), parseError: null };
@@ -57356,7 +57864,7 @@ function isRecord3(value) {
 function checkCapabilityDeclared(serverSourcePath) {
   const id = 1;
   const name = "MCP server declares the claude/channel capability";
-  if (!existsSync49(serverSourcePath)) {
+  if (!existsSync50(serverSourcePath)) {
     return { id, name, status: "unknown", detail: `server source not found at ${serverSourcePath}` };
   }
   const source = readFileSync40(serverSourcePath, "utf8");
@@ -57488,446 +57996,6 @@ function runChannelDoctorChecks(inputs) {
   return { gates, firstClosedGate, headlessWarning };
 }
 var init_channel_doctor = () => {};
-
-// src/activation/workitem-store.ts
-import { existsSync as existsSync50 } from "fs";
-import { createRequire as createRequire6 } from "module";
-import { homedir as homedir13 } from "os";
-import { dirname as dirname24, join as join51 } from "path";
-import { pathToFileURL } from "url";
-function resolveSubstrateDir(explicit, resolveInstalled) {
-  const trimmed = explicit.trim();
-  if (trimmed)
-    return trimmed;
-  if (resolveInstalled)
-    return resolveInstalled();
-  try {
-    return dirname24(require5.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
-  } catch {}
-  return resolveSubstrateFromGlobalPrefix();
-}
-function resolveSubstrateFromGlobalPrefix(libDirs) {
-  const runtimePrefix = dirname24(dirname24(process.execPath));
-  const candidates = uniqueExistingLibDirs(libDirs ?? [
-    ...resolveGlobalNodeModulesDirs().map((modulesDir) => dirname24(modulesDir)),
-    join51(runtimePrefix, "lib"),
-    join51(homedir13(), ".bun", "install", "global")
-  ]);
-  for (const libDir of candidates) {
-    try {
-      return dirname24(require5.resolve(`${SUBSTRATE_PACKAGE}/package.json`, { paths: [libDir] }));
-    } catch {}
-  }
-  return null;
-}
-function uniqueExistingLibDirs(candidates) {
-  const seen = new Set;
-  const out = [];
-  for (const candidate of candidates) {
-    if (!candidate)
-      continue;
-    const normalized = join51(candidate);
-    if (seen.has(normalized))
-      continue;
-    seen.add(normalized);
-    try {
-      if (existsSync50(normalized))
-        out.push(normalized);
-    } catch {}
-  }
-  return out;
-}
-function resolveWorkItemDbPath(env = process.env) {
-  return resolveAuthorityDbPath(env);
-}
-function openSubstrateDb(dbPath) {
-  const applyPragmas = (db) => {
-    db.exec("PRAGMA journal_mode = WAL");
-    db.exec("PRAGMA busy_timeout = 5000");
-    db.exec("PRAGMA synchronous = FULL");
-    db.exec("PRAGMA foreign_keys = ON");
-  };
-  const failures = [];
-  try {
-    const bun = require5("bun:sqlite");
-    if (bun?.Database) {
-      const db = new bun.Database(dbPath);
-      applyPragmas(db);
-      return db;
-    }
-    failures.push("bun:sqlite: module exposes no Database export");
-  } catch (error) {
-    failures.push(`bun:sqlite: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  try {
-    const node = require5("node:sqlite");
-    if (node?.DatabaseSync) {
-      const db = new node.DatabaseSync(dbPath);
-      applyPragmas(db);
-      return db;
-    }
-    failures.push("node:sqlite: module exposes no DatabaseSync export");
-  } catch (error) {
-    failures.push(`node:sqlite: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  throw new Error(`work-item store: cannot open the sqlite store at ${dbPath} ` + `(bun:sqlite and node:sqlite both unavailable: ${failures.join("; ")})`);
-}
-function defaultKindForOutputType(outputType) {
-  return outputType === "research" || outputType === "analysis" ? "research" : "task";
-}
-function attemptOfEntry(entry) {
-  return entry.executionContext?.specialist?.attemptId ?? entry.attemptId ?? null;
-}
-function createWorkItemBoundary(ports) {
-  const { issues, provenance, store, gate, journalService, provenanceService } = ports;
-  const viewOf = (ref) => {
-    const v = store.get(ref);
-    return {
-      ref: v.issue.humanRef,
-      issueId: v.issue.id,
-      revision: v.issue.currentRevision,
-      contractHash: v.issue.currentContractHash,
-      lifecycleState: v.issue.lifecycleState,
-      title: v.issue.title,
-      contract: v.contract,
-      readinessState: v.readinessState,
-      dispatchable: v.dispatchable,
-      reasons: v.reasons
-    };
-  };
-  return {
-    view(ref) {
-      return viewOf(ref);
-    },
-    epicAncestors(ref, depth) {
-      if (depth !== 1 && depth !== 2)
-        return [];
-      const ancestors = [];
-      const seen = new Set;
-      let childId = issues.resolveRef(ref).id;
-      for (let i = 0;i < depth; i += 1) {
-        const parent = issues.getParent(childId);
-        if (!parent)
-          break;
-        if (seen.has(parent.id))
-          break;
-        seen.add(parent.id);
-        const rev = issues.getRevision(parent.id, parent.currentRevision);
-        ancestors.push({
-          ref: parent.humanRef,
-          title: parent.title,
-          description: typeof rev.contract === "object" && rev.contract !== null ? String(rev.contract.problem ?? "") : undefined
-        });
-        childId = parent.id;
-      }
-      return ancestors;
-    },
-    completedBlockers(ref, depth) {
-      if (depth !== 1 && depth !== 2)
-        return [];
-      if (!issues.getBlockers)
-        return [];
-      const collected = [];
-      const seen = new Set;
-      let frontier = [issues.resolveRef(ref).id];
-      for (let hop = 0;hop < depth && frontier.length > 0; hop += 1) {
-        const next = [];
-        for (const id of frontier) {
-          for (const blocker of issues.getBlockers(id)) {
-            if (seen.has(blocker.id))
-              continue;
-            seen.add(blocker.id);
-            if (!SATISFIED_BLOCKER_STATES.has(blocker.lifecycleState))
-              continue;
-            const rev = issues.getRevision(blocker.id, blocker.currentRevision);
-            collected.push({
-              ref: blocker.humanRef,
-              title: blocker.title,
-              description: typeof rev.contract === "object" && rev.contract !== null ? String(rev.contract.problem ?? "") : undefined
-            });
-            next.push(blocker.id);
-          }
-        }
-        frontier = next;
-      }
-      return collected;
-    },
-    check(req) {
-      const check = gate.check(issues, req);
-      return { issueId: check.issueId, revision: check.revision, contractHash: check.contractHash, report: check.report };
-    },
-    bind(req) {
-      const issueId = issues.resolveRef(req.ref).id;
-      const active = issues.getActiveClaim(issueId);
-      if (active) {
-        if (active.holder !== req.holder) {
-          throw new Error(`dispatch refused: issue is claimed by '${active.holder}' \u2014 holder '${req.holder}' must claim first`);
-        }
-        const claimActivation = active.activationId ?? null;
-        const reqActivation = req.activationId ?? null;
-        if (claimActivation !== reqActivation) {
-          throw new Error("dispatch refused: claim activation does not match dispatch activation \u2014 claim with the dispatching activation id");
-        }
-        if (req.claimId != null && req.claimId !== active.id) {
-          throw new Error(`dispatch refused: supplied claim ${req.claimId} is not the active claim ${active.id}`);
-        }
-      }
-      const claimId = active?.id ?? req.claimId ?? undefined;
-      const out = gate.dispatch(issues, provenance, { ...req, claimId });
-      return out.binding;
-    },
-    inlineCreate(contract, opts = {}) {
-      const validation = validateContractText(contract);
-      if (!validation.ok) {
-        throw new Error(`${validation.reason}: ${validation.missing.join(", ")}`);
-      }
-      const sections = extractSections(contract);
-      const scrutiny = scrutinyLevel(contract) ?? "MEDIUM";
-      const problem = sections.get("PROBLEM") ?? "";
-      const firstLine = problem.split(`
-`).map((s) => s.trim()).find(Boolean);
-      const contractObj = {
-        problem,
-        success: sections.get("SUCCESS") ?? "",
-        scope: splitLines(sections.get("SCOPE")),
-        nonGoals: splitLines(sections.get("NON_GOALS")),
-        constraints: splitLines(sections.get("CONSTRAINTS")),
-        validation: splitLines(sections.get("VALIDATION")).map((check) => ({ check })),
-        output: splitLines(sections.get("OUTPUT")).map((artifact) => ({ artifact }))
-      };
-      const kind = opts.kind ?? "task";
-      if (!INLINE_ISSUE_KINDS.includes(kind)) {
-        throw new Error(`inline contract kind '${kind}' is not creatable \u2014 an ad hoc dispatch creates one of ${INLINE_ISSUE_KINDS.join(", ")}, never epic`);
-      }
-      const holder = opts.holder ?? "adapter::specialists";
-      const { projectId } = issues.resolveProject({ gitRoot: process.cwd() });
-      const issue = issues.createIssue({
-        projectId,
-        title: opts.title ?? (firstLine ?? "Specialist dispatch contract").slice(0, 72),
-        kind,
-        contract: contractObj,
-        scrutiny,
-        authoredBy: holder,
-        ...opts.parentId ? { parentId: opts.parentId } : {}
-      });
-      const { claim } = issues.claimReady(issue.id, holder, { outcome: "ready", policy: "default", attestedBy: holder }, { activationId: opts.activationId });
-      return { ref: issues.resolveRef(issue.id).humanRef, issueId: issue.id, claimId: claim.id };
-    },
-    releaseInlineClaim(ref, opts = {}) {
-      const issueId = issues.resolveRef(ref).id;
-      const active = issues.getActiveClaim(issueId);
-      if (!active || !issues.releaseClaim)
-        return false;
-      if (opts.activationId && active.activationId !== opts.activationId)
-        return false;
-      const released = issues.releaseClaim(issueId, active.holder, active.activationId ? { activationId: active.activationId } : {});
-      return released !== null;
-    },
-    journal(ref, kind, opts = {}) {
-      if (opts.summary !== undefined && journalService) {
-        const issueId = issues.resolveRef(ref).id;
-        journalService.appendEntry(issueId, {
-          kind,
-          semantic: { summary: opts.summary },
-          ...opts.participantId ? { participantId: opts.participantId } : {},
-          ...opts.activationId ? { activationId: opts.activationId } : {}
-        });
-        return;
-      }
-      const { summary: _evidence, ...storeOpts } = opts;
-      store.addJournal(ref, kind, storeOpts);
-    },
-    ...journalService || provenanceService ? {
-      appendResult(ref, input) {
-        if (!journalService)
-          throw new Error("settlement unavailable: no journal service on this boundary");
-        const issueId = issues.resolveRef(ref).id;
-        const entry = journalService.appendEntry(issueId, {
-          kind: "result",
-          result: input.result,
-          executionContext: input.executionContext ?? null,
-          refs: input.refs ?? [],
-          participantId: input.participantId,
-          activationId: input.activationId,
-          sessionId: input.sessionId
-        });
-        return { entryId: entry.id, sequence: entry.sequence };
-      },
-      allocateReceipt(bindingId) {
-        if (!provenanceService)
-          throw new Error("settlement unavailable: no provenance service on this boundary");
-        const receipt = provenanceService.allocateReceipt(bindingId);
-        return {
-          id: receipt.id,
-          executionBindingId: receipt.executionBindingId,
-          issueId: receipt.issueId,
-          issueRevision: receipt.issueRevision,
-          contractHash: receipt.contractHash
-        };
-      },
-      attachArtifact(receiptId, kind, value) {
-        if (!provenanceService)
-          throw new Error("settlement unavailable: no provenance service on this boundary");
-        const attached = provenanceService.attachArtifact(receiptId, kind, value);
-        return {
-          receiptId: attached.receiptId ?? receiptId,
-          kind: attached.kind ?? kind,
-          value: attached.value ?? value
-        };
-      },
-      findResultEntry(ref, key) {
-        if (!journalService?.listEntries) {
-          return { status: "unavailable", reason: "journal service exposes no entry listing" };
-        }
-        try {
-          const entries = journalService.listEntries(issues.resolveRef(ref).id, { kind: "result" });
-          const forActivation = entries.filter((entry) => entry.activationId === key.activationId);
-          const match = forActivation.find((entry) => attemptOfEntry(entry) === key.attemptId);
-          if (match)
-            return { status: "found", value: { entryId: match.id } };
-          const unattributed = forActivation.filter((entry) => attemptOfEntry(entry) === null);
-          if (unattributed.length > 0) {
-            return {
-              status: "unavailable",
-              reason: `${unattributed.length} Journal result(s) for this activation carry no attempt attribution`
-            };
-          }
-          return { status: "absent" };
-        } catch (error) {
-          return { status: "unavailable", reason: error instanceof Error ? error.message : String(error) };
-        }
-      },
-      findReceiptForBinding(ref, bindingId) {
-        if (!provenanceService?.listReceipts) {
-          return { status: "unavailable", reason: "provenance service exposes no receipt listing" };
-        }
-        try {
-          const rows = provenanceService.listReceipts(issues.resolveRef(ref).id);
-          const match = rows.find((receipt) => receipt.executionBindingId === bindingId);
-          return match ? { status: "found", value: { receiptId: match.id } } : { status: "absent" };
-        } catch (error) {
-          return { status: "unavailable", reason: error instanceof Error ? error.message : String(error) };
-        }
-      }
-    } : {}
-  };
-}
-function splitLines(body) {
-  if (!body)
-    return [];
-  return body.split(`
-`).map((l) => l.trim().replace(/^[-*\u2022]\s*/, "").replace(/^\d+[.)]\s*/, "").trim()).filter((l) => l.length > 0);
-}
-function resolveSubstrateModule(substrateDir, rel) {
-  const source = join51(substrateDir, rel);
-  if (existsSync50(source))
-    return source;
-  const built = join51(substrateDir, "dist", rel.replace(/\.ts$/, ".js"));
-  return existsSync50(built) ? built : null;
-}
-async function openWorkItemBoundary(opts = {}) {
-  const env = opts.env ?? process.env;
-  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "", opts.resolveInstalled);
-  if (!substrateDir) {
-    throw new Error(`work_item_store_unavailable: no Substrate package configured (install ${SUBSTRATE_PACKAGE}, ` + "or set XTRM_SUBSTRATE_DIR to a checkout of it)");
-  }
-  let pkgName;
-  try {
-    const pkgRaw = await import(pathToFileURL(join51(substrateDir, "package.json")).href, { with: { type: "json" } });
-    pkgName = pkgRaw.default?.name;
-  } catch (error) {
-    throw new Error(`work_item_store_unavailable: cannot read Substrate package identity at ${substrateDir}: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  if (pkgName !== SUBSTRATE_PACKAGE) {
-    throw new Error(`work_item_store_unavailable: expected ${SUBSTRATE_PACKAGE} at ${substrateDir}, found ${JSON.stringify(pkgName) ?? "no name"}`);
-  }
-  const load = async (rel) => {
-    const modulePath = resolveSubstrateModule(substrateDir, rel);
-    if (!modulePath) {
-      throw new Error(`work_item_store_unavailable: cannot load Substrate module ${rel}: neither ${rel} nor dist/${rel.replace(/\.ts$/, ".js")} exists under ${substrateDir}`);
-    }
-    try {
-      return await import(pathToFileURL(modulePath).href);
-    } catch (error) {
-      throw new Error(`work_item_store_unavailable: cannot load Substrate module ${rel}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
-  const [runner, issueSvcMod, journalMod, provMod, storeMod, gateMod] = await Promise.all(SUBSTRATE_REQUIRED_MODULES.map((rel) => load(rel)));
-  for (const [mod, name] of [
-    [runner, "migrate"],
-    [issueSvcMod, "IssueService"],
-    [journalMod, "JournalService"],
-    [provMod, "ProvenanceService"],
-    [storeMod, "SubstrateIssueStore"],
-    [gateMod, "checkDispatch"],
-    [gateMod, "dispatchToSpecialist"]
-  ]) {
-    if (typeof mod[name] === "undefined") {
-      throw new Error(`work_item_store_unavailable: Substrate module is missing export ${name}`);
-    }
-  }
-  const dbPath = opts.dbPath ?? resolveWorkItemDbPath(env);
-  const storeRefusal = (error) => new Error(`work_item_store_unavailable: cannot open the Substrate store at ${dbPath} (set SUBSTRATE_DB or XTRM_STATE_DB to a writable database path, or install ${SUBSTRATE_PACKAGE}): ${error instanceof Error ? error.message : String(error)}`);
-  let db;
-  try {
-    db = openSubstrateDb(dbPath);
-    runner.migrate(db);
-  } catch (error) {
-    throw storeRefusal(error);
-  }
-  let issueService;
-  let journalSvc;
-  let provenance;
-  let store;
-  try {
-    issueService = new issueSvcMod.IssueService(db);
-    journalSvc = new journalMod.JournalService(db, issueService);
-    provenance = new provMod.ProvenanceService(db, issueService, journalSvc);
-    store = new storeMod.SubstrateIssueStore(issueService, journalSvc);
-  } catch (error) {
-    throw storeRefusal(error);
-  }
-  issueService.getBlockers = (childId) => issueService.listActiveEdges().filter((edge) => edge.active && edge.kind === "blocks" && edge.toIssue === childId).map((edge) => {
-    const issue = issueService.getIssue(edge.fromIssue);
-    return {
-      id: issue.id,
-      humanRef: issue.humanRef,
-      title: issue.title,
-      currentRevision: issue.currentRevision,
-      lifecycleState: issue.lifecycleState
-    };
-  });
-  const issues = issueService;
-  return createWorkItemBoundary({
-    issues,
-    provenance,
-    store,
-    gate: {
-      check: (i, r) => gateMod.checkDispatch(i, r),
-      dispatch: (i, p, r) => gateMod.dispatchToSpecialist(i, p, r)
-    },
-    journalService: journalSvc,
-    provenanceService: provenance
-  });
-}
-var require5, SUBSTRATE_PACKAGE = "@jaggerxtrm/substrate", SATISFIED_BLOCKER_STATES, INLINE_PARENT_TERMINAL_STATES, INLINE_ISSUE_KINDS, SUBSTRATE_REQUIRED_MODULES;
-var init_workitem_store = __esm(() => {
-  init_session();
-  init_contract_sections();
-  init_authority_store();
-  require5 = createRequire6(import.meta.url);
-  SATISFIED_BLOCKER_STATES = new Set(["done", "archived"]);
-  INLINE_PARENT_TERMINAL_STATES = new Set(["done", "cancelled", "archived"]);
-  INLINE_ISSUE_KINDS = ["task", "bug", "research", "decision", "followup"];
-  SUBSTRATE_REQUIRED_MODULES = [
-    "src/store/migrations/runner.ts",
-    "src/service/issue-service.ts",
-    "src/service/journal-service.ts",
-    "src/service/provenance-service.ts",
-    "src/workitems/substrate-store.ts",
-    "src/workitems/dispatch-gate.ts"
-  ];
-});
 
 // src/cli/doctor.ts
 import { createHash as createHash10 } from "crypto";
@@ -94378,37 +94446,6 @@ function purposeExcerptFromContract(contract) {
     }
   }
   return extractPurposeExcerpt(contractToMarkdown(contract)) ?? "";
-}
-function contractToMarkdown(contract) {
-  if (contract === null || typeof contract !== "object")
-    return "";
-  const c = contract;
-  const lines = [];
-  const text = (v) => typeof v === "string" ? v : "";
-  const list = (v) => Array.isArray(v) ? v.map((x) => typeof x === "string" ? x : typeof x === "object" && x !== null ? Object.values(x).filter((y) => typeof y === "string").join(": ") : String(x)) : [];
-  const problem = text(c["problem"]);
-  if (problem)
-    lines.push(`PROBLEM: ${problem}`);
-  const success = text(c["success"]);
-  if (success)
-    lines.push(`SUCCESS: ${success}`);
-  const sections = [
-    ["SCOPE", c["scope"]],
-    ["NON_GOALS", c["nonGoals"]],
-    ["CONSTRAINTS", c["constraints"]],
-    ["VALIDATION", c["validation"]],
-    ["OUTPUT", c["output"]]
-  ];
-  for (const [name, value] of sections) {
-    const items = list(value);
-    if (items.length === 0)
-      continue;
-    lines.push(`${name}:`);
-    for (const item of items)
-      lines.push(`- ${item}`);
-  }
-  return lines.join(`
-`);
 }
 function lastAssistantMessage(messages) {
   for (let i = messages.length - 1;i >= 0; i -= 1) {

@@ -20909,6 +20909,41 @@ function resolveSkillsPaths(spec, fileDir, consumerRoot) {
 }
 // src/activation/native-host.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
+
+// src/activation/contract-markdown.ts
+function contractToMarkdown(contract) {
+  if (contract === null || typeof contract !== "object")
+    return "";
+  const c = contract;
+  const lines = [];
+  const text = (v) => typeof v === "string" ? v : "";
+  const list = (v) => Array.isArray(v) ? v.map((x) => typeof x === "string" ? x : typeof x === "object" && x !== null ? Object.values(x).filter((y) => typeof y === "string").join(": ") : String(x)) : [];
+  const problem = text(c["problem"]);
+  if (problem)
+    lines.push(`PROBLEM: ${problem}`);
+  const success = text(c["success"]);
+  if (success)
+    lines.push(`SUCCESS: ${success}`);
+  const sections = [
+    ["SCOPE", c["scope"]],
+    ["NON_GOALS", c["nonGoals"]],
+    ["CONSTRAINTS", c["constraints"]],
+    ["VALIDATION", c["validation"]],
+    ["OUTPUT", c["output"]]
+  ];
+  for (const [name, value] of sections) {
+    const items = list(value);
+    if (items.length === 0)
+      continue;
+    lines.push(`${name}:`);
+    for (const item of items)
+      lines.push(`- ${item}`);
+  }
+  return lines.join(`
+`);
+}
+
+// src/activation/native-host.ts
 import { existsSync as existsSync21 } from "node:fs";
 
 // src/activation/workitem-store.ts
@@ -25751,37 +25786,6 @@ function purposeExcerptFromContract(contract) {
     }
   }
   return extractPurposeExcerpt(contractToMarkdown(contract)) ?? "";
-}
-function contractToMarkdown(contract) {
-  if (contract === null || typeof contract !== "object")
-    return "";
-  const c = contract;
-  const lines = [];
-  const text = (v) => typeof v === "string" ? v : "";
-  const list = (v) => Array.isArray(v) ? v.map((x) => typeof x === "string" ? x : typeof x === "object" && x !== null ? Object.values(x).filter((y) => typeof y === "string").join(": ") : String(x)) : [];
-  const problem = text(c["problem"]);
-  if (problem)
-    lines.push(`PROBLEM: ${problem}`);
-  const success = text(c["success"]);
-  if (success)
-    lines.push(`SUCCESS: ${success}`);
-  const sections = [
-    ["SCOPE", c["scope"]],
-    ["NON_GOALS", c["nonGoals"]],
-    ["CONSTRAINTS", c["constraints"]],
-    ["VALIDATION", c["validation"]],
-    ["OUTPUT", c["output"]]
-  ];
-  for (const [name, value] of sections) {
-    const items = list(value);
-    if (items.length === 0)
-      continue;
-    lines.push(`${name}:`);
-    for (const item of items)
-      lines.push(`- ${item}`);
-  }
-  return lines.join(`
-`);
 }
 function lastAssistantMessage(messages) {
   for (let i = messages.length - 1;i >= 0; i -= 1) {

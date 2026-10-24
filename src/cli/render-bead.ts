@@ -42,12 +42,12 @@ export function rolelessSpecialist(): Specialist['specialist'] {
   }).specialist;
 }
 
-export function run(): void {
+export async function run(): Promise<void> {
   const args = parseRenderArgs(process.argv.slice(3));
   // The bead id is the verb's subject: accept it positionally, and as --issue-ref/--bead for
   // callers sharing an argv builder with `render-task`.
   const beadId = args.beadId || args.positional[0] || '';
   if (!beadId) fail('usage', USAGE);
 
-  renderAndEmit(rolelessSpecialist(), null, { ...args, beadId });
+  await renderAndEmit(rolelessSpecialist(), null, { ...args, beadId });
 }

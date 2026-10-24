@@ -151,14 +151,14 @@ export declare const createBeadActionSchema: z.ZodObject<{
     type: "create_bead";
     title: string;
     depends_on: string[];
-    bead_type: "task" | "decision" | "epic" | "bug" | "feature" | "chore";
+    bead_type: "task" | "decision" | "bug" | "epic" | "feature" | "chore";
     parent_bead_id?: string | undefined;
 }, {
     priority: number;
     description: string;
     type: "create_bead";
     title: string;
-    bead_type: "task" | "decision" | "epic" | "bug" | "feature" | "chore";
+    bead_type: "task" | "decision" | "bug" | "epic" | "feature" | "chore";
     depends_on?: string[] | undefined;
     parent_bead_id?: string | undefined;
 }>;
@@ -212,14 +212,14 @@ export declare const coordinatorActionSchema: z.ZodDiscriminatedUnion<"type", [z
     type: "create_bead";
     title: string;
     depends_on: string[];
-    bead_type: "task" | "decision" | "epic" | "bug" | "feature" | "chore";
+    bead_type: "task" | "decision" | "bug" | "epic" | "feature" | "chore";
     parent_bead_id?: string | undefined;
 }, {
     priority: number;
     description: string;
     type: "create_bead";
     title: string;
-    bead_type: "task" | "decision" | "epic" | "bug" | "feature" | "chore";
+    bead_type: "task" | "decision" | "bug" | "epic" | "feature" | "chore";
     depends_on?: string[] | undefined;
     parent_bead_id?: string | undefined;
 }>, z.ZodObject<{
@@ -270,15 +270,15 @@ export declare const coordinatorMemoryPatchEntrySchema: z.ZodObject<{
     entry_type: "fact" | "question" | "decision";
     source_member_id: string;
     confidence: number;
-    entry_id?: string | undefined;
     provenance?: Record<string, unknown> | undefined;
+    entry_id?: string | undefined;
 }, {
     summary: string;
     entry_type: "fact" | "question" | "decision";
     source_member_id: string;
     confidence: number;
-    entry_id?: string | undefined;
     provenance?: Record<string, unknown> | undefined;
+    entry_id?: string | undefined;
 }>;
 export interface CoordinatorOutputContract {
     summary: string;
