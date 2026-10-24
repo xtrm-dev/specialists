@@ -562,3 +562,29 @@ describe('global modules prefix enumeration', () => {
     expect(roots).toEqual(newestFirst); // v24 before v22; 'lts'/' .cache' never become candidates
   });
 });
+
+describe('createWorkItemBoundary resolvedContext', () => {
+  it('fails closed when the Substrate port exposes no getResolvedContext', () => {
+    const boundary = createWorkItemBoundary(stubPorts(null));
+    expect(() => boundary.resolvedContext!('X')).toThrow(/no getResolvedContext/);
+  });
+
+  it('maps resolved entries to their source human ref and own/inherited rule', () => {
+    const ports = stubPorts(null);
+    (ports.issues as Record<string, unknown>).getResolvedContext = () => ({
+      hash: 'ctx-hash',
+      entries: [
+        { key: 'own', value: 'a', sourceIssueId: 'iss_X', sourceRevision: 2, resolutionRule: 'own' },
+        { key: 'parent', value: 'b', sourceIssueId: 'iss_P', sourceRevision: 4, resolutionRule: 'inherited' },
+      ],
+    });
+    const context = createWorkItemBoundary(ports).resolvedContext!('X');
+    expect(context).toEqual({
+      hash: 'ctx-hash',
+      entries: [
+        { key: 'own', value: 'a', sourceRef: 'iss_X', sourceRevision: 2, inherited: false },
+        { key: 'parent', value: 'b', sourceRef: 'iss_P', sourceRevision: 4, inherited: true },
+      ],
+    });
+  });
+});

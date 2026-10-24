@@ -422,8 +422,8 @@ export interface SpecialistWorkItemBoundary {
   completedBlockers(ref: string, depth: number): EpicAncestor[];
   /**
    * The Issue's resolved contextRefs (own + inherited from parents) for the turn-1 prompt.
-   * Optional so fakes keep compiling; null when the store exposes no context. Throws when
-   * Substrate refuses the context (journal/memory authority, parent cycle): fail closed.
+   * Optional so fakes keep compiling. Throws when Substrate refuses the context
+   * (journal/memory authority, parent cycle) or exposes no context reader: fail closed.
    */
   resolvedContext?(ref: string): ResolvedContextView | null;
   check(req: DispatchRequest): CheckResult;
@@ -665,7 +665,11 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
     },
 
     resolvedContext(ref: string): ResolvedContextView | null {
-      if (!issues.getResolvedContext) return null;
+      // Fail closed: Substrate binds the Issue's resolved context hash on every dispatch, so a
+      // store that cannot read that context cannot prove the prompt matches the binding.
+      if (!issues.getResolvedContext) {
+        throw new Error('Substrate exposes no getResolvedContext: the bound context cannot be read or verified');
+      }
       const resolved = issues.getResolvedContext(issues.resolveRef(ref).id);
       const humanRefOf = (issueId: string): string => {
         try {

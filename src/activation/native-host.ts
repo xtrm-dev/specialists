@@ -2217,8 +2217,8 @@ export class NativeActivationHost {
     // context hash. A contextRefs edit (own, or on a parent) in between would launch a model on
     // context the binding does not record, so refuse rather than run on a stale snapshot.
     // Fail closed whenever context was read: a missing or non-string bound hash cannot prove
-    // the match. A boundary with no context reader (an older Substrate without
-    // getResolvedContext) rendered nothing and keeps the pre-contextRefs behaviour.
+    // the match. The production boundary always reads context (it refuses a Substrate without
+    // getResolvedContext); only a structural test double without the method skips this.
     const boundContextHash = (binding as { resolvedContextHash?: unknown }).resolvedContextHash;
     if (resolvedContext && (typeof boundContextHash !== 'string' || boundContextHash !== resolvedContext.hash)) {
       try { session.dispose(); } catch { /* best effort before refusing */ }

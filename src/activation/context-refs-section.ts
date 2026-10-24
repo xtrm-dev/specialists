@@ -49,7 +49,14 @@ function valueText(value: unknown): string {
 
 /** A fence longer than any backtick run inside the value, so the value cannot close it. */
 function fenceFor(text: string): string {
-  const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
+  // One linear pass, no spread: a large value with many backtick runs must not overflow the
+  // argument list of Math.max.
+  let longest = 0;
+  let run = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    run = text.charCodeAt(i) === 96 ? run + 1 : 0;
+    if (run > longest) longest = run;
+  }
   return '`'.repeat(Math.max(3, longest + 1));
 }
 
