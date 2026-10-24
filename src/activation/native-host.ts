@@ -76,10 +76,12 @@ import {
   openWorkItemBoundary,
   resolveWorkItemDbPath,
   type EpicAncestor,
+  type ResolvedContextView,
   type SpecialistWorkItemBoundary,
   type WorkItemView,
 } from './workitem-store.js';
 import { compileStepContract, type StepContract } from './step-contract.js';
+import { renderContextRefsSection } from './context-refs-section.js';
 import { validateContractText } from './contract-sections.js';
 import { InteractionTransport, type InteractionMessage, type PendingAsk } from './interaction.js';
 import { createPeerDelivery } from './peer-bridge.js';
@@ -1848,6 +1850,18 @@ export class NativeActivationHost {
     // child never sees the contracts that unblocked it (SPECIALISTS-22).
     const completedBlockers = workItems.completedBlockers(issueRef, 1);
 
+    // The Issue's resolved contextRefs (own + inherited), Substrate's revisioned channel for
+    // stage context. Rendered as evidence under the contract; the hash is checked against the
+    // ExecutionBinding below so the prompt shows exactly the context the binding records.
+    let resolvedContext: ResolvedContextView | null = null;
+    try {
+      resolvedContext = workItems.resolvedContext?.(issueRef) ?? null;
+    } catch (error) {
+      return reject('context_unresolvable', {
+        note: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     const isReviewer = specialist.specialist.metadata.name === 'reviewer';
 
     const rendered = renderTaskPrompt({
@@ -1861,6 +1875,7 @@ export class NativeActivationHost {
       bead: workItemAsRecord(view),
       epicAncestors: epicAncestors.map(workAncestorAsRecord),
       completedBlockers: completedBlockers.map(workAncestorAsRecord),
+      contextRefsSection: renderContextRefsSection(resolvedContext),
       preScriptOutput,
       // $resolved_tool_contract: 7 shipped specialists interpolate it, and explorer's template
       // instructs the model to "Read resolved tool contract first". The renderer treats an
@@ -2195,6 +2210,19 @@ export class NativeActivationHost {
       try { session.dispose(); } catch { /* best effort before refusing */ }
       return reject('issue_binding_failed', {
         note: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    // The prompt was rendered from the context read above; the binding pins Substrate's live
+    // context hash. A contextRefs edit (own, or on a parent) in between would launch a model on
+    // context the binding does not record, so refuse rather than run on a stale snapshot.
+    const boundContextHash = (binding as { resolvedContextHash?: unknown }).resolvedContextHash;
+    if (resolvedContext && typeof boundContextHash === 'string' && boundContextHash !== resolvedContext.hash) {
+      try { session.dispose(); } catch { /* best effort before refusing */ }
+      return reject('context_changed', {
+        note: 'contextRefs changed between prompt render and binding; re-dispatch to render the current context',
+        rendered_context_hash: resolvedContext.hash,
+        bound_context_hash: boundContextHash,
       });
     }
 

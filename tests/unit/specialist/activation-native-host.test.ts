@@ -56,7 +56,7 @@ import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../sr
 import { createSpecialistStatusTool } from '../../../src/tools/specialist/specialist_status.tool.js';
 import { CircuitBreaker } from '../../../src/utils/circuitBreaker.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
-import type { SpecialistWorkItemBoundary, WorkItemView } from '../../../src/activation/workitem-store.js';
+import type { ResolvedContextView, SpecialistWorkItemBoundary, WorkItemView } from '../../../src/activation/workitem-store.js';
 
 /**
  * Phase 1 acceptance. The load-bearing assertions here are:
@@ -312,7 +312,16 @@ const INLINE_CONTRACT =
   'SCOPE\nRead-only.\n\nNON_GOALS\nNo writes.\n\nCONSTRAINTS\nRead-only.\n\n' +
   'VALIDATION\nOutput confirms.\n\nOUTPUT\nA short report.\n\nSCRUTINY LOW';
 
-function fakeWorkItems(options: { state?: string; blockers?: Array<{ ref: string; title: string; description?: string }> } = {}): SpecialistWorkItemBoundary {
+function fakeWorkItems(options: {
+  state?: string;
+  blockers?: Array<{ ref: string; title: string; description?: string }>;
+  /** Resolved contextRefs the store reports; absent = the boundary exposes no context method. */
+  context?: ResolvedContextView | null;
+  /** The store refuses the context (journal/memory authority, parent cycle). */
+  contextError?: string;
+  /** resolvedContextHash the binding records; defaults to 'context-test'. */
+  boundContextHash?: string;
+} = {}): SpecialistWorkItemBoundary {
   const contract = {
     problem: 'The thing is unclear.',
     success: 'The thing is clear.',
@@ -340,6 +349,14 @@ function fakeWorkItems(options: { state?: string; blockers?: Array<{ ref: string
     },
     epicAncestors: () => [],
     completedBlockers: () => options.blockers ?? [],
+    ...(options.context !== undefined || options.contextError !== undefined
+      ? {
+          resolvedContext: () => {
+            if (options.contextError) throw new Error(options.contextError);
+            return options.context ?? null;
+          },
+        }
+      : {}),
     check() {
       if (state !== 'ready' && state !== 'claimed') throw new Error(`dispatch rejected: issue is ${state}`);
       return { issueId: 'iss_test', revision: 1, contractHash: 'hash-test', report: { state, revision: 1, contractHash: 'hash-test', reasons: [] } as never };
@@ -347,7 +364,7 @@ function fakeWorkItems(options: { state?: string; blockers?: Array<{ ref: string
     bind() {
       return {
         id: 'exb_test', issueId: 'iss_test', issueRevision: 1, contractHash: 'hash-test',
-        resolvedContextHash: 'context-test', claimId: 1, participantId: 'coordinator',
+        resolvedContextHash: options.boundContextHash ?? 'context-test', claimId: 1, participantId: 'coordinator',
         activationId: 'activation-test', attemptId: 'attempt-test', sessionId: 'pi-sess-123',
         workspace: '/tmp/test-workspace', baseCommit: null, createdAt: Date.now(),
       } as never;
@@ -2937,7 +2954,14 @@ describe('task-prompt composition parity (SPECIALISTS-22)', () => {
     return spec;
   }
 
-  async function dispatchWith(options: { blockers?: Array<{ ref: string; title: string; description?: string }>; specialist?: string; cwd?: string }) {
+  async function dispatchWith(options: {
+    blockers?: Array<{ ref: string; title: string; description?: string }>;
+    specialist?: string;
+    cwd?: string;
+    context?: ResolvedContextView | null;
+    contextError?: string;
+    boundContextHash?: string;
+  }) {
     const record: { createArgs?: Record<string, unknown> } = {};
     const session = fakeSession({ record });
     const sink = collectingSink();
@@ -2947,7 +2971,12 @@ describe('task-prompt composition parity (SPECIALISTS-22)', () => {
     const host = new NativeActivationHost({
       provisionWriterWorkspace: workspaceIdentityFor,
       loader: loaderFor(spec),
-      workItems: fakeWorkItems({ blockers: options.blockers }),
+      workItems: fakeWorkItems({
+        blockers: options.blockers,
+        context: options.context,
+        contextError: options.contextError,
+        boundContextHash: options.boundContextHash,
+      }),
       forensics: sink,
       loadSdk: async () => makeSdk(record, session),
       cwd: options.cwd ?? hostWorkspace(),
@@ -2976,6 +3005,47 @@ describe('task-prompt composition parity (SPECIALISTS-22)', () => {
   it('renders no dependency section when nothing is completed', async () => {
     const { session } = await dispatchWith({});
     expect(session.prompts[0]).not.toContain('## Context from completed dependencies:');
+  });
+
+  // contextRefs: Substrate's revisioned stage-context channel reaches turn 1 as evidence.
+  const CONTEXT: ResolvedContextView = {
+    hash: 'context-test',
+    entries: [
+      { key: 'explorer-allowlist', value: 'src/a.ts\nsrc/b.ts', sourceRef: 'ISSUE-1', sourceRevision: 2, inherited: false },
+      { key: 'venv', value: '/abs/.venv/bin/python', sourceRef: 'EPIC-1', sourceRevision: 3, inherited: true },
+    ],
+  };
+
+  it('renders own and inherited contextRefs with their source, after the contract and before the boundary rules', async () => {
+    const { session, refusal } = await dispatchWith({ context: CONTEXT });
+    expect(refusal).toBeUndefined();
+    const prompt = session.prompts[0];
+    expect(prompt).toContain('## Context references (evidence from the Issue; the contract above wins)');
+    expect(prompt).toContain('### explorer-allowlist (from ISSUE-1 rev 2)');
+    expect(prompt).toContain('src/a.ts\nsrc/b.ts');
+    expect(prompt).toContain('### venv (from EPIC-1 rev 3, inherited)');
+    const section = prompt.indexOf('## Context references');
+    expect(section).toBeGreaterThan(prompt.indexOf('The thing is unclear.'));
+    expect(section).toBeLessThan(prompt.indexOf('## Runtime Boundary Rules'));
+  });
+
+  it('renders no context section when the Issue has no contextRefs', async () => {
+    const { session } = await dispatchWith({ context: { hash: 'context-test', entries: [] } });
+    expect(session.prompts[0]).not.toContain('## Context references');
+  });
+
+  it('refuses context_changed when the binding records a different context than the prompt showed', async () => {
+    const { refusal, session } = await dispatchWith({ context: CONTEXT, boundContextHash: 'context-edited-meanwhile' });
+    expect(refusal).toBeInstanceOf(DispatchRejectedError);
+    expect((refusal as DispatchRejectedError).reason).toBe('context_changed');
+    expect(session.disposed).toBe(true);
+  });
+
+  it('refuses context_unresolvable when Substrate refuses the context', async () => {
+    const { refusal, session } = await dispatchWith({ contextError: 'fail-closed: context key "x" claims journal authority (§43)' });
+    expect(refusal).toBeInstanceOf(DispatchRejectedError);
+    expect((refusal as DispatchRejectedError).reason).toBe('context_unresolvable');
+    expect(session.prompts).toHaveLength(0);
   });
 
   it('releases the writer lease when a post-acquisition refusal fires', async () => {
