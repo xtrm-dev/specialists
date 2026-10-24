@@ -697,6 +697,19 @@ export declare class NativeActivationHost {
     private stopToolDurationWatch;
     private runToSettled;
     /**
+     * Shared settle tail for framed legs and background-woken wake turns (SPECIALISTS-4354).
+     *
+     * Settles an already-idle session by the same rule on both paths: stopReason
+     * inspection, validation with the live-background-tasks carve-out
+     * (SPECIALISTS-4310), terminal emits, lease release and publication. The wake
+     * difference is explicit in `opts.notifyWake`: only the wake path reports the
+     * superseding result through the outward `onWakeSettlement` seam. Session-stats
+     * capture stays with the callers — framed legs use the once-guard
+     * (SPECIALISTS-120 F2), the wake captures once — so this tail starts at
+     * stopReason inspection.
+     */
+    private settleTurnTail;
+    /**
      * Mark an activation whose turn starts on an already-settled snapshot: a
      * background-woken wake, not a framed leg (SPECIALISTS-4322). Framed turns always
      * pass through starting/running first (resume/retry set starting, agent_start sets
@@ -712,7 +725,8 @@ export declare class NativeActivationHost {
      * the model takes a wake turn on its own. That turn settles through onSessionEvent
      * only — no prompt window, no terminal emit, no metrics refresh — so without this
      * the job parks in `waiting` with a stale metrics row and the activation is never
-     * finalised. The tail mirrors runToSettled's exactly (stats capture, stopReason
+     * finalised. The tail is shared with runToSettled through settleTurnTail
+     * (SPECIALISTS-4354: stats capture stays with the caller, stopReason
      * inspection, validation with the live-background-tasks carve-out, terminal emits,
      * release, publication): the wake is settled by the same rule as every framed turn,
      * including `uncertain` while its own background tasks still run (SPECIALISTS-4310)

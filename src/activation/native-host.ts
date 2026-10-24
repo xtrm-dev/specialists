@@ -2752,99 +2752,7 @@ export class NativeActivationHost {
       // reconciliation. Bounded and failure-tolerant by construction — see the helper.
       await recordSettlementOnce();
 
-      // A settled session is NOT a successful one. pi records a failed turn as an
-      // assistant message with stopReason 'error' (or 'aborted') and an errorMessage —
-      // provider 429s, auth failures and aborts all land here — while `waitForIdle`
-      // returns normally. Reporting that as `completed` with empty output is exactly the
-      // silent-success failure the result contract exists to prevent.
-      const last = lastAssistantMessage(session.messages);
-      if (last && (last.stopReason === 'error' || last.stopReason === 'aborted')) {
-        const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
-        snapshot.state = 'failed';
-        this.save(snapshot);
-        emit('activation_failed', { error: detail, stop_reason: last.stopReason });
-        const failedResult: ActivationResult = {
-          activationId: snapshot.activationId,
-          participantId: snapshot.participantId,
-          attemptId: snapshot.attemptId,
-          issueId: snapshot.issueId,
-          issueRef: snapshot.issueRef,
-          issueRevision: snapshot.issueRevision,
-          contractHash: snapshot.contractHash,
-          executionBindingId: snapshot.executionBindingId,
-          status: 'failed',
-          output: undefined,
-          validation: { valid: false, errors: [detail] },
-          piSessionId: session.sessionId,
-          configuredModel: snapshot.configuredModel,
-      requestedModel: snapshot.requestedModel,
-          resolvedModel: snapshot.resolvedModel,
-          modelOverride: snapshot.modelOverride,
-          ...(snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {}),
-          thinkingOverride: snapshot.thinkingOverride,
-          fallbackUsed: false,
-          completedAt: this.now(),
-        };
-        this.publishTerminalSettlement(snapshot, failedResult, record, emit);
-        return failedResult;
-      }
-
-      const output = textOf(last);
-
-      // The turn reached idle without an error/aborted stopReason — the one terminal
-      // event this disposal reports (unitAI-8s7xx). Fired here, after stopReason
-      // inspection, instead of unconditionally on every settle in `onSessionEvent`.
-      emit('activation_settled');
-
-      emit('output_validation_started');
-      // Phase 1 carries no output schema; schema/expected-key enforcement arrives with the
-      // result-contract work (unitAI-v2om5 NON_GOALS). One check is always available
-      // regardless: a specialist that produced no output has not delivered, whitespace
-      // included — so empty/whitespace-only output fails validation on an otherwise
-      // settled (not failed) activation.
-      // An idle session whose own background tasks still run has not finished: it is waiting on
-      // them (SPECIALISTS-4310). Settled and resumable, but `uncertain`, never `completed`.
-      const pendingTasks = this.liveBackgroundTasks(snapshot.activationId);
-      const validation = pendingTasks.length > 0
-        ? { valid: false as const, errors: [`background tasks still running: ${pendingTasks.join(', ')}; resume the activation after they finish`] }
-        : output.trim().length > 0
-        ? { valid: true as const }
-        : { valid: false as const, errors: ['empty output: specialist produced no output'] };
-      if (validation.valid) {
-        emit('output_validation_passed');
-      } else {
-        emit('output_validation_failed', { errors: validation.errors });
-      }
-
-      snapshot.state = 'settled';
-      this.save(snapshot);
-      emit('activation_completed', { pi_session_id: session.sessionId, output });
-      this.releaseIfWriter(snapshot, 'completed');
-
-      const completedResult: ActivationResult = {
-        activationId: snapshot.activationId,
-        participantId: snapshot.participantId,
-        attemptId: snapshot.attemptId,
-        issueId: snapshot.issueId,
-        issueRef: snapshot.issueRef,
-        issueRevision: snapshot.issueRevision,
-        contractHash: snapshot.contractHash,
-        executionBindingId: snapshot.executionBindingId,
-        status: pendingTasks.length > 0 ? 'uncertain' : 'completed',
-        output,
-        validation,
-        piSessionId: session.sessionId,
-        configuredModel: snapshot.configuredModel,
-      requestedModel: snapshot.requestedModel,
-        resolvedModel: snapshot.resolvedModel,
-        modelOverride: snapshot.modelOverride,
-        ...(snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {}),
-        thinkingOverride: snapshot.thinkingOverride,
-        fallbackUsed: false,
-        completedAt: this.now(),
-      };
-      this.publishTerminalSettlement(snapshot, completedResult, record, emit);
-      return completedResult;
+      return this.settleTurnTail(snapshot, session, emit, record, { notifyWake: false });
     } catch (error) {
       snapshot.state = 'failed';
       this.save(snapshot);
@@ -2893,6 +2801,122 @@ export class NativeActivationHost {
   }
 
   /**
+   * Shared settle tail for framed legs and background-woken wake turns (SPECIALISTS-4354).
+   *
+   * Settles an already-idle session by the same rule on both paths: stopReason
+   * inspection, validation with the live-background-tasks carve-out
+   * (SPECIALISTS-4310), terminal emits, lease release and publication. The wake
+   * difference is explicit in `opts.notifyWake`: only the wake path reports the
+   * superseding result through the outward `onWakeSettlement` seam. Session-stats
+   * capture stays with the callers — framed legs use the once-guard
+   * (SPECIALISTS-120 F2), the wake captures once — so this tail starts at
+   * stopReason inspection.
+   */
+  private settleTurnTail(
+    snapshot: ActivationSnapshot,
+    session: PiAgentSessionLike,
+    emit: (name: string, payload?: Record<string, unknown>) => void,
+    record: ActivationRecord,
+    opts: { notifyWake: boolean },
+  ): ActivationResult {
+    // A settled session is NOT a successful one. pi records a failed turn as an
+    // assistant message with stopReason 'error' (or 'aborted') and an errorMessage —
+    // provider 429s, auth failures and aborts all land here — while `waitForIdle`
+    // returns normally. Reporting that as `completed` with empty output is exactly the
+    // silent-success failure the result contract exists to prevent.
+    const last = lastAssistantMessage(session.messages);
+    if (last && (last.stopReason === 'error' || last.stopReason === 'aborted')) {
+      const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
+      snapshot.state = 'failed';
+      this.save(snapshot);
+      emit('activation_failed', { error: detail, stop_reason: last.stopReason });
+      const failedResult: ActivationResult = {
+        activationId: snapshot.activationId,
+        participantId: snapshot.participantId,
+        attemptId: snapshot.attemptId,
+        issueId: snapshot.issueId,
+        issueRef: snapshot.issueRef,
+        issueRevision: snapshot.issueRevision,
+        contractHash: snapshot.contractHash,
+        executionBindingId: snapshot.executionBindingId,
+        status: 'failed',
+        output: undefined,
+        validation: { valid: false, errors: [detail] },
+        piSessionId: session.sessionId,
+        configuredModel: snapshot.configuredModel,
+        requestedModel: snapshot.requestedModel,
+        resolvedModel: snapshot.resolvedModel,
+        modelOverride: snapshot.modelOverride,
+        ...(snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {}),
+        thinkingOverride: snapshot.thinkingOverride,
+        fallbackUsed: false,
+        completedAt: this.now(),
+      };
+      this.publishTerminalSettlement(snapshot, failedResult, record, emit);
+      if (opts.notifyWake) this.notifyWakeSettlement(failedResult);
+      return failedResult;
+    }
+
+    const output = textOf(last);
+
+    // The turn reached idle without an error/aborted stopReason — the one terminal
+    // event this disposal reports (unitAI-8s7xx). Fired here, after stopReason
+    // inspection, instead of unconditionally on every settle in `onSessionEvent`.
+    emit('activation_settled');
+
+    emit('output_validation_started');
+    // Phase 1 carries no output schema; schema/expected-key enforcement arrives with the
+    // result-contract work (unitAI-v2om5 NON_GOALS). One check is always available
+    // regardless: a specialist that produced no output has not delivered, whitespace
+    // included — so empty/whitespace-only output fails validation on an otherwise
+    // settled (not failed) activation.
+    // An idle session whose own background tasks still run has not finished: it is waiting on
+    // them (SPECIALISTS-4310). Settled and resumable, but `uncertain`, never `completed`.
+    const pendingTasks = this.liveBackgroundTasks(snapshot.activationId);
+    const validation = pendingTasks.length > 0
+      ? { valid: false as const, errors: [`background tasks still running: ${pendingTasks.join(', ')}; resume the activation after they finish`] }
+      : output.trim().length > 0
+      ? { valid: true as const }
+      : { valid: false as const, errors: ['empty output: specialist produced no output'] };
+    if (validation.valid) {
+      emit('output_validation_passed');
+    } else {
+      emit('output_validation_failed', { errors: validation.errors });
+    }
+
+    snapshot.state = 'settled';
+    this.save(snapshot);
+    emit('activation_completed', { pi_session_id: session.sessionId, output });
+    this.releaseIfWriter(snapshot, 'completed');
+
+    const completedResult: ActivationResult = {
+      activationId: snapshot.activationId,
+      participantId: snapshot.participantId,
+      attemptId: snapshot.attemptId,
+      issueId: snapshot.issueId,
+      issueRef: snapshot.issueRef,
+      issueRevision: snapshot.issueRevision,
+      contractHash: snapshot.contractHash,
+      executionBindingId: snapshot.executionBindingId,
+      status: pendingTasks.length > 0 ? 'uncertain' : 'completed',
+      output,
+      validation,
+      piSessionId: session.sessionId,
+      configuredModel: snapshot.configuredModel,
+      requestedModel: snapshot.requestedModel,
+      resolvedModel: snapshot.resolvedModel,
+      modelOverride: snapshot.modelOverride,
+      ...(snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {}),
+      thinkingOverride: snapshot.thinkingOverride,
+      fallbackUsed: false,
+      completedAt: this.now(),
+    };
+    this.publishTerminalSettlement(snapshot, completedResult, record, emit);
+    if (opts.notifyWake) this.notifyWakeSettlement(completedResult);
+    return completedResult;
+  }
+
+  /**
    * Mark an activation whose turn starts on an already-settled snapshot: a
    * background-woken wake, not a framed leg (SPECIALISTS-4322). Framed turns always
    * pass through starting/running first (resume/retry set starting, agent_start sets
@@ -2911,7 +2935,8 @@ export class NativeActivationHost {
    * the model takes a wake turn on its own. That turn settles through onSessionEvent
    * only — no prompt window, no terminal emit, no metrics refresh — so without this
    * the job parks in `waiting` with a stale metrics row and the activation is never
-   * finalised. The tail mirrors runToSettled's exactly (stats capture, stopReason
+   * finalised. The tail is shared with runToSettled through settleTurnTail
+   * (SPECIALISTS-4354: stats capture stays with the caller, stopReason
    * inspection, validation with the live-background-tasks carve-out, terminal emits,
    * release, publication): the wake is settled by the same rule as every framed turn,
    * including `uncertain` while its own background tasks still run (SPECIALISTS-4310)
@@ -2930,80 +2955,7 @@ export class NativeActivationHost {
       // Same bounded, failure-tolerant capture as the framed path: the settlement
       // capture runs on failure legs too, so a missing snapshot stays explicit.
       await this.captureSessionStats(session, emit);
-      const last = lastAssistantMessage(session.messages);
-      if (last && (last.stopReason === 'error' || last.stopReason === 'aborted')) {
-        const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
-        snapshot.state = 'failed';
-        this.save(snapshot);
-        emit('activation_failed', { error: detail, stop_reason: last.stopReason });
-        const failedResult: ActivationResult = {
-          activationId: snapshot.activationId,
-          participantId: snapshot.participantId,
-          attemptId: snapshot.attemptId,
-          issueId: snapshot.issueId,
-          issueRef: snapshot.issueRef,
-          issueRevision: snapshot.issueRevision,
-          contractHash: snapshot.contractHash,
-          executionBindingId: snapshot.executionBindingId,
-          status: 'failed',
-          output: undefined,
-          validation: { valid: false, errors: [detail] },
-          piSessionId: session.sessionId,
-          configuredModel: snapshot.configuredModel,
-          requestedModel: snapshot.requestedModel,
-          resolvedModel: snapshot.resolvedModel,
-          modelOverride: snapshot.modelOverride,
-          ...(snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {}),
-          thinkingOverride: snapshot.thinkingOverride,
-          fallbackUsed: false,
-          completedAt: this.now(),
-        };
-        this.publishTerminalSettlement(snapshot, failedResult, record, emit);
-        this.notifyWakeSettlement(failedResult);
-        return;
-      }
-      const output = textOf(last);
-      emit('activation_settled');
-      emit('output_validation_started');
-      const pendingTasks = this.liveBackgroundTasks(snapshot.activationId);
-      const validation = pendingTasks.length > 0
-        ? { valid: false as const, errors: [`background tasks still running: ${pendingTasks.join(', ')}; resume the activation after they finish`] }
-        : output.trim().length > 0
-          ? { valid: true as const }
-          : { valid: false as const, errors: ['empty output: specialist produced no output'] };
-      if (validation.valid) {
-        emit('output_validation_passed');
-      } else {
-        emit('output_validation_failed', { errors: validation.errors });
-      }
-      snapshot.state = 'settled';
-      this.save(snapshot);
-      emit('activation_completed', { pi_session_id: session.sessionId, output });
-      this.releaseIfWriter(snapshot, 'completed');
-      const completedResult: ActivationResult = {
-        activationId: snapshot.activationId,
-        participantId: snapshot.participantId,
-        attemptId: snapshot.attemptId,
-        issueId: snapshot.issueId,
-        issueRef: snapshot.issueRef,
-        issueRevision: snapshot.issueRevision,
-        contractHash: snapshot.contractHash,
-        executionBindingId: snapshot.executionBindingId,
-        status: pendingTasks.length > 0 ? 'uncertain' : 'completed',
-        output,
-        validation,
-        piSessionId: session.sessionId,
-        configuredModel: snapshot.configuredModel,
-        requestedModel: snapshot.requestedModel,
-        resolvedModel: snapshot.resolvedModel,
-        modelOverride: snapshot.modelOverride,
-        ...(snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {}),
-        thinkingOverride: snapshot.thinkingOverride,
-        fallbackUsed: false,
-        completedAt: this.now(),
-      };
-      this.publishTerminalSettlement(snapshot, completedResult, record, emit);
-      this.notifyWakeSettlement(completedResult);
+      this.settleTurnTail(snapshot, session, emit, record, { notifyWake: true });
     } catch {
       // Finalisation is diagnostic plumbing on top of an already-settled turn:
       // it must never throw into the session fan-out.

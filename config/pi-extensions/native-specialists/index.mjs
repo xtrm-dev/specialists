@@ -379,14 +379,9 @@ export function renderSectionLines({ activations, asks }, { expanded = true, now
   if (nonIdle) lines.push('');
   lines.push(renderFleetHeader({ activations, asks }));
   if (!expanded) return lines;
-  const askIds = new Set((asks ?? []).map((a) => a.activation_id));
-  const ordered = [...(activations ?? [])].sort(
-    (a, b) => Number(askIds.has(b.activation_id)) - Number(askIds.has(a.activation_id)),
-  );
   // Bounded by ENTRIES: each pushed entry is its whole one-line unit.
-  const entries = ordered.slice(0, FLEET_MAX_ROWS);
+  const { entries, overflow } = selectFleetEntries({ activations, asks });
   for (const view of entries) lines.push(...renderFleetRowLines(view, asks, nowMs));
-  const overflow = ordered.length - entries.length;
   if (overflow > 0) lines.push(`    +${overflow} more`);
   if (detail) lines.push(...renderDetailLines(detail, detailCache));
   return lines;
@@ -501,6 +496,30 @@ export function buildOverlayRows(fleet, nowMs = Date.now()) {
 }
 
 /**
+ * Blocked-first ordering plus the entry bound, shared by the text section
+ * and the footer-split rows so the two can never disagree on order, bound,
+ * or overflow wording. Returns the bounded entries plus the overflow count.
+ */
+export function selectFleetEntries(fleet) {
+  const activations = fleet?.activations ?? [];
+  const asks = fleet?.asks ?? [];
+  const askIds = new Set(asks.map((a) => a.activation_id));
+  const ordered = [...activations].sort(
+    (a, b) => Number(askIds.has(b.activation_id)) - Number(askIds.has(a.activation_id)),
+  );
+  return { entries: ordered.slice(0, FLEET_MAX_ROWS), overflow: Math.max(0, ordered.length - FLEET_MAX_ROWS) };
+}
+
+/**
+ * Plain work identity for detail heads (overlay, status): `issue … · model
+ * [· thinking]`. Unstyled — heads apply their own dim at render. The styled
+ * row identity lives in `renderFleetRowLines` alone.
+ */
+export function formatWorkIdentity(view) {
+  return `issue ${view?.issue_ref ?? view?.issue_id ?? '—'} · ${view?.resolved_model ?? '?model'}${view?.thinking_level ? ` · ${view.thinking_level}` : ''}`;
+}
+
+/**
  * Detail head for one activation: the sb issue title in full when known,
  * then issue ref, purpose, model facts, run cost or the wait reason, and the
  * ask body when blocked. Full titles and bodies live here, never truncated
@@ -510,8 +529,9 @@ export function buildOverlayDetailHead(view, ask, kind, nowMs = Date.now(), issu
   const head = [];
   const title = typeof issueTitle === 'string' && issueTitle.trim() ? issueTitle.trim() : '';
   if (title) head.push(title);
-  head.push(`issue ${view?.issue_ref ?? view?.issue_id ?? '—'} · ${view?.resolved_model ?? '?model'}${view?.thinking_level ? ` · ${view.thinking_level}` : ''}`);
-  if (view?.purpose) head.push(`purpose: ${String(view.purpose).replace(/\s+/g, ' ').trim()}`);
+  head.push(formatWorkIdentity(view));
+  const purpose = formatPurposeShort(view?.purpose);
+  if (purpose) head.push(`purpose: ${purpose}`);
   head.push(rowMetrics({ view: view ?? {}, ask: ask ?? null, nowMs }));
   if (ask?.body?.trim()) head.push(`ask ${ask.message_id ?? ''}: ${ask.body.trim()}`.trim());
   if (kind === 'feed' && view && isActiveState(view.state) && !ask) head.push('live — new events arrive on fleet change');
@@ -3261,13 +3281,10 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     const asks = fleet.asks ?? [];
     if (activations.length === 0 && asks.length === 0) return [];
     const nowMs = Date.now();
-    const askIds = new Set(asks.map((a) => a.activation_id));
-    const ordered = [...activations].sort(
-      (a, b) => Number(askIds.has(b.activation_id)) - Number(askIds.has(a.activation_id)),
-    );
-    const lines = [];
-    for (const view of ordered.slice(0, FLEET_MAX_ROWS)) lines.push(...renderFleetRowLines(view, asks, nowMs));
-    if (ordered.length > FLEET_MAX_ROWS) lines.push(`    +${ordered.length - FLEET_MAX_ROWS} more`);
+    const { entries, overflow } = selectFleetEntries(fleet);
+    const lines = [''];
+    for (const view of entries) lines.push(...renderFleetRowLines(view, asks, nowMs));
+    if (overflow > 0) lines.push(`    +${overflow} more`);
     return lines;
   };
 
@@ -3561,10 +3578,13 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
           return;
         }
         const ask = resolved.fleet.asks.find((a) => a.activation_id === row.activation_id);
+        const nowMs = Date.now();
+        const statusPurpose = formatPurposeShort(row.purpose);
         report(ctx, [
           `${row.specialist} ${row.activation_id} · ${row.state ?? 'unknown'}`,
-          `  issue ${row.issue_ref ?? row.bead_id ?? '—'} · ${row.resolved_model ?? '?model'}${row.thinking_level ? ` · ${row.thinking_level}` : ''}`,
-          ...(row.purpose ? [`  purpose: ${row.purpose}`] : []),
+          `  ${formatWorkIdentity(row)}`,
+          ...(statusPurpose ? [`  purpose: ${statusPurpose}`] : []),
+          `  ${rowMetrics({ view: row, ask: ask ?? null, nowMs })}`,
           ...(ask ? [`  ${ask.kind ?? 'ask'} ${ask.message_id}: ${ask.body ?? ''}`] : []),
         ].join('\n'));
         return;

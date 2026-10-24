@@ -93674,75 +93674,7 @@ class NativeActivationHost {
       await session.prompt(initialPrompt);
       await session.waitForIdle();
       await recordSettlementOnce();
-      const last = lastAssistantMessage(session.messages);
-      if (last && (last.stopReason === "error" || last.stopReason === "aborted")) {
-        const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
-        snapshot.state = "failed";
-        this.save(snapshot);
-        emit("activation_failed", { error: detail, stop_reason: last.stopReason });
-        const failedResult = {
-          activationId: snapshot.activationId,
-          participantId: snapshot.participantId,
-          attemptId: snapshot.attemptId,
-          issueId: snapshot.issueId,
-          issueRef: snapshot.issueRef,
-          issueRevision: snapshot.issueRevision,
-          contractHash: snapshot.contractHash,
-          executionBindingId: snapshot.executionBindingId,
-          status: "failed",
-          output: undefined,
-          validation: { valid: false, errors: [detail] },
-          piSessionId: session.sessionId,
-          configuredModel: snapshot.configuredModel,
-          requestedModel: snapshot.requestedModel,
-          resolvedModel: snapshot.resolvedModel,
-          modelOverride: snapshot.modelOverride,
-          ...snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {},
-          thinkingOverride: snapshot.thinkingOverride,
-          fallbackUsed: false,
-          completedAt: this.now()
-        };
-        this.publishTerminalSettlement(snapshot, failedResult, record, emit);
-        return failedResult;
-      }
-      const output = textOf(last);
-      emit("activation_settled");
-      emit("output_validation_started");
-      const pendingTasks = this.liveBackgroundTasks(snapshot.activationId);
-      const validation = pendingTasks.length > 0 ? { valid: false, errors: [`background tasks still running: ${pendingTasks.join(", ")}; resume the activation after they finish`] } : output.trim().length > 0 ? { valid: true } : { valid: false, errors: ["empty output: specialist produced no output"] };
-      if (validation.valid) {
-        emit("output_validation_passed");
-      } else {
-        emit("output_validation_failed", { errors: validation.errors });
-      }
-      snapshot.state = "settled";
-      this.save(snapshot);
-      emit("activation_completed", { pi_session_id: session.sessionId, output });
-      this.releaseIfWriter(snapshot, "completed");
-      const completedResult = {
-        activationId: snapshot.activationId,
-        participantId: snapshot.participantId,
-        attemptId: snapshot.attemptId,
-        issueId: snapshot.issueId,
-        issueRef: snapshot.issueRef,
-        issueRevision: snapshot.issueRevision,
-        contractHash: snapshot.contractHash,
-        executionBindingId: snapshot.executionBindingId,
-        status: pendingTasks.length > 0 ? "uncertain" : "completed",
-        output,
-        validation,
-        piSessionId: session.sessionId,
-        configuredModel: snapshot.configuredModel,
-        requestedModel: snapshot.requestedModel,
-        resolvedModel: snapshot.resolvedModel,
-        modelOverride: snapshot.modelOverride,
-        ...snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {},
-        thinkingOverride: snapshot.thinkingOverride,
-        fallbackUsed: false,
-        completedAt: this.now()
-      };
-      this.publishTerminalSettlement(snapshot, completedResult, record, emit);
-      return completedResult;
+      return this.settleTurnTail(snapshot, session, emit, record, { notifyWake: false });
     } catch (error) {
       snapshot.state = "failed";
       this.save(snapshot);
@@ -93776,61 +93708,14 @@ class NativeActivationHost {
       return thrownResult;
     }
   }
-  noteWakeTurnStart(snapshot) {
-    if (snapshot.state === "settled")
-      this.wakeDirty.add(snapshot.activationId);
-  }
-  async finalizeWakeTurn(snapshot, record, emit) {
-    try {
-      const session = record.session;
-      await this.captureSessionStats(session, emit);
-      const last = lastAssistantMessage(session.messages);
-      if (last && (last.stopReason === "error" || last.stopReason === "aborted")) {
-        const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
-        snapshot.state = "failed";
-        this.save(snapshot);
-        emit("activation_failed", { error: detail, stop_reason: last.stopReason });
-        const failedResult = {
-          activationId: snapshot.activationId,
-          participantId: snapshot.participantId,
-          attemptId: snapshot.attemptId,
-          issueId: snapshot.issueId,
-          issueRef: snapshot.issueRef,
-          issueRevision: snapshot.issueRevision,
-          contractHash: snapshot.contractHash,
-          executionBindingId: snapshot.executionBindingId,
-          status: "failed",
-          output: undefined,
-          validation: { valid: false, errors: [detail] },
-          piSessionId: session.sessionId,
-          configuredModel: snapshot.configuredModel,
-          requestedModel: snapshot.requestedModel,
-          resolvedModel: snapshot.resolvedModel,
-          modelOverride: snapshot.modelOverride,
-          ...snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {},
-          thinkingOverride: snapshot.thinkingOverride,
-          fallbackUsed: false,
-          completedAt: this.now()
-        };
-        this.publishTerminalSettlement(snapshot, failedResult, record, emit);
-        this.notifyWakeSettlement(failedResult);
-        return;
-      }
-      const output = textOf(last);
-      emit("activation_settled");
-      emit("output_validation_started");
-      const pendingTasks = this.liveBackgroundTasks(snapshot.activationId);
-      const validation = pendingTasks.length > 0 ? { valid: false, errors: [`background tasks still running: ${pendingTasks.join(", ")}; resume the activation after they finish`] } : output.trim().length > 0 ? { valid: true } : { valid: false, errors: ["empty output: specialist produced no output"] };
-      if (validation.valid) {
-        emit("output_validation_passed");
-      } else {
-        emit("output_validation_failed", { errors: validation.errors });
-      }
-      snapshot.state = "settled";
+  settleTurnTail(snapshot, session, emit, record, opts) {
+    const last = lastAssistantMessage(session.messages);
+    if (last && (last.stopReason === "error" || last.stopReason === "aborted")) {
+      const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
+      snapshot.state = "failed";
       this.save(snapshot);
-      emit("activation_completed", { pi_session_id: session.sessionId, output });
-      this.releaseIfWriter(snapshot, "completed");
-      const completedResult = {
+      emit("activation_failed", { error: detail, stop_reason: last.stopReason });
+      const failedResult = {
         activationId: snapshot.activationId,
         participantId: snapshot.participantId,
         attemptId: snapshot.attemptId,
@@ -93839,9 +93724,9 @@ class NativeActivationHost {
         issueRevision: snapshot.issueRevision,
         contractHash: snapshot.contractHash,
         executionBindingId: snapshot.executionBindingId,
-        status: pendingTasks.length > 0 ? "uncertain" : "completed",
-        output,
-        validation,
+        status: "failed",
+        output: undefined,
+        validation: { valid: false, errors: [detail] },
         piSessionId: session.sessionId,
         configuredModel: snapshot.configuredModel,
         requestedModel: snapshot.requestedModel,
@@ -93852,8 +93737,61 @@ class NativeActivationHost {
         fallbackUsed: false,
         completedAt: this.now()
       };
-      this.publishTerminalSettlement(snapshot, completedResult, record, emit);
+      this.publishTerminalSettlement(snapshot, failedResult, record, emit);
+      if (opts.notifyWake)
+        this.notifyWakeSettlement(failedResult);
+      return failedResult;
+    }
+    const output = textOf(last);
+    emit("activation_settled");
+    emit("output_validation_started");
+    const pendingTasks = this.liveBackgroundTasks(snapshot.activationId);
+    const validation = pendingTasks.length > 0 ? { valid: false, errors: [`background tasks still running: ${pendingTasks.join(", ")}; resume the activation after they finish`] } : output.trim().length > 0 ? { valid: true } : { valid: false, errors: ["empty output: specialist produced no output"] };
+    if (validation.valid) {
+      emit("output_validation_passed");
+    } else {
+      emit("output_validation_failed", { errors: validation.errors });
+    }
+    snapshot.state = "settled";
+    this.save(snapshot);
+    emit("activation_completed", { pi_session_id: session.sessionId, output });
+    this.releaseIfWriter(snapshot, "completed");
+    const completedResult = {
+      activationId: snapshot.activationId,
+      participantId: snapshot.participantId,
+      attemptId: snapshot.attemptId,
+      issueId: snapshot.issueId,
+      issueRef: snapshot.issueRef,
+      issueRevision: snapshot.issueRevision,
+      contractHash: snapshot.contractHash,
+      executionBindingId: snapshot.executionBindingId,
+      status: pendingTasks.length > 0 ? "uncertain" : "completed",
+      output,
+      validation,
+      piSessionId: session.sessionId,
+      configuredModel: snapshot.configuredModel,
+      requestedModel: snapshot.requestedModel,
+      resolvedModel: snapshot.resolvedModel,
+      modelOverride: snapshot.modelOverride,
+      ...snapshot.thinkingLevel ? { thinkingLevel: snapshot.thinkingLevel } : {},
+      thinkingOverride: snapshot.thinkingOverride,
+      fallbackUsed: false,
+      completedAt: this.now()
+    };
+    this.publishTerminalSettlement(snapshot, completedResult, record, emit);
+    if (opts.notifyWake)
       this.notifyWakeSettlement(completedResult);
+    return completedResult;
+  }
+  noteWakeTurnStart(snapshot) {
+    if (snapshot.state === "settled")
+      this.wakeDirty.add(snapshot.activationId);
+  }
+  async finalizeWakeTurn(snapshot, record, emit) {
+    try {
+      const session = record.session;
+      await this.captureSessionStats(session, emit);
+      this.settleTurnTail(snapshot, session, emit, record, { notifyWake: true });
     } catch {}
   }
   notifyWakeSettlement(result) {
