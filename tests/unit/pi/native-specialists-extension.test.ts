@@ -1425,6 +1425,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(widgetText()).toContain('specialists');
     expect(widgetText()).not.toContain('feed01');
     const before = rowsText();
+    expect(before.split('\n')[0]).toBe('');
     expect(before).toContain('feed01');
     expect(before).not.toContain('select a row');
     expect(before).not.toContain('▾');
@@ -3050,5 +3051,23 @@ describe('/specialists overlay (SPECIALISTS-4325)', () => {
     expect(head[1]).toContain('SPECIALISTS-4325');
     const untitled = mod.buildOverlayDetailHead(view, null, 'result', SPIN_CLOCK, null);
     expect(untitled[0]).toContain('SPECIALISTS-4325');
+  });
+
+  it('entry selection and work identity are shared, never reimplemented', async () => {
+    const mod = await loadExtension();
+    const fleet = {
+      activations: [0, 1, 2, 3, 4, 5].map((i) => ({
+        activation_id: `act:${i}`, specialist: 'explorer', issue_ref: 'SPECIALISTS-1',
+        state: 'running', resolved_model: 'm', elapsed_s: 10, last_activity_at: SPIN_CLOCK,
+      })),
+      asks: [{ message_id: 'msg:1', kind: 'question', activation_id: 'act:5', from: 'x', body: 'Which?', asked_at: SPIN_CLOCK }],
+    };
+    const { entries, overflow } = mod.selectFleetEntries(fleet);
+    expect(entries).toHaveLength(mod.FLEET_MAX_ROWS);
+    expect(entries[0].activation_id).toBe('act:5'); // blocked first, same as the section
+    expect(overflow).toBe(2);
+    expect(mod.formatWorkIdentity({ issue_ref: 'SPECIALISTS-1', resolved_model: 'm', thinking_level: 'high' }))
+      .toBe('issue SPECIALISTS-1 · m · high');
+    expect(mod.formatWorkIdentity({})).toBe('issue — · ?model');
   });
 });
