@@ -1,6 +1,7 @@
 import { Container, ProcessTerminal, TUI } from '@earendil-works/pi-tui';
 import { ConsoleApp } from './console/components.js';
 import { createRuntimeClient } from './console/runtime.js';
+import { withForensicObservability } from './console/observability-runtime.js';
 
 export async function run(): Promise<void> {
   const terminal = new ProcessTerminal();
@@ -10,7 +11,7 @@ export async function run(): Promise<void> {
   const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
 
   const app = new ConsoleApp({
-    runtime: createRuntimeClient(process.cwd()),
+    runtime: withForensicObservability(createRuntimeClient(process.cwd())),
     requestRender: () => tui.requestRender(),
     rows: () => terminal.rows,
     stop: () => resolveExit?.(),
