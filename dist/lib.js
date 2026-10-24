@@ -27136,6 +27136,7 @@ export {
   recoverDeadHolder,
   releaseHolderLease,
   renderRejection,
+  resolveExecutionExtensionSelection,
   resolveModelChain,
   resolveObservabilityDbLocation,
   resolveRuntimeToolContract,
