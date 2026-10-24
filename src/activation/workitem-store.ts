@@ -247,6 +247,22 @@ export interface WorkItemView {
   reasons: string[];
 }
 
+/** One resolved contextRef as the turn-1 prompt shows it, with its source. */
+export interface ResolvedContextEntryView {
+  key: string;
+  value: unknown;
+  /** Human ref of the Issue whose revision carries the ref (the machine id when unresolvable). */
+  sourceRef: string;
+  sourceRevision: number;
+  inherited: boolean;
+}
+
+/** The Issue's resolved contextRefs plus the hash Substrate binds into the ExecutionBinding. */
+export interface ResolvedContextView {
+  hash: string;
+  entries: ResolvedContextEntryView[];
+}
+
 /** Epic lineage hop: whatever the prompt renderer needs from an ancestor issue. */
 export interface EpicAncestor {
   ref: string;
@@ -404,6 +420,12 @@ export interface SpecialistWorkItemBoundary {
    * the host never queries the store or walks edges itself (SPECIALISTS-22).
    */
   completedBlockers(ref: string, depth: number): EpicAncestor[];
+  /**
+   * The Issue's resolved contextRefs (own + inherited from parents) for the turn-1 prompt.
+   * Optional so fakes keep compiling. Throws when Substrate refuses the context
+   * (journal/memory authority, parent cycle) or exposes no context reader: fail closed.
+   */
+  resolvedContext?(ref: string): ResolvedContextView | null;
   check(req: DispatchRequest): CheckResult;
   bind(req: DispatchRequest): ExecutionBindingView;
   inlineCreate(contract: string, opts?: { title?: string; holder?: string; activationId?: string; parentId?: string; kind?: string }): InlineIssueResult;
@@ -490,6 +512,15 @@ export interface IssueServicePort {
    */
   getBlockers?(childId: string): BlockerIssue[];
   getRevision(issueId: string, revision: number): { contract: unknown };
+  /**
+   * The Issue's revisioned contextRefs, inherited root -> leaf with source provenance and the
+   * hash the ExecutionBinding records (substrate issue-service `getResolvedContext`). Optional so
+   * existing fakes keep compiling; absent means "no context information".
+   */
+  getResolvedContext?(issueId: string): {
+    entries: Array<{ key: string; value: unknown; sourceIssueId: string; sourceRevision: number; resolutionRule: string }>;
+    hash: string;
+  };
   resolveProject(opts: { gitRoot: string }): { projectId: string };
   createIssue(input: {
     projectId: string;
@@ -631,6 +662,32 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
         childId = parent.id;
       }
       return ancestors;
+    },
+
+    resolvedContext(ref: string): ResolvedContextView | null {
+      // Fail closed: Substrate binds the Issue's resolved context hash on every dispatch, so a
+      // store that cannot read that context cannot prove the prompt matches the binding.
+      if (!issues.getResolvedContext) {
+        throw new Error('Substrate exposes no getResolvedContext: the bound context cannot be read or verified');
+      }
+      const resolved = issues.getResolvedContext(issues.resolveRef(ref).id);
+      const humanRefOf = (issueId: string): string => {
+        try {
+          return issues.resolveRef(issueId).humanRef;
+        } catch {
+          return issueId;
+        }
+      };
+      return {
+        hash: resolved.hash,
+        entries: resolved.entries.map((entry) => ({
+          key: entry.key,
+          value: entry.value,
+          sourceRef: humanRefOf(entry.sourceIssueId),
+          sourceRevision: entry.sourceRevision,
+          inherited: entry.resolutionRule === 'inherited',
+        })),
+      };
     },
 
     completedBlockers(ref: string, depth: number): EpicAncestor[] {

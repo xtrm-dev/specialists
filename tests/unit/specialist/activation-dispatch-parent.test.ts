@@ -68,6 +68,8 @@ function makePorts() {
       return { id: parent.id, humanRef: parent.humanRef, title: parent.title, currentRevision: 1 };
     },
     getRevision: () => ({ contract: {} }),
+    // The producer always resolves context; an empty one hashes to what the binding records.
+    getResolvedContext: () => ({ entries: [], hash: 'context-test' }),
     resolveProject: () => ({ projectId: 'proj-test' }),
     createIssue: (input: Record<string, unknown>) => {
       // Mirrors the producer: existence is checked, then the link is written.
@@ -116,7 +118,7 @@ function makePorts() {
     }),
     dispatch: (_i: unknown, _p: unknown, req: Record<string, unknown>) => ({
       binding: {
-        id: 'exb_test', issueId: 'iss_test', issueRevision: 1, contractHash: 'hash-test',
+        id: 'exb_test', issueId: 'iss_test', issueRevision: 1, contractHash: 'hash-test', resolvedContextHash: 'context-test',
         claimId: req.claimId ?? 1,
       },
     }),

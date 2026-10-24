@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -50,7 +52,11 @@ async function ensureScratchProject(dbPath: string): Promise<void> {
   try {
     runner.migrate(db);
     const issues = new issueSvcMod.IssueService(db);
-    issues.createProject({ prefix: 'PRB', name: 'substrate parity scratch' });
+    const project = issues.createProject({ prefix: 'PRB', name: 'substrate parity scratch' });
+    // Current Substrate resolves the project from a repository binding or checkout link and
+    // refuses to guess; link the checkout the boundary runs in to the scratch project.
+    const gitRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf-8' }).trim();
+    issues.linkCheckout(gitRoot, project.id);
   } finally {
     (db as unknown as { close(): void }).close();
   }
@@ -78,7 +84,7 @@ describe.skipIf(!LIVE)('substrate parity (private integration)', () => {
       specialist: 'researcher',
       holder: 'parity::holder',
       activationId: 'act-parity-1',
-      sessionId: 'sess-parity-1',
+      sessionId: randomUUID(),
       workspace: dir,
     });
     expect(binding.issueRevision).toBe(view.revision);
@@ -89,5 +95,46 @@ describe.skipIf(!LIVE)('substrate parity (private integration)', () => {
       .toThrow(/claimed by/);
 
     boundary.journal(created.ref, 'note', { activationId: 'act-parity-1' });
+  });
+
+  it('contextRefs: own + inherited reach resolvedContext with provenance, and the bound hash matches', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'substrate-parity-ctx-'));
+    const dbPath = join(dir, 'state.db');
+    await ensureScratchProject(dbPath);
+    const boundary = await openWorkItemBoundary({ dbPath, substrateDir: SUBSTRATE_DIR });
+
+    const parent = boundary.inlineCreate(CONTRACT, { holder: 'parity::parent', activationId: 'act-parent' });
+    const child = boundary.inlineCreate(CONTRACT, { holder: 'parity::holder', activationId: 'act-ctx', parentId: parent.issueId });
+
+    // The `sb issue edit --context-refs` path: a new revision carrying the refs, then re-attest + claim.
+    const issueSvcMod = (await import(pathToFileURL(join(SUBSTRATE_DIR, 'src/service/issue-service.ts')).href)) as Record<string, any>;
+    const db = openSubstrateDb(dbPath);
+    const svc = new issueSvcMod.IssueService(db);
+    const contractOf = (id: string) => svc.getRevision(id, svc.getIssue(id).currentRevision).contract;
+    svc.updateContract(parent.issueId, contractOf(parent.issueId), 'parity', {
+      contextRefs: [{ key: 'venv', value: '/abs/.venv/bin/python', kind: 'evidence' }],
+    });
+    svc.updateContract(child.issueId, contractOf(child.issueId), 'parity', {
+      contextRefs: [{ key: 'explorer-allowlist', value: 'src/a.ts\nsrc/b.ts', kind: 'evidence' }],
+    });
+    expect(() => svc.updateContract(child.issueId, contractOf(child.issueId), 'parity', {
+      contextRefs: [{ key: 'raw', value: 'journal text', kind: 'journal' }],
+    })).toThrow(/journal/);
+    svc.releaseClaim(child.issueId, 'parity::holder', { activationId: 'act-ctx' });
+    svc.claimReady(child.issueId, 'parity::holder', { outcome: 'ready', policy: 'default', attestedBy: 'parity::holder' }, { activationId: 'act-ctx' });
+    (db as unknown as { close(): void }).close();
+
+    const context = boundary.resolvedContext!(child.ref);
+    expect(context).not.toBeNull();
+    expect(context!.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'explorer-allowlist', sourceRef: child.ref, inherited: false }),
+      expect.objectContaining({ key: 'venv', sourceRef: parent.ref, inherited: true }),
+    ]));
+
+    const binding = boundary.bind({
+      ref: child.ref, specialist: 'researcher', holder: 'parity::holder', activationId: 'act-ctx',
+      sessionId: randomUUID(), workspace: dir,
+    });
+    expect(binding.resolvedContextHash).toBe(context!.hash);
   });
 });
