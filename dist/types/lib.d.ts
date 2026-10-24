@@ -4,6 +4,7 @@ export { SpecialistLoader } from './specialist/loader.js';
 export type { Specialist } from './specialist/schema.js';
 export { resolveModelChain } from './specialist/model-chain.js';
 export { resolveRuntimeToolContract } from './pi/session.js';
+export { resolveExecutionExtensionSelection } from './pi/session.js';
 export { validateBeforeRun } from './specialist/runner.js';
 export { NativeActivationHost } from './activation/native-host.js';
 export type { NativeActivationHostDeps, ActivationForensicSink, ActivationAttachment } from './activation/native-host.js';

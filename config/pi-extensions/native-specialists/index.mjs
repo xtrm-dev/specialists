@@ -50,6 +50,7 @@ import {
   NativeActivationHost,
   resolveModelChain,
   resolveObservabilityDbLocation,
+  resolveExecutionExtensionSelection,
   resolveRuntimeToolContract,
   SpecialistLoader,
   THINKING_LEVELS,
@@ -1269,12 +1270,29 @@ export async function dispatchability(spec) {
   if (modelChain.length === 0) {
     return { dispatchable: false, reason: 'no configured model — pass model_override at dispatch' };
   }
-  const toolContract = resolveRuntimeToolContract({
-    level: tier,
-    specialistName: spec.specialist.metadata.name,
-    specialistPermissions: spec.specialist.permissions,
-    cwd: process.cwd(),
-  });
+  // SPECIALISTS-4349 (mirrors SPECIALISTS-57 in the MCP surface,
+  // src/tools/specialist/specialist_list.tool.ts:66-83): this listing must resolve the contract
+  // from the SAME inputs the host does, and that includes the definition's OWN extension
+  // selection. Without it, a definition that turns an extension OFF
+  // (`execution.extensions.gitnexus = false`) was reported here as undispatchable on exactly
+  // the hosts where the deny is active: the catalog's hard deny removes grep/find/ls, preflight
+  // fails, and `dispatchable: false` is published for a Specialist the runtime would admit.
+  const extensionSelection = resolveExecutionExtensionSelection(execution.extensions);
+  let toolContract;
+  try {
+    toolContract = resolveRuntimeToolContract({
+      level: tier,
+      specialistName: spec.specialist.metadata.name,
+      specialistPermissions: spec.specialist.permissions,
+      excludeExtensions: extensionSelection.excludeExtensions,
+      extensionSources: extensionSelection.extensionSources,
+      cwd: process.cwd(),
+    });
+  } catch (error) {
+    // Same shape as the MCP mirror: a contract that cannot be resolved is a per-row verdict,
+    // not a listing failure.
+    return { dispatchable: false, reason: error instanceof Error ? error.message : String(error) };
+  }
   if (!toolContract || toolContract.toolsList.length === 0) {
     return { dispatchable: false, reason: 'empty tool contract for tier' };
   }

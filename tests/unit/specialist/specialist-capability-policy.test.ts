@@ -191,39 +191,51 @@ describe('shipped specialist capability policy (SPECIALISTS-57)', () => {
 // runs" — still resolving a contract with the exclusions dropped, so it published
 // `dispatchable: false` for Specialists the runtime would admit. This is a source-level lint for
 // that invariant: blunt, but it is the only check that survives a new call site.
+//
+// SPECIALISTS-4349: the lint scanned `src/` only, so the SAME dropped argument in the Pi
+// extension bundle (config/pi-extensions, `.mjs`, built over `dist/lib.js`) was invisible to it
+// for two releases. Every surface that resolves a contract is now scanned, and BOTH parts of the
+// selection are required — passing the exclusion without the enabled sources resolves a contract
+// the host would never build.
 describe('tool-contract call sites carry the definition extension selection', () => {
   function sourceFiles(dir: string, out: string[] = []): string[] {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) sourceFiles(path, out);
-      else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) out.push(path);
+      else if (/\.(ts|mjs|js)$/.test(entry.name) && !/\.test\.(ts|mjs|js)$/.test(entry.name)) out.push(path);
     }
     return out;
   }
 
-  it('every resolveRuntimeToolContract call passes excludeExtensions', () => {
-    const offenders: string[] = [];
-    for (const file of sourceFiles(join(REPO_ROOT, 'src'))) {
-      const text = readFileSync(file, 'utf8');
-      const needle = 'resolveRuntimeToolContract({';
-      for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) {
-        // Balance braces from the opening `{` so the whole argument object is inspected.
-        const open = text.indexOf('{', at);
-        let depth = 0;
-        let end = open;
-        for (let i = open; i < text.length; i += 1) {
-          if (text[i] === '{') depth += 1;
-          else if (text[i] === '}') {
-            depth -= 1;
-            if (depth === 0) { end = i; break; }
+  it('every resolveRuntimeToolContract call passes excludeExtensions and extensionSources', () => {
+    const offending: string[] = [];
+    const scanned: string[] = [];
+    for (const dir of [join(REPO_ROOT, 'src'), join(REPO_ROOT, 'config', 'pi-extensions')]) {
+      for (const file of sourceFiles(dir)) {
+        const text = readFileSync(file, 'utf8');
+        const needle = 'resolveRuntimeToolContract({';
+        for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) {
+          scanned.push(file);
+          // Balance braces from the opening `{` so the whole argument object is inspected.
+          const open = text.indexOf('{', at);
+          let depth = 0;
+          let end = open;
+          for (let i = open; i < text.length; i += 1) {
+            if (text[i] === '{') depth += 1;
+            else if (text[i] === '}') {
+              depth -= 1;
+              if (depth === 0) { end = i; break; }
+            }
           }
-        }
-        const call = text.slice(open, end + 1);
-        if (!call.includes('excludeExtensions')) {
-          offenders.push(`${file.slice(REPO_ROOT.length + 1)}: ${call.split('\n').slice(0, 4).join(' ')}`);
+          const call = text.slice(open, end + 1);
+          if (!call.includes('excludeExtensions') || !call.includes('extensionSources')) {
+            offending.push(`${file.slice(REPO_ROOT.length + 1)}: ${call.split('\n').slice(0, 4).join(' ')}`);
+          }
         }
       }
     }
-    expect(offenders, `call sites dropping the definition extension selection:\n${offenders.join('\n')}`).toEqual([]);
+    // A lint that scans nothing passes for the wrong reason.
+    expect(scanned.length, 'call sites scanned').toBeGreaterThan(3);
+    expect(offending, `call sites dropping the definition extension selection:\n${offending.join('\n')}`).toEqual([]);
   });
 });

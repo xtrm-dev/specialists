@@ -32,6 +32,10 @@ export type { Specialist } from './specialist/schema.js';
 // second resolution.
 export { resolveModelChain } from './specialist/model-chain.js';
 export { resolveRuntimeToolContract } from './pi/session.js';
+// SPECIALISTS-4349: the Pi extension bundle resolves the tool contract itself, so it must reach
+// the SAME definition-scoped extension selection every other call site uses. Exporting it from
+// the library entry is what lets the bundle pass the argument instead of dropping it.
+export { resolveExecutionExtensionSelection } from './pi/session.js';
 export { validateBeforeRun } from './specialist/runner.js';
 
 // ── Native activation seam (unitAI-rrdnt.37) ─────────────────────────────────

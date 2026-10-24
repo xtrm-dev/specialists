@@ -94801,6 +94801,7 @@ var init_lib = __esm(() => {
   init_script_runner();
   init_loader();
   init_session();
+  init_session();
   init_runner();
   init_native_host();
   init_workitem_store();
