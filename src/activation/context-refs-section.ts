@@ -54,8 +54,24 @@ function fenceFor(text: string): string {
 }
 
 /**
+ * A key is caller-authored text that Substrate only requires to be a non-empty string. It is
+ * shown JSON-quoted (newlines and control characters escaped) and capped, so a key can never
+ * start a line or a heading of its own outside the data fence.
+ */
+const KEY_MAX_CHARS = 120;
+function displayKey(key: string): string {
+  const quoted = JSON.stringify(key);
+  return quoted.length <= KEY_MAX_CHARS ? quoted : `${quoted.slice(0, KEY_MAX_CHARS - 4)}..."`;
+}
+
+/** Room kept at the end of the section so the omitted-entries notice always fits the budget. */
+const OMITTED_NOTICE_RESERVE_BYTES = 128;
+
+/**
  * Render the section, or '' when there is nothing to show (no section at all, so a prompt
- * without contextRefs is byte-identical to before).
+ * without contextRefs is byte-identical to before). Budgets cover the RENDERED text: each
+ * entry block (heading, fences, value, cut notice) stays within `entryMaxBytes`, and the whole
+ * section (heading, preface, blocks, separators, omitted notice) within `totalMaxBytes`.
  */
 export function renderContextRefsSection(
   context: ResolvedContextView | null | undefined,
@@ -65,29 +81,38 @@ export function renderContextRefsSection(
   const entryMax = opts.entryMaxBytes ?? CONTEXT_REFS_ENTRY_MAX_BYTES;
   const totalMax = opts.totalMaxBytes ?? CONTEXT_REFS_TOTAL_MAX_BYTES;
 
+  const header = [HEADING, PREFACE, ''].join('\n');
+  const separator = '\n\n';
   const blocks: string[] = [];
-  let used = 0;
+  let used = utf8Bytes(header) + 1; // the newline that joins header and blocks
   let omitted = 0;
   for (const entry of context.entries) {
-    const origin = `${entry.sourceRef} rev ${entry.sourceRevision}${entry.inherited ? ', inherited' : ''}`;
+    const source = `${entry.sourceRef} rev ${entry.sourceRevision}`;
+    const heading = `### ${displayKey(entry.key)} (from ${source}${entry.inherited ? ', inherited' : ''})`;
     const raw = valueText(entry.value);
-    const budget = Math.min(entryMax, totalMax - used);
-    if (budget <= 0) {
-      omitted += 1;
-      continue;
+    // The fence is sized on the full value: any cut of it has no longer backtick run.
+    const fence = fenceFor(raw);
+    const block = (body: string, notice?: string): string =>
+      [heading, fence, body, fence, ...(notice ? [notice] : [])].join('\n');
+    const join = blocks.length > 0 ? utf8Bytes(separator) : 0;
+    const room = Math.min(entryMax, totalMax - OMITTED_NOTICE_RESERVE_BYTES - used - join);
+
+    let rendered = block(raw);
+    if (utf8Bytes(rendered) > room) {
+      const notice = `[cut at NNNNNNNN of ${utf8Bytes(raw)} bytes; the full value is contextRef ${displayKey(entry.key)} on ${source}]`;
+      const valueRoom = room - utf8Bytes(block('', notice));
+      if (valueRoom <= 0) {
+        omitted += 1;
+        continue;
+      }
+      const body = cutToBytes(raw, valueRoom);
+      rendered = block(body, notice.replace('NNNNNNNN', String(utf8Bytes(body))));
     }
-    const body = cutToBytes(raw, budget);
-    const cut = body.length < raw.length;
-    const fence = fenceFor(body);
-    const lines = [`### ${entry.key} (from ${origin})`, fence, body, fence];
-    if (cut) {
-      lines.push(`[cut at ${utf8Bytes(body)} of ${utf8Bytes(raw)} bytes; the full value is contextRef "${entry.key}" on ${origin.split(',')[0]}]`);
-    }
-    blocks.push(lines.join('\n'));
-    used += utf8Bytes(body);
+    blocks.push(rendered);
+    used += join + utf8Bytes(rendered);
   }
   if (omitted > 0) {
     blocks.push(`[${omitted} more context entr${omitted === 1 ? 'y' : 'ies'} omitted: section budget of ${totalMax} bytes reached]`);
   }
-  return [HEADING, PREFACE, '', blocks.join('\n\n')].join('\n');
+  return `${header}\n${blocks.join(separator)}`;
 }

@@ -319,8 +319,8 @@ function fakeWorkItems(options: {
   context?: ResolvedContextView | null;
   /** The store refuses the context (journal/memory authority, parent cycle). */
   contextError?: string;
-  /** resolvedContextHash the binding records; defaults to 'context-test'. */
-  boundContextHash?: string;
+  /** resolvedContextHash the binding records; defaults to 'context-test'; null = the binding carries none. */
+  boundContextHash?: string | null;
 } = {}): SpecialistWorkItemBoundary {
   const contract = {
     problem: 'The thing is unclear.',
@@ -364,7 +364,8 @@ function fakeWorkItems(options: {
     bind() {
       return {
         id: 'exb_test', issueId: 'iss_test', issueRevision: 1, contractHash: 'hash-test',
-        resolvedContextHash: options.boundContextHash ?? 'context-test', claimId: 1, participantId: 'coordinator',
+        ...(options.boundContextHash === null ? {} : { resolvedContextHash: options.boundContextHash ?? 'context-test' }),
+        claimId: 1, participantId: 'coordinator',
         activationId: 'activation-test', attemptId: 'attempt-test', sessionId: 'pi-sess-123',
         workspace: '/tmp/test-workspace', baseCommit: null, createdAt: Date.now(),
       } as never;
@@ -2960,7 +2961,7 @@ describe('task-prompt composition parity (SPECIALISTS-22)', () => {
     cwd?: string;
     context?: ResolvedContextView | null;
     contextError?: string;
-    boundContextHash?: string;
+    boundContextHash?: string | null;
   }) {
     const record: { createArgs?: Record<string, unknown> } = {};
     const session = fakeSession({ record });
@@ -3021,9 +3022,9 @@ describe('task-prompt composition parity (SPECIALISTS-22)', () => {
     expect(refusal).toBeUndefined();
     const prompt = session.prompts[0];
     expect(prompt).toContain('## Context references (evidence from the Issue; the contract above wins)');
-    expect(prompt).toContain('### explorer-allowlist (from ISSUE-1 rev 2)');
+    expect(prompt).toContain('### "explorer-allowlist" (from ISSUE-1 rev 2)');
     expect(prompt).toContain('src/a.ts\nsrc/b.ts');
-    expect(prompt).toContain('### venv (from EPIC-1 rev 3, inherited)');
+    expect(prompt).toContain('### "venv" (from EPIC-1 rev 3, inherited)');
     const section = prompt.indexOf('## Context references');
     expect(section).toBeGreaterThan(prompt.indexOf('The thing is unclear.'));
     expect(section).toBeLessThan(prompt.indexOf('## Runtime Boundary Rules'));
@@ -3039,6 +3040,12 @@ describe('task-prompt composition parity (SPECIALISTS-22)', () => {
     expect(refusal).toBeInstanceOf(DispatchRejectedError);
     expect((refusal as DispatchRejectedError).reason).toBe('context_changed');
     expect(session.disposed).toBe(true);
+  });
+
+  it('refuses context_changed when context was rendered but the binding carries no context hash', async () => {
+    const { refusal } = await dispatchWith({ context: CONTEXT, boundContextHash: null });
+    expect(refusal).toBeInstanceOf(DispatchRejectedError);
+    expect((refusal as DispatchRejectedError).reason).toBe('context_changed');
   });
 
   it('refuses context_unresolvable when Substrate refuses the context', async () => {
