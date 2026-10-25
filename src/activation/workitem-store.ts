@@ -1002,6 +1002,38 @@ export const SUBSTRATE_REQUIRED_MODULES = [
 ] as const;
 
 /**
+ * IssueService methods this build calls through the port. Separate from the module list on
+ * purpose: a Substrate that ships every required module can still lack a method the boundary
+ * relies on. The install then looks healthy and every native dispatch is refused at admission
+ * (`context_unresolvable`) instead of the upgrade being named once, at open time.
+ */
+export const SUBSTRATE_REQUIRED_ISSUE_METHODS = ['getResolvedContext'] as const;
+
+/** Required IssueService methods a loaded `issue-service` module does not implement. */
+export function missingSubstrateIssueMethodsIn(issueServiceModule: Record<string, unknown>): string[] {
+  const ctor = issueServiceModule.IssueService as { prototype?: Record<string, unknown> } | undefined;
+  const prototype = ctor?.prototype ?? {};
+  return SUBSTRATE_REQUIRED_ISSUE_METHODS.filter((method) => typeof prototype[method] !== 'function');
+}
+
+/**
+ * The same check for a Substrate DIRECTORY, so `sp doctor` reports the skew before any dispatch
+ * is attempted instead of leaving it to a per-dispatch refusal. An absent module file is the
+ * module list's finding, not this one's: it returns [] so the doctor cannot report it twice.
+ */
+export async function findMissingSubstrateIssueMethods(substrateDir: string): Promise<string[]> {
+  const modulePath = resolveSubstrateModule(substrateDir, 'src/service/issue-service.ts');
+  if (!modulePath) return [];
+  try {
+    const mod = (await import(pathToFileURL(modulePath).href)) as Record<string, unknown>;
+    return missingSubstrateIssueMethodsIn(mod);
+  } catch {
+    // An unloadable module is reported by the module/exports checks; this check states nothing.
+    return [];
+  }
+}
+
+/**
  * Resolve one required module inside a Substrate package directory: the TypeScript source when
  * the directory is a checkout, otherwise the prebuilt `dist/src/*.js` a published package ships.
  * Returns null when neither exists.
@@ -1119,6 +1151,18 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
     store = new storeMod.SubstrateIssueStore(issueService, journalSvc) as IssueStorePort;
   } catch (error) {
     throw storeRefusal(error);
+  }
+  // A module that loads, exports the class and constructs a service can still lack the methods
+  // the boundary calls. Checked AFTER the store opens so an unopenable or unmigratable store keeps
+  // its own refusal (a different remedy); checked BEFORE the boundary is built so the skew is
+  // named once, at open time, instead of decaying into a per-dispatch `context_unresolvable`.
+  const missingIssueMethods = missingSubstrateIssueMethodsIn(issueSvcMod);
+  if (missingIssueMethods.length > 0) {
+    throw new Error(
+      `work_item_store_unavailable: ${SUBSTRATE_PACKAGE} at ${substrateDir} does not implement `
+        + `${missingIssueMethods.map((method) => `IssueService.${method}`).join(', ')}, which native dispatch `
+        + 'needs to read and verify the Issue context (npm install -g @jaggerxtrm/substrate)',
+    );
   }
   // The blocker traversal lives here, over the producer's own edge list, so the boundary
   // stays the single consumer surface and no host queries the store directly.

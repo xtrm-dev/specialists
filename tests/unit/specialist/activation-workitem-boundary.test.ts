@@ -5,10 +5,13 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   createWorkItemBoundary,
+  findMissingSubstrateIssueMethods,
+  missingSubstrateIssueMethodsIn,
   openSubstrateDb,
   openWorkItemBoundary,
   resolveSubstrateFromGlobalPrefix,
   resolveSubstrateModule,
+  SUBSTRATE_REQUIRED_ISSUE_METHODS,
   type ActiveClaimView,
   type DispatchRequest,
   type WorkItemPorts,
@@ -571,7 +574,7 @@ describe('createWorkItemBoundary resolvedContext', () => {
 
   it('maps resolved entries to their source human ref and own/inherited rule', () => {
     const ports = stubPorts(null);
-    (ports.issues as Record<string, unknown>).getResolvedContext = () => ({
+    (ports.issues as unknown as Record<string, unknown>).getResolvedContext = () => ({
       hash: 'ctx-hash',
       entries: [
         { key: 'own', value: 'a', sourceIssueId: 'iss_X', sourceRevision: 2, resolutionRule: 'own' },
@@ -586,5 +589,41 @@ describe('createWorkItemBoundary resolvedContext', () => {
         { key: 'parent', value: 'b', sourceRef: 'iss_P', sourceRevision: 4, inherited: true },
       ],
     });
+  });
+});
+
+describe('required IssueService methods', () => {
+  it('names every port method the boundary relies on', () => {
+    expect([...SUBSTRATE_REQUIRED_ISSUE_METHODS]).toEqual(['getResolvedContext']);
+  });
+
+  it('reports a class that lacks the method and accepts one that implements it', () => {
+    class WithoutReader {}
+    class WithReader {
+      getResolvedContext() { return { entries: [], hash: 'h' }; }
+    }
+    expect(missingSubstrateIssueMethodsIn({ IssueService: WithoutReader })).toEqual(['getResolvedContext']);
+    expect(missingSubstrateIssueMethodsIn({ IssueService: WithReader })).toEqual([]);
+  });
+
+  it('checks a Substrate directory through the same module resolver the loader uses', async () => {
+    const write = (dir: string, source: string): string => {
+      mkdirSync(join(dir, 'src', 'service'), { recursive: true });
+      writeFileSync(join(dir, 'src', 'service', 'issue-service.ts'), source);
+      return dir;
+    };
+    // A package that ships the module but not the method: the skew sp doctor reports.
+    // Separate directories because an ESM import is cached by URL — rewriting a file in place
+    // would silently re-check yesterday's module.
+    const withoutReader = write(mkdtempSync(join(tmpdir(), 'substrate-methods-')), 'export class IssueService {}\n');
+    expect(await findMissingSubstrateIssueMethods(withoutReader)).toEqual(['getResolvedContext']);
+
+    const withReader = write(
+      mkdtempSync(join(tmpdir(), 'substrate-methods-')),
+      'export class IssueService { getResolvedContext() { return { entries: [], hash: "h" }; } }\n',
+    );
+    expect(await findMissingSubstrateIssueMethods(withReader)).toEqual([]);
+    // An absent module is the module list's finding, not this check's, so it states nothing twice.
+    expect(await findMissingSubstrateIssueMethods(mkdtempSync(join(tmpdir(), 'substrate-empty-')))).toEqual([]);
   });
 });

@@ -86,7 +86,10 @@ function captureStdout(): void {
  * every mutating method throws, so a render that claimed or mutated the
  * Issue would fail the test instead of silently passing.
  */
-function fakeBoundary(viewFn: (ref: string) => WorkItemView) {
+function fakeBoundary(
+  viewFn: (ref: string) => WorkItemView,
+  resolvedContext?: () => ReturnType<NonNullable<SpecialistWorkItemBoundary['resolvedContext']>>,
+) {
   const view = vi.fn(viewFn);
   const completedBlockers = vi.fn((): never[] => []);
   const mustNotMutate = (name: string) => () => {
@@ -96,6 +99,9 @@ function fakeBoundary(viewFn: (ref: string) => WorkItemView) {
     view: (ref: string) => view(ref),
     epicAncestors: () => [],
     completedBlockers: (ref: string, depth: number) => completedBlockers(ref, depth),
+    // Absent unless a case supplies it: a boundary without the reader renders no section,
+    // which is what keeps a prompt for a ref without contextRefs byte-identical.
+    ...(resolvedContext ? { resolvedContext } : {}),
     check: mustNotMutate('check'),
     bind: mustNotMutate('bind'),
     inlineCreate: mustNotMutate('inlineCreate'),
@@ -212,5 +218,68 @@ describe('sp render-bead --issue-ref shares the one resolution path', () => {
     expect(out.specialist).toBeNull();
     expect(out.bead_id).toBe(SUBSTRATE_REF);
     expect(out.initial_prompt).toContain('The board owns this work.');
+  });
+});
+
+describe('sp render-task renders the Issue context native dispatch renders', () => {
+  const CONTEXT = {
+    hash: 'ctx-hash',
+    entries: [
+      { key: 'explorer-allowlist', value: 'src/a.ts\nsrc/b.ts', sourceRef: 'SUB-1', sourceRevision: 2, inherited: false },
+      { key: 'venv', value: '/abs/.venv/bin/python', sourceRef: 'EPIC-1', sourceRevision: 3, inherited: true },
+    ],
+  };
+
+  it('shows own and inherited contextRefs between the contract and the boundary rules', async () => {
+    readBead = () => null;
+    const { boundary } = fakeBoundary(substrateView, () => CONTEXT);
+    __setWorkItemsForTests(boundary);
+
+    argv('render-task', 'probe', '--issue-ref', SUBSTRATE_REF);
+    const { run } = await import('../../../src/cli/render-task.js');
+    await run();
+
+    const out = JSON.parse(stdout.join(''));
+    expect(out.ok).toBe(true);
+    expect(out.initial_prompt).toContain('## Context references');
+    expect(out.initial_prompt).toContain('### "explorer-allowlist" (from SUB-1 rev 2)');
+    expect(out.initial_prompt).toContain('### "venv" (from EPIC-1 rev 3, inherited)');
+    const section = out.initial_prompt.indexOf('## Context references');
+    expect(section).toBeGreaterThan(out.initial_prompt.indexOf('The board owns this work.'));
+    expect(section).toBeLessThan(out.initial_prompt.indexOf('## Runtime Boundary Rules'));
+    // Measured where the prompt carries it, so the envelope's component list stays truthful.
+    expect(out.components).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'bead_context', name: 'context_refs' }),
+    ]));
+  });
+
+  it('renders no section when the Issue carries no contextRefs', async () => {
+    readBead = () => null;
+    const { boundary } = fakeBoundary(substrateView, () => ({ hash: 'ctx-hash', entries: [] }));
+    __setWorkItemsForTests(boundary);
+
+    argv('render-task', 'probe', '--issue-ref', SUBSTRATE_REF);
+    const { run } = await import('../../../src/cli/render-task.js');
+    await run();
+
+    const out = JSON.parse(stdout.join(''));
+    expect(out.initial_prompt).not.toContain('## Context references');
+  });
+
+  it('fails with the dispatch reason when Substrate refuses the Issue context', async () => {
+    readBead = () => null;
+    const { boundary } = fakeBoundary(substrateView, () => {
+      throw new Error('fail-closed: context key "x" claims journal authority (§43)');
+    });
+    __setWorkItemsForTests(boundary);
+
+    argv('render-task', 'probe', '--issue-ref', SUBSTRATE_REF);
+    const { run } = await import('../../../src/cli/render-task.js');
+    await expect(run()).rejects.toThrow('exit:1');
+
+    const out = JSON.parse(stdout.join(''));
+    expect(out.ok).toBe(false);
+    expect(out.error.code).toBe('context_unresolvable');
+    expect(out.error.message).toContain('journal authority');
   });
 });

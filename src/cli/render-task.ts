@@ -16,6 +16,7 @@ import { SpecialistLoader, SpecialistMissingModelError } from '../specialist/loa
 import { BeadsClient, type BeadRecord } from '../specialist/beads.js';
 import { renderTaskPrompt } from '../specialist/task-prompt.js';
 import { openWorkItemBoundary, type SpecialistWorkItemBoundary } from '../activation/workitem-store.js';
+import { renderContextRefsSection } from '../activation/context-refs-section.js';
 import { contractToMarkdown } from '../activation/contract-markdown.js';
 import type { Specialist } from '../specialist/schema.js';
 
@@ -31,12 +32,18 @@ export interface RenderArgs {
 }
 
 // Stable, machine-readable failure codes. The core consumer branches on these.
+//
+// `context_unresolvable` mirrors the reason native dispatch refuses the same Issue. The
+// renderer exists so a launcher sends the prompt the runtime would build; when Substrate
+// refuses the Issue's context, emitting a prompt without it would hide the very context the
+// coordinator curated, so the render refuses with the dispatch's own reason instead.
 export type ErrorCode =
   | 'usage'
   | 'specialist_not_found'
   | 'bead_not_found'
   | 'template_render_failed'
-  | 'mandatory_rules_failed';
+  | 'mandatory_rules_failed'
+  | 'context_unresolvable';
 
 export function fail(code: ErrorCode, message: string): never {
   process.stdout.write(`${JSON.stringify({ ok: false, error: { code, message } }, null, 2)}\n`);
@@ -110,11 +117,22 @@ async function openBoundaryIfAvailable(): Promise<SpecialistWorkItemBoundary | n
  * check/bind/journal, so this surface cannot claim or mutate the Issue).
  * A ref in neither store fails with the stable `bead_not_found` code naming
  * the ref.
+ *
+ * The resolved `contextRefs` are rendered here, from the same boundary and the
+ * same renderer native dispatch uses, so a launcher and `specialist_dispatch`
+ * hand a worker the SAME turn-1 context for the same Issue. Rendering them on
+ * only one of the two paths made an Issue read differently depending on how it
+ * was launched.
  */
 async function resolveWorkForRender(
   ref: string,
   contextDepth: number,
-): Promise<{ beadId: string; bead: BeadRecord; completedBlockers: BeadRecord[] }> {
+): Promise<{
+  beadId: string;
+  bead: BeadRecord;
+  completedBlockers: BeadRecord[];
+  contextRefsSection: string;
+}> {
   const beads = new BeadsClient();
   const legacy = beads.readBead(ref);
   if (legacy) {
@@ -122,18 +140,37 @@ async function resolveWorkForRender(
       beadId: ref,
       bead: legacy,
       completedBlockers: contextDepth > 0 ? beads.getCompletedBlockers(ref, contextDepth) : [],
+      // Legacy Beads has no revisioned contextRefs, so the section stays absent and a
+      // prompt for a Beads-only ref stays byte-identical to what it rendered before.
+      contextRefsSection: '',
     };
   }
 
   const boundary = workItemsOverride ?? await openBoundaryIfAvailable();
   if (boundary) {
+    let view: ReturnType<SpecialistWorkItemBoundary['view']> | null = null;
+    let blockers: ReturnType<SpecialistWorkItemBoundary['completedBlockers']> = [];
     try {
-      const view = boundary.view(ref);
+      view = boundary.view(ref);
       // The boundary serves depths 1|2 only; clamp the user-facing depth into
       // its domain instead of silently dropping blocker context at depth 3+.
-      const blockers = contextDepth > 0
+      blockers = contextDepth > 0
         ? boundary.completedBlockers(ref, Math.min(contextDepth, 2))
         : [];
+    } catch {
+      // Not a Substrate ref (or unreadable) — fall through to the truthful failure below.
+      view = null;
+    }
+    if (view) {
+      let contextRefsSection = '';
+      try {
+        contextRefsSection = renderContextRefsSection(boundary.resolvedContext?.(view.ref) ?? null);
+      } catch (error) {
+        fail(
+          'context_unresolvable',
+          `contextRefs of '${view.ref}' cannot be resolved: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       return {
         beadId: view.ref,
         bead: { id: view.ref, title: view.title, description: contractToMarkdown(view.contract) } as BeadRecord,
@@ -142,9 +179,8 @@ async function resolveWorkForRender(
           title: blocker.title,
           description: blocker.description,
         }) as BeadRecord),
+        contextRefsSection,
       };
-    } catch {
-      // Not a Substrate ref (or unreadable) — fall through to the truthful failure below.
     }
   }
 
@@ -175,6 +211,7 @@ export async function renderAndEmit(
       beadId,
       bead,
       completedBlockers,
+      contextRefsSection: resolved.contextRefsSection,
       surface: args.surface,
       // Execution-only inputs are absent by construction: no pre-scripts are run
       // and no reviewer git diff is taken. Both are classified execution-only in
@@ -195,6 +232,8 @@ export async function renderAndEmit(
     ...(rendered.beadContextOwn ? [rendered.beadContextOwn] : []),
     ...(rendered.beadContextParent ? [rendered.beadContextParent] : []),
     ...rendered.beadContextBlockers,
+    // Same position as in the prompt: after the bead context, before the mandatory rules.
+    ...(rendered.contextRefsComponent ? [rendered.contextRefsComponent] : []),
     ...(rendered.mandatoryRules?.sections ?? []).map((section) => ({
       kind: 'mandatory_rule' as const,
       name: section.setId,

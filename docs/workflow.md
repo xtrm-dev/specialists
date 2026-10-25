@@ -66,6 +66,14 @@ refused. Native dispatch renders the resolved contextRefs on turn 1 under
 to the contract and bounded at 4 KB per entry and 16 KB in total. A dispatch whose bound
 context differs from the rendered one is refused `context_changed`.
 
+The same context reaches a launcher-rendered prompt: `sp render-task` / `sp render-bead`
+render the section from the same boundary and the same renderer, so `xt claude worker
+--issue-ref <ref>` and `specialist_dispatch(issue_ref=...)` hand a worker the SAME turn-1
+context. A context Substrate refuses makes the render fail `context_unresolvable` (the same
+reason native dispatch refuses the Issue) instead of silently omitting the section. `sp
+doctor` reports a Substrate too old to expose `IssueService.getResolvedContext`, which is what
+that refusal would otherwise decay into on every dispatch.
+
 ## Findings and follow-up work
 
 Progress, findings, decisions, blockers and results belong in the Journal/result evidence.
