@@ -60,6 +60,11 @@ export interface TaskPromptInput {
     /** Up-walk ancestors (immediate parent first). Empty/absent = no lineage section. */
     epicAncestors?: BeadRecord[];
     /**
+     * Rendered `Context references` section (the Issue's resolved contextRefs). Placed after the
+     * bead context and before the boundary rules; empty/absent = no section.
+     */
+    contextRefsSection?: string;
+    /**
      * Prompt used when no bead context is available — either no `beadId`, or a
      * `beadId` that could not be read. Lazy so callers only pay for it on that path.
      */
@@ -92,6 +97,8 @@ export interface TaskPromptResult {
     beadContextOwn: PayloadComponentMeasurement | null;
     beadContextParent: PayloadComponentMeasurement | null;
     beadContextBlockers: PayloadComponentMeasurement[];
+    /** The contextRefs section, when one was rendered. */
+    contextRefsComponent: PayloadComponentMeasurement | null;
     mandatoryRules: ReturnType<typeof buildMandatoryRulesInjection> | null;
     mandatoryRulesBlock: string;
     /**
