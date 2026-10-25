@@ -74,6 +74,12 @@ Issue ready (attested)
 - **Readiness is the dispatch gate.** The read-only check refuses draft, unready,
   blocked, terminal, and scope-expanding Issues; `bind` pins the immutable
   ExecutionBinding (issue/revision/hash/claim/participant/activation/session/workspace).
+- **Stage context travels through `contextRefs`, never through the Journal.** Turn 1 renders
+  the Issue's resolved `contextRefs` (own, plus inherited from parent Issues) as evidence
+  under the contract, each entry naming its source Issue and revision. A finding the next
+  stage needs is curated into that Issue's refs (`sb issue edit <ref> --context-refs <json>`
+  opens a new revision — re-attest) or onto a parent Issue; a Journal result reaches no
+  prompt, and pasting one into a dispatch is not a substitute.
 - **Writers share the coordinator's worktree under a lease.** MEDIUM/HIGH tiers take
   the workspace writer lease at admission (re-checked per mutating call); contention
   refuses. The lease releases at settle/completion/disposal; `specialist_resume` and

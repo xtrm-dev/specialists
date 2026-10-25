@@ -9,7 +9,7 @@ export interface RenderArgs {
     surface: Surface;
     positional: string[];
 }
-export type ErrorCode = 'usage' | 'specialist_not_found' | 'bead_not_found' | 'template_render_failed' | 'mandatory_rules_failed';
+export type ErrorCode = 'usage' | 'specialist_not_found' | 'bead_not_found' | 'template_render_failed' | 'mandatory_rules_failed' | 'context_unresolvable';
 export declare function fail(code: ErrorCode, message: string): never;
 /** Shared flag parsing. Each verb enforces its own required-argument shape. */
 export declare function parseRenderArgs(argv: string[]): RenderArgs;

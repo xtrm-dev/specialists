@@ -98,6 +98,20 @@ export interface WorkItemView {
     dispatchable: boolean;
     reasons: string[];
 }
+/** One resolved contextRef as the turn-1 prompt shows it, with its source. */
+export interface ResolvedContextEntryView {
+    key: string;
+    value: unknown;
+    /** Human ref of the Issue whose revision carries the ref (the machine id when unresolvable). */
+    sourceRef: string;
+    sourceRevision: number;
+    inherited: boolean;
+}
+/** The Issue's resolved contextRefs plus the hash Substrate binds into the ExecutionBinding. */
+export interface ResolvedContextView {
+    hash: string;
+    entries: ResolvedContextEntryView[];
+}
 /** Epic lineage hop: whatever the prompt renderer needs from an ancestor issue. */
 export interface EpicAncestor {
     ref: string;
@@ -246,6 +260,12 @@ export interface SpecialistWorkItemBoundary {
      * the host never queries the store or walks edges itself (SPECIALISTS-22).
      */
     completedBlockers(ref: string, depth: number): EpicAncestor[];
+    /**
+     * The Issue's resolved contextRefs (own + inherited from parents) for the turn-1 prompt.
+     * Optional so fakes keep compiling. Throws when Substrate refuses the context
+     * (journal/memory authority, parent cycle) or exposes no context reader: fail closed.
+     */
+    resolvedContext?(ref: string): ResolvedContextView | null;
     check(req: DispatchRequest): CheckResult;
     bind(req: DispatchRequest): ExecutionBindingView;
     inlineCreate(contract: string, opts?: {
@@ -364,6 +384,21 @@ export interface IssueServicePort {
     getBlockers?(childId: string): BlockerIssue[];
     getRevision(issueId: string, revision: number): {
         contract: unknown;
+    };
+    /**
+     * The Issue's revisioned contextRefs, inherited root -> leaf with source provenance and the
+     * hash the ExecutionBinding records (substrate issue-service `getResolvedContext`). Optional so
+     * existing fakes keep compiling; absent means "no context information".
+     */
+    getResolvedContext?(issueId: string): {
+        entries: Array<{
+            key: string;
+            value: unknown;
+            sourceIssueId: string;
+            sourceRevision: number;
+            resolutionRule: string;
+        }>;
+        hash: string;
     };
     resolveProject(opts: {
         gitRoot: string;
@@ -540,6 +575,21 @@ export interface OpenWorkItemsOptions {
  * shape the doctor check exists to surface. One list, so the two cannot disagree.
  */
 export declare const SUBSTRATE_REQUIRED_MODULES: readonly ["src/store/migrations/runner.ts", "src/service/issue-service.ts", "src/service/journal-service.ts", "src/service/provenance-service.ts", "src/workitems/substrate-store.ts", "src/workitems/dispatch-gate.ts"];
+/**
+ * IssueService methods this build calls through the port. Separate from the module list on
+ * purpose: a Substrate that ships every required module can still lack a method the boundary
+ * relies on. The install then looks healthy and every native dispatch is refused at admission
+ * (`context_unresolvable`) instead of the upgrade being named once, at open time.
+ */
+export declare const SUBSTRATE_REQUIRED_ISSUE_METHODS: readonly ["getResolvedContext"];
+/** Required IssueService methods a loaded `issue-service` module does not implement. */
+export declare function missingSubstrateIssueMethodsIn(issueServiceModule: Record<string, unknown>): string[];
+/**
+ * The same check for a Substrate DIRECTORY, so `sp doctor` reports the skew before any dispatch
+ * is attempted instead of leaving it to a per-dispatch refusal. An absent module file is the
+ * module list's finding, not this one's: it returns [] so the doctor cannot report it twice.
+ */
+export declare function findMissingSubstrateIssueMethods(substrateDir: string): Promise<string[]>;
 /**
  * Resolve one required module inside a Substrate package directory: the TypeScript source when
  * the directory is a checkout, otherwise the prebuilt `dist/src/*.js` a published package ships.

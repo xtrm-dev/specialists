@@ -54,6 +54,26 @@ Native activation:
 If the Issue is draft, stale, blocked, or materially ambiguous, repair/re-attest it through
 planning before dispatch. Do not supplement an incomplete contract with hidden prompt prose.
 
+### Stage handoffs through contextRefs
+
+A later stage does not see an earlier stage's Journal result: the Journal is continuity, not
+authority. When a finding must reach the next stage (an explorer's allowlist for the executor,
+an environment fact for every stage), the coordinator curates it into the next stage Issue's
+`contextRefs` (`sb issue edit <ref> --context-refs <json>`, which creates a new revision; then
+re-attest) or onto a parent Issue so every child inherits it. Kind `journal` and `memory` are
+refused. Native dispatch renders the resolved contextRefs on turn 1 under
+`## Context references`, each entry with its source Issue and revision, as evidence subordinate
+to the contract and bounded at 4 KB per entry and 16 KB in total. A dispatch whose bound
+context differs from the rendered one is refused `context_changed`.
+
+The same context reaches a launcher-rendered prompt: `sp render-task` / `sp render-bead`
+render the section from the same boundary and the same renderer, so `xt claude worker
+--issue-ref <ref>` and `specialist_dispatch(issue_ref=...)` hand a worker the SAME turn-1
+context. A context Substrate refuses makes the render fail `context_unresolvable` (the same
+reason native dispatch refuses the Issue) instead of silently omitting the section. `sp
+doctor` reports a Substrate too old to expose `IssueService.getResolvedContext`, which is what
+that refusal would otherwise decay into on every dispatch.
+
 ## Findings and follow-up work
 
 Progress, findings, decisions, blockers and results belong in the Journal/result evidence.

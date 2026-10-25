@@ -18,7 +18,7 @@ import { analyzeGlobalUserConfigDrift, buildGlobalUserConfigTemplate, readValida
 import { runChannelDoctorChecks, type ChannelDoctorInputs } from '../specialist/channel-doctor.js';
 import { describeCatalogCompatibility } from '../specialist/tool-catalog.js';
 import { loadSharedToolCatalogIndex, readPackageVersion, resolveGlobalPackageDir } from '../pi/session.js';
-import { resolveSubstrateDir, resolveSubstrateModule, resolveWorkItemDbPath, SUBSTRATE_REQUIRED_MODULES } from '../activation/workitem-store.js';
+import { resolveSubstrateDir, resolveSubstrateModule, resolveWorkItemDbPath, SUBSTRATE_REQUIRED_MODULES, findMissingSubstrateIssueMethods } from '../activation/workitem-store.js';
 import { formatVersionCheckNudge, getVersionCheckResult, localVersion, readCachedVersionCheck } from './version-check.js';
 
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
@@ -135,7 +135,7 @@ export function checkObservabilityDb(cwd: string = process.cwd()): boolean {
   return true;
 }
 
-function checkSubstrateRuntime(): void {
+async function checkSubstrateRuntime(): Promise<void> {
   section('substrate (native dispatch)');
   try {
     const dir = resolveSubstrateDir(process.env.XTRM_SUBSTRATE_DIR ?? '');
@@ -179,6 +179,17 @@ function checkSubstrateRuntime(): void {
       fix('reinstall @jaggerxtrm/substrate, or point XTRM_SUBSTRATE_DIR at a checkout');
       return;
     }
+    // Modules are not the whole contract: the boundary also calls IssueService methods. A Substrate
+    // that ships every module but lacks one of them installs green and then refuses every native
+    // dispatch at admission, so name the upgrade here instead.
+    const missingIssueMethods = await findMissingSubstrateIssueMethods(dir);
+    if (missingIssueMethods.length > 0) {
+      warn(`${missingIssueMethods.length} required IssueService method(s) absent under ${dir} — every native dispatch will be refused`);
+      hint(`missing: ${missingIssueMethods.map((method) => `IssueService.${method}`).join(', ')}`);
+      fix('upgrade @jaggerxtrm/substrate — native dispatch reads and verifies the Issue context through it');
+      return;
+    }
+    ok('IssueService context reader present');
     const dbPath = resolveWorkItemDbPath();
     if (!existsSync(dbPath)) {
       warn(`work store not present at ${dbPath}`);
@@ -1228,7 +1239,7 @@ export async function run(argv: readonly string[] = process.argv.slice(3)): Prom
   // Advisory only: it does not feed the exit status. A missing Substrate breaks the NATIVE path
   // and leaves the legacy CLI fully usable, so failing the doctor would misreport a working
   // install as broken.
-  checkSubstrateRuntime();
+  await checkSubstrateRuntime();
   checkObservabilityDb();
   const catalogsOk = checkCatalogs();
   const versionOk = checkVersion();
