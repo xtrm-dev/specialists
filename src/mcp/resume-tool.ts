@@ -22,6 +22,10 @@ import { DispatchRejectedError } from '../activation/types.js';
 import type { NativeActivationHost } from '../activation/native-host.js';
 import type { RuntimeEventPusher } from '../activation/async-events.js';
 import { toActivationCompactView, toActivationView } from '../tools/specialist/activation.tool.js';
+import {
+  SPECIALIST_RESUME_PARAMS,
+  specialistToolDescription,
+} from '../tools/specialist/descriptions.js';
 
 // Same loaded-vs-on-disk artifact comparison the dispatch tool renders: this
 // module runs in two layouts (src/ under tsx/vitest, bundled dist in
@@ -37,11 +41,9 @@ const DIST_LIB_PATH = (() => {
 const LOADED_BUILD_ID = readBuildId(DIST_LIB_PATH);
 
 export const specialistResumeSchema = z.object({
-  activation_id: z.string().describe('The settled or waiting activation to resume.'),
-  prompt: z.string().describe('The new instruction for the resumed Specialist.'),
-  full: z.boolean().optional().describe(
-    'Return the full verbose view (pre-SPECIALISTS-142 shape). Default compact.',
-  ),
+  activation_id: z.string().describe(SPECIALIST_RESUME_PARAMS.activation_id),
+  prompt: z.string().describe(SPECIALIST_RESUME_PARAMS.prompt),
+  full: z.boolean().optional().describe(SPECIALIST_RESUME_PARAMS.full),
 });
 
 /**
@@ -58,15 +60,7 @@ export function createSpecialistResumeTool(
 ) {
   return {
     name: 'specialist_resume' as const,
-    description:
-      'Resume a settled or waiting Specialist with a new prompt, in the SAME session. ' +
-      'This is not a second dispatch: the activation_id is kept and the attempt_id advances, ' +
-      'so the child keeps its CONTEXT rather than starting over. The writer lease is NOT kept ' +
-      'across settle — it is released at settle and reacquired here, and a resume that loses ' +
-      'the race to another writer is refused with a structured lease_denied reason. ' +
-      'Use this after answering a question, or to give a settled Specialist more work. ' +
-      'A disposed activation cannot be resumed — that is what makes specialist_stop_activation ' +
-      'the irreversible one.',
+    description: specialistToolDescription('specialist_resume', 'mcp'),
     inputSchema: specialistResumeSchema,
     async execute(input: z.infer<typeof specialistResumeSchema>) {
       const build = () => describeBuildIdentity(LOADED_BUILD_ID, readBuildId(DIST_LIB_PATH));

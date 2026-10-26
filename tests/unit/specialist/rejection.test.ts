@@ -232,7 +232,9 @@ describe('issue_ref is primary, bead_id is a permanent alias (SPECIALISTS-20)', 
     const shape = specialistDispatchSchema.shape as Record<string, { description?: string }>;
     expect(shape.issue_ref.description).toContain('Substrate Issue locator');
     expect(shape.issue_ref.description).toContain('Only a Substrate Issue locator is accepted');
-    expect(shape.bead_id.description).toContain('Permanent compatibility alias for issue_ref');
+    // SPECIALISTS-4342: the wording lives once in descriptions.ts and is shared
+    // with the Pi extension, which pins the 'Legacy compatibility alias' phrasing.
+    expect(shape.bead_id.description).toContain('Legacy compatibility alias for issue_ref');
     // One marked compatibility note names the old `bd` id as refused; no other bd-board wording remains.
     expect(shape.bead_id.description).toContain('Compatibility note: a bare `bd` id is not a Substrate Issue');
     // The old primary explanation must be gone from the alias.

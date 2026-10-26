@@ -3,6 +3,11 @@ import * as z from 'zod';
 import type { NativeActivationHost } from '../../activation/native-host.js';
 import { createObservabilitySqliteClient, type ObservabilitySqliteClient } from '../../specialist/observability-sqlite.js';
 import type { TimelineEvent } from '../../specialist/timeline-events.js';
+import {
+  SPECIALIST_FEED_PARAMS,
+  specialistFeedLimitDescription,
+  specialistToolDescription,
+} from './descriptions.js';
 
 export const FEED_DEFAULT_LIMIT = 40;
 export const FEED_MAX_LIMIT = 200;
@@ -10,18 +15,11 @@ export const FEED_MAX_LIMIT = 200;
 export const FEED_LINE_MAX = 200;
 
 export const specialistFeedSchema = z.object({
-  activation_id: z.string().min(1).describe(
-    "Activation id: the full id or a unique short prefix, e.g. 'act:a2924153' or 'a2924153'.",
-  ),
-  view: z.enum(['terminal', 'forensic']).optional().describe(
-    "'terminal' (default): what the specialist did — tool calls, text, turns, status, completion — " +
-    "one line each, like `sp feed`. 'forensic': every recorded lifecycle event name.",
-  ),
-  since_seq: z.number().int().min(0).optional().describe(
-    'Only events with a sequence number above this. Pass the previous call\'s last_seq to follow a running activation.',
-  ),
+  activation_id: z.string().min(1).describe(SPECIALIST_FEED_PARAMS.activation_id),
+  view: z.enum(['terminal', 'forensic']).optional().describe(SPECIALIST_FEED_PARAMS.view),
+  since_seq: z.number().int().min(0).optional().describe(SPECIALIST_FEED_PARAMS.since_seq),
   limit: z.number().int().min(1).max(FEED_MAX_LIMIT).optional().describe(
-    `Newest events to return (default ${FEED_DEFAULT_LIMIT}, max ${FEED_MAX_LIMIT}).`,
+    specialistFeedLimitDescription(FEED_DEFAULT_LIMIT, FEED_MAX_LIMIT),
   ),
 });
 
@@ -119,10 +117,7 @@ export function createSpecialistFeedTool(
 ) {
   return {
     name: 'specialist_feed' as const,
-    description:
-      "Read one activation's event feed, like `sp feed`: tool calls, text, turns, status changes and completion " +
-      "(view 'terminal', default), or every lifecycle event (view 'forensic'). Works on running, settled and " +
-      'earlier-session activations. Pass since_seq (the last call\'s last_seq) to follow a running one.',
+    description: specialistToolDescription('specialist_feed', 'mcp'),
     inputSchema: specialistFeedSchema,
     async execute(input: FeedInput) {
       const wanted = normalize(input.activation_id);

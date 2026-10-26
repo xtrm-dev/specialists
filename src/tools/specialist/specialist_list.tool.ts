@@ -13,17 +13,21 @@ import { resolveModelChain, resolveRuntimeToolContract, validateBeforeRun } from
 import { resolveExecutionExtensionSelection } from '../../pi/session.js';
 import type { SpecialistLoader, SpecialistSummary } from '../../specialist/loader.js';
 import type { Specialist } from '../../specialist/schema.js';
+import {
+  SPECIALIST_LIST_PARAMS,
+  specialistToolDescription,
+} from './descriptions.js';
 
 export const specialistListSchema = z.object({
-  name: z.string().optional().describe('Return the full record for this one specialist instead of the compact list.'),
+  name: z.string().optional().describe(SPECIALIST_LIST_PARAMS.name),
   detail: z
     .enum(['compact', 'full'])
     .optional()
-    .describe('"compact" (default) is one line each; "full" returns every field for every specialist.'),
+    .describe(SPECIALIST_LIST_PARAMS.detail),
   full: z
     .boolean()
     .optional()
-    .describe('Alias for detail:"full" (SPECIALISTS-142 one-flag vocabulary). Default compact.'),
+    .describe(SPECIALIST_LIST_PARAMS.full),
 });
 
 const WRITE_TIERS = new Set(['MEDIUM', 'HIGH']);
@@ -106,15 +110,7 @@ type RegistryRow = ReturnType<typeof specialistSummaryView> & {
 export function createSpecialistListTool(loader: SpecialistLoader) {
   return {
     name: 'specialist_list' as const,
-    description:
-      'List the resolved Specialist registry after repo and user layer overrides. ' +
-      'Returns a COMPACT line per specialist by default — name, permission tier, ' +
-      'category, and a reason only where the native runtime cannot dispatch it. ' +
-      'Pass `name` for one specialist\'s full record including its description, or ' +
-      'detail:"full" for every field of every specialist (large — prefer `name`). ' +
-      'Write-capable tiers (MEDIUM/HIGH) still need the workspace lease at dispatch ' +
-      'time; a read-tier specialist with `lease_waiver: true` is provisioned an isolated ' +
-      'worktree and holds its lease instead of running in place.',
+    description: specialistToolDescription('specialist_list', 'mcp'),
     inputSchema: specialistListSchema,
     async execute(input: z.infer<typeof specialistListSchema>) {
       const summaries = await loader.list();
