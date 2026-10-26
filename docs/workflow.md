@@ -139,7 +139,7 @@ Runtime/UI state is not durable work authority.
 ## See also
 
 - `config/skills/using-specialists/SKILL.md`
-- `plugins/specialists/skills/supervising-activations/SKILL.md`
+- `plugins/specialists/skills/using-specialists/SKILL.md`
 - `docs/native-activation.md`
 - `docs/mcp-tools.md`
 - `docs/authoring.md`
