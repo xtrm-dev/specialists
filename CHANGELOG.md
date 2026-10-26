@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.1.1] - 2026-10-26
+
+### Fixed
+- Separate the fleet band status text from the open button ([f5b5867](https://github.com/xtrm-dev/specialists/commit/f5b5867cc6dd4291702dfcb9a629479fa4f4b4c8))
+- Plain button labels in the Claude fleet band and pane, no hotkeys ([d90610e](https://github.com/xtrm-dev/specialists/commit/d90610eaa8dc890f3583b78b61b50b86308b18b4))
+
+### Project maintenance
+- Record SPECIALISTS-4340 final state, pre-rebase SHA mapping and the waiver expiry ([90642c9](https://github.com/xtrm-dev/specialists/commit/90642c92503364898a545089146448c95b91086f))
+
 ## [4.1.0] - 2026-10-26
 
 ### Added
