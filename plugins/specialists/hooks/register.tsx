@@ -58,7 +58,26 @@ export type Ask = {
   asked_at?: number
 }
 
-export type Fleet = { activations: Activation[]; asks: Ask[] }
+/**
+ * One activation's ready-made display strings from the runtime (SPECIALISTS-4365).
+ * Plain text, no styling — the mod applies its own rendering. Absent when the
+ * runtime predates the `display` block; every reader falls back to its local
+ * formatters then. This file is engine-loaded with a type-only import, so the
+ * block is read from the MCP payload and nothing is imported at runtime.
+ */
+export type FleetDisplayEntry = {
+  activation_id: string
+  marker?: string
+  metrics?: string
+  work?: string
+}
+
+export type FleetDisplay = {
+  header?: string
+  activations?: FleetDisplayEntry[]
+}
+
+export type Fleet = { activations: Activation[]; asks: Ask[]; display?: FleetDisplay }
 
 const USAGE =
   'Usage: /specialists [status [activation]|show|hide|expand|collapse] · result <activation> · ' +
@@ -115,10 +134,62 @@ export async function callTool(
 export function fleetOf(value: Record<string, unknown>): Fleet {
   const activations = Array.isArray(value.activations) ? (value.activations as Activation[]) : []
   const asks = Array.isArray(value.pending_asks) ? (value.pending_asks as Ask[]) : []
-  return {
+  const fleet: Fleet = {
     activations: activations.filter(a => a && typeof a.activation_id === 'string'),
     asks: asks.filter(a => a && typeof a.message_id === 'string'),
   }
+  // Additive and optional (SPECIALISTS-4365): old runtimes omit the block and
+  // every reader below falls back to its local formatters.
+  const display = value.display as Record<string, unknown> | undefined
+  if (display && typeof display === 'object') {
+    const entries = Array.isArray(display.activations)
+      ? (display.activations as FleetDisplayEntry[]).filter(e => e && typeof e.activation_id === 'string')
+      : undefined
+    const header = typeof display.header === 'string' ? display.header : undefined
+    if (header !== undefined || entries !== undefined) {
+      fleet.display = { ...(header !== undefined ? { header } : {}), ...(entries !== undefined ? { activations: entries } : {}) }
+    }
+  }
+  return fleet
+}
+
+/** One activation's display entry, or undefined when the payload predates `display`. */
+export function displayEntryOf(fleet: Fleet, activationId: string): FleetDisplayEntry | undefined {
+  const list = fleet.display?.activations
+  if (!Array.isArray(list)) return undefined
+  return list.find(e => e?.activation_id === activationId)
+}
+
+/** Fleet header text: the runtime's canonical header when present, else the local one. */
+export function headerTextOf(fleet: Fleet): string {
+  const header = fleet.display?.header
+  if (typeof header === 'string' && header) return header
+  return headerOf(fleet)
+}
+
+/** Row marker: the runtime's canonical marker when present, else the local one. */
+export function markerTextOf(fleet: Fleet, row: Activation, ask: Ask | undefined, nowMs: number): string {
+  const marker = displayEntryOf(fleet, row.activation_id)?.marker
+  if (typeof marker === 'string' && marker) return marker
+  return markerOf(row, ask, nowMs)
+}
+
+/** Row metrics: the runtime's canonical metrics when present, else the local ones. */
+export function metricsTextOf(fleet: Fleet, row: Activation, ask: Ask | undefined, nowMs: number): string {
+  const metrics = displayEntryOf(fleet, row.activation_id)?.metrics
+  if (typeof metrics === 'string' && metrics) return metrics
+  return metricsOf(row, ask, nowMs)
+}
+
+/**
+ * Work identity: the runtime's canonical issue ref when present, else the local
+ * bead fallback. The canonical identity is issue_ref (SPECIALISTS-4365); the
+ * fallback keeps the old output byte-identical.
+ */
+export function workTextOf(fleet: Fleet, row: Activation): string {
+  const work = displayEntryOf(fleet, row.activation_id)?.work
+  if (typeof work === 'string' && work) return work
+  return row.bead_id ?? '—'
 }
 
 /** Buckets are exclusive, so they sum to the entry count (as the Pi header does). */
@@ -204,12 +275,12 @@ export function orderedOf({ activations, asks }: Fleet): Activation[] {
 
 /** The plain-text fleet report `/specialists` prints (every surface, not only the band). */
 export function reportOf(fleet: Fleet, error: string | null, nowMs: number): string {
-  const lines = [`Specialists · ${headerOf(fleet)}`]
+  const lines = [`Specialists · ${headerTextOf(fleet)}`]
   if (error) lines.push(`status unavailable · ${error}`)
   for (const row of orderedOf(fleet)) {
     const ask = fleet.asks.find(a => a.activation_id === row.activation_id)
     lines.push(
-      `  ${markerOf(row, ask, nowMs)} ${row.specialist ?? 'specialist'} ${row.activation_id}  ${row.bead_id ?? '—'}  ${metricsOf(row, ask, nowMs)}`,
+      `  ${markerTextOf(fleet, row, ask, nowMs)} ${row.specialist ?? 'specialist'} ${row.activation_id}  ${workTextOf(fleet, row)}  ${metricsTextOf(fleet, row, ask, nowMs)}`,
     )
     if (ask) lines.push(`      ${ask.kind ?? 'ask'} ${ask.message_id}: ${ask.body ?? ''}`)
   }
@@ -455,10 +526,10 @@ function fleetBody($: EngineInterface, s: State, ui: Kit, rows: Activation[], si
               key={`row:${row.activation_id}`}
               onPress={() => { s.selected = isSelected ? null : row.activation_id; s.flash = null; $.ui.invalidate('ui.render') }}
             >
-              {`${isSelected ? '▾' : ' '} ${markerOf(row, ask, nowMs)} ${row.specialist ?? 'specialist'}:${shortId(row.activation_id)}  ${row.bead_id ?? '—'}${purpose ? `  ${purpose}` : ''}`}
+              {`${isSelected ? '▾' : ' '} ${markerTextOf(s.fleet, row, ask, nowMs)} ${row.specialist ?? 'specialist'}:${shortId(row.activation_id)}  ${workTextOf(s.fleet, row)}${purpose ? `  ${purpose}` : ''}`}
             </Button>
             <Text dimColor wrap="truncate-end">
-              {`      ${row.resolved_model ?? '?model'}${row.thinking_level ? ` · ${row.thinking_level}` : ''}  • ${metricsOf(row, ask, nowMs)}`}
+              {`      ${row.resolved_model ?? '?model'}${row.thinking_level ? ` · ${row.thinking_level}` : ''}  • ${metricsTextOf(s.fleet, row, ask, nowMs)}`}
             </Text>
           </Box>
         )
@@ -620,11 +691,12 @@ export function register(on: On) {
       if (verb === 'status') {
         if (typeof target === 'string') return { text: target }
         const ask = s.fleet.asks.find(a => a.activation_id === id)
+        const entry = displayEntryOf(s.fleet, id)
         return {
           text: [
-            `${markerOf(target, ask, Date.now())} ${target.specialist ?? 'specialist'} ${id} · ${target.state ?? 'unknown'}`,
-            `  issue ${target.bead_id ?? '—'} · ${target.resolved_model ?? '?model'}${target.thinking_level ? ` · ${target.thinking_level}` : ''}`,
-            `  ${metricsOf(target, ask, Date.now())}`,
+            `${entry?.marker ?? markerOf(target, ask, Date.now())} ${target.specialist ?? 'specialist'} ${id} · ${target.state ?? 'unknown'}`,
+            `  issue ${entry?.work ?? target.bead_id ?? '—'} · ${target.resolved_model ?? '?model'}${target.thinking_level ? ` · ${target.thinking_level}` : ''}`,
+            `  ${entry?.metrics ?? metricsOf(target, ask, Date.now())}`,
             ...(target.purpose ? [`  purpose: ${target.purpose}`] : []),
             ...(ask ? [`  ${ask.kind ?? 'ask'} ${ask.message_id}: ${ask.body ?? ''}`] : []),
           ].join('\n'),
@@ -694,7 +766,7 @@ export function register(on: On) {
         <Box>
           <Text>  </Text>
           <Text bold>specialists</Text>
-          <Text> {headerOf(s.fleet)}</Text>
+          <Text> {headerTextOf(s.fleet)}</Text>
           {isFolded ? (
             <Button plain key="open" hotkey="o" onPress={() => void (s.paneOpen ? closePane($, s) : openPane($, s))}>
               {s.paneOpen ? 'close' : 'open'}
@@ -720,7 +792,7 @@ export function register(on: On) {
     const { Box, Text, Button, Input } = await $.ui.resolve(e)
     return (
       <Box flexDirection="column">
-        <Text bold>{headerOf(s.fleet)}</Text>
+        <Text bold>{headerTextOf(s.fleet)}</Text>
         {s.error ? <Text color="yellow" wrap="truncate-end">status unavailable · {s.error}</Text> : null}
         {s.fleet.activations.length === 0 ? <Text dimColor>No live activations.</Text> : null}
         {fleetBody($, s, { Box, Text, Button, Input }, orderedOf(s.fleet), 'pane', DETAIL_PANE_LINES)}

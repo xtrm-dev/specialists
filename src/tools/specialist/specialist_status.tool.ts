@@ -10,6 +10,7 @@ import {
   specialistToolDescription,
 } from './descriptions.js';
 import { toActivationCompactView, toActivationResultView, toActivationView, toPendingAskCompactView, toPendingAskView, type ActivationResultView, type ActivationView, type PendingAskView } from './activation.tool.js';
+import { buildFleetDisplay, type FleetDisplayBlock } from './specialist-display.js';
 import type { RuntimeEventPusher } from '../../activation/async-events.js';
 
 const BACKENDS = ['gemini', 'qwen', 'anthropic', 'openai'];
@@ -26,7 +27,7 @@ export const specialistStatusSchema = z.object({
     .describe(SPECIALIST_STATUS_PARAMS.timeout_s),
 });
 
-/** Fields the wait compares — the actionable set. Volatile display fields (elapsed_s, token_usage) are excluded so a running activation's turn noise does not unblock the wait. */
+/** Fields the wait compares — the actionable set. Volatile display fields (elapsed_s, token_usage) and the derived `display` block are excluded so a running activation's turn noise does not unblock the wait. */
 function fleetFingerprint(
   host: NativeActivationHost,
   results: { activationId: string; status: string }[],
@@ -151,6 +152,16 @@ export function createSpecialistStatusTool(
         // what makes a pushed coordinator and a polling coordinator agree by construction.
         const activation_results: ActivationResultView[] =
           getPusher?.()?.allResults().map(toActivationResultView) ?? [];
+        // Ready-made display strings, computed once here (SPECIALISTS-4365): the
+        // Pi extension and the Claude mod style these instead of re-deriving
+        // them. Additive and optional — old readers ignore the block. Built from
+        // the host snapshots (not the views) so the idle reason has lastActivityAt
+        // even on rows whose projection omits it. Excluded from the
+        // wait_for_change fingerprint by construction: fleetFingerprint reads only
+        // activation states, result statuses and ask ids, never this block.
+        const display: FleetDisplayBlock = host
+          ? buildFleetDisplay(host.list(), host.pendingAsks())
+          : { header: 'idle', activations: [] };
         return {
           loaded_count: list.length,
           activations,
@@ -159,6 +170,7 @@ export function createSpecialistStatusTool(
           pending_interactions,
           uncertain_workspaces,
           backends_health: Object.fromEntries(BACKENDS.map(b => [b, circuitBreaker.getState(b)])),
+          display,
         };
       }
       // Compact default: identity, state, cost, intent per activation; settled rows
@@ -168,6 +180,10 @@ export function createSpecialistStatusTool(
       // pending_interactions, uncertain_workspaces) are `full`-only.
       const hostResults = getPusher?.()?.allResults() ?? [];
       const statusById = new Map(hostResults.map(r => [r.activationId, r.status]));
+      // Same display block as the full payload (SPECIALISTS-4365); see above.
+      const display: FleetDisplayBlock = host
+        ? buildFleetDisplay(host.list(), host.pendingAsks())
+        : { header: 'idle', activations: [] };
       return {
         activations: host
           ? host.list().map(s => ({
@@ -176,6 +192,7 @@ export function createSpecialistStatusTool(
           }))
           : [],
         pending_asks: host ? host.pendingAsks().map(toPendingAskCompactView) : [],
+        display,
       };
     },
   };

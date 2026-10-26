@@ -569,7 +569,8 @@ describe('specialist_status wait_for_change — one parked call instead of a pol
     const out = await waiting as Record<string, unknown>;
 
     expect(Date.now() - t0, 'woke on the change, not the 30s timeout').toBeLessThan(1000);
-    expect(out).toEqual({ activations: [], pending_asks: [] }); // post-change compact projection
+    // Post-change compact projection, including the additive display block (SPECIALISTS-4365).
+    expect(out).toEqual({ activations: [], pending_asks: [], display: { header: 'idle', activations: [] } });
   });
 
   it('returns at the timeout when nothing changes, with the unchanged compact payload', async () => {
