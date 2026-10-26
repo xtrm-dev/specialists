@@ -71,7 +71,7 @@ const PLUGIN_FILES = [
   'package/plugins/specialists/scripts/precompact.mjs',
   'package/plugins/specialists/scripts/postcompact.mjs',
   'package/plugins/specialists/scripts/wake-watch.mjs',
-  'package/plugins/specialists/skills/supervising-activations/SKILL.md',
+  'package/plugins/specialists/skills/using-specialists/SKILL.md',
   'package/plugins/specialists-ui/.claude-plugin/plugin.json',
   'package/plugins/specialists-ui/hooks/hooks.json',
   'package/plugins/specialists-ui/hooks/register.tsx',
@@ -579,7 +579,7 @@ const gateSkill = run(
     '--plugin-dir',
     PLUGIN,
     '-p',
-    'Is a skill named supervising-activations available to you? Reply with its exact invocable name, or NONE.',
+    'Is a skill named using-specialists available to you? Reply with its exact invocable name, or NONE.',
   ],
   { cwd: REPO_DIR, timeout: 300000 },
 );
@@ -591,9 +591,9 @@ if (ENV_BLOCKED.test(gateSkillOut) || gateSkill.signal) {
 } else {
   link(
     'client-skill',
-    gateSkillOut.includes('specialists:supervising-activations'),
-    gateSkillOut.includes('specialists:supervising-activations')
-      ? 'skill surfaced as specialists:supervising-activations'
+    gateSkillOut.includes('specialists:using-specialists'),
+    gateSkillOut.includes('specialists:using-specialists')
+      ? 'skill surfaced as specialists:using-specialists'
       : `skill not surfaced: ${(gateSkill.stdout || '').trim().slice(0, 120)}`,
   );
 }

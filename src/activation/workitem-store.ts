@@ -168,7 +168,7 @@ function uniqueExistingLibDirs(candidates: readonly (string | undefined)[]): str
  *
  * This is a DELEGATION, not a second precedence rule. It used to resolve only
  * `XTRM_STATE_DB`, so an operator who set `SUBSTRATE_DB` — the owner-defined variable
- * README.md and the supervising-activations skill tell them to use — got Substrate
+ * README.md and the using-specialists skill (references/claude-code.md) tell them to use — got Substrate
  * services and forensics on one database and dispatch on another, silently, because the
  * test suite pinned the correct precedence only for the resolver that was NOT on the
  * dispatch path (SPECIALISTS-3). One rule, one home.
