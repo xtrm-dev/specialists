@@ -627,7 +627,7 @@ describe('fleet snapshots (SPECIALISTS-4346)', () => {
       "1 running • ! 1 blocked"
     <Text dimColor=true>
       " · "
-    <Button hotkey="o" key="open" label="open (o)" plain=true>
+    <Button key="open" label="open" plain=true>
   <Box flexDirection="column">
     <Box flexDirection="column" paddingLeft=4>
       <Box flexDirection="column" key="band:act:67eff6ec-d2f">
@@ -644,12 +644,12 @@ describe('fleet snapshots (SPECIALISTS-4346)', () => {
         "Implement the fleet band"
       <Input key="steer:act:4245711d-4e3" label="steer " placeholder="redirect the running specialist" submitLabel="steer">
       <Box>
-        <Button hotkey="r" key="result:act:4245711d-4e3" label="result (r)" plain=true>
+        <Button key="result:act:4245711d-4e3" label="result" plain=true>
         <Text>
           " "
-        <Button hotkey="f" key="feed:act:4245711d-4e3" label="feed (f)" plain=true>
+        <Button key="feed:act:4245711d-4e3" label="feed" plain=true>
       <Box>
-        <Button hotkey="x" key="stop:act:4245711d-4e3" label="stop (x)" plain=true>`
+        <Button key="stop:act:4245711d-4e3" label="stop" plain=true>`
   const SNAP_BAND_FOLDED = `<Box flexDirection="column">
   <Box flexDirection="row" paddingLeft=2>
     <Text bold=true>
@@ -659,7 +659,7 @@ describe('fleet snapshots (SPECIALISTS-4346)', () => {
       "5 running • ! 1 blocked"
     <Text dimColor=true>
       " · "
-    <Button hotkey="o" key="open" label="open (o)" plain=true>
+    <Button key="open" label="open" plain=true>
   <Box paddingLeft=4>
     <Text dimColor=true wrap="wrap">
       "open the pane or /specialists for the full fleet"
@@ -686,12 +686,12 @@ describe('fleet snapshots (SPECIALISTS-4346)', () => {
         "Implement the fleet band"
       <Input key="steer:act:4245711d-4e3" label="steer " placeholder="redirect the running specialist" submitLabel="steer">
       <Box>
-        <Button hotkey="r" key="result:act:4245711d-4e3" label="result (r)" plain=true>
+        <Button key="result:act:4245711d-4e3" label="result" plain=true>
         <Text>
           " "
-        <Button hotkey="f" key="feed:act:4245711d-4e3" label="feed (f)" plain=true>
+        <Button key="feed:act:4245711d-4e3" label="feed" plain=true>
       <Box>
-        <Button hotkey="x" key="stop:act:4245711d-4e3" label="stop (x)" plain=true>
+        <Button key="stop:act:4245711d-4e3" label="stop" plain=true>
   <Text dimColor=true wrap="wrap">
     "esc closes · select a row to read its result or feed, or to reply, steer, resume or stop"`
 
@@ -745,9 +745,9 @@ describe('fleet snapshots (SPECIALISTS-4346)', () => {
     server(on, () => ({ content: [{ type: 'text', text: 'server not connected' }], isError: true }))
     await $.session.start(SESSION)
     await clock.settle()
-    // With no activations and an error the header reads "idle"; it must not run into "open (o)".
+    // With no activations and an error the header reads "idle"; it must not run into "open".
     const band = snapOf(await $.ui.render(bandAt(80)))
-    expect(band).toContain('"idle"\n    <Text dimColor=true>\n      " · "\n    <Button hotkey="o" key="open" label="open (o)" plain=true>')
+    expect(band).toContain('"idle"\n    <Text dimColor=true>\n      " · "\n    <Button key="open" label="open" plain=true>')
   })
 
   for (const width of [80, 120, 144]) {
@@ -780,11 +780,13 @@ describe('fleet snapshots (SPECIALISTS-4346)', () => {
     const boxes = elementNodes(tree).filter(n => n.type === 'Box')
     expect(boxes.some(b => b.props.paddingLeft === 2 || b.props.paddingLeft === 4 || b.props.paddingLeft === 6), 'paddingLeft carries the indentation').toBe(true)
     const labels = buttons.map(b => b.props.label)
-    expect(labels.includes('open (o)'), 'H2 refuted: the unfolded band toggles with open (o)').toBe(true)
+    expect(labels.includes('open'), 'H2 refuted: the unfolded band toggles with open').toBe(true)
     expect(labels.some(l => typeof l === 'string' && /\[-\]|\[\+\]/.test(l)), 'H2 refuted: no [-]/[+] grammar remains').toBe(false)
-    expect(textOf(tree).includes('result (r)'), 'H3 refuted: result names its hotkey').toBe(true)
-    expect(textOf(tree).includes('feed (f)'), 'H3 refuted: feed names its hotkey').toBe(true)
-    expect(textOf(tree).includes('stop (x)'), 'H3 refuted: stop names its hotkey').toBe(true)
+    const labelOf = (prefix: string) => buttons.find(b => String(b.props.key ?? '').startsWith(prefix))?.props.label
+    expect(labelOf('result:'), 'H3 refuted: result is a plain labelled button').toBe('result')
+    expect(labelOf('feed:'), 'H3 refuted: feed is a plain labelled button').toBe('feed')
+    expect(labelOf('stop:'), 'H3 refuted: stop is a plain labelled button').toBe('stop')
+    expect(buttons.some(b => b.props.hotkey !== undefined), 'no band Button draws a hotkey: the prompt takes the keys, so it would never fire').toBe(false)
     for (const key of ['result:', 'feed:', 'stop:']) {
       const button = buttons.filter(b => String(b.props.key ?? '').startsWith(key))[0]
       expect(button !== undefined && button.props.plain === true, `H3 refuted: ${key} is a plain button`).toBe(true)
@@ -809,7 +811,7 @@ describe('fleet snapshots (SPECIALISTS-4346)', () => {
     expect(hint.length).toBe(1)
     expect(hint[0]?.wrap === 'wrap', 'the folded hint wraps').toBe(true)
     const labels = nodes.filter(n => n.type === 'Button').map(n => n.props.label)
-    expect(labels.includes('open (o)'), 'H2 refuted: the folded band uses the same open (o) grammar').toBe(true)
+    expect(labels.includes('open'), 'H2 refuted: the folded band uses the same open grammar').toBe(true)
   })
 
   test('H4 verdict: stop arms an inline confirm and fires only on confirm', async ($, on) => {
@@ -850,7 +852,7 @@ describe('fleet snapshots (SPECIALISTS-4346)', () => {
     await clock.settle()
     expect(calls.some(c => c.tool === 'specialist_stop_activation'), 'cancel calls nothing').toBe(false)
     expect(textOf(await ui.drawn()).includes('cannot be undone'), 'cancel clears the confirm').toBe(false)
-    expect(textOf(await ui.drawn()).includes('stop (x)'), 'cancel restores the stop button').toBe(true)
+    expect(textOf(await ui.drawn()).includes('stop'), 'cancel restores the stop button').toBe(true)
   })
 
   test('H5 verdict: the pane re-opens to follow the content', async ($, on) => {

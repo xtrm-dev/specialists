@@ -26,14 +26,14 @@ Controls go through the existing MCP operations, never a second vocabulary:
 | band: blocked row | reply input | `specialist_reply` |
 | band: running row | steer input | `specialist_steer` |
 | band: settled/waiting row | resume input | `specialist_resume` |
-| band: any row | `stop` button (hotkey `x`) | `specialist_stop_activation` |
+| band: any row | `stop` button | `specialist_stop_activation` |
 | `/specialists reply <message_id> <answer>` | | `specialist_reply` |
 | `/specialists steer\|resume\|stop <activation> …` | activation by full id or unique prefix | as above |
 | `/specialists` | toggles the fleet pane | `specialist_status` |
 | `/specialists status` | prints the fleet report (every surface) | `specialist_status` |
 | `/specialists [show\|hide\|expand\|collapse]` | band visibility | — |
 
-With more than `COLLAPSE_AT` (3) activations the band folds to its header, an `open` button (hotkey `o`) and the blocked rows; an ask never hides behind a count. `open` or `/specialists` opens the `specialists-fleet` pane with the full list and the same controls (one shared renderer). The surface places the pane: docked beside a fullscreen transcript, else inline above the prompt; the API has no overlay. The pane opens with `focus` and `closeOnEscape`; while it is open the band shows only its header.
+With more than `COLLAPSE_AT` (3) activations the band folds to its header, an `open` button and the blocked rows; an ask never hides behind a count. `open` or `/specialists` opens the `specialists-fleet` pane with the full list and the same controls (one shared renderer). The surface places the pane: docked beside a fullscreen transcript, else inline above the prompt; the API has no overlay. The pane opens with `focus` and `closeOnEscape`; while it is open the band shows only its header.
 
 The command is `immediate`, so it runs while a model turn is streaming. Command-driven actions record a hidden `context` note, so the model knows the operator acted on its fleet. A failed read (`isError`, a `{ status: 'error' }` payload, or a rejected call) shows `status unavailable`; it is never drawn as an empty fleet.
 
