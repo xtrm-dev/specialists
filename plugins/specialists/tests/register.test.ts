@@ -143,8 +143,14 @@ describe('register', () => {
     expect(drawn).toContain('1 running')
     expect(drawn).toContain('executor:4245711d')
     expect(drawn).toContain('XTRM-464')
-    expect(drawn).toContain('Implement the fleet band')
     expect(drawn).toContain('2m14s • 3 turns • 12k')
+    // The purpose lives in the selected-row detail (the band stays compact):
+    // unselected rows carry no purpose, selecting reveals it.
+    expect(drawn).not.toContain('Implement the fleet band')
+    const ui = await $.ui.mount({ ...BAND, plugin: 'specialists' })
+    await ui.press({ key: `row:${RUNNING.activation_id}` })
+    await ui.redraw()
+    expect(textOf(await ui.drawn())).toContain('Implement the fleet band')
   })
 
   test('the watch parks server-side instead of polling at a fixed rate (SPECIALISTS-4218)', async ($, on) => {
@@ -523,5 +529,362 @@ describe('role-to-specialist nudge (SPECIALISTS-4343)', () => {
     const second = await $.prompt.submit(submit('deploy the thing now'))
     expect(second.deny).toBeUndefined()
     expect(second.context, 'a second matching prompt stays silent').toBeUndefined()
+  })
+})
+
+describe('fleet snapshots (SPECIALISTS-4346)', () => {
+  // The mock engine applies no width-based truncation: the 80/120/144 trees are
+  // byte-identical, so one constant pins each scenario and every width asserts
+  // against it. `claude plugin test` runs without node:fs/process, so the
+  // snapshots live inline here instead of on-disk files.
+  const bandAt = (columns: number): RenderInput<'AbovePrompt'> => ({
+    ...BAND,
+    viewport: { ...BAND.viewport, columns },
+    props: { ...BAND.props, bodyColumns: columns },
+  })
+
+  const paneAt = (columns: number): RenderInput<'Pane'> => ({
+    ...PANE,
+    viewport: { ...PANE.viewport, columns },
+    props: { ...PANE.props, bodyColumns: columns },
+  })
+
+  /** Stable layout serialization: element types, scalar props and text. Literal
+   *  spaces stay visible inside quotes; paddingLeft/wrap/color ride on the node. */
+  function treeSnapshot(tree: unknown): string {
+    const lines: string[] = []
+    const walk = (node: unknown, depth: number): void => {
+      const pad = '  '.repeat(depth)
+      if (node === null || node === undefined) return
+      if (typeof node === 'string' || typeof node === 'number') {
+        const s = String(node)
+        if (s !== '') lines.push(`${pad}"${s}"`)
+        return
+      }
+      if (Array.isArray(node)) { node.forEach(n => walk(n, depth)); return }
+      if (typeof node !== 'object') return
+      const record = node as Record<string, unknown>
+      const props = (Reflect.get(node, 'props') ?? {}) as Record<string, unknown>
+      const entries = Object.entries(props)
+        .filter(([k, v]) => k !== 'onPress' && k !== 'onSubmit' && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'))
+        .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+        .sort()
+      lines.push(`${pad}<${String(record.type)}${entries.length > 0 ? ' ' + entries.join(' ') : ''}>`)
+      walk(Reflect.get(node, 'children'), depth + 1)
+    }
+    walk(tree, 0)
+    return lines.join('\n')
+  }
+
+  /** Wall-clock pieces the mock cannot pin: spinner frames and ask-wait durations. */
+  function normalizeSnapshot(snap: string): string {
+    return snap.replace(/[◐◓◑◒]/g, '◌').replace(/waiting [\dhms]+/g, 'waiting <dur>')
+  }
+
+  const snapOf = (tree: unknown): string => normalizeSnapshot(treeSnapshot(tree))
+
+  /** Every raw string leaf, in order — indentation stays measurable. */
+  function stringLeaves(tree: unknown): string[] {
+    const out: string[] = []
+    const walk = (node: unknown): void => {
+      if (typeof node === 'string') { if (node !== '') out.push(node); return }
+      if (Array.isArray(node)) { node.forEach(walk); return }
+      if (!node || typeof node !== 'object') return
+      walk(Reflect.get(node, 'children'))
+    }
+    walk(tree)
+    return out
+  }
+
+  /** Every element with its scalar props (handlers excluded). */
+  function elementNodes(tree: unknown): { type: unknown; props: Record<string, unknown> }[] {
+    const out: { type: unknown; props: Record<string, unknown> }[] = []
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) { node.forEach(walk); return }
+      if (!node || typeof node !== 'object') return
+      const record = node as Record<string, unknown>
+      if (typeof record.type === 'string') {
+        const props = (Reflect.get(node, 'props') ?? {}) as Record<string, unknown>
+        const scalar: Record<string, unknown> = {}
+        for (const [k, v] of Object.entries(props)) {
+          if (k === 'onPress' || k === 'onSubmit') continue
+          if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') scalar[k] = v
+        }
+        out.push({ type: record.type, props: scalar })
+      }
+      walk(Reflect.get(node, 'children'))
+    }
+    walk(tree)
+    return out
+  }
+
+  const SNAP_BAND_SELECTED = `<Box flexDirection="column">
+  <Box flexDirection="row" paddingLeft=2>
+    <Text bold=true>
+      "specialists"
+    <Text>
+      " "
+      "1 running • ! 1 blocked"
+    <Button hotkey="o" key="open" label="open (o)" plain=true>
+  <Box flexDirection="column">
+    <Box flexDirection="column" paddingLeft=4>
+      <Box flexDirection="column" key="band:act:67eff6ec-d2f">
+        <Button key="row:act:67eff6ec-d2f" label="▸ ! debugger:67eff6ec XTRM-467 ?model · waiting <dur>" plain=true>
+      <Box flexDirection="column" key="band:act:4245711d-4e3">
+        <Button key="row:act:4245711d-4e3" label="▾ ◌ executor:4245711d XTRM-464 claude-sonnet-5 medium · 2m14s • 3 turns • 12k" plain=true>
+    <Box flexDirection="column" paddingLeft=6>
+      <Text dimColor=true wrap="wrap">
+        "act:4245711d-4e3"
+        " · "
+        "running"
+      <Text dimColor=true wrap="wrap">
+        "purpose: "
+        "Implement the fleet band"
+      <Input key="steer:act:4245711d-4e3" label="steer " placeholder="redirect the running specialist" submitLabel="steer">
+      <Box>
+        <Button hotkey="r" key="result:act:4245711d-4e3" label="result (r)" plain=true>
+        <Text>
+          " "
+        <Button hotkey="f" key="feed:act:4245711d-4e3" label="feed (f)" plain=true>
+      <Box>
+        <Button hotkey="x" key="stop:act:4245711d-4e3" label="stop (x)" plain=true>`
+  const SNAP_BAND_FOLDED = `<Box flexDirection="column">
+  <Box flexDirection="row" paddingLeft=2>
+    <Text bold=true>
+      "specialists"
+    <Text>
+      " "
+      "5 running • ! 1 blocked"
+    <Button hotkey="o" key="open" label="open (o)" plain=true>
+  <Box paddingLeft=4>
+    <Text dimColor=true wrap="wrap">
+      "open the pane or /specialists for the full fleet"
+  <Box flexDirection="column">
+    <Box flexDirection="column" paddingLeft=4>
+      <Box flexDirection="column" key="band:act:67eff6ec-d2f">
+        <Button key="row:act:67eff6ec-d2f" label="▸ ! debugger:67eff6ec XTRM-467 ?model · waiting <dur>" plain=true>`
+  const SNAP_PANE_SELECTED = `<Box flexDirection="column">
+  <Text bold=true>
+    "1 running • ! 1 blocked"
+  <Box flexDirection="column">
+    <Box flexDirection="column" paddingLeft=4>
+      <Box flexDirection="column" key="pane:act:67eff6ec-d2f">
+        <Button key="row:act:67eff6ec-d2f" label="▸ ! debugger:67eff6ec XTRM-467 ?model · waiting <dur>" plain=true>
+      <Box flexDirection="column" key="pane:act:4245711d-4e3">
+        <Button key="row:act:4245711d-4e3" label="▾ ◌ executor:4245711d XTRM-464 claude-sonnet-5 medium · 2m14s • 3 turns • 12k" plain=true>
+    <Box flexDirection="column" paddingLeft=6>
+      <Text dimColor=true wrap="wrap">
+        "act:4245711d-4e3"
+        " · "
+        "running"
+      <Text dimColor=true wrap="wrap">
+        "purpose: "
+        "Implement the fleet band"
+      <Input key="steer:act:4245711d-4e3" label="steer " placeholder="redirect the running specialist" submitLabel="steer">
+      <Box>
+        <Button hotkey="r" key="result:act:4245711d-4e3" label="result (r)" plain=true>
+        <Text>
+          " "
+        <Button hotkey="f" key="feed:act:4245711d-4e3" label="feed (f)" plain=true>
+      <Box>
+        <Button hotkey="x" key="stop:act:4245711d-4e3" label="stop (x)" plain=true>
+  <Text dimColor=true wrap="wrap">
+    "esc closes · select a row to read its result or feed, or to reply, steer, resume or stop"`
+
+  /** Text elements with their visible string and display props — the unit the H6/H7 verdicts read. */
+  function textNodes(tree: unknown): { text: string; wrap: unknown; color: unknown }[] {
+    const out: { text: string; wrap: unknown; color: unknown }[] = []
+    const stringsOf = (node: unknown): string => {
+      if (typeof node === 'string') return node
+      if (typeof node === 'number') return String(node)
+      if (Array.isArray(node)) return node.map(stringsOf).join('')
+      return ''
+    }
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) { node.forEach(walk); return }
+      if (!node || typeof node !== 'object') return
+      const record = node as Record<string, unknown>
+      const props = (Reflect.get(node, 'props') ?? {}) as Record<string, unknown>
+      if (record.type === 'Text') out.push({ text: stringsOf(Reflect.get(node, 'children')), wrap: props.wrap, color: props.color })
+      walk(Reflect.get(node, 'children'))
+    }
+    walk(tree)
+    return out
+  }
+
+  for (const width of [80, 120, 144]) {
+    test(`band pins the selected-row layout at ${width} columns`, async ($, on) => {
+      const clock = mock.clock(on)
+      server(on, () => json({ activations: [RUNNING, BLOCKED], pending_asks: [ASK] }))
+      await $.session.start(SESSION)
+      await clock.settle()
+      const ui = await $.ui.mount({ ...bandAt(width), plugin: 'specialists' })
+      await ui.press({ key: `row:${RUNNING.activation_id}` })
+      await ui.redraw()
+      expect(snapOf(await ui.drawn())).toBe(SNAP_BAND_SELECTED)
+    })
+  }
+
+  for (const width of [80, 120, 144]) {
+    test(`folded band pins the one-line layout at ${width} columns`, async ($, on) => {
+      const clock = mock.clock(on)
+      const many = [RUNNING, BLOCKED, ...[1, 2, 3, 4].map(n => ({ ...RUNNING, activation_id: `act:0000000${n}-aaa`, specialist: `worker${n}` }))]
+      server(on, () => json({ activations: many, pending_asks: [ASK] }))
+      await $.session.start(SESSION)
+      await clock.settle()
+      expect(snapOf(await $.ui.render(bandAt(width)))).toBe(SNAP_BAND_FOLDED)
+    })
+  }
+
+  for (const width of [80, 120, 144]) {
+    test(`pane pins the selected-row layout at ${width} columns`, async ($, on) => {
+      const clock = mock.clock(on)
+      server(on, () => json({ activations: [RUNNING, BLOCKED], pending_asks: [ASK] }))
+      await $.session.start(SESSION)
+      await clock.settle()
+      const ui = await $.ui.mount({ ...paneAt(width), plugin: 'specialists' })
+      await ui.press({ key: `row:${RUNNING.activation_id}` })
+      await ui.redraw()
+      expect(snapOf(await ui.drawn())).toBe(SNAP_PANE_SELECTED)
+    })
+  }
+
+  test('H1/H2/H3/H8 verdicts on the selected band: each hypothesis is refuted', async ($, on) => {
+    const clock = mock.clock(on)
+    server(on, () => json({ activations: [RUNNING, BLOCKED], pending_asks: [ASK] }))
+    await $.session.start(SESSION)
+    await clock.settle()
+    const ui = await $.ui.mount({ ...bandAt(120), plugin: 'specialists' })
+    await ui.press({ key: `row:${RUNNING.activation_id}` })
+    await ui.redraw()
+    const tree = await ui.drawn()
+    const leaves = stringLeaves(tree)
+    const buttons = elementNodes(tree).filter(n => n.type === 'Button')
+    const spaced = [...leaves, ...buttons.map(b => String(b.props.label ?? ''))]
+    expect(spaced.some(l => /^  /.test(l)), 'H1 refuted: no two-or-more leading literal spaces').toBe(false)
+    expect(spaced.filter(l => /[^ ]  +[^ ]/.test(l)), 'H1 refuted: no doubled spaces inside labels').toEqual([])
+    const boxes = elementNodes(tree).filter(n => n.type === 'Box')
+    expect(boxes.some(b => b.props.paddingLeft === 2 || b.props.paddingLeft === 4 || b.props.paddingLeft === 6), 'paddingLeft carries the indentation').toBe(true)
+    const labels = buttons.map(b => b.props.label)
+    expect(labels.includes('open (o)'), 'H2 refuted: the unfolded band toggles with open (o)').toBe(true)
+    expect(labels.some(l => typeof l === 'string' && /\[-\]|\[\+\]/.test(l)), 'H2 refuted: no [-]/[+] grammar remains').toBe(false)
+    expect(textOf(tree).includes('result (r)'), 'H3 refuted: result names its hotkey').toBe(true)
+    expect(textOf(tree).includes('feed (f)'), 'H3 refuted: feed names its hotkey').toBe(true)
+    expect(textOf(tree).includes('stop (x)'), 'H3 refuted: stop names its hotkey').toBe(true)
+    for (const key of ['result:', 'feed:', 'stop:']) {
+      const button = buttons.filter(b => String(b.props.key ?? '').startsWith(key))[0]
+      expect(button !== undefined && button.props.plain === true, `H3 refuted: ${key} is a plain button`).toBe(true)
+    }
+    const rowLabels = buttons.filter(b => String(b.props.key ?? '').startsWith('row:')).map(b => String(b.props.label ?? ''))
+    expect(rowLabels.length, 'two rows render').toBe(2)
+    expect(rowLabels.every(l => l.includes('·')), 'H8 refuted: model facts and metrics share the one row line').toBe(true)
+    expect(leaves.some(l => l.includes('claude-sonnet-5') && !rowLabels.some(r => r.includes(l))), 'H8 refuted: no model line rides below a row').toBe(false)
+  })
+
+  test('H1/H2 verdicts on the folded band: one grammar, padded hint', async ($, on) => {
+    const clock = mock.clock(on)
+    const many = [RUNNING, BLOCKED, ...[1, 2, 3, 4].map(n => ({ ...RUNNING, activation_id: `act:0000000${n}-aaa`, specialist: `worker${n}` }))]
+    server(on, () => json({ activations: many, pending_asks: [ASK] }))
+    await $.session.start(SESSION)
+    await clock.settle()
+    const tree = await $.ui.render(bandAt(120))
+    const leaves = stringLeaves(tree)
+    expect(leaves.some(l => /^  /.test(l)), 'H1 refuted: the folded band has no literal-space indent').toBe(false)
+    const nodes = elementNodes(tree)
+    const hint = textNodes(tree).filter(n => n.text.includes('for the full fleet'))
+    expect(hint.length).toBe(1)
+    expect(hint[0]?.wrap === 'wrap', 'the folded hint wraps').toBe(true)
+    const labels = nodes.filter(n => n.type === 'Button').map(n => n.props.label)
+    expect(labels.includes('open (o)'), 'H2 refuted: the folded band uses the same open (o) grammar').toBe(true)
+  })
+
+  test('H4 verdict: stop arms an inline confirm and fires only on confirm', async ($, on) => {
+    const clock = mock.clock(on)
+    const calls = server(on, () => json({ activations: [RUNNING], pending_asks: [] }))
+    await $.session.start(SESSION)
+    await clock.settle()
+    const ui = await $.ui.mount({ ...bandAt(120), plugin: 'specialists' })
+    await ui.press({ key: `row:${RUNNING.activation_id}` })
+    await ui.redraw()
+    await ui.press({ key: `stop:${RUNNING.activation_id}` })
+    await ui.redraw()
+    await clock.settle()
+    expect(calls.some(c => c.tool === 'specialist_stop_activation'), 'H4 refuted: stop alone calls nothing').toBe(false)
+    expect(textOf(await ui.drawn()).includes('cannot be undone'), 'the inline confirm renders').toBe(true)
+    await ui.press({ key: `confirm-stop:${RUNNING.activation_id}` })
+    await ui.redraw()
+    await clock.settle()
+    const stop = calls.find(c => c.tool === 'specialist_stop_activation')
+    expect(stop !== undefined, 'H4 refuted: confirm fires specialist_stop_activation').toBe(true)
+    expect(stop?.args).toEqual({ activation_id: RUNNING.activation_id, reason: 'operator request' })
+    expect(textOf(await ui.drawn()).includes('cannot be undone'), 'the confirm clears after firing').toBe(false)
+  })
+
+  test('an armed stop cancels without calling the server', async ($, on) => {
+    const clock = mock.clock(on)
+    const calls = server(on, () => json({ activations: [RUNNING], pending_asks: [] }))
+    await $.session.start(SESSION)
+    await clock.settle()
+    const ui = await $.ui.mount({ ...bandAt(120), plugin: 'specialists' })
+    await ui.press({ key: `row:${RUNNING.activation_id}` })
+    await ui.redraw()
+    await ui.press({ key: `stop:${RUNNING.activation_id}` })
+    await ui.redraw()
+    await clock.settle()
+    await ui.press({ key: `cancel-stop:${RUNNING.activation_id}` })
+    await ui.redraw()
+    await clock.settle()
+    expect(calls.some(c => c.tool === 'specialist_stop_activation'), 'cancel calls nothing').toBe(false)
+    expect(textOf(await ui.drawn()).includes('cannot be undone'), 'cancel clears the confirm').toBe(false)
+    expect(textOf(await ui.drawn()).includes('stop (x)'), 'cancel restores the stop button').toBe(true)
+  })
+
+  test('H5 verdict: the pane re-opens to follow the content', async ($, on) => {
+    const clock = mock.clock(on)
+    panes = []
+    let fleet = { activations: [RUNNING], pending_asks: [] as unknown[] }
+    server(on, () => json(fleet))
+    await $.session.start(SESSION)
+    await clock.settle()
+    expect((await $.command.run(command(''))).text).toBe('Specialists pane shown')
+    const opens = panes.filter((p): p is { open: { rows: number } } => 'open' in (p as object))
+    expect(opens.length).toBe(1)
+    expect(opens[0]?.open.rows > 0, 'pane opens with rows for one activation').toBe(true)
+    fleet = { activations: [RUNNING, BLOCKED, ...[1, 2, 3, 4].map(n => ({ ...RUNNING, activation_id: `act:0000000${n}-aaa`, specialist: `worker${n}` }))], pending_asks: [] }
+    await clock.advance(POLL_MS)
+    await clock.advance(POLL_MS)
+    const pane = textOf(await $.ui.render({ ...PANE, requestId: PANE_ID }))
+    expect(pane, 'the pane content follows the fleet').toContain('worker1')
+    expect(panes.filter(p => 'open' in (p as object)).length, 'H5 refuted: a second open follows the content').toBe(2)
+    const reopened = panes.filter((p): p is { open: { rows: number } } => 'open' in (p as object))
+    expect(reopened[1]?.open.rows, 'the reopened pane fits six one-line rows').toBe(6 + 8)
+  })
+
+  test('H6 verdict: footer and flash lines wrap', async ($, on) => {
+    const clock = mock.clock(on)
+    server(on, () => json({ activations: [RUNNING], pending_asks: [] }))
+    await $.session.start(SESSION)
+    await clock.settle()
+    expect((await $.command.run(command(''))).text).toBe('Specialists pane shown')
+    const footer = textNodes(await $.ui.render({ ...PANE, requestId: PANE_ID })).filter(n => n.text.includes('esc closes'))
+    expect(footer.length).toBe(1)
+    expect(footer[0]?.wrap === 'wrap', 'H6 refuted: the footer line wraps').toBe(true)
+    expect((await $.command.run(command('stop 4245711d done'))).text).toBe(`Stopped ${RUNNING.activation_id}.`)
+    const flash = textNodes(await $.ui.render(bandAt(120))).filter(n => n.text.includes('Stopped'))
+    expect(flash.length, 'the stop flash renders in the band').toBe(1)
+    expect(flash[0]?.wrap === 'wrap', 'H6 refuted: the flash line wraps').toBe(true)
+  })
+
+  test('H7 verdict: the ask line uses the theme attention key', async ($, on) => {
+    const clock = mock.clock(on)
+    server(on, () => json({ activations: [RUNNING, BLOCKED], pending_asks: [ASK] }))
+    await $.session.start(SESSION)
+    await clock.settle()
+    const ui = await $.ui.mount({ ...bandAt(120), plugin: 'specialists' })
+    await ui.press({ key: `row:${BLOCKED.activation_id}` })
+    await ui.redraw()
+    const colors = new Set(textNodes(await ui.drawn()).map(n => n.color).filter(v => typeof v === 'string'))
+    expect([...colors].some(c => c.startsWith('#')), `H7 refuted: no hard-coded hex reaches the tree, saw [${[...colors]}]`).toBe(false)
+    expect(colors.has('yellow'), 'the ask line uses the theme attention key').toBe(true)
   })
 })
