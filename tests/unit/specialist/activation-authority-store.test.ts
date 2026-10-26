@@ -257,13 +257,17 @@ describe('SessionStart hook — live against the real schema', () => {
     expect(live.stdout).toContain('act:live1 | researcher | running | B-1 | 3000');
     expect(live.stdout).toContain('act:live2 | executor | needs_reply | B-2 | 2000');
     expect(live.stdout).not.toContain('act:old');
+    // Role doctrine (SPECIALISTS-4343): every session-start output carries the one line.
+    expect(live.stdout).toContain('verify with specialist_list');
 
     const absent = spawnSync(runtime, [hookPath], {
       env: { ...process.env, XTRM_STATE_DB: join(tmpRoot(), 'nope', 'state.db') },
       encoding: 'utf-8',
     });
     expect(absent.status).toBe(0);
-    expect(absent.stdout).toBe('');
+    // No store, no authority block — but the doctrine line still fires (SPECIALISTS-4343).
+    expect(absent.stdout).not.toContain('Substrate work authority');
+    expect(absent.stdout).toContain('verify with specialist_list');
   });
 });
 
