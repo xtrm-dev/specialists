@@ -30,7 +30,7 @@ The Issue revision is the contract. This document links and summarises. It is no
 | 4364 | Suggest the chain reference after a dispatch | settings-level PostToolUse hook (Claude), appended line in the dispatch execute path (Pi) | `plugins/specialists/hooks/hooks.json`, `config/pi-extensions/native-specialists/index.mjs` | 2 |
 | 4365 | specialist_status emits display fields; mod and Pi consume with local fallback | additive `display` block, shared formatter, fallback tests | `src/tools/specialist/specialist_status.tool.ts`, Pi `index.mjs`, `register.tsx` | 1 |
 
-Dependencies: 4345 blocks 4346. 4341 blocks 4342. 4325 relates to 4346 (visual reference only).
+Dependencies: 4365 blocks 4346 (open). Satisfied: 4345 -> 4346, 4341 -> 4342, 4343 -> 4365, 4363 -> 4364. 4325 relates to 4346 (visual reference only).
 
 ## 3. Review record
 
