@@ -1,7 +1,7 @@
 import type { McpToolResult, On, RenderInput } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { COLLAPSE_AT, MCP_SERVER, PANE_ID, POLL_MS, feedLinesOf, resultLinesOf, transitionsOf } from '../hooks/register'
+import { COLLAPSE_AT, MCP_SERVER, PANE_ID, POLL_MS, ROLE_NUDGE_RE, feedLinesOf, resultLinesOf, roleNudgeLine, transitionsOf } from '../hooks/register'
 
 const SESSION = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
 
@@ -423,5 +423,57 @@ describe('register', () => {
     const drawn = textOf(await ui.drawn())
     expect(drawn).toContain('read a.ts')
     expect(drawn).not.toContain('line two')
+  })
+})
+
+describe('role-to-specialist nudge (SPECIALISTS-4343)', () => {
+  const submit = (text: string) => ({ text, wait: false, origin: { kind: 'composer' } }) as never
+
+  test('the trigger matches every listed word and nothing else', () => {
+    for (const word of ['review', 'dispatch', 'subagent', 'teammate', 'monitor', 'deploy']) {
+      expect(ROLE_NUDGE_RE.test(`please ${word} this`), word).toBe(true)
+    }
+    expect(ROLE_NUDGE_RE.test('Please Review This Diff')).toBe(true)
+    expect(ROLE_NUDGE_RE.test('hello there')).toBe(false)
+    expect(ROLE_NUDGE_RE.test('')).toBe(false)
+  })
+
+  test('the nudge line ends with the specialist_list verify and names no absent role', () => {
+    const line = roleNudgeLine()
+    expect(line).toContain('reviewer')
+    expect(line?.endsWith('verify with specialist_list')).toBe(true)
+    for (const absent of ['pr-reviewer', 'deploy-watcher', 'production-monitor']) {
+      expect(line).not.toContain(absent)
+    }
+  })
+
+  test('a matching prompt carries one context line, a non-matching prompt passes through', async ($, on) => {
+    on('prompt.submit', ($, e) => ({ text: e.text, ...(e.context !== undefined && { context: e.context }) })) // the engine answer beneath the plugin
+
+    const matched = await $.prompt.submit(submit('please review this diff'))
+    expect(matched.deny).toBeUndefined()
+    expect(matched.context).toHaveLength(1)
+    expect(matched.context?.[0]).toContain('reviewer')
+    expect(matched.context?.[0]?.endsWith('verify with specialist_list')).toBe(true)
+    expect(matched.text).toBe('please review this diff')
+  })
+
+  test('a non-matching prompt adds no context', async ($, on) => {
+    on('prompt.submit', ($, e) => ({ text: e.text, ...(e.context !== undefined && { context: e.context }) })) // the engine answer beneath the plugin
+
+    const plain = await $.prompt.submit(submit('hello there'))
+    expect(plain.deny).toBeUndefined()
+    expect(plain.context).toBeUndefined()
+    expect(plain.text).toBe('hello there')
+  })
+
+  test('the notice appears at most once per session', async ($, on) => {
+    on('prompt.submit', ($, e) => ({ text: e.text, ...(e.context !== undefined && { context: e.context }) })) // the engine answer beneath the plugin
+
+    const first = await $.prompt.submit(submit('please review this diff'))
+    expect(first.context).toHaveLength(1)
+    const second = await $.prompt.submit(submit('deploy the thing now'))
+    expect(second.deny).toBeUndefined()
+    expect(second.context, 'a second matching prompt stays silent').toBeUndefined()
   })
 })

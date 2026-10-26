@@ -2,6 +2,7 @@
 /* @jsx h */
 /* @jsxFrag Fragment */
 import type { Elements, EngineInterface, McpToolResult, On } from 'claude-code'
+import { ROLE_SPECIALIST_MAP } from './role-specialist-map.generated'
 
 // The live Specialists fleet of THIS session, drawn in the band above the prompt: the
 // Claude-native twin of the Pi native-specialists footer section
@@ -216,6 +217,33 @@ export function reportOf(fleet: Fleet, error: string | null, nowMs: number): str
 }
 
 /**
+ * Prompts that suggest a dispatchable specialist may fit (SPECIALISTS-4343): review or
+ * delegation work a coordinator might otherwise hand to a generic subagent. No `g` flag:
+ * `test` on a global regex is stateful and would skip alternate prompts.
+ */
+export const ROLE_NUDGE_RE = /review|dispatch|subagent|teammate|monitor|deploy/i
+
+/**
+ * The one-line nudge built from the GENERATED role map (config/catalog/role-specialist-map.json
+ * via ./role-specialist-map.generated): every specialist name in it comes from the map,
+ * never from a hand-kept list. Null when the map is unreadable, so the hook stays silent
+ * instead of nudging from a stale list.
+ */
+export function roleNudgeLine(): string | null {
+  try {
+    const roles: unknown = ROLE_SPECIALIST_MAP
+    if (!roles || typeof roles !== 'object') return null
+    const pairs = Object.entries(roles as Record<string, unknown>)
+      .filter((entry): entry is [string, string[]] => Array.isArray(entry[1]) && (entry[1] as string[]).length > 0)
+      .map(([role, names]) => `${role}→${names.join('/')}`)
+    if (pairs.length === 0) return null
+    return `Prefer a dispatchable specialist over a generic subagent (${pairs.join('; ')}) — verify with specialist_list`
+  } catch {
+    return null
+  }
+}
+
+/**
  * The toasts one fleet read owes the operator: an activation that newly finished or failed,
  * and an ask that newly appeared — the Claude Code twin of the Pi extension's `ui.notify`.
  * Pure over two reads, so a missed read cannot replay old events: the FIRST read after start
@@ -288,6 +316,8 @@ type State = {
   last: Fleet | null
   /** SPECIALISTS_WAKE=off silences toasts, as the Pi extension's --no-specialist-wake does. */
   quiet: boolean
+  /** Role-to-specialist nudge (SPECIALISTS-4343): the one-line notice fires at most once per session. */
+  roleNudgeShown: boolean
 }
 
 /** Apply one specialist_status read to the band state and redraw. */
@@ -517,6 +547,7 @@ export function register(on: On) {
     detail: null,
     last: null,
     quiet: false,
+    roleNudgeShown: false,
   }
 
   on('session.start', async ($, e, next) => {
@@ -540,6 +571,22 @@ export function register(on: On) {
     void refresh($, s)
     void watchOnce($, s)
     return next(e)
+  })
+
+  // Role-to-specialist nudge (SPECIALISTS-4343): a matching prompt carries the generated
+  // map's one-line notice once per session. Never denies, never throws (fail open), and a
+  // non-matching prompt pays one regex test and nothing else.
+  on('prompt.submit', async ($, e, next) => {
+    try {
+      if (s.roleNudgeShown) return next(e)
+      if (!ROLE_NUDGE_RE.test(e.text ?? '')) return next(e)
+      const line = roleNudgeLine()
+      if (!line) return next(e)
+      s.roleNudgeShown = true
+      return next({ ...e, context: [...(e.context ?? []), line] })
+    } catch {
+      return next(e)
+    }
   })
 
   on('command.run', { command: COMMAND }, async ($, e) => {

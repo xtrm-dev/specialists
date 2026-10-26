@@ -10,9 +10,10 @@
 // malformed row, absent sqlite), no result or prompt bodies, no forensic IDs. A plugin
 // hook that can block session start is a support incident.
 
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 const MAX_ROWS = 10;
 
@@ -59,7 +60,34 @@ async function readActiveRows(storePath) {
   }
 }
 
+// Role-to-specialist doctrine (SPECIALISTS-4343): one line naming the task roles the
+// generated map covers, built from the map itself — no hand-kept role list. The map copy
+// lives beside this script (not under config/) because marketplace installs copy only
+// the plugin folder. Fail open: any read problem skips the line, exit stays 0.
+function readRoleMap() {
+  try {
+    const dir = dirname(fileURLToPath(import.meta.url));
+    return JSON.parse(readFileSync(join(dir, 'role-specialist-map.generated.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function doctrineLine(map) {
+  try {
+    const roles = map?.roles;
+    if (!roles || typeof roles !== 'object') return null;
+    const keys = Object.keys(roles).filter((k) => Array.isArray(roles[k]) && roles[k].length > 0);
+    if (keys.length === 0) return null;
+    return `Specialist doctrine: dispatchable specialists cover ${keys.join(', ')} — use specialist_dispatch, not a generic subagent — verify with specialist_list`;
+  } catch {
+    return null;
+  }
+}
+
 try {
+  const line = doctrineLine(readRoleMap());
+  if (line) console.log(line);
   const storePath = resolveStorePath();
   if (!existsSync(storePath)) process.exit(0);
   const rows = await readActiveRows(storePath);

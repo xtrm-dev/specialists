@@ -1,0 +1,69 @@
+{
+  "_generated_by": "scripts/generate-role-specialist-map.mjs",
+  "_source": "config/specialists/*.specialist.json",
+  "roles": {
+    "review": [
+      "reviewer",
+      "seconder"
+    ],
+    "quant": [
+      "quant-methodologist",
+      "quant-researcher"
+    ],
+    "deep-analysis": [
+      "overthinker"
+    ],
+    "deploy": [
+      "test-runner",
+      "reviewer"
+    ],
+    "monitor": [
+      "test-runner",
+      "debugger"
+    ],
+    "implement": [
+      "executor"
+    ],
+    "explore": [
+      "explorer",
+      "researcher"
+    ],
+    "plan": [
+      "planner"
+    ],
+    "test": [
+      "test-engineer",
+      "test-runner"
+    ],
+    "security": [
+      "security-auditor"
+    ],
+    "debug": [
+      "debugger"
+    ],
+    "coordinate": [
+      "chain-coordinator",
+      "node-coordinator"
+    ],
+    "docs": [
+      "sync-docs",
+      "service-knowledge-sync"
+    ],
+    "changelog": [
+      "changelog-keeper",
+      "changelog-drafter"
+    ],
+    "merge": [
+      "xt-merge"
+    ],
+    "transcribe": [
+      "transcriber"
+    ],
+    "obligations": [
+      "obligations-scanner"
+    ],
+    "author": [
+      "specialists-creator"
+    ]
+  }
+}
