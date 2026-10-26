@@ -126,7 +126,12 @@ describe('review-chain hardening specialist configs', () => {
     const system = spec.specialist.prompt.system ?? '';
     const schema = spec.specialist.prompt.output_schema ?? {};
 
-    expect(spec.specialist.metadata.version).toBe('1.4.0');
+    expect(spec.specialist.metadata.version).toBe('1.5.0');
+    expect(system).toContain('## AgentRun + ocr delegation wiring (ocr always on for a git range)');
+    expect(system).toContain('the SCOPE does not need to name it');
+    expect(system).toContain('Never run `ocr review` or `ocr scan`');
+    expect(system).toContain('do not post a comment on GitHub');
+    expect(system).not.toContain('explicit scope only)');
     expect(system).toContain("this role's bash is sandboxed");
     expect(system).not.toContain('this role has no bash');
     expect(system).toContain('ocr-preflight.mjs preflight --from "$(git merge-base origin/HEAD HEAD)" --to HEAD');
