@@ -27,6 +27,14 @@ describe('pr-reviewer package specialist', () => {
     expect(system).toContain('Never run `ocr review` or `ocr scan`');
   });
 
+  it('tells the model which background tools exist and that no delegate tools do', async () => {
+    const spec = await loadPrReviewer();
+    const system = spec.specialist.prompt.system ?? '';
+
+    expect(spec.specialist.metadata.version).toBe('1.3.1');
+    expect(system).toContain('If only `BashBackground`, `Monitor` and `BackgroundStop` are exposed, there are no delegate, attested-run or fusion tools');
+  });
+
   it('posts exactly one identified PR comment and never approves, merges or edits', async () => {
     const system = (await loadPrReviewer()).specialist.prompt.system ?? '';
 
