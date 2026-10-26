@@ -4,11 +4,13 @@ import type { NativeActivationHost } from '../../activation/native-host.js';
 import type { RuntimeEventPusher } from '../../activation/async-events.js';
 import { createObservabilitySqliteClient, type ObservabilitySqliteClient } from '../../specialist/observability-sqlite.js';
 import { toActivationResultView } from './activation.tool.js';
+import {
+  SPECIALIST_RESULT_PARAMS,
+  specialistToolDescription,
+} from './descriptions.js';
 
 export const specialistResultSchema = z.object({
-  activation_id: z.string().min(1).describe(
-    "Activation id: the full id or a unique short prefix, e.g. 'act:a2924153' or 'a2924153'.",
-  ),
+  activation_id: z.string().min(1).describe(SPECIALIST_RESULT_PARAMS.activation_id),
 });
 
 type ResultSource = 'memory' | 'observability_db';
@@ -48,7 +50,7 @@ export function createSpecialistResultTool(
 ) {
   return {
     name: 'specialist_result' as const,
-    description: "Read the complete result of one settled activation by id (full id or unique short prefix). Returns the full output, never truncated. For an activation that has not settled it names the right next tool.",
+    description: specialistToolDescription('specialist_result', 'mcp'),
     inputSchema: specialistResultSchema,
     async execute(input: z.infer<typeof specialistResultSchema>) {
       const wanted = normalize(input.activation_id);

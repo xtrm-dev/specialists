@@ -8,20 +8,20 @@ import {
   reconcile,
 } from '../../activation/workspace-reconcile.js';
 import type { LeaseProcessProbe } from '../../activation/workspace-lease.js';
+import {
+  SPECIALIST_LEASE_PARAMS,
+  specialistToolDescription,
+} from './descriptions.js';
 
 export const specialistLeaseReconcileSchema = z.object({
-  action: z.enum(['list', 'reconcile']).default('list').describe(
-    "'list' returns uncertain workspaces with the outcomes permitted for each; 'reconcile' records a decision for one worktree.",
-  ),
-  worktree: z.string().min(1).optional().describe("reconcile: the worktree whose lease is uncertain."),
+  action: z.enum(['list', 'reconcile']).default('list').describe(SPECIALIST_LEASE_PARAMS.action),
+  worktree: z.string().min(1).optional().describe(SPECIALIST_LEASE_PARAMS.worktree),
   outcome: z.enum(['safe_free', 'superseded', 'manual_attention_required']).optional().describe(
-    'reconcile: the outcome the operator asserts. Never inferred.',
+    SPECIALIST_LEASE_PARAMS.outcome,
   ),
-  basis: z.array(z.string()).optional().describe(
-    'reconcile: the durable evidence consulted, one entry per source. Empty is refused.',
-  ),
-  superseded_by: z.string().optional().describe("reconcile: required for 'superseded'; the activation that now owns the workspace."),
-  note: z.string().optional().describe('reconcile: free-form note carried into the durable record.'),
+  basis: z.array(z.string()).optional().describe(SPECIALIST_LEASE_PARAMS.basis),
+  superseded_by: z.string().optional().describe(SPECIALIST_LEASE_PARAMS.superseded_by),
+  note: z.string().optional().describe(SPECIALIST_LEASE_PARAMS.note),
 });
 
 /**
@@ -31,7 +31,7 @@ export const specialistLeaseReconcileSchema = z.object({
 export function createSpecialistLeaseReconcileTool(probe?: LeaseProcessProbe) {
   return {
     name: 'specialist_lease_reconcile' as const,
-    description: "List uncertain writer leases (action 'list', default) or resolve one (action 'reconcile' with worktree, outcome and basis). The caller states the outcome; it is never inferred, and a refusal returns its refusal_reason.",
+    description: specialistToolDescription('specialist_lease_reconcile', 'mcp'),
     inputSchema: specialistLeaseReconcileSchema,
     async execute(input: z.infer<typeof specialistLeaseReconcileSchema>) {
       if (input.action !== 'reconcile') {

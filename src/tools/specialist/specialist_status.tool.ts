@@ -5,25 +5,25 @@ import type { CircuitBreaker } from '../../utils/circuitBreaker.js';
 import { projectOutstandingAsks, type PendingInteractionProjection } from '../../activation/transport/polling.js';
 import { leaseScopeFor, projectUncertainWorkspaces, type UncertainWorkspaceProjection } from '../../activation/workspace-reconcile.js';
 import type { NativeActivationHost } from '../../activation/native-host.js';
+import {
+  SPECIALIST_STATUS_PARAMS,
+  specialistToolDescription,
+} from './descriptions.js';
 import { toActivationCompactView, toActivationResultView, toActivationView, toPendingAskCompactView, toPendingAskView, type ActivationResultView, type ActivationView, type PendingAskView } from './activation.tool.js';
 import type { RuntimeEventPusher } from '../../activation/async-events.js';
 
 const BACKENDS = ['gemini', 'qwen', 'anthropic', 'openai'];
 
 export const specialistStatusSchema = z.object({
-  full: z.boolean().optional().describe(
-    'Return the full verbose payload (pre-SPECIALISTS-142 shape). Default compact.',
-  ),
-  wait_for_change: z.boolean().optional().describe(
-    'Block until the compact Fleet projection actually changes (activation state/result, pending asks) or the timeout passes, then return the same payload as a normal call. One blocking call replaces a poll loop: ~1 call per timeout while nothing changes, and a real transition still returns within ~1s. Ignored when this server hosts no native Fleet.',
-  ),
+  full: z.boolean().optional().describe(SPECIALIST_STATUS_PARAMS.full),
+  wait_for_change: z.boolean().optional().describe(SPECIALIST_STATUS_PARAMS.wait_for_change),
   timeout_s: z
     .number()
     .int()
     .min(1)
     .max(60)
     .optional()
-    .describe('How long wait_for_change may block, in seconds (1-60, default 25). Keep it under the client tool-call timeout.'),
+    .describe(SPECIALIST_STATUS_PARAMS.timeout_s),
 });
 
 /** Fields the wait compares — the actionable set. Volatile display fields (elapsed_s, token_usage) are excluded so a running activation's turn noise does not unblock the wait. */
@@ -88,8 +88,7 @@ export function createSpecialistStatusTool(
 ) {
   return {
     name: 'specialist_status' as const,
-    description:
-      'System health: backend circuit breaker states, loaded specialist count, and native in-process activations with any question they are waiting on — answer those with specialist_reply. Pass wait_for_change with timeout_s to block server-side until the fleet actually changes instead of polling.',
+    description: specialistToolDescription('specialist_status', 'mcp'),
     inputSchema: specialistStatusSchema,
     async execute(input: z.infer<typeof specialistStatusSchema>) {
       // Compact default (SPECIALISTS-142): identity, state, cost, intent per row;
