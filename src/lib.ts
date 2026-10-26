@@ -98,6 +98,27 @@ export type {
 // hand-written projections agree until the next field is added, then diverge silently.
 export { toActivationView, toActivationCompactView, toActivationResultView, toPendingAskView, toPendingAskCompactView } from './tools/specialist/activation.tool.js';
 export type { ActivationView, ActivationCompactView, ActivationResultView, PendingAskView, PendingAskCompactView } from './tools/specialist/activation.tool.js';
+// Canonical fleet display fields (SPECIALISTS-4365): the runtime computes them once;
+// the Pi extension styles them and the Claude mod reads them from the MCP payload.
+export {
+  activationDisplayEntry,
+  activationDisplayMarker,
+  activationDisplayMetrics,
+  buildFleetDisplay,
+  fleetDisplayHeader,
+  formatDisplayElapsed,
+  formatDisplaySpend,
+  formatDisplayTurns,
+  DISPLAY_IDLE_AFTER_S,
+  DISPLAY_SPINNER_FRAME_MS,
+  DISPLAY_SPINNER_FRAMES,
+} from './tools/specialist/specialist-display.js';
+export type {
+  ActivationDisplayEntry,
+  DisplayActivationInput,
+  DisplayAskInput,
+  FleetDisplayBlock,
+} from './tools/specialist/specialist-display.js';
 export { RuntimeEventPusher, ResultNotValidatedError, completionBody, parseCompletionBody } from './activation/async-events.js';
 export type { EventRoute, RuntimeEventPusherOptions } from './activation/async-events.js';
 

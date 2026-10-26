@@ -1,7 +1,7 @@
 import type { McpToolResult, On, RenderInput } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { COLLAPSE_AT, MCP_SERVER, PANE_ID, POLL_MS, ROLE_NUDGE_RE, feedLinesOf, resultLinesOf, roleNudgeLine, transitionsOf } from '../hooks/register'
+import { COLLAPSE_AT, MCP_SERVER, PANE_ID, POLL_MS, ROLE_NUDGE_RE, displayEntryOf, feedLinesOf, fleetOf, headerOf, headerTextOf, markerOf, markerTextOf, metricsOf, metricsTextOf, orderedOf, reportOf, resultLinesOf, roleNudgeLine, transitionsOf, workTextOf } from '../hooks/register'
 
 const SESSION = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
 
@@ -423,6 +423,54 @@ describe('register', () => {
     const drawn = textOf(await ui.drawn())
     expect(drawn).toContain('read a.ts')
     expect(drawn).not.toContain('line two')
+  })
+})
+
+describe('fleet display fallback and preference (SPECIALISTS-4365)', () => {
+  test('a payload without display renders the old output with zero errors', () => {
+    const fleet = fleetOf({ activations: [RUNNING, BLOCKED], pending_asks: [ASK] })
+    expect(fleet.display).toBeUndefined()
+    expect(headerOf(fleet)).toBe('1 running • ! 1 blocked')
+    expect(headerTextOf(fleet)).toBe('1 running • ! 1 blocked')
+    // nowMs 0 pins the spinner to its first frame.
+    const row = fleet.activations.find(a => a.activation_id === RUNNING.activation_id)!
+    const ask = fleet.asks.find(a => a.activation_id === RUNNING.activation_id)
+    expect(markerOf(row, ask, 0)).toBe('◐')
+    expect(markerTextOf(fleet, row, ask, 0)).toBe('◐')
+    expect(metricsOf(row, ask, 0)).toBe('2m14s • 3 turns • 12k')
+    expect(metricsTextOf(fleet, row, ask, 0)).toBe('2m14s • 3 turns • 12k')
+    expect(workTextOf(fleet, row)).toBe('XTRM-464')
+    expect(reportOf(fleet, null, 0)).toContain('◐ executor act:4245711d-4e3  XTRM-464  2m14s • 3 turns • 12k')
+    expect(orderedOf(fleet).map(a => a.activation_id)).toEqual([BLOCKED.activation_id, RUNNING.activation_id])
+  })
+
+  test('a payload with display prefers the runtime strings', () => {
+    const fleet = fleetOf({
+      activations: [RUNNING, BLOCKED],
+      pending_asks: [ASK],
+      display: {
+        header: '1 running 1 blocked',
+        activations: [
+          { activation_id: RUNNING.activation_id, marker: '◐', metrics: '2m14s 3 turns 12k', work: 'XTRM-464' },
+          { activation_id: BLOCKED.activation_id, marker: '!', metrics: 'asked 19s', work: 'XTRM-467' },
+        ],
+      },
+    })
+    expect(headerTextOf(fleet)).toBe('1 running 1 blocked')
+    const blocked = fleet.activations.find(a => a.activation_id === BLOCKED.activation_id)!
+    const ask = fleet.asks.find(a => a.activation_id === BLOCKED.activation_id)
+    expect(displayEntryOf(fleet, BLOCKED.activation_id)).toMatchObject({ marker: '!', metrics: 'asked 19s', work: 'XTRM-467' })
+    expect(markerTextOf(fleet, blocked, ask, 0)).toBe('!')
+    expect(metricsTextOf(fleet, blocked, ask, 0)).toBe('asked 19s')
+    expect(workTextOf(fleet, blocked)).toBe('XTRM-467')
+    const report = reportOf(fleet, null, 0)
+    expect(report).toContain('Specialists · 1 running 1 blocked')
+    expect(report).toContain('! debugger act:67eff6ec-d2f  XTRM-467  asked 19s')
+    expect(report).not.toContain('waiting 19s')
+    // A malformed display block is ignored, never fatal.
+    const broken = fleetOf({ activations: [RUNNING], pending_asks: [], display: { header: 42, activations: 'nope' } })
+    expect(headerTextOf(broken)).toBe(headerOf(broken))
+    expect(displayEntryOf(broken, RUNNING.activation_id)).toBeUndefined()
   })
 })
 

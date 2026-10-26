@@ -17,6 +17,8 @@ export type { ActivationId, ActivationRequest, ActivationResult, ActivationSnaps
 export type { DeliveryState, InteractionKind, InteractionMessage, MessageId, PendingAsk, } from './activation/interaction.js';
 export { toActivationView, toActivationCompactView, toActivationResultView, toPendingAskView, toPendingAskCompactView } from './tools/specialist/activation.tool.js';
 export type { ActivationView, ActivationCompactView, ActivationResultView, PendingAskView, PendingAskCompactView } from './tools/specialist/activation.tool.js';
+export { activationDisplayEntry, activationDisplayMarker, activationDisplayMetrics, buildFleetDisplay, fleetDisplayHeader, formatDisplayElapsed, formatDisplaySpend, formatDisplayTurns, DISPLAY_IDLE_AFTER_S, DISPLAY_SPINNER_FRAME_MS, DISPLAY_SPINNER_FRAMES, } from './tools/specialist/specialist-display.js';
+export type { ActivationDisplayEntry, DisplayActivationInput, DisplayAskInput, FleetDisplayBlock, } from './tools/specialist/specialist-display.js';
 export { RuntimeEventPusher, ResultNotValidatedError, completionBody, parseCompletionBody } from './activation/async-events.js';
 export type { EventRoute, RuntimeEventPusherOptions } from './activation/async-events.js';
 export { createActivationForensicSink, } from './activation/forensic-sink.js';

@@ -5,6 +5,7 @@ import { type PendingInteractionProjection } from '../../activation/transport/po
 import { type UncertainWorkspaceProjection } from '../../activation/workspace-reconcile.js';
 import type { NativeActivationHost } from '../../activation/native-host.js';
 import { type ActivationResultView, type ActivationView, type PendingAskView } from './activation.tool.js';
+import { type FleetDisplayBlock } from './specialist-display.js';
 import type { RuntimeEventPusher } from '../../activation/async-events.js';
 export declare const specialistStatusSchema: z.ZodObject<{
     full: z.ZodOptional<z.ZodBoolean>;
@@ -53,6 +54,7 @@ export declare function createSpecialistStatusTool(loader: SpecialistLoader, cir
         backends_health: {
             [k: string]: "CLOSED" | "HALF_OPEN" | "OPEN";
         };
+        display: FleetDisplayBlock;
     } | {
         activations: {
             result_status?: string;
@@ -71,6 +73,7 @@ export declare function createSpecialistStatusTool(loader: SpecialistLoader, cir
             purpose?: string;
         }[];
         pending_asks: import("./activation.tool.js").PendingAskCompactView[];
+        display: FleetDisplayBlock;
         loaded_count?: undefined;
         activation_results?: undefined;
         pending_interactions?: undefined;
