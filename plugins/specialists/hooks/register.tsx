@@ -620,12 +620,12 @@ function fleetBody($: EngineInterface, s: State, ui: Kit, rows: Activation[], si
             />
           )}
           <Box>
-            <Button plain key={`result:${selectedRow.activation_id}`} hotkey="r" onPress={() => toggleDetail($, s, 'result', selectedRow.activation_id)}>
-              {s.detail?.kind === 'result' ? 'hide result (r)' : 'result (r)'}
+            <Button plain key={`result:${selectedRow.activation_id}`} onPress={() => toggleDetail($, s, 'result', selectedRow.activation_id)}>
+              {s.detail?.kind === 'result' ? 'hide result' : 'result'}
             </Button>
             <Text> </Text>
-            <Button plain key={`feed:${selectedRow.activation_id}`} hotkey="f" onPress={() => toggleDetail($, s, 'feed', selectedRow.activation_id)}>
-              {s.detail?.kind === 'feed' ? 'hide feed (f)' : 'feed (f)'}
+            <Button plain key={`feed:${selectedRow.activation_id}`} onPress={() => toggleDetail($, s, 'feed', selectedRow.activation_id)}>
+              {s.detail?.kind === 'feed' ? 'hide feed' : 'feed'}
             </Button>
           </Box>
           <Box>
@@ -646,10 +646,9 @@ function fleetBody($: EngineInterface, s: State, ui: Kit, rows: Activation[], si
               <Button
                 plain
                 key={`stop:${selectedRow.activation_id}`}
-                hotkey="x"
                 onPress={() => { s.pendingStop = selectedRow.activation_id; s.flash = null; $.ui.invalidate('ui.render') }}
               >
-                stop (x)
+                stop
               </Button>
             )}
           </Box>
@@ -842,8 +841,8 @@ export function register(on: On) {
           <Text bold>specialists</Text>
           <Text> {headerTextOf(s.fleet)}</Text>
           <Text dimColor> · </Text>
-          <Button plain key="open" hotkey="o" onPress={() => void (s.paneOpen ? closePane($, s) : openPane($, s))}>
-            {s.paneOpen ? 'close (o)' : 'open (o)'}
+          <Button plain key="open" onPress={() => void (s.paneOpen ? closePane($, s) : openPane($, s))}>
+            {s.paneOpen ? 'close' : 'open'}
           </Button>
         </Box>
         {isFolded && !s.paneOpen ? (
