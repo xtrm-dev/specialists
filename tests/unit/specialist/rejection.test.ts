@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderRejection, supersedeStaleRefusal } from '../../../src/activation/rejection.js';
+import { FIX_BY_REASON, renderRejection, supersedeStaleRefusal } from '../../../src/activation/rejection.js';
 import { describeBuildIdentity, isBuildStale } from '../../../src/activation/build-identity.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
 import { createSpecialistDispatchTool, specialistDispatchSchema } from '../../../src/tools/specialist/activation.tool.js';
@@ -98,13 +98,14 @@ describe('staleness outranks the downstream symptom (SPECIALISTS-2)', () => {
     expect(out.build).toBe(STALE_BUILD);
   });
 
-  it('a matching build renders exactly as today', () => {
+  it('a matching build renders exactly as today, plus fix', () => {
     const detail = { note: STALE_NOTE };
     expect(
       renderRejection({ reason: 'work_item_store_unavailable', detail }, FRESH_BUILD, false),
     ).toEqual({
       status: 'rejected',
       reason: 'work_item_store_unavailable',
+      fix: FIX_BY_REASON.work_item_store_unavailable,
       detail,
       build: FRESH_BUILD,
     });
@@ -230,8 +231,10 @@ describe('issue_ref is primary, bead_id is a permanent alias (SPECIALISTS-20)', 
   it('documents issue_ref as the primary locator and bead_id as a compatibility alias', () => {
     const shape = specialistDispatchSchema.shape as Record<string, { description?: string }>;
     expect(shape.issue_ref.description).toContain('Substrate Issue locator');
-    expect(shape.issue_ref.description).toContain('NOT address the live bd board');
+    expect(shape.issue_ref.description).toContain('Only a Substrate Issue locator is accepted');
     expect(shape.bead_id.description).toContain('Permanent compatibility alias for issue_ref');
+    // One marked compatibility note names the old `bd` id as refused; no other bd-board wording remains.
+    expect(shape.bead_id.description).toContain('Compatibility note: a bare `bd` id is not a Substrate Issue');
     // The old primary explanation must be gone from the alias.
     expect(shape.bead_id.description).not.toContain('EXISTING READY Bead');
     expect(shape.bead_id.description).not.toContain('The id of an EXISTING READY');

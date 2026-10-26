@@ -37,6 +37,6 @@ export { isWorkspaceWriteTool, recoverDeadHolder, releaseHolderLease, WORKSPACE_
 export { createSpecialistLeaseReconcileTool } from './tools/specialist/specialist_lease_reconcile.tool.js';
 export { leaseScopeFor } from './activation/workspace-reconcile.js';
 export { inspect as inspectWorkspaceLease } from './activation/workspace-lease.js';
-export { renderRejection, supersedeStaleRefusal, STALE_RUNTIME_REASON, } from './activation/rejection.js';
-export type { RejectionInput, RefusalPayload } from './activation/rejection.js';
+export { DISPATCH_REFUSAL_REASONS, FIX_BY_REASON, fixForRefusalReason, renderRejection, supersedeStaleRefusal, STALE_RUNTIME_REASON, } from './activation/rejection.js';
+export type { DispatchRefusalReason, RejectionInput, RefusalPayload } from './activation/rejection.js';
 //# sourceMappingURL=lib.d.ts.map

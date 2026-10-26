@@ -57,9 +57,11 @@ import {
   admitCoordinatorToolCall,
   createSpecialistLeaseReconcileTool,
   releaseHolderLease,
+  FIX_BY_REASON,
   isBuildStale,
   leaseScopeFor,
   readBuildId,
+  renderRejection,
   supersedeStaleRefusal,
   toActivationCompactView,
   toActivationResultView,
@@ -1390,23 +1392,38 @@ export function annexBuildIdentity(
   };
 }
 
-/** Render an inline-contract gate refusal as a structured tool result. */
-function inlineRejectionResult(reason, missing, note) {
-  return annexBuildIdentity({
-    status: 'rejected',
-    reason,
-    ...(missing?.length ? { missing } : {}),
+/** Render an inline-contract gate refusal through the shared renderer. */
+function inlineRejectionResult(reason, missing, note, fix) {
+  const onDiskId = readBuildId(DIST_LIB_PATH);
+  const build = describeBuildIdentity(LOADED_BUILD_ID, onDiskId);
+  const out = renderRejection(
+    {
+      reason,
+      ...(missing?.length ? { missing } : {}),
+      ...(fix ? { fix } : {}),
+    },
+    build,
+    isBuildStale(LOADED_BUILD_ID, onDiskId),
+  );
+  return {
+    ...out,
     ...(note ? { note } : {}),
-  });
+  };
 }
 
-/** Render a host-thrown `DispatchRejectedError` as a structured tool result. */
+/** Render a host-thrown `DispatchRejectedError` through the shared renderer. */
 function rejectionResult(error) {
-  return annexBuildIdentity({
-    status: 'rejected',
-    reason: error.message,
-    detail: error.detail,
-  });
+  const onDiskId = readBuildId(DIST_LIB_PATH);
+  const build = describeBuildIdentity(LOADED_BUILD_ID, onDiskId);
+  return renderRejection(
+    {
+      reason: error.message,
+      detail: error.detail,
+      ...(error.detail?.missing?.length ? { missing: error.detail.missing } : {}),
+    },
+    build,
+    isBuildStale(LOADED_BUILD_ID, onDiskId),
+  );
 }
 
 // ── Result shapes (pi 0.99 tool exposure) ─────────────────────────────────────
@@ -2296,12 +2313,18 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
         if (issueRef && beadAlias) {
           return resultOf(inlineRejectionResult(
             'both issue_ref and bead_id were provided — bead_id is only an alias; provide one locator spelling',
+            undefined,
+            undefined,
+            'Provide one locator spelling; bead_id is only an alias for issue_ref.',
           ));
         }
         const workRef = issueRef || beadAlias;
         if (workRef && contract) {
           return resultOf(inlineRejectionResult(
             'a work locator and contract were both provided — provide exactly one; silently preferring one would dispatch against work the coordinator did not mean',
+            undefined,
+            undefined,
+            FIX_BY_REASON.contract_and_ref,
           ));
         }
         if (parentRef && workRef) {
@@ -2309,30 +2332,45 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
             'parent_ref and issue_ref/bead_id were both provided — parent_ref only ' +
             'parents an issue created from an inline contract; provide exactly one of ' +
             'issue_ref, bead_id or contract',
+            undefined,
+            undefined,
+            FIX_BY_REASON.parent_ref_and_ref,
           ));
         }
         if (kind && workRef) {
           return resultOf(inlineRejectionResult(
             'kind and issue_ref/bead_id were both provided — kind only flavours an ' +
             'issue created from an inline contract',
+            undefined,
+            undefined,
+            FIX_BY_REASON.kind_and_ref,
           ));
         }
         if (parentRef && !contract) {
           return resultOf(inlineRejectionResult(
             'parent_ref was provided without contract — it only parents the issue ' +
             'created from an inline contract',
+            undefined,
+            undefined,
+            FIX_BY_REASON.parent_ref_without_contract,
           ));
         }
         if (kind && !contract) {
           return resultOf(inlineRejectionResult(
             'kind was provided without contract — it only flavours the issue ' +
             'created from an inline contract',
+            undefined,
+            undefined,
+            FIX_BY_REASON.kind_without_contract,
           ));
         }
         const epicContextDepth = params.epic_context_depth;
         if (epicContextDepth !== undefined && epicContextDepth !== 1 && epicContextDepth !== 2) {
           return resultOf(inlineRejectionResult(
             'epic_context_depth must be 1 or 2 — 1 walks to the immediate parent epic, 2 also includes the grand-epic',
+            undefined,
+            undefined,
+            'Re-dispatch with epic_context_depth 1 or 2, or omit it for a single-Issue dispatch.',
           ));
         }
         // Lineage needs a parent: an inline contract honours epic_context_depth only
@@ -2341,6 +2379,9 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
         if (!workRef && !inline) {
           return resultOf(inlineRejectionResult(
             'neither issue_ref/bead_id nor contract was provided — dispatch requires a READY Substrate Issue or an inline contract',
+            undefined,
+            undefined,
+            FIX_BY_REASON.no_work_ref,
           ));
         }
         if (inline) {
@@ -2349,7 +2390,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
           // authoritatively inside inlineCreate — same parser, same verdict.
           const gate = validateContractText(inline);
           if (!gate.ok) {
-            return resultOf(inlineRejectionResult(gate.reason, gate.missing));
+            return resultOf(inlineRejectionResult(gate.reason, gate.missing, undefined, FIX_BY_REASON.issue_not_dispatchable));
           }
         }
 

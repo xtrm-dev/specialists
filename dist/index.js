@@ -89769,6 +89769,18 @@ var BUILD_ID_BYTES = 12, UNKNOWN_BUILD_ID = "unknown";
 var init_build_identity = () => {};
 
 // src/activation/rejection.ts
+function fixForRefusalReason(reason) {
+  if (!reason)
+    return;
+  const direct = FIX_BY_REASON[reason];
+  if (direct)
+    return direct;
+  for (const code of DISPATCH_REFUSAL_REASONS) {
+    if (reason.includes(code))
+      return FIX_BY_REASON[code];
+  }
+  return;
+}
 function supersedeStaleRefusal(payload, stale, build) {
   const reason = payload.reason;
   if (!stale || typeof reason !== "string")
@@ -89784,16 +89796,96 @@ function supersedeStaleRefusal(payload, stale, build) {
 }
 function renderRejection(input, build, stale = false) {
   const superseded = supersedeStaleRefusal({ reason: input.reason, ...input.detail ? { detail: input.detail } : {} }, stale, build);
+  const fix = input.fix ?? fixForRefusalReason(input.reason);
   return {
     status: "rejected",
     reason: superseded.reason,
+    ...fix ? { fix } : {},
     ...superseded.detail ? { detail: superseded.detail } : {},
     ...input.missing?.length ? { missing: input.missing } : {},
     ...build ? { build } : {}
   };
 }
-var STALE_DOWNSTREAM_REASONS, STALE_RUNTIME_REASON;
+var DISPATCH_REFUSAL_REASONS, FIX_BY_REASON, STALE_DOWNSTREAM_REASONS, STALE_RUNTIME_REASON;
 var init_rejection = __esm(() => {
+  DISPATCH_REFUSAL_REASONS = [
+    "unknown_specialist",
+    "work_item_store_unavailable",
+    "parent_ref_and_ref",
+    "kind_and_ref",
+    "parent_ref_without_contract",
+    "kind_without_contract",
+    "contract_and_ref",
+    "unknown_kind",
+    "parent_unresolvable",
+    "parent_terminal",
+    "issue_not_dispatchable",
+    "no_work_ref",
+    "issue_unresolvable",
+    "issue_revision_diverged",
+    "empty_tool_contract",
+    "required_pre_script_failed",
+    "pi_sdk_resource_loader_unavailable",
+    "invalid_thinking_override",
+    "no_model_configured",
+    "model_unavailable",
+    "extension_tool_shadowed",
+    "extension_discovery_failed",
+    "context_unresolvable",
+    "mandatory_rules_unavailable",
+    "preflight_failed",
+    "unguardable_mutating_tools",
+    "permission_guard_unavailable",
+    "tool_contract_unsatisfied",
+    "issue_binding_failed",
+    "context_changed",
+    "workspace_isolation_unavailable",
+    "workspace_held_by_another_writer",
+    "workspace_lease_uncertain",
+    "workspace_lease_not_held_by_caller",
+    "unknown_activation",
+    "not_resumable",
+    "not_steerable"
+  ];
+  FIX_BY_REASON = {
+    unknown_specialist: "Check specialist_list for the exact Specialist name and re-dispatch with a known name.",
+    work_item_store_unavailable: "The Substrate work boundary could not be opened. Install or upgrade the Substrate package, or set SUBSTRATE_DB (fallback XTRM_STATE_DB) to a writable state file, then re-dispatch.",
+    parent_ref_and_ref: "Provide exactly one work locator. parent_ref only parents an Issue created from an inline contract: re-dispatch with contract plus parent_ref, or with issue_ref alone.",
+    kind_and_ref: "Provide exactly one work locator. kind only flavours an Issue created from an inline contract: re-dispatch with contract plus kind, or with issue_ref alone.",
+    parent_ref_without_contract: "parent_ref only parents an Issue created from an inline contract. Re-dispatch with contract plus parent_ref, or drop parent_ref.",
+    kind_without_contract: "kind only flavours an Issue created from an inline contract. Re-dispatch with contract plus kind, or drop kind.",
+    contract_and_ref: "Provide exactly one of issue_ref or contract. Re-dispatch with the Issue locator alone, or with the inline contract alone.",
+    unknown_kind: "Re-dispatch with a creatable Substrate kind (task, bug, research, decision, followup); epic is never created ad hoc.",
+    parent_unresolvable: "The parent_ref locator resolves to no Substrate Issue. Verify the parent Issue ref and re-dispatch; the check runs before anything is created.",
+    parent_terminal: "The parent Issue is terminal (done, cancelled, or archived). Re-dispatch with a non-terminal parent Issue, or create without a parent.",
+    issue_not_dispatchable: "The Substrate Issue is not dispatchable (draft, unattested, blocked, or incomplete contract). Repair Issue readiness and re-dispatch.",
+    no_work_ref: "Dispatch requires an existing Issue or an inline contract. Re-dispatch with issue_ref or with contract.",
+    issue_unresolvable: "The locator is not a Substrate Issue. Create the Issue first (planning skill) and re-dispatch with its ref, or pass the work as an inline contract.",
+    issue_revision_diverged: "The Issue changed between resolution and the dispatch check. Re-dispatch against the new revision.",
+    empty_tool_contract: "The resolved tool contract is empty for this tier. Adjust the Specialist definition permissions or tier and re-dispatch.",
+    required_pre_script_failed: "A required pre-phase script failed. Fix the script or its prerequisites and re-dispatch; no session was created.",
+    pi_sdk_resource_loader_unavailable: "The loaded Pi SDK cannot declare session skills. Upgrade the Pi SDK to a version exporting DefaultResourceLoader and getAgentDir, then re-dispatch.",
+    invalid_thinking_override: "The thinking_override value is unknown. Re-dispatch with a supported thinking level.",
+    no_model_configured: "No model is configured for this Specialist. Set the definition model chain or pass model_override and re-dispatch.",
+    model_unavailable: "The requested model is unavailable. Re-dispatch with an available model via model_override, or fix the provider configuration.",
+    extension_tool_shadowed: "An enabled extension shadows a granted tool. Disable or rename the shadowing extension source and re-dispatch.",
+    extension_discovery_failed: "Extension discovery failed. Fix the extension source configuration and re-dispatch.",
+    context_unresolvable: "The Issue contextRefs could not be resolved. Run `sp doctor` to diagnose the context store, then re-dispatch.",
+    mandatory_rules_unavailable: "Mandatory rules could not be resolved. Fix the mandatory-rules configuration and re-dispatch; a session is never launched without its rules.",
+    preflight_failed: "Preflight admission failed. Address the reported admission note and re-dispatch.",
+    unguardable_mutating_tools: "Some mutating tools cannot be fenced by the workspace lease on this runtime. Remove them from the contract or run on a runtime that can guard them.",
+    permission_guard_unavailable: "READ_ONLY bash was granted without the permission guard in the loaded set. Load the guard extension or remove bash from the READ_ONLY contract and re-dispatch.",
+    tool_contract_unsatisfied: "The live session did not expose every promised tool. Fix the extension and resource-loader setup so the session exposes the full contract, then re-dispatch.",
+    issue_binding_failed: "Binding the Issue to this activation failed. Re-read the Issue and re-dispatch.",
+    context_changed: "contextRefs changed between prompt render and binding. Re-dispatch to render the current contextRefs.",
+    workspace_isolation_unavailable: "A write-capable activation needs its own git worktree and none could be created. Fix the git worktree setup and re-dispatch.",
+    workspace_held_by_another_writer: "Exactly one writer holds a workspace at a time. Wait for the holder to stop, dispatch on another Issue, or resolve it with specialist_lease_reconcile.",
+    workspace_lease_uncertain: "The workspace lease holder liveness could not be established. Resolve it with specialist_lease_reconcile, then re-dispatch.",
+    workspace_lease_not_held_by_caller: "The lease is not held by this activation. Dispatch or resume under the holding activation, or resolve it with specialist_lease_reconcile if the holder is gone.",
+    unknown_activation: "No activation exists with that id. Verify the activation_id from specialist_status and retry with the correct id.",
+    not_resumable: "That activation state cannot be resumed or retried here. Use resume for settled or waiting, retry for failed, steer for running, and reply for outstanding asks.",
+    not_steerable: "Steer only redirects running activations. Use resume for settled or waiting, retry for failed, and reply for outstanding asks."
+  };
   STALE_DOWNSTREAM_REASONS = ["work_item_store_unavailable"];
   STALE_RUNTIME_REASON = "stale_runtime: the runtime serving this session was rebuilt after it loaded, so this " + "refusal came from superseded code. Restart the session, then retry the dispatch \u2014 do " + "not act on the refusal text below.";
 });
@@ -89923,45 +90015,52 @@ function createSpecialistDispatchTool(getHost, getPusher) {
         ];
         if (parentRef && issueRefValue) {
           return renderRejection({
-            reason: "parent_ref and issue_ref/bead_id were both provided \u2014 parent_ref only " + "parents an issue created from an inline contract; provide exactly one of " + "issue_ref, bead_id or contract"
+            reason: "parent_ref and issue_ref/bead_id were both provided \u2014 parent_ref only " + "parents an issue created from an inline contract; provide exactly one of " + "issue_ref, bead_id or contract",
+            fix: FIX_BY_REASON.parent_ref_and_ref
           }, build());
         }
         if (kind && issueRefValue) {
           return renderRejection({
-            reason: "kind and issue_ref/bead_id were both provided \u2014 kind only flavours an " + "issue created from an inline contract"
+            reason: "kind and issue_ref/bead_id were both provided \u2014 kind only flavours an " + "issue created from an inline contract",
+            fix: FIX_BY_REASON.kind_and_ref
           }, build());
         }
         if (parentRef && !contract) {
           return renderRejection({
-            reason: "parent_ref was provided without contract \u2014 it only parents the issue " + "created from an inline contract"
+            reason: "parent_ref was provided without contract \u2014 it only parents the issue " + "created from an inline contract",
+            fix: FIX_BY_REASON.parent_ref_without_contract
           }, build());
         }
         if (kind && !contract) {
           return renderRejection({
-            reason: "kind was provided without contract \u2014 it only flavours the issue " + "created from an inline contract"
+            reason: "kind was provided without contract \u2014 it only flavours the issue " + "created from an inline contract",
+            fix: FIX_BY_REASON.kind_without_contract
           }, build());
         }
         if (supplied.length > 1) {
           return renderRejection({
-            reason: `both ${supplied.join(" and ")} were provided \u2014 provide exactly one of ` + "issue_ref, bead_id or contract; silently preferring one would dispatch against a " + "contract the coordinator did not mean"
+            reason: `both ${supplied.join(" and ")} were provided \u2014 provide exactly one of ` + "issue_ref, bead_id or contract; silently preferring one would dispatch against a " + "contract the coordinator did not mean",
+            fix: FIX_BY_REASON.contract_and_ref
           }, build());
         }
         const epicContextDepth = input.epic_context_depth;
         if (epicContextDepth !== undefined && epicContextDepth !== 1 && epicContextDepth !== 2) {
           return renderRejection({
-            reason: "epic_context_depth must be 1 or 2 \u2014 1 walks to the immediate parent epic, " + "2 also includes the grand-epic"
+            reason: "epic_context_depth must be 1 or 2 \u2014 1 walks to the immediate parent epic, " + "2 also includes the grand-epic",
+            fix: "Re-dispatch with epic_context_depth 1 or 2, or omit it for a single-Issue dispatch."
           }, build());
         }
         const inline = !issueRefValue && contract ? contract : undefined;
         if (!issueRefValue && !inline) {
           return renderRejection({
-            reason: "neither issue_ref, bead_id nor contract was provided \u2014 dispatch requires a " + "READY Issue (7 sections + SCRUTINY) or an inline contract"
+            reason: "neither issue_ref, bead_id nor contract was provided \u2014 dispatch requires a " + "READY Issue (7 sections + SCRUTINY) or an inline contract",
+            fix: FIX_BY_REASON.no_work_ref
           }, build());
         }
         if (inline) {
           const gate = validateContractText(inline);
           if (!gate.ok) {
-            return renderRejection({ reason: gate.reason, missing: gate.missing }, build());
+            return renderRejection({ reason: gate.reason, missing: gate.missing, fix: FIX_BY_REASON.issue_not_dispatchable }, build());
           }
         }
         const handle = await getHost().start({
@@ -90142,8 +90241,8 @@ var init_activation_tool = __esm(() => {
   };
   specialistDispatchSchema = objectType({
     specialist: stringType().describe("Specialist name, e.g. codebase-explorer"),
-    issue_ref: stringType().optional().describe("The Substrate Issue locator for this activation's task contract \u2014 XTRM-227, XTRM-184.2.3, " + "iss_..., a historical locator, or an imported Beads alias. It does NOT address the live bd " + "board: Substrate and bd are separate stores, so a bd id is refused as unresolvable. The " + "issue must be READY: a COMPLETE 7-section contract (PROBLEM, SUCCESS, SCOPE, NON_GOALS, " + "CONSTRAINTS, VALIDATION, OUTPUT) plus a SCRUTINY level, which must be exactly one of LOW, " + "MEDIUM, HIGH or CRITICAL. That is EIGHT required parts, not seven; SCRUTINY is the one most " + "often left out. Write each section as a heading: either the section name on its own line " + "with its body beneath, or `PROBLEM: the body` on one line. Both forms are accepted. " + "A draft or incomplete issue is refused before any model turn. No free-form task text is " + "accepted: a task that needs more definition belongs in the Issue (see the planning skill). " + "Supply EXACTLY ONE of issue_ref, bead_id or contract."),
-    bead_id: stringType().optional().describe("Permanent compatibility alias for issue_ref \u2014 the same Substrate Issue locator, resolved at " + "this tool boundary to the same value. Both names are accepted forever and behave identically; " + "prefer issue_ref in new calls. Do not read the name as an address on the live bd board: it " + "carries a Substrate Issue locator, and a bd id is refused as unresolvable. Supply EXACTLY ONE " + "of issue_ref, bead_id or contract."),
+    issue_ref: stringType().optional().describe("The Substrate Issue locator for this activation's task contract \u2014 XTRM-227, XTRM-184.2.3, " + "iss_..., a historical locator, or an imported Beads alias. Only a Substrate Issue locator is accepted here; " + "any other locator is refused as unresolvable. The " + "issue must be READY: a COMPLETE 7-section contract (PROBLEM, SUCCESS, SCOPE, NON_GOALS, " + "CONSTRAINTS, VALIDATION, OUTPUT) plus a SCRUTINY level, which must be exactly one of LOW, " + "MEDIUM, HIGH or CRITICAL. That is EIGHT required parts, not seven; SCRUTINY is the one most " + "often left out. Write each section as a heading: either the section name on its own line " + "with its body beneath, or `PROBLEM: the body` on one line. Both forms are accepted. " + "A draft or incomplete issue is refused before any model turn. No free-form task text is " + "accepted: a task that needs more definition belongs in the Issue (see the planning skill). " + "Supply EXACTLY ONE of issue_ref, bead_id or contract."),
+    bead_id: stringType().optional().describe("Permanent compatibility alias for issue_ref \u2014 the same Substrate Issue locator, resolved at " + "this tool boundary to the same value. Both names are accepted forever and behave identically; " + "prefer issue_ref in new calls. Compatibility note: a bare `bd` id is not a Substrate Issue and is refused as unresolvable. " + "Supply EXACTLY ONE " + "of issue_ref, bead_id or contract."),
     contract: stringType().optional().describe("An INLINE task contract, used instead of issue_ref: the SAME readiness gate " + "runs first, then a Substrate Issue is created from it and dispatched. The contract " + "must contain all seven sections \u2014 PROBLEM, SUCCESS, SCOPE, NON_GOALS, " + "CONSTRAINTS, VALIDATION, OUTPUT \u2014 plus a SCRUTINY level, which must be exactly " + "one of LOW, MEDIUM, HIGH or CRITICAL. Note that this is EIGHT required parts, " + "not seven; SCRUTINY is the one most often left out. Write each section as a " + "heading: either the section name on its own line with its body beneath, or " + "`PROBLEM: the body` on one line. Both forms are accepted. " + "A contract missing any section is refused and nothing is created."),
     title: stringType().optional().describe("Optional title for the Substrate Issue created from `contract` (default: `<specialist>: <first PROBLEM line>`). " + "An explicit title wins; blank counts as absent. Ignored when issue_ref (or its bead_id alias) is given."),
     parent_ref: stringType().optional().describe("Parent locator for the Substrate Issue created from `contract` \u2014 any locator the shared " + "work boundary resolves. ONLY with contract: refused alongside issue_ref/bead_id, and " + "refused without contract. The parent must exist and not be terminal " + "(done/cancelled/archived; deferred is accepted); the check runs BEFORE anything is " + "created, and creation-with-parent is one atomic step."),
