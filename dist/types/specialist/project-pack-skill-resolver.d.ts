@@ -16,7 +16,7 @@ export declare class ProjectPackSkillAmbiguityError extends Error {
     /** Raw caller-supplied consumer root — programmatic use only; never rendered into `.message`. */
     readonly consumerRoot: string;
     readonly matches: string[];
-    constructor(skillName: string, 
+    constructor(skillName: string,
     /** Raw caller-supplied consumer root — programmatic use only; never rendered into `.message`. */
     consumerRoot: string, matches: string[], displayLines: string[]);
 }
@@ -25,7 +25,7 @@ export declare class ProjectPackSkillSecurityError extends Error {
     readonly skillName: string;
     /** Repo-relative path under the consumer root (no host prefix). */
     readonly repoRelativePath: string;
-    constructor(skillName: string, 
+    constructor(skillName: string,
     /** Repo-relative path under the consumer root (no host prefix). */
     repoRelativePath: string, detail: string);
 }
