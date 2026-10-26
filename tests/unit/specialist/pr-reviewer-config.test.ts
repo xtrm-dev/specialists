@@ -54,4 +54,11 @@ describe('pr-reviewer package specialist', () => {
     expect(system).toContain('A required check that is red and unexplained prevents PASS.');
     expect(system).toContain('- Verdict: PASS | PARTIAL | FAIL (exactly one of these three words');
   });
+
+  it('caps targeted test runs at 4 GB virtual and keeps mutation runs at 2 GB', async () => {
+    const system = (await loadPrReviewer()).specialist.prompt.system ?? '';
+
+    expect(system).toContain('targeted Python tests `(ulimit -v 4000000; timeout 120 ...)`');
+    expect(system).toContain('mutation runs keep `(ulimit -v 2000000; timeout 120 ...)`, one mutant at a time');
+  });
 });
