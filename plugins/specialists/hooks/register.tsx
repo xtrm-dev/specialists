@@ -33,7 +33,9 @@ export const PANE_ID = 'specialists-fleet'
 export const PURPOSE_ROW_MAX = 60
 
 const SPINNER_FRAMES = ['◐', '◓', '◑', '◒']
-const ACCENT = '#9a8bff'
+/** Attention yellow: the terminal theme's warning key, shared with the error
+ *  lines and the specialists-ui WAITING_COLOR — no hard-coded hex. */
+const ATTENTION = 'yellow'
 
 export type Activation = {
   activation_id: string
@@ -383,6 +385,10 @@ type State = {
   fastStreak: number
   /** The result or feed view open under the selected row; null when none is. */
   detail: { kind: 'result' | 'feed'; id: string; lines: string[] } | null
+  /** A stop press waiting for its inline confirm; null when no stop is armed. */
+  pendingStop: string | null
+  /** The rows the open pane was last sized for; the pane re-opens when they drift. */
+  paneRows: number
   /** The previous successful read, for transition toasts; null until the first one. */
   last: Fleet | null
   /** SPECIALISTS_WAKE=off silences toasts, as the Pi extension's --no-specialist-wake does. */
@@ -400,6 +406,9 @@ function apply($: EngineInterface, s: State, read: { ok: true; value: Record<str
     s.last = s.fleet
     if (s.selected && !s.fleet.activations.some(a => a.activation_id === s.selected)) s.selected = null
     if (s.detail && s.detail.id !== s.selected) s.detail = null
+    // An armed stop dies with its activation; the operator re-arms deliberately.
+    if (s.pendingStop && !s.fleet.activations.some(a => a.activation_id === s.pendingStop)) s.pendingStop = null
+    void syncPaneRows($, s)
     // A live feed keeps up with the activation; a settled one is read once.
     const row = s.detail?.kind === 'feed' ? s.fleet.activations.find(a => a.activation_id === s.detail!.id) : undefined
     if (row && isActive(row.state)) void loadDetail($, s, 'feed', row.activation_id)
@@ -473,6 +482,13 @@ function toggleDetail($: EngineInterface, s: State, kind: 'result' | 'feed', id:
   void loadDetail($, s, kind, id)
 }
 
+/** A stop press the operator confirmed inline: the only path from the band/pane
+ *  stop button to specialist_stop_activation (SPECIALISTS-4346). */
+async function confirmStop($: EngineInterface, s: State, id: string): Promise<void> {
+  s.pendingStop = null
+  await act($, s, 'specialist_stop_activation', { activation_id: id, reason: 'operator request' }, `Stopped ${id}.`)
+}
+
 /** One control action; its answer is what the operator sees. */
 async function act($: EngineInterface, s: State, tool: string, args: Record<string, unknown>, done: string): Promise<string> {
   const result = await callTool($, tool, args)
@@ -484,28 +500,56 @@ async function act($: EngineInterface, s: State, tool: string, args: Record<stri
 /** The elements both sites draw with; the terminal and desktop tables have all four. */
 type Kit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button' | 'Input'>
 
+/** Pane rows for the live fleet: one line per activation, chrome, and the selected-row
+ *  detail reserve. Recomputed whenever the content changes (SPECIALISTS-4346); the old
+ *  `* 2` counted the retired two-line rows. */
+function paneRowsFor(s: State): number {
+  const n = s.fleet.activations.length
+  return Math.min(48, n + 8 + (s.selected ? DETAIL_PANE_LINES : 0))
+}
+
 /** Opens the fleet pane: docked beside a fullscreen transcript, else inline above the prompt. */
 async function openPane($: EngineInterface, s: State): Promise<void> {
+  const rows = paneRowsFor(s)
   await $.ui.open({
     id: PANE_ID,
     title: 'Specialists',
     focus: true,
     closeOnEscape: true,
-    rows: Math.min(48, s.fleet.activations.length * 2 + 8 + DETAIL_PANE_LINES),
+    rows,
   })
   s.paneOpen = true
+  s.paneRows = rows
   $.ui.invalidate('ui.render')
+}
+
+/** Re-opens the pane when the content outgrew its rows; a no-op otherwise. The engine
+ *  has no resize primitive, so open-again with the new count is the follow mechanism. */
+async function syncPaneRows($: EngineInterface, s: State): Promise<void> {
+  if (!s.paneOpen) return
+  const want = paneRowsFor(s)
+  if (want === s.paneRows) return
+  try {
+    await $.ui.open({ id: PANE_ID, title: 'Specialists', focus: true, closeOnEscape: true, rows: want })
+    s.paneRows = want
+  } catch {
+    // The open pane keeps its old height; the next change retries.
+  }
 }
 
 async function closePane($: EngineInterface, s: State): Promise<void> {
   await $.ui.close({ id: PANE_ID }).catch(() => undefined)
   s.paneOpen = false
+  s.paneRows = 0
   $.ui.invalidate('ui.render')
 }
 
 /**
  * Rows and the selected row's controls: the one drawing the band and the pane share, so
  * both sites read and act the same way. `site` keeps element keys apart between them.
+ * One line per activation (the Pi row layout: marker, name:short, work, model facts,
+ * metrics); the purpose and the inputs live in the detail under the selected row.
+ * Indentation rides on paddingLeft, never on literal spaces.
  */
 function fleetBody($: EngineInterface, s: State, ui: Kit, rows: Activation[], site: string, detailLines: number) {
   const { Box, Text, Button, Input } = ui
@@ -513,34 +557,42 @@ function fleetBody($: EngineInterface, s: State, ui: Kit, rows: Activation[], si
   const selectedRow = rows.find(a => a.activation_id === s.selected)
   const selectedAsk = selectedRow && s.fleet.asks.find(a => a.activation_id === selectedRow.activation_id)
 
+  const selectRow = (id: string | null) => {
+    s.selected = id
+    s.flash = null
+    s.pendingStop = null
+    $.ui.invalidate('ui.render')
+    void syncPaneRows($, s)
+  }
+
   return (
     <Box flexDirection="column">
-      {rows.map(row => {
-        const ask = s.fleet.asks.find(a => a.activation_id === row.activation_id)
-        const purpose = purposeShort(row.purpose)
-        const isSelected = row.activation_id === s.selected
-        return (
-          <Box key={`${site}:${row.activation_id}`} flexDirection="column">
-            <Button
-              plain
-              key={`row:${row.activation_id}`}
-              onPress={() => { s.selected = isSelected ? null : row.activation_id; s.flash = null; $.ui.invalidate('ui.render') }}
-            >
-              {`${isSelected ? '▾' : ' '} ${markerTextOf(s.fleet, row, ask, nowMs)} ${row.specialist ?? 'specialist'}:${shortId(row.activation_id)}  ${workTextOf(s.fleet, row)}${purpose ? `  ${purpose}` : ''}`}
-            </Button>
-            <Text dimColor wrap="truncate-end">
-              {`      ${row.resolved_model ?? '?model'}${row.thinking_level ? ` · ${row.thinking_level}` : ''}  • ${metricsTextOf(s.fleet, row, ask, nowMs)}`}
-            </Text>
-          </Box>
-        )
-      })}
+      <Box flexDirection="column" paddingLeft={4}>
+        {rows.map(row => {
+          const ask = s.fleet.asks.find(a => a.activation_id === row.activation_id)
+          const isSelected = row.activation_id === s.selected
+          const thinking = row.thinking_level ? ` ${row.thinking_level}` : ''
+          return (
+            <Box key={`${site}:${row.activation_id}`} flexDirection="column">
+              <Button
+                plain
+                key={`row:${row.activation_id}`}
+                onPress={() => selectRow(isSelected ? null : row.activation_id)}
+              >
+                {`${isSelected ? '▾' : '▸'} ${markerTextOf(s.fleet, row, ask, nowMs)} ${row.specialist ?? 'specialist'}:${shortId(row.activation_id)} ${workTextOf(s.fleet, row)} ${row.resolved_model ?? '?model'}${thinking} · ${metricsTextOf(s.fleet, row, ask, nowMs)}`}
+              </Button>
+            </Box>
+          )
+        })}
+      </Box>
 
       {selectedRow ? (
-        <Box flexDirection="column" paddingLeft={4}>
-          <Text dimColor>{selectedRow.activation_id} · {selectedRow.state ?? 'unknown'}</Text>
+        <Box flexDirection="column" paddingLeft={6}>
+          <Text dimColor wrap="wrap">{selectedRow.activation_id} · {selectedRow.state ?? 'unknown'}</Text>
+          {selectedRow.purpose ? <Text dimColor wrap="wrap">purpose: {purposeShort(selectedRow.purpose)}</Text> : null}
           {selectedAsk ? (
             <>
-              <Text color={ACCENT} wrap="wrap">{selectedAsk.kind ?? 'ask'}: {selectedAsk.body ?? ''}</Text>
+              <Text color={ATTENTION} wrap="wrap">{selectedAsk.kind ?? 'ask'}: {selectedAsk.body ?? ''}</Text>
               <Input
                 key={`reply:${selectedAsk.message_id}`}
                 label="reply "
@@ -568,21 +620,38 @@ function fleetBody($: EngineInterface, s: State, ui: Kit, rows: Activation[], si
             />
           )}
           <Box>
-            <Button key={`result:${selectedRow.activation_id}`} hotkey="r" onPress={() => toggleDetail($, s, 'result', selectedRow.activation_id)}>
-              {s.detail?.kind === 'result' ? 'hide result' : 'result'}
+            <Button plain key={`result:${selectedRow.activation_id}`} hotkey="r" onPress={() => toggleDetail($, s, 'result', selectedRow.activation_id)}>
+              {s.detail?.kind === 'result' ? 'hide result (r)' : 'result (r)'}
             </Button>
             <Text> </Text>
-            <Button key={`feed:${selectedRow.activation_id}`} hotkey="f" onPress={() => toggleDetail($, s, 'feed', selectedRow.activation_id)}>
-              {s.detail?.kind === 'feed' ? 'hide feed' : 'feed'}
+            <Button plain key={`feed:${selectedRow.activation_id}`} hotkey="f" onPress={() => toggleDetail($, s, 'feed', selectedRow.activation_id)}>
+              {s.detail?.kind === 'feed' ? 'hide feed (f)' : 'feed (f)'}
             </Button>
-            <Text> </Text>
-            <Button
-              key={`stop:${selectedRow.activation_id}`}
-              hotkey="x"
-              onPress={() => void act($, s, 'specialist_stop_activation', { activation_id: selectedRow.activation_id, reason: 'operator request' }, `Stopped ${selectedRow.activation_id}.`)}
-            >
-              stop
-            </Button>
+          </Box>
+          <Box>
+            {s.pendingStop === selectedRow.activation_id ? (
+              <Box flexDirection="column">
+                <Text wrap="wrap">Stop {shortId(selectedRow.activation_id)}? This cannot be undone.</Text>
+                <Box>
+                  <Button plain key={`confirm-stop:${selectedRow.activation_id}`} onPress={() => void confirmStop($, s, selectedRow.activation_id)}>
+                    confirm stop
+                  </Button>
+                  <Text> </Text>
+                  <Button plain key={`cancel-stop:${selectedRow.activation_id}`} onPress={() => { s.pendingStop = null; $.ui.invalidate('ui.render') }}>
+                    keep running
+                  </Button>
+                </Box>
+              </Box>
+            ) : (
+              <Button
+                plain
+                key={`stop:${selectedRow.activation_id}`}
+                hotkey="x"
+                onPress={() => { s.pendingStop = selectedRow.activation_id; s.flash = null; $.ui.invalidate('ui.render') }}
+              >
+                stop (x)
+              </Button>
+            )}
           </Box>
           {s.detail && s.detail.id === selectedRow.activation_id ? (
             <Box flexDirection="column">
@@ -590,14 +659,18 @@ function fleetBody($: EngineInterface, s: State, ui: Kit, rows: Activation[], si
                 <Text key={`${site}:detail:${i}`} dimColor={s.detail!.kind === 'feed'} wrap="truncate-end">{line}</Text>
               ))}
               {s.detail.lines.length > detailLines ? (
-                <Text dimColor italic>{`… ${s.detail.lines.length - detailLines} more lines · /specialists ${s.detail.kind} ${shortId(selectedRow.activation_id)}`}</Text>
+                <Text dimColor italic wrap="wrap">{`… ${s.detail.lines.length - detailLines} more lines · /specialists ${s.detail.kind} ${shortId(selectedRow.activation_id)}`}</Text>
               ) : null}
             </Box>
           ) : null}
         </Box>
       ) : null}
 
-      {s.flash ? <Text dimColor>    {s.flash}</Text> : null}
+      {s.flash ? (
+        <Box paddingLeft={4}>
+          <Text dimColor wrap="wrap">{s.flash}</Text>
+        </Box>
+      ) : null}
     </Box>
   )
 }
@@ -616,6 +689,8 @@ export function register(on: On) {
     watching: false,
     fastStreak: 0,
     detail: null,
+    pendingStop: null,
+    paneRows: 0,
     last: null,
     quiet: false,
     roleNudgeShown: false,
@@ -763,24 +838,29 @@ export function register(on: On) {
 
     return (
       <Box flexDirection="column">
-        <Box>
-          <Text>  </Text>
+        <Box flexDirection="row" paddingLeft={2}>
           <Text bold>specialists</Text>
           <Text> {headerTextOf(s.fleet)}</Text>
-          {isFolded ? (
-            <Button plain key="open" hotkey="o" onPress={() => void (s.paneOpen ? closePane($, s) : openPane($, s))}>
-              {s.paneOpen ? 'close' : 'open'}
-            </Button>
-          ) : (
-            <Button plain dimColor key="toggle" onPress={() => { s.expanded = !s.expanded; $.ui.invalidate('ui.render') }}>
-              {s.expanded ? ' [-]' : ' [+]'}
-            </Button>
-          )}
+          <Button plain key="open" hotkey="o" onPress={() => void (s.paneOpen ? closePane($, s) : openPane($, s))}>
+            {s.paneOpen ? 'close (o)' : 'open (o)'}
+          </Button>
         </Box>
-        {isFolded && !s.paneOpen ? <Text dimColor>    tap open or /specialists for the full fleet</Text> : null}
-        {s.error ? <Text color="yellow" wrap="truncate-end">    status unavailable · {s.error}</Text> : null}
+        {isFolded && !s.paneOpen ? (
+          <Box paddingLeft={4}>
+            <Text dimColor wrap="wrap">open the pane or /specialists for the full fleet</Text>
+          </Box>
+        ) : null}
+        {s.error ? (
+          <Box paddingLeft={4}>
+            <Text color="yellow" wrap="wrap">status unavailable · {s.error}</Text>
+          </Box>
+        ) : null}
         {rows.length > 0 || s.flash ? fleetBody($, s, { Box, Text, Button, Input }, rows, 'band', DETAIL_BAND_LINES) : null}
-        {!isFolded && s.expanded && ordered.length > rows.length ? <Text dimColor>    +{ordered.length - rows.length} more</Text> : null}
+        {!isFolded && s.expanded && ordered.length > rows.length ? (
+          <Box paddingLeft={4}>
+            <Text dimColor wrap="wrap">+{ordered.length - rows.length} more</Text>
+          </Box>
+        ) : null}
       </Box>
     )
   })
@@ -793,10 +873,10 @@ export function register(on: On) {
     return (
       <Box flexDirection="column">
         <Text bold>{headerTextOf(s.fleet)}</Text>
-        {s.error ? <Text color="yellow" wrap="truncate-end">status unavailable · {s.error}</Text> : null}
-        {s.fleet.activations.length === 0 ? <Text dimColor>No live activations.</Text> : null}
+        {s.error ? <Text color="yellow" wrap="wrap">status unavailable · {s.error}</Text> : null}
+        {s.fleet.activations.length === 0 ? <Text dimColor wrap="wrap">No live activations.</Text> : null}
         {fleetBody($, s, { Box, Text, Button, Input }, orderedOf(s.fleet), 'pane', DETAIL_PANE_LINES)}
-        <Text dimColor>esc closes · select a row to read its result or feed, or to reply, steer, resume or stop</Text>
+        <Text dimColor wrap="wrap">esc closes · select a row to read its result or feed, or to reply, steer, resume or stop</Text>
       </Box>
     )
   })
@@ -805,6 +885,7 @@ export function register(on: On) {
     const result = await next(e)
     if (result.deny === undefined) {
       s.paneOpen = false
+      s.paneRows = 0
       $.ui.invalidate('ui.render')
     }
     return result
