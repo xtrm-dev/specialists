@@ -10,10 +10,10 @@ The Issue revision is the contract. This document links and summarises. It is no
 | Refusal text (4341) | Every dispatch refusal carries a `fix` field in Substrate vocabulary. MCP and Pi produce identical refusal payloads. |
 | Tool descriptions (4342) | Each `specialist_*` description exists once and is consumed by Pi and the MCP servers. A drift test fails when surfaces diverge. |
 | Role nudges (4343) | A coordinator that writes a review, deploy or monitor prompt sees one context line naming the matching specialist. The session-start output carries one doctrine line. The map derives from `config/specialists/*.specialist.json`. |
-| One skill (4344) | One canonical `using-specialists` skill serves Claude and Pi. `supervising-activations` is folded in. |
+| One skill (4344) | Pending (unrevised): one canonical `using-specialists` skill would serve Claude and Pi, with `supervising-activations` folded in. |
 | Fleet display (4345) | A recorded decision: shared display fields in `specialist_status`, or two tested implementations. |
 | Mod UX (4346) | The Claude mod fleet band and pane follow the Pi layout, show labelled controls, and confirm before stop. |
-| Global CLAUDE.md (4347) | `~/.claude/CLAUDE.md` moves from `bd` to `sb` vocabulary (out-of-repo change, operator-approved diff). |
+| Global CLAUDE.md (4347) | Pending (unrevised): `~/.claude/CLAUDE.md` would move from `bd` to `sb` vocabulary (out-of-repo change, operator-approved diff). |
 
 ## 2. Children
 
