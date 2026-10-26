@@ -61,4 +61,13 @@ describe('pr-reviewer package specialist', () => {
     expect(system).toContain('targeted Python tests `(ulimit -v 4000000; timeout 120 ...)`');
     expect(system).toContain('mutation runs keep `(ulimit -v 2000000; timeout 120 ...)`, one mutant at a time');
   });
+
+  it('lints the comment body mechanically before posting', async () => {
+    const system = (await loadPrReviewer()).specialist.prompt.system ?? '';
+
+    expect(system).toContain('This exact command must exit 0, and a body that fails it is fixed and re-linted, never posted');
+    expect(system).toContain("<!-- mmd-review reviewer=pr-reviewer head=[0-9a-f]{12} -->");
+    expect(system).toContain("^- Verdict: (PASS|PARTIAL|FAIL)$");
+    expect(system).toContain("! grep -Eq '/home/|/Users/|/root/'");
+  });
 });
