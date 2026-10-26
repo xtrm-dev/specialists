@@ -841,6 +841,7 @@ export function register(on: On) {
         <Box flexDirection="row" paddingLeft={2}>
           <Text bold>specialists</Text>
           <Text> {headerTextOf(s.fleet)}</Text>
+          <Text dimColor> · </Text>
           <Button plain key="open" hotkey="o" onPress={() => void (s.paneOpen ? closePane($, s) : openPane($, s))}>
             {s.paneOpen ? 'close (o)' : 'open (o)'}
           </Button>

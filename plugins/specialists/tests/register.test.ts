@@ -625,6 +625,8 @@ describe('fleet snapshots (SPECIALISTS-4346)', () => {
     <Text>
       " "
       "1 running • ! 1 blocked"
+    <Text dimColor=true>
+      " · "
     <Button hotkey="o" key="open" label="open (o)" plain=true>
   <Box flexDirection="column">
     <Box flexDirection="column" paddingLeft=4>
@@ -655,6 +657,8 @@ describe('fleet snapshots (SPECIALISTS-4346)', () => {
     <Text>
       " "
       "5 running • ! 1 blocked"
+    <Text dimColor=true>
+      " · "
     <Button hotkey="o" key="open" label="open (o)" plain=true>
   <Box paddingLeft=4>
     <Text dimColor=true wrap="wrap">
@@ -735,6 +739,16 @@ describe('fleet snapshots (SPECIALISTS-4346)', () => {
       expect(snapOf(await $.ui.render(bandAt(width)))).toBe(SNAP_BAND_FOLDED)
     })
   }
+
+  test('the band header is separated from the open button (idle case)', async ($, on) => {
+    const clock = mock.clock(on)
+    server(on, () => ({ content: [{ type: 'text', text: 'server not connected' }], isError: true }))
+    await $.session.start(SESSION)
+    await clock.settle()
+    // With no activations and an error the header reads "idle"; it must not run into "open (o)".
+    const band = snapOf(await $.ui.render(bandAt(80)))
+    expect(band).toContain('"idle"\n    <Text dimColor=true>\n      " · "\n    <Button hotkey="o" key="open" label="open (o)" plain=true>')
+  })
 
   for (const width of [80, 120, 144]) {
     test(`pane pins the selected-row layout at ${width} columns`, async ($, on) => {
