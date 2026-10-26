@@ -64,6 +64,6 @@ Baseline note for 4344: PR #498 added one `contextRefs` doctrine bullet to `conf
 
 Integration: all code is merged into branch `xt/4340`; a `build:` commit refreshed `dist/asset-contract.json` after 4363. Nothing is pushed. Full suite on `xt/4340`: 3780 passed, 2 failed. Both failures reproduce on master `2a450f5b8` (`doctor-catalogs --require-installed`, `integration/pi/extension-grant`).
 
-Follow-ups not yet filed as Issues: repair `code-with-advisors` (undeclared advisor steps); ship or retire `memory-hygiene` (`memory-processor` is absent); sync `docs/mcp-tools.md:64` ("like `sp feed`").
+Follow-ups not yet filed as Issues: repair `code-with-advisors` (undeclared advisor steps); ship or retire `memory-hygiene` (`memory-processor` is absent); sync `docs/mcp-tools.md:64` ("like `sp feed`"). Prune the chain-suggest marker directory (`~/.xtrm/chain-suggest-seen`, one file per session and activation, never pruned): delete markers older than about 7 days on write, best effort. When the client omits `session_id`, the dedupe key falls back to cwd and then "default", so sessions in one cwd share markers.
 
 Review checks still to apply to 4344: where the byte-identical plugin skill copy is committed (a marketplace install cannot run the package build), and that each CLAUDE.md replacement in 4347 names an existing `sb` equivalent.
