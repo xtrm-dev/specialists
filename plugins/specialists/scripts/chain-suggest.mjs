@@ -16,6 +16,8 @@
 //   - At most once per session per activation: a marker file under
 //     ~/.xtrm/chain-suggest-seen (overridable via SPECIALISTS_CHAIN_SUGGEST_DIR
 //     for tests) records which (session, activation) pairs already suggested.
+//     Markers older than 7 days are pruned best-effort. When the payload has no
+//     session id, the key falls back to the cwd, then to "default".
 //   - FAILS OPEN, always exits 0. Malformed input, an unrelated tool name, a
 //     missing activation id, or any filesystem error produces no output.
 //
@@ -28,7 +30,7 @@
 // containing specialist_dispatch, so a future server rename degrades to suggesting,
 // never to blocking.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -39,6 +41,21 @@ function markerDir() {
   const override = (process.env.SPECIALISTS_CHAIN_SUGGEST_DIR ?? '').trim();
   if (override) return override;
   return join(homedir(), '.xtrm', 'chain-suggest-seen');
+}
+
+const MARKER_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Best effort: markers older than a week belong to finished sessions. Any error is ignored.
+function pruneMarkers(dir) {
+  try {
+    const cutoff = Date.now() - MARKER_MAX_AGE_MS;
+    for (const name of readdirSync(dir)) {
+      const file = join(dir, name);
+      if (statSync(file).mtimeMs < cutoff) unlinkSync(file);
+    }
+  } catch {
+    // Pruning must never suppress the suggestion.
+  }
 }
 
 function sanitize(part) {
@@ -101,6 +118,7 @@ try {
   try {
     mkdirSync(markerDir(), { recursive: true });
     writeFileSync(marker, `${sessionId} ${activationId}\n`);
+    pruneMarkers(markerDir());
   } catch {
     // Marker write failure must not suppress the suggestion (fails open).
   }

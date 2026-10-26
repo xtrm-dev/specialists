@@ -61,7 +61,7 @@ that parsed the verbose form working with one flag.
 |---|---|
 | `specialist_status` | authoritative read: compact Fleet (activations, pending asks) by default; `full:true` adds results, health, interactions, workspaces |
 | `specialist_result` | full output of one settled activation by id or short prefix, from memory or `observability.db` |
-| `specialist_feed` | one activation's event feed, like `sp feed`: tool calls, text, turns, status and completion (`view:"terminal"`, default) or every lifecycle event (`view:"forensic"`); `since_seq` follows a running activation |
+| `specialist_feed` | one activation's event feed: tool calls, text, turns, status and completion (`view:"terminal"`, default) or every lifecycle event (`view:"forensic"`); `since_seq` follows a running activation |
 | `specialist_dispatch` | admit-and-start a Specialist on the native runtime (async; returns on admission; compact view, `full:true` for verbose) |
 | `specialist_reply` | answer an outstanding ask by `message_id` |
 | `specialist_resume` | resume a settled or waiting activation in the same session (id kept, attempt advances; compact view, `full:true` for verbose) |
