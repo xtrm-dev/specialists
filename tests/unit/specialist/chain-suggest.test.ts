@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -78,6 +78,22 @@ describe('chain-suggest PostToolUse hook (SPECIALISTS-4364)', () => {
     const second = runHook(dispatchPayload(tool, 'act:chain-1'), seenDir);
     expect(second.status).toBe(0);
     expect(second.stdout.trim()).toBe('');
+  });
+
+  it('prunes markers older than 7 days and keeps fresh ones', () => {
+    const seenDir = scratch();
+    const stale = join(seenDir, 'old-session.act-old');
+    const fresh = join(seenDir, 'new-session.act-new');
+    writeFileSync(stale, 'old\n');
+    writeFileSync(fresh, 'new\n');
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+    utimesSync(stale, eightDaysAgo, eightDaysAgo);
+
+    runHook(dispatchPayload('mcp__plugin_specialists_specialists__specialist_dispatch', 'act-1'), seenDir);
+
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
+    expect(existsSync(join(seenDir, 'sess-test-1.act-1'))).toBe(true);
   });
 
   it('suggests again for a different activation in the same session', () => {
