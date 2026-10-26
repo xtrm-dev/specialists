@@ -38,7 +38,7 @@ describe('review-chain hardening specialist configs', () => {
     const spec = await loadSpec('reviewer');
     const system = spec.specialist.prompt.system ?? '';
 
-    expect(spec.specialist.metadata.version).toBe('2.5.0');
+    expect(spec.specialist.metadata.version).toBe('2.6.0');
     expect(system).toContain('ocr-preflight.mjs');
     expect(system).toContain('Run the ocr lane in one codemode cell');
     expect(system).toContain('must exit 0 before you report coverage');
@@ -158,5 +158,15 @@ describe('review-chain hardening specialist configs', () => {
     expect(system).toContain('Introduced by change: yes | newly reachable | worsened | repository-wide');
     expect(system).toContain('Why this is not a false positive');
     expect(system).toContain('Do not import blanket exclusions from another scanner.');
+  });
+
+  it('makes the CI status a gate and reproduces red checks on the merge ref', async () => {
+    const spec = await loadSpec('reviewer');
+    const system = spec.specialist.prompt.system ?? '';
+
+    expect(system).toContain('## PR CI status gate (when the review target is a PR)');
+    expect(system).toContain('reproduce it on the merge ref before you claim anything passes');
+    expect(system).toContain('A run on the PR head alone does not clear a red check');
+    expect(system).toContain('The Verdict field is exactly PASS, PARTIAL or FAIL');
   });
 });
