@@ -1364,6 +1364,18 @@ function shortReason(reason) {
  */
 const NATIVE_ONLY_NOTE = 'Dispatch through specialist_dispatch. Do not shell out to the specialists CLI.';
 
+/**
+ * Chain-reference suggestion (SPECIALISTS-4364): the one informational line appended
+ * to a successful specialist_dispatch result. Names the SPECIALISTS-4363 reference
+ * and asks the coordinator to choose the next step by scrutiny and its own judgment;
+ * never names a role, never denies/rewrites/delays. The byte-identical sentence lives
+ * in plugins/specialists/scripts/chain-suggest.mjs (Claude PostToolUse); the parity
+ * test pins the two copies equal because descriptions.ts (SPECIALISTS-4342) is outside
+ * this Issue's scope, so no shared module carries it yet.
+ */
+const CHAIN_REFERENCE_SUGGESTION =
+  'Chain reference: the using-specialists skill, references/chain-recipes.md \u2014 read it and choose the next step by scrutiny and your own judgment.';
+
 function specialistSummaryView(summary) {
   return {
     name: summary.name,
@@ -1595,6 +1607,7 @@ const PendingAskRow = Type.Union([PendingAskFull, PendingAskCompact]);
  */
 const Envelope = Type.Object({
   status: Type.String(),
+  chain_reference: Type.Optional(Type.String()),
   activation_id: Type.Optional(Type.String()),
   specialist: Type.Optional(Type.String()),
   state: Type.Optional(Type.String()),
@@ -2412,6 +2425,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
                 inputs: handle.stepContract.inputs.length,
                 outputs: handle.stepContract.outputs.length,
               },
+              chain_reference: CHAIN_REFERENCE_SUGGESTION,
             }))
       } catch (error) {
         if (error instanceof DispatchRejectedError) {

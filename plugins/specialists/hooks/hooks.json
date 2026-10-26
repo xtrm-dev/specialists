@@ -54,6 +54,18 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__specialists__specialist_dispatch|mcp__plugin_specialists_specialists__specialist_dispatch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun \"${CLAUDE_PLUGIN_ROOT}/scripts/chain-suggest.mjs\"",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   },
   "description": "Specialists classic lifecycle hooks plus the early-access Claude Mod: the live fleet band above the prompt and /specialists controls.",
