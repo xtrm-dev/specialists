@@ -51,10 +51,7 @@ section below documents the REMOVED `use_specialist` path so no reader mistakes 
 
 ### specialist_dispatch
 Creates an activation. Supply an existing issue ref OR an inline contract — never both:
-- `issue_ref` — a Substrate issue ref (for example `XTRM-240`), already READY. NOT a `bd`
-  bead id: Substrate's issue store and the `bd` board are separate stores, so passing a `bd`
-  id such as `unitAI-ucpcy` is refused with `issue_unresolvable`. To run a specialist against
-  work that only exists in `bd`, pass its contract inline instead.
+- `issue_ref` — a Substrate Issue ref (for example `XTRM-240`), already READY. Only a Substrate Issue locator is accepted; any other locator is refused with `issue_unresolvable`. To run a specialist against work that does not exist as a Substrate Issue, pass its contract inline instead.
 - `bead_id` — permanent compatibility alias for `issue_ref`: same value, same gate.
   Prefer `issue_ref` in new calls.
 - `contract` — an inline contract: seven sections (PROBLEM, SUCCESS, SCOPE, NON_GOALS,

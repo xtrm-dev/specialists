@@ -9,7 +9,7 @@
 // that runs `sp` would satisfy the letter of "expose the runtime over MCP" and defeat its
 // entire purpose. No child process is reachable from here at all: inline-contract
 // creation is owned by `host.start()` through the work boundary (validate → create →
-// attest → claim), never by a `bd` subprocess. The live evidence for acceptance AV
+// attest → claim), never by a subprocess. The live evidence for acceptance AV
 // asserts the absence of `sp` against the process table rather than against intent.
 //
 // The gates are not re-implemented here, and that is the load-bearing property. Issue
@@ -41,7 +41,7 @@ import { fileURLToPath } from 'node:url';
 import type { NativeActivationHost } from '../../activation/native-host.js';
 import { describeBuildIdentity, isBuildStale, readBuildId } from '../../activation/build-identity.js';
 import { validateContractText } from '../../activation/contract-sections.js';
-import { renderRejection } from '../../activation/rejection.js';
+import { FIX_BY_REASON, renderRejection } from '../../activation/rejection.js';
 import { THINKING_LEVELS } from '../../activation/types.js';
 import type { ActivationSnapshot, ActivationTokenUsage } from '../../activation/types.js';
 import { DispatchRejectedError } from '../../activation/types.js';
@@ -347,8 +347,8 @@ export const specialistDispatchSchema = z.object({
   specialist: z.string().describe('Specialist name, e.g. codebase-explorer'),
   issue_ref: z.string().optional().describe(
     "The Substrate Issue locator for this activation's task contract — XTRM-227, XTRM-184.2.3, " +
-    'iss_..., a historical locator, or an imported Beads alias. It does NOT address the live bd ' +
-    'board: Substrate and bd are separate stores, so a bd id is refused as unresolvable. The ' +
+    'iss_..., a historical locator, or an imported Beads alias. Only a Substrate Issue locator is accepted here; ' +
+    'any other locator is refused as unresolvable. The ' +
     "issue must be READY: a COMPLETE 7-section contract (PROBLEM, SUCCESS, SCOPE, NON_GOALS, " +
     'CONSTRAINTS, VALIDATION, OUTPUT) plus a SCRUTINY level, which must be exactly one of LOW, ' +
     'MEDIUM, HIGH or CRITICAL. That is EIGHT required parts, not seven; SCRUTINY is the one most ' +
@@ -361,8 +361,8 @@ export const specialistDispatchSchema = z.object({
   bead_id: z.string().optional().describe(
     'Permanent compatibility alias for issue_ref — the same Substrate Issue locator, resolved at ' +
     'this tool boundary to the same value. Both names are accepted forever and behave identically; ' +
-    'prefer issue_ref in new calls. Do not read the name as an address on the live bd board: it ' +
-    'carries a Substrate Issue locator, and a bd id is refused as unresolvable. Supply EXACTLY ONE ' +
+    'prefer issue_ref in new calls. Compatibility note: a bare `bd` id is not a Substrate Issue and is refused as unresolvable. ' +
+    'Supply EXACTLY ONE ' +
     'of issue_ref, bead_id or contract.',
   ),
   contract: z.string().optional().describe(
@@ -484,24 +484,28 @@ export function createSpecialistDispatchTool(
             reason: 'parent_ref and issue_ref/bead_id were both provided — parent_ref only ' +
               'parents an issue created from an inline contract; provide exactly one of ' +
               'issue_ref, bead_id or contract',
+            fix: FIX_BY_REASON.parent_ref_and_ref,
           }, build());
         }
         if (kind && issueRefValue) {
           return renderRejection({
             reason: 'kind and issue_ref/bead_id were both provided — kind only flavours an ' +
               'issue created from an inline contract',
+            fix: FIX_BY_REASON.kind_and_ref,
           }, build());
         }
         if (parentRef && !contract) {
           return renderRejection({
             reason: 'parent_ref was provided without contract — it only parents the issue ' +
               'created from an inline contract',
+            fix: FIX_BY_REASON.parent_ref_without_contract,
           }, build());
         }
         if (kind && !contract) {
           return renderRejection({
             reason: 'kind was provided without contract — it only flavours the issue ' +
               'created from an inline contract',
+            fix: FIX_BY_REASON.kind_without_contract,
           }, build());
         }
         if (supplied.length > 1) {
@@ -511,6 +515,7 @@ export function createSpecialistDispatchTool(
             reason: `both ${supplied.join(' and ')} were provided — provide exactly one of ` +
               'issue_ref, bead_id or contract; silently preferring one would dispatch against a ' +
               'contract the coordinator did not mean',
+            fix: FIX_BY_REASON.contract_and_ref,
           }, build());
         }
         const epicContextDepth = input.epic_context_depth;
@@ -518,6 +523,7 @@ export function createSpecialistDispatchTool(
           return renderRejection({
             reason: 'epic_context_depth must be 1 or 2 — 1 walks to the immediate parent epic, ' +
               '2 also includes the grand-epic',
+            fix: 'Re-dispatch with epic_context_depth 1 or 2, or omit it for a single-Issue dispatch.',
           }, build());
         }
         // Lineage needs a parent: an inline contract honours epic_context_depth only
@@ -527,6 +533,7 @@ export function createSpecialistDispatchTool(
           return renderRejection({
             reason: 'neither issue_ref, bead_id nor contract was provided — dispatch requires a ' +
               'READY Issue (7 sections + SCRUTINY) or an inline contract',
+            fix: FIX_BY_REASON.no_work_ref,
           }, build());
         }
         if (inline) {
@@ -535,7 +542,7 @@ export function createSpecialistDispatchTool(
           // authoritatively inside inlineCreate — same parser, same verdict.
           const gate = validateContractText(inline);
           if (!gate.ok) {
-            return renderRejection({ reason: gate.reason, missing: gate.missing }, build());
+            return renderRejection({ reason: gate.reason, missing: gate.missing, fix: FIX_BY_REASON.issue_not_dispatchable }, build());
           }
         }
 

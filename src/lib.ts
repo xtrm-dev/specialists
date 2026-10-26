@@ -194,8 +194,11 @@ export { inspect as inspectWorkspaceLease } from './activation/workspace-lease.j
 // Shared refusal renderer (unitAI-t2kol.4): the single gate-outcome shape both
 // coordinator surfaces use. MCP imports it; the Pi extension follows (recorded follow-up).
 export {
+  DISPATCH_REFUSAL_REASONS,
+  FIX_BY_REASON,
+  fixForRefusalReason,
   renderRejection,
   supersedeStaleRefusal,
   STALE_RUNTIME_REASON,
 } from './activation/rejection.js';
-export type { RejectionInput, RefusalPayload } from './activation/rejection.js';
+export type { DispatchRefusalReason, RejectionInput, RefusalPayload } from './activation/rejection.js';
