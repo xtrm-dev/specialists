@@ -1,6 +1,6 @@
 # SPECIALISTS-4340: coordinator surfaces
 
-Status: work in progress (updated 2026-10-26 after 4341, 4342, 4343, 4345 and 4363 closed). Baseline: PR #498 merged as `2a450f5b8`.
+Status: complete (2026-10-26). All ten children are closed. Released in v4.1.0; the live-check fixes ship in v4.1.1. Baseline: PR #498 merged as `2a450f5b8`.
 The Issue revision is the contract. This document links and summarises. It is not authority for any contract text.
 
 ## 1. What the epic changes
@@ -46,24 +46,28 @@ Provenance (peer messages, session `specialists-xt-pi-pr498`): `83b587dd` defect
 
 Baseline note for 4344: PR #498 added one `contextRefs` doctrine bullet to `config/skills/using-specialists/SKILL.md`. 4344 must reconcile it.
 
-## 4. State and remaining work
+## 4. State
 
-| Ref | Rev | State | Evidence |
+| Ref | Rev | State | Evidence (master commit; pre-rebase commit) |
 |---|---|---|---|
-| 4341 | 2 | closed | commit `52fdae5c6`; reviewer PASS `act:db82ef87-0f1`; blast radius CRITICAL (journal seq 3) |
-| 4342 | 3 | closed | commit `251d0af5f`; reviewer PASS `act:fdaecbeb-e5d`; journal seq 3 |
-| 4343 | 3 | closed | commit `6f2bdf443`; reviewer PASS `act:844903a8-b39`; blast radius UNKNOWN, plugins not indexed (journal seq 4) |
-| 4345 | 2 | closed | decision option A, journal seq 2; follow-up 4365 |
-| 4363 | 2 | closed | commit `7ca50fee0`; 15 templates: 13 statically valid, 1 valid after variable resolution (`research-only`), 1 invalid (`memory-hygiene`) |
-| 4364 | 2 | in progress | executor `act:67a246d3-9a3` |
-| 4365 | 1 | ready, waits on 4364 for file contention | not dispatched |
-| 4346 | 2 | blocked by 4365 | |
-| 4344 | 1 | draft, unrevised | |
-| 4347 | 1 | draft, unrevised | |
-| 4340 | 1 | open draft, unattested | |
+| 4341 | 2 | closed | `9cf4fcd4b`; `52fdae5c6`. Reviewer PASS `act:db82ef87-0f1`; blast radius CRITICAL (journal seq 3) |
+| 4342 | 3 | closed | `fc3a972f5`; `251d0af5f`. Reviewer PASS `act:fdaecbeb-e5d` |
+| 4343 | 3 | closed | `af18d9771`; `6f2bdf443`. Blast radius UNKNOWN: plugins are not in the code-graph index |
+| 4344 | 3 | closed | `7c94da8d7`; `f9ba97671`. Accepted deviation, see below |
+| 4345 | 2 | closed | decision option A (journal seq 2); follow-up 4365 |
+| 4346 | 2 | closed | `b7f62d2bc`, harness `940f6b576`; `3d881b9b9`, `d82fb6c3e`. The operator's live check found two defects, fixed in `f5b5867cc` (header separator) and `d90610eaa` (plain button labels, no hotkeys) |
+| 4347 | 4 | closed | out of repo: `~/.claude/CLAUDE.md` has no `bd` or Beads reference; dated backup and diff beside it |
+| 4363 | 2 | closed | `36a3c817d`; `7ca50fee0`. 15 templates: 13 statically valid, 1 valid after variable resolution (`research-only`), 1 invalid (`memory-hygiene`) |
+| 4364 | 2 | closed | `11faea631`; `954485e4b`. Marker pruning in `b440b27aa` |
+| 4365 | 1 | closed | `e6289a653`; `85d98c10f` |
+| 4340 | 3 | closed | this epic |
 
-Integration: all code is merged into branch `xt/4340`; a `build:` commit refreshed `dist/asset-contract.json` after 4363. Nothing is pushed. Full suite on `xt/4340`: 3780 passed, 2 failed. Both failures reproduce on master `2a450f5b8` (`doctor-catalogs --require-installed`, `integration/pi/extension-grant`).
+PR #499 was merged with a rebase, so every pre-rebase SHA above changed. The tag `pre-rebase-xt-4340` (annotated, at `43633351e`) keeps the pre-rebase commits fetchable. The canonical dist commit is `512df4e1c` (pre-rebase `b249051d9`).
 
-Follow-ups not yet filed as Issues: repair `code-with-advisors` (undeclared advisor steps); ship or retire `memory-hygiene` (`memory-processor` is absent); sync `docs/mcp-tools.md:64` ("like `sp feed`"). Prune the chain-suggest marker directory (`~/.xtrm/chain-suggest-seen`, one file per session and activation, never pruned): delete markers older than about 7 days on write, best effort. When the client omits `session_id`, the dedupe key falls back to cwd and then "default", so sessions in one cwd share markers.
+Validation at the merge: full suite 3810 passed, 2 failed. Both failures also fail on master `2a450f5b8` (`doctor-catalogs --require-installed`, `integration/pi/extension-grant`). CI could not run (GitHub account billing lock); gitleaks, semgrep and osv-scanner ran locally with no new findings.
 
-Review checks still to apply to 4344: where the byte-identical plugin skill copy is committed (a marketplace install cannot run the package build), and that each CLAUDE.md replacement in 4347 names an existing `sb` equivalent.
+**Accepted deviation (4344).** "A Claude session and a Pi session each load the same skill text" is accepted as structurally equivalent (one source file, a byte-equality test). No live Pi session ran. It is not satisfied.
+
+**Waiver.** The release renews the bounded host-read-isolation waiver (`release-attestation.json`). The waiver is bound to one exact version, so a release of any other version is refused by `scripts/generate-release-attestation.mjs` until the waiver itself is edited with the operator's approval. It also ends at `2026-11-01T00:00:00Z`. Closing this epic does not resolve the risk: host-read isolation is still not provided.
+
+Follow-ups filed: SPECIALISTS-4366 (repair or label `code-with-advisors`), SPECIALISTS-4367 (ship or retire `memory-hygiene`), CORE-2518 (re-pin core's `using-specialists` copy after the xtrm install and update rework).
