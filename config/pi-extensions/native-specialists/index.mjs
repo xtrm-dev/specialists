@@ -81,6 +81,7 @@ import {
   toActivationView,
   toPendingAskCompactView,
   toPendingAskView,
+  buildFleetDisplay,
   validateBeforeRun,
 } from '../../../dist/lib.js';
 
@@ -226,9 +227,16 @@ export function fleetSummaryOf({ activations, asks }) {
  * `/specialists` help and its argument completions, and an idle Fleet says `idle` rather
  * than quoting a command at an operator who has nothing to do.
  */
-export function renderFleetHeader({ activations, asks }) {
-  const { running, waiting, blocked, total } = fleetSummaryOf({ activations, asks });
+export function renderFleetHeader({ activations, asks, display }) {
   const label = BOLD(SECTION_LABEL);
+  // Canonical display (SPECIALISTS-4365): the runtime computed the header once;
+  // it is styled here, and the local summary is the fallback for payloads that
+  // predate the `display` block. A `display.header` of `idle` renders the same
+  // line the fallback would.
+  if (display && typeof display.header === 'string' && display.header) {
+    return `${SECTION_INDENT}${label} ${display.header}`;
+  }
+  const { running, waiting, blocked, total } = fleetSummaryOf({ activations, asks });
   // Indent plus one separator space: `  specialists 1 running 1 waiting`.
   // Text only: no glyphs, no markers, no command hints — statuses joined by spaces.
   if (total === 0 && blocked === 0) return `${SECTION_INDENT}${label} idle`;
@@ -340,6 +348,30 @@ function stateMarker({ view, blocked, active, nowMs }) {
 }
 
 /**
+ * One activation's entry from a status payload's `display` block (SPECIALISTS-4365).
+ *
+ * Null when the payload predates `display` — the row then falls back to its local
+ * formatters, which are retained exactly for that case.
+ */
+function displayEntryFor(fleetOrDisplay, activationId) {
+  const list = Array.isArray(fleetOrDisplay) ? fleetOrDisplay : fleetOrDisplay?.activations;
+  if (!Array.isArray(list)) return null;
+  return list.find((e) => e?.activation_id === activationId) ?? null;
+}
+
+/**
+ * Style a canonical display marker the way the local stateMarker would: the runtime
+ * sends plain text, the frontend owns the color.
+ */
+function styledDisplayMarker(marker) {
+  if (marker === '!') return WARNING('!');
+  if (marker === '✓') return SUCCESS('✓');
+  if (marker === '✕') return FAILURE('✕');
+  if (SPINNER_FRAMES.includes(marker)) return ACCENT(marker);
+  return marker ?? '●';
+}
+
+/**
  * The metric slot on a one-line entry: elapsed, turns and tokens for work in
  * flight or finished, and the state REASON (`asked 19s`, `idle 42s`) when there
  * is one to give. Stats are space-separated (`16m00s 56 turns 3843k`); the `·`
@@ -370,8 +402,20 @@ function rowMetrics({ view, ask, nowMs }) {
  * marker, name:shortid, issue ref, model, thinking level, then `·` and the
  * space-separated stats (`16m00s 56 turns 3843k`). Forensic ids never appear.
  */
-export function renderFleetRowLines(view, asks = [], nowMs = Date.now()) {
+export function renderFleetRowLines(view, asks = [], nowMs = Date.now(), displayEntry = null) {
   const ask = (asks ?? []).find((a) => a.activation_id === view.activation_id);
+  // Canonical display (SPECIALISTS-4365): the runtime computed marker, metrics and
+  // work identity once; they are styled here, and the local formatters below are
+  // the fallback for payloads that predate the `display` block.
+  if (displayEntry && typeof displayEntry.marker === 'string' && typeof displayEntry.metrics === 'string') {
+    const work = typeof displayEntry.work === 'string' && displayEntry.work
+      ? displayEntry.work
+      : (view.issue_ref ?? view.bead_id ?? view.issue_id ?? '—');
+    const thinking = view.thinking_level ? ` ${BOLD(view.thinking_level)}` : '';
+    return [
+      `    ${styledDisplayMarker(displayEntry.marker)} ${BOLD(`${view.specialist}:${view.activation_id.slice(4)}`)} ${work} ${DIM(view.resolved_model ?? '?model')}${thinking} ${DIM('·')} ${DIM(displayEntry.metrics)}`,
+    ];
+  }
   const idle = idleSeconds(view, nowMs);
   const active = isActiveState(view.state) && !ask && !(idle != null && idle > IDLE_AFTER_S);
   const marker = stateMarker({ view, blocked: Boolean(ask), active, nowMs });
@@ -388,15 +432,15 @@ export function renderFleetRowLines(view, asks = [], nowMs = Date.now()) {
  * sort first. `detail` selects one activation's result or feed rendered under the
  * rows (SPECIALISTS-4264); the cache carries the last completed read, so the
  * section never awaits. */
-export function renderSectionLines({ activations, asks }, { expanded = true, nowMs = Date.now(), detail = null, detailCache = null } = {}) {
+export function renderSectionLines({ activations, asks, display }, { expanded = true, nowMs = Date.now(), detail = null, detailCache = null } = {}) {
   const lines = [];
   const nonIdle = (activations ?? []).length > 0 || (asks ?? []).length > 0;
   if (nonIdle) lines.push('');
-  lines.push(renderFleetHeader({ activations, asks }));
+  lines.push(renderFleetHeader({ activations, asks, display }));
   if (!expanded) return lines;
   // Bounded by ENTRIES: each pushed entry is its whole one-line unit.
   const { entries, overflow } = selectFleetEntries({ activations, asks });
-  for (const view of entries) lines.push(...renderFleetRowLines(view, asks, nowMs));
+  for (const view of entries) lines.push(...renderFleetRowLines(view, asks, nowMs, displayEntryFor(display, view.activation_id)));
   if (overflow > 0) lines.push(`    +${overflow} more`);
   if (detail) lines.push(...renderDetailLines(detail, detailCache));
   return lines;
@@ -506,7 +550,7 @@ export function buildOverlayRows(fleet, nowMs = Date.now()) {
       state: view.state,
       blocked: askIds.has(view.activation_id),
       message_id: askById.get(view.activation_id)?.message_id ?? null,
-      line: renderFleetRowLines(view, asks, nowMs)[0],
+      line: renderFleetRowLines(view, asks, nowMs, displayEntryFor(fleet?.display, view.activation_id))[0],
     }));
 }
 
@@ -540,14 +584,15 @@ export function formatWorkIdentity(view) {
  * ask body when blocked. Full titles and bodies live here, never truncated
  * to row budget.
  */
-export function buildOverlayDetailHead(view, ask, kind, nowMs = Date.now(), issueTitle = null) {
+export function buildOverlayDetailHead(view, ask, kind, nowMs = Date.now(), issueTitle = null, displayMetrics = null) {
   const head = [];
   const title = typeof issueTitle === 'string' && issueTitle.trim() ? issueTitle.trim() : '';
   if (title) head.push(title);
   head.push(formatWorkIdentity(view));
   const purpose = formatPurposeShort(view?.purpose);
   if (purpose) head.push(`purpose: ${purpose}`);
-  head.push(rowMetrics({ view: view ?? {}, ask: ask ?? null, nowMs }));
+  // Canonical display (SPECIALISTS-4365): styled here, local rowMetrics is the fallback.
+  head.push(typeof displayMetrics === 'string' && displayMetrics ? displayMetrics : rowMetrics({ view: view ?? {}, ask: ask ?? null, nowMs }));
   if (ask?.body?.trim()) head.push(`ask ${ask.message_id ?? ''}: ${ask.body.trim()}`.trim());
   if (kind === 'feed' && view && isActiveState(view.state) && !ask) head.push('live — new events arrive on fleet change');
   return head;
@@ -1648,6 +1693,18 @@ const Fleet = Type.Object({
   activations: Type.Array(ActivationRow),
   pending_asks: Type.Array(PendingAskRow),
   build: Type.Optional(Type.String()),
+  // Canonical display (SPECIALISTS-4365): the runtime-computed header plus one
+  // entry per activation. Optional — payloads from older runtimes omit it and
+  // every renderer falls back to its local formatters then.
+  display: Type.Optional(Type.Object({
+    header: Type.Optional(Type.String()),
+    activations: Type.Optional(Type.Array(Type.Object({
+      activation_id: Type.String(),
+      marker: Type.Optional(Type.String()),
+      metrics: Type.Optional(Type.String()),
+      work: Type.Optional(Type.String()),
+    })) ),
+  })),
 });
 
 const SpecialistRow = Type.Object({
@@ -2453,20 +2510,28 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       const h = getHost();
       const full = params.full === true;
       if (full) {
+        const snapshots = h.list();
+        const asks = h.pendingAsks();
         return resultOf(annexBuildIdentity({
-              activations: h.list().map((snapshot) =>
+              activations: snapshots.map((snapshot) =>
                 withResult(withIssuePair(toActivationView(snapshot), snapshot?.issueRef), results.get(snapshot.activationId), true)),
-              pending_asks: h.pendingAsks().map(toPendingAskView),
+              pending_asks: asks.map(toPendingAskView),
+              // Canonical display (SPECIALISTS-4365): same block the MCP tool
+              // carries, computed from the same snapshots.
+              display: buildFleetDisplay(snapshots, asks),
             }))
       }
+      const snapshots = h.list();
+      const asks = h.pendingAsks();
       return resultOf(annexBuildIdentity({
-            activations: h.list().map((snapshot) => withIssuePair({
+            activations: snapshots.map((snapshot) => withIssuePair({
               ...toActivationCompactView(snapshot),
               ...(results.has(snapshot.activationId)
                 ? { result_status: results.get(snapshot.activationId).status ?? 'settled' }
                 : {}),
             }, snapshot?.issueRef)),
-            pending_asks: h.pendingAsks().map(toPendingAskCompactView),
+            pending_asks: asks.map(toPendingAskCompactView),
+            display: buildFleetDisplay(snapshots, asks),
           }))
     },
   });
@@ -3143,12 +3208,17 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     // `host` stays null until the first tool use, and a null host is an empty
     // Fleet, not an error: creating one here would open the observability
     // database for a session that has not dispatched anything.
-    if (!host) return { activations: [], asks: [] };
+    if (!host) return { activations: [], asks: [], display: { header: 'idle', activations: [] } };
+    // Canonical display (SPECIALISTS-4365): computed once from the snapshots so
+    // every renderer styles the SAME strings the status payload carries.
+    const snapshots = host.list();
+    const asks = host.pendingAsks();
     return {
       // Arrow form, never bare `.map(toActivationView)`: Array.map passes the
       // element INDEX as nowMs, freezing every row at elapsed 0s (unitAI-d99hb).
-      activations: host.list().map((s) => withIssuePair(toActivationView(s), s?.issueRef)),
-      asks: host.pendingAsks().map(toPendingAskView),
+      activations: snapshots.map((s) => withIssuePair(toActivationView(s), s?.issueRef)),
+      asks: asks.map(toPendingAskView),
+      display: buildFleetDisplay(snapshots, asks),
     };
   };
 
@@ -3218,7 +3288,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     const nowMs = Date.now();
     const { entries, overflow } = selectFleetEntries(fleet);
     const lines = [''];
-    for (const view of entries) lines.push(...renderFleetRowLines(view, asks, nowMs));
+    for (const view of entries) lines.push(...renderFleetRowLines(view, asks, nowMs, displayEntryFor(fleet.display, view.activation_id)));
     if (overflow > 0) lines.push(`    +${overflow} more`);
     return lines;
   };
@@ -3424,10 +3494,11 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       const view = fleet.activations.find((a) => a.activation_id === resolvedId);
       const ask = fleet.asks.find((a) => a.activation_id === resolvedId);
       const issueTitle = readIssueTitle(view?.issue_ref ?? payload.issue_ref ?? id);
+      const displayMetrics = displayEntryFor(fleet.display, resolvedId)?.metrics ?? null;
       if (payload.status === 'error') {
-        return { head: buildOverlayDetailHead(view, ask, 'result', Date.now(), issueTitle), lines: [`result unavailable · ${payload.error ?? 'unknown error'}`], lastSeq: null, running: false, settled: true };
+        return { head: buildOverlayDetailHead(view, ask, 'result', Date.now(), issueTitle, displayMetrics), lines: [`result unavailable · ${payload.error ?? 'unknown error'}`], lastSeq: null, running: false, settled: true };
       }
-      return { head: buildOverlayDetailHead(view, ask, 'result', Date.now(), issueTitle), lines: resultCommandLines(payload), lastSeq: null, running: false, settled: true };
+      return { head: buildOverlayDetailHead(view, ask, 'result', Date.now(), issueTitle, displayMetrics), lines: resultCommandLines(payload), lastSeq: null, running: false, settled: true };
     };
     const readFeed = async (id, since = null) => {
       const input = { activation_id: id, limit: FEED_COMMAND_LINES };
@@ -3439,11 +3510,12 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       const view = fleet.activations.find((a) => a.activation_id === resolvedId);
       const ask = fleet.asks.find((a) => a.activation_id === resolvedId);
       const issueTitle = readIssueTitle(view?.issue_ref ?? payload.issue_ref ?? id);
+      const displayMetrics = displayEntryFor(fleet.display, resolvedId)?.metrics ?? null;
       if (payload.status === 'error') {
-        return { head: buildOverlayDetailHead(view, ask, 'feed', Date.now(), issueTitle), lines: [`feed unavailable · ${payload.error ?? 'unknown error'}`], lastSeq: null, running: false, settled: true };
+        return { head: buildOverlayDetailHead(view, ask, 'feed', Date.now(), issueTitle, displayMetrics), lines: [`feed unavailable · ${payload.error ?? 'unknown error'}`], lastSeq: null, running: false, settled: true };
       }
       const running = fleet.activations.some((a) => a.activation_id === resolvedId && isActiveStateFor(a.state));
-      return { head: buildOverlayDetailHead(view, ask, 'feed', Date.now(), issueTitle), lines: feedCommandLines(payload), lastSeq: payload.last_seq ?? null, running, settled: !running };
+      return { head: buildOverlayDetailHead(view, ask, 'feed', Date.now(), issueTitle, displayMetrics), lines: feedCommandLines(payload), lastSeq: payload.last_seq ?? null, running, settled: !running };
     };
     let overlay = null;
     let mounted = false;
@@ -3515,11 +3587,12 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
         const ask = resolved.fleet.asks.find((a) => a.activation_id === row.activation_id);
         const nowMs = Date.now();
         const statusPurpose = formatPurposeShort(row.purpose);
+        const statusDisplay = displayEntryFor(resolved.fleet.display, row.activation_id);
         report(ctx, [
           `${row.specialist} ${row.activation_id} · ${row.state ?? 'unknown'}`,
           `  ${formatWorkIdentity(row)}`,
           ...(statusPurpose ? [`  purpose: ${statusPurpose}`] : []),
-          `  ${rowMetrics({ view: row, ask: ask ?? null, nowMs })}`,
+          `  ${statusDisplay?.metrics ?? rowMetrics({ view: row, ask: ask ?? null, nowMs })}`,
           ...(ask ? [`  ${ask.kind ?? 'ask'} ${ask.message_id}: ${ask.body ?? ''}`] : []),
         ].join('\n'));
         return;

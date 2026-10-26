@@ -90885,6 +90885,157 @@ var init_polling = __esm(() => {
   init_pending_store();
 });
 
+// src/tools/specialist/specialist-display.ts
+function displayActivationId(view) {
+  return view.activationId ?? view.activation_id ?? "";
+}
+function displayWorkRef(view) {
+  return view.issueRef ?? view.issue_ref ?? view.bead_id ?? view.issue_id ?? "\u2014";
+}
+function displayElapsedS(view, nowMs) {
+  if (typeof view.elapsed_s === "number" && Number.isFinite(view.elapsed_s)) {
+    return Math.max(0, Math.floor(view.elapsed_s));
+  }
+  if (typeof view.startedAt === "number" && Number.isFinite(view.startedAt)) {
+    return Math.max(0, Math.floor((nowMs - view.startedAt) / 1000));
+  }
+  return 0;
+}
+function displayTurnCount(view) {
+  const turns = view.turnCount ?? view.turn_count;
+  return typeof turns === "number" && Number.isFinite(turns) ? turns : undefined;
+}
+function displayTokenUsage(view) {
+  const usage = view.tokenUsage ?? view.token_usage;
+  return usage === undefined ? undefined : usage;
+}
+function displayCounter(usage, key) {
+  const value = usage[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+function displayLastActivityAt(view) {
+  const at = view.lastActivityAt ?? view.last_activity_at;
+  return typeof at === "number" && Number.isFinite(at) ? at : undefined;
+}
+function displayAskActivationId(ask) {
+  return ask.message?.activationId ?? ask.message?.activation_id ?? ask.activationId ?? ask.activation_id ?? "";
+}
+function displayAskedAt(ask, nowMs) {
+  const at = ask.askedAt ?? ask.asked_at;
+  return typeof at === "number" && Number.isFinite(at) ? at : nowMs;
+}
+function formatDisplayElapsed(elapsedS) {
+  const total = Math.max(0, Math.floor(elapsedS ?? 0));
+  if (total < 60)
+    return `${total}s`;
+  if (total < 3600)
+    return `${Math.floor(total / 60)}m${String(total % 60).padStart(2, "0")}s`;
+  return `${Math.floor(total / 3600)}h${String(Math.floor(total % 3600 / 60)).padStart(2, "0")}m`;
+}
+function formatDisplaySpend(tokenUsage) {
+  if (!tokenUsage)
+    return "";
+  const total = ["input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens"].reduce((n, k) => n + displayCounter(tokenUsage, k), 0) + displayCounter(tokenUsage, "input") + displayCounter(tokenUsage, "output") + displayCounter(tokenUsage, "cache");
+  if (total <= 0)
+    return "";
+  if (total < 1000)
+    return `${total}`;
+  if (total < 1e4)
+    return `${(total / 1000).toFixed(1)}k`;
+  return `${Math.round(total / 1000)}k`;
+}
+function formatDisplayTurns(turnCount) {
+  if (turnCount === null || turnCount === undefined)
+    return "";
+  return `${turnCount} turn${turnCount === 1 ? "" : "s"}`;
+}
+function displayIdleS(view, nowMs) {
+  const at = displayLastActivityAt(view);
+  if (at == null)
+    return null;
+  return Math.max(0, Math.floor((nowMs - at) / 1000));
+}
+function isDisplayActiveState(state) {
+  return state === "running" || state === "starting";
+}
+function activationDisplayMarker(view, ask, nowMs = Date.now()) {
+  if (ask)
+    return "!";
+  if (view.state === "settled")
+    return "\u2713";
+  if (view.state === "failed")
+    return "\u2715";
+  const idle = displayIdleS(view, nowMs);
+  const active = isDisplayActiveState(view.state) && !(idle != null && idle > DISPLAY_IDLE_AFTER_S);
+  if (active)
+    return DISPLAY_SPINNER_FRAMES[Math.floor(nowMs / DISPLAY_SPINNER_FRAME_MS) % DISPLAY_SPINNER_FRAMES.length];
+  return "\u25CF";
+}
+function activationDisplayMetrics(view, ask, nowMs = Date.now()) {
+  if (ask) {
+    return `asked ${formatDisplayElapsed(Math.max(0, Math.floor((nowMs - displayAskedAt(ask, nowMs)) / 1000)))}`;
+  }
+  const idle = displayIdleS(view, nowMs);
+  if (isDisplayActiveState(view.state) && idle != null && idle > DISPLAY_IDLE_AFTER_S) {
+    return `idle ${formatDisplayElapsed(idle)}`;
+  }
+  const parts = [formatDisplayElapsed(displayElapsedS(view, nowMs))];
+  const turns = formatDisplayTurns(displayTurnCount(view));
+  if (turns)
+    parts.push(turns);
+  const spend = formatDisplaySpend(displayTokenUsage(view));
+  if (spend)
+    parts.push(spend);
+  return parts.filter(Boolean).join(" ");
+}
+function fleetDisplayHeader(activations, asks) {
+  const total = activations.length;
+  if (total === 0)
+    return "idle";
+  const askById = new Map;
+  for (const ask of asks ?? []) {
+    const id = displayAskActivationId(ask);
+    if (id && !askById.has(id))
+      askById.set(id, ask);
+  }
+  const blocked = activations.filter((v) => askById.has(displayActivationId(v))).length;
+  const running = activations.filter((v) => isDisplayActiveState(v.state) && !askById.has(displayActivationId(v))).length;
+  const waiting = Math.max(0, total - running - blocked);
+  const parts = [];
+  if (running > 0)
+    parts.push(`${running} running`);
+  if (waiting > 0)
+    parts.push(`${waiting} waiting`);
+  if (blocked > 0)
+    parts.push(`${blocked} blocked`);
+  return parts.join(" ");
+}
+function activationDisplayEntry(view, ask, nowMs = Date.now()) {
+  return {
+    activation_id: displayActivationId(view),
+    marker: activationDisplayMarker(view, ask, nowMs),
+    metrics: activationDisplayMetrics(view, ask, nowMs),
+    work: displayWorkRef(view)
+  };
+}
+function buildFleetDisplay(activations, asks, nowMs = Date.now()) {
+  const askById = new Map;
+  for (const ask of asks ?? []) {
+    const id = displayAskActivationId(ask);
+    if (id && !askById.has(id))
+      askById.set(id, ask);
+  }
+  return {
+    header: fleetDisplayHeader(activations ?? [], asks ?? []),
+    activations: (activations ?? []).map((view) => activationDisplayEntry(view, askById.get(displayActivationId(view)), nowMs))
+  };
+}
+var DISPLAY_SPINNER_FRAMES, DISPLAY_SPINNER_FRAME_MS = 220, DISPLAY_IDLE_AFTER_S = 30, DISPLAY_ACTIVE_STATES;
+var init_specialist_display = __esm(() => {
+  DISPLAY_SPINNER_FRAMES = ["\u25D0", "\u25D3", "\u25D1", "\u25D2"];
+  DISPLAY_ACTIVE_STATES = new Set(["running", "starting"]);
+});
+
 // src/tools/specialist/specialist_status.tool.ts
 function fleetFingerprint(host, results) {
   const activations = host.list().map((s) => `${s.activationId}:${s.state}`).sort();
@@ -90933,6 +91084,7 @@ function createSpecialistStatusTool(loader, circuitBreaker, getHost, getPusher) 
         const activations = host ? host.list().map((s) => toActivationView(s)) : [];
         const pending_asks = host ? host.pendingAsks().map(toPendingAskView) : [];
         const activation_results = getPusher?.()?.allResults().map(toActivationResultView) ?? [];
+        const display = host ? buildFleetDisplay(host.list(), host.pendingAsks()) : { header: "idle", activations: [] };
         return {
           loaded_count: list.length,
           activations,
@@ -90940,17 +91092,20 @@ function createSpecialistStatusTool(loader, circuitBreaker, getHost, getPusher) 
           activation_results,
           pending_interactions,
           uncertain_workspaces,
-          backends_health: Object.fromEntries(BACKENDS2.map((b) => [b, circuitBreaker.getState(b)]))
+          backends_health: Object.fromEntries(BACKENDS2.map((b) => [b, circuitBreaker.getState(b)])),
+          display
         };
       }
       const hostResults = getPusher?.()?.allResults() ?? [];
       const statusById = new Map(hostResults.map((r) => [r.activationId, r.status]));
+      const display = host ? buildFleetDisplay(host.list(), host.pendingAsks()) : { header: "idle", activations: [] };
       return {
         activations: host ? host.list().map((s) => ({
           ...toActivationCompactView(s),
           ...statusById.has(s.activationId) ? { result_status: statusById.get(s.activationId) } : {}
         })) : [],
-        pending_asks: host ? host.pendingAsks().map(toPendingAskCompactView) : []
+        pending_asks: host ? host.pendingAsks().map(toPendingAskCompactView) : [],
+        display
       };
     }
   };
@@ -90962,6 +91117,7 @@ var init_specialist_status_tool = __esm(() => {
   init_workspace_reconcile();
   init_descriptions();
   init_activation_tool();
+  init_specialist_display();
   BACKENDS2 = ["gemini", "qwen", "anthropic", "openai"];
   specialistStatusSchema = objectType({
     full: booleanType().optional().describe(SPECIALIST_STATUS_PARAMS.full),
@@ -95195,6 +95351,7 @@ var init_lib = __esm(() => {
   init_contract_sections();
   init_types3();
   init_activation_tool();
+  init_specialist_display();
   init_async_events();
   init_forensic_sink();
   init_observability_sqlite();

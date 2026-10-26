@@ -26375,6 +26375,155 @@ var specialistRetrySchema = objectType({
   prompt: stringType().optional().describe(SPECIALIST_RETRY_PARAMS.prompt),
   ...fullFlag
 });
+// src/tools/specialist/specialist-display.ts
+var DISPLAY_SPINNER_FRAMES = ["◐", "◓", "◑", "◒"];
+var DISPLAY_SPINNER_FRAME_MS = 220;
+var DISPLAY_IDLE_AFTER_S = 30;
+var DISPLAY_ACTIVE_STATES = new Set(["running", "starting"]);
+function displayActivationId(view) {
+  return view.activationId ?? view.activation_id ?? "";
+}
+function displayWorkRef(view) {
+  return view.issueRef ?? view.issue_ref ?? view.bead_id ?? view.issue_id ?? "—";
+}
+function displayElapsedS(view, nowMs) {
+  if (typeof view.elapsed_s === "number" && Number.isFinite(view.elapsed_s)) {
+    return Math.max(0, Math.floor(view.elapsed_s));
+  }
+  if (typeof view.startedAt === "number" && Number.isFinite(view.startedAt)) {
+    return Math.max(0, Math.floor((nowMs - view.startedAt) / 1000));
+  }
+  return 0;
+}
+function displayTurnCount(view) {
+  const turns = view.turnCount ?? view.turn_count;
+  return typeof turns === "number" && Number.isFinite(turns) ? turns : undefined;
+}
+function displayTokenUsage(view) {
+  const usage = view.tokenUsage ?? view.token_usage;
+  return usage === undefined ? undefined : usage;
+}
+function displayCounter(usage, key) {
+  const value = usage[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+function displayLastActivityAt(view) {
+  const at = view.lastActivityAt ?? view.last_activity_at;
+  return typeof at === "number" && Number.isFinite(at) ? at : undefined;
+}
+function displayAskActivationId(ask) {
+  return ask.message?.activationId ?? ask.message?.activation_id ?? ask.activationId ?? ask.activation_id ?? "";
+}
+function displayAskedAt(ask, nowMs) {
+  const at = ask.askedAt ?? ask.asked_at;
+  return typeof at === "number" && Number.isFinite(at) ? at : nowMs;
+}
+function formatDisplayElapsed(elapsedS) {
+  const total = Math.max(0, Math.floor(elapsedS ?? 0));
+  if (total < 60)
+    return `${total}s`;
+  if (total < 3600)
+    return `${Math.floor(total / 60)}m${String(total % 60).padStart(2, "0")}s`;
+  return `${Math.floor(total / 3600)}h${String(Math.floor(total % 3600 / 60)).padStart(2, "0")}m`;
+}
+function formatDisplaySpend(tokenUsage) {
+  if (!tokenUsage)
+    return "";
+  const total = ["input_tokens", "output_tokens", "cache_creation_tokens", "cache_read_tokens"].reduce((n, k) => n + displayCounter(tokenUsage, k), 0) + displayCounter(tokenUsage, "input") + displayCounter(tokenUsage, "output") + displayCounter(tokenUsage, "cache");
+  if (total <= 0)
+    return "";
+  if (total < 1000)
+    return `${total}`;
+  if (total < 1e4)
+    return `${(total / 1000).toFixed(1)}k`;
+  return `${Math.round(total / 1000)}k`;
+}
+function formatDisplayTurns(turnCount) {
+  if (turnCount === null || turnCount === undefined)
+    return "";
+  return `${turnCount} turn${turnCount === 1 ? "" : "s"}`;
+}
+function displayIdleS(view, nowMs) {
+  const at = displayLastActivityAt(view);
+  if (at == null)
+    return null;
+  return Math.max(0, Math.floor((nowMs - at) / 1000));
+}
+function isDisplayActiveState(state) {
+  return state === "running" || state === "starting";
+}
+function activationDisplayMarker(view, ask, nowMs = Date.now()) {
+  if (ask)
+    return "!";
+  if (view.state === "settled")
+    return "✓";
+  if (view.state === "failed")
+    return "✕";
+  const idle = displayIdleS(view, nowMs);
+  const active = isDisplayActiveState(view.state) && !(idle != null && idle > DISPLAY_IDLE_AFTER_S);
+  if (active)
+    return DISPLAY_SPINNER_FRAMES[Math.floor(nowMs / DISPLAY_SPINNER_FRAME_MS) % DISPLAY_SPINNER_FRAMES.length];
+  return "●";
+}
+function activationDisplayMetrics(view, ask, nowMs = Date.now()) {
+  if (ask) {
+    return `asked ${formatDisplayElapsed(Math.max(0, Math.floor((nowMs - displayAskedAt(ask, nowMs)) / 1000)))}`;
+  }
+  const idle = displayIdleS(view, nowMs);
+  if (isDisplayActiveState(view.state) && idle != null && idle > DISPLAY_IDLE_AFTER_S) {
+    return `idle ${formatDisplayElapsed(idle)}`;
+  }
+  const parts = [formatDisplayElapsed(displayElapsedS(view, nowMs))];
+  const turns = formatDisplayTurns(displayTurnCount(view));
+  if (turns)
+    parts.push(turns);
+  const spend = formatDisplaySpend(displayTokenUsage(view));
+  if (spend)
+    parts.push(spend);
+  return parts.filter(Boolean).join(" ");
+}
+function fleetDisplayHeader(activations, asks) {
+  const total = activations.length;
+  if (total === 0)
+    return "idle";
+  const askById = new Map;
+  for (const ask of asks ?? []) {
+    const id = displayAskActivationId(ask);
+    if (id && !askById.has(id))
+      askById.set(id, ask);
+  }
+  const blocked = activations.filter((v) => askById.has(displayActivationId(v))).length;
+  const running = activations.filter((v) => isDisplayActiveState(v.state) && !askById.has(displayActivationId(v))).length;
+  const waiting = Math.max(0, total - running - blocked);
+  const parts = [];
+  if (running > 0)
+    parts.push(`${running} running`);
+  if (waiting > 0)
+    parts.push(`${waiting} waiting`);
+  if (blocked > 0)
+    parts.push(`${blocked} blocked`);
+  return parts.join(" ");
+}
+function activationDisplayEntry(view, ask, nowMs = Date.now()) {
+  return {
+    activation_id: displayActivationId(view),
+    marker: activationDisplayMarker(view, ask, nowMs),
+    metrics: activationDisplayMetrics(view, ask, nowMs),
+    work: displayWorkRef(view)
+  };
+}
+function buildFleetDisplay(activations, asks, nowMs = Date.now()) {
+  const askById = new Map;
+  for (const ask of asks ?? []) {
+    const id = displayAskActivationId(ask);
+    if (id && !askById.has(id))
+      askById.set(id, ask);
+  }
+  return {
+    header: fleetDisplayHeader(activations ?? [], asks ?? []),
+    activations: (activations ?? []).map((view) => activationDisplayEntry(view, askById.get(displayActivationId(view)), nowMs))
+  };
+}
 // src/activation/async-events.ts
 import { randomUUID as randomUUID5 } from "node:crypto";
 class ResultNotValidatedError extends Error {
@@ -27424,6 +27573,9 @@ function createSpecialistLeaseReconcileTool(probe) {
 export {
   BUILD_ID_BYTES,
   DISPATCH_REFUSAL_REASONS,
+  DISPLAY_IDLE_AFTER_S,
+  DISPLAY_SPINNER_FRAMES,
+  DISPLAY_SPINNER_FRAME_MS,
   DispatchRejectedError,
   FEED_DEFAULT_LIMIT,
   FEED_LINE_MAX,
@@ -27461,7 +27613,11 @@ export {
   V1_SPECIALIST_TOOL_NAMES,
   V2_SPECIALIST_TOOL_NAMES,
   WORKSPACE_WRITE_TOOLS,
+  activationDisplayEntry,
+  activationDisplayMarker,
+  activationDisplayMetrics,
   admitCoordinatorToolCall,
+  buildFleetDisplay,
   completionBody,
   createActivationForensicSink,
   createBeadFromContract,
@@ -27475,6 +27631,10 @@ export {
   extractSections,
   feedLine,
   fixForRefusalReason,
+  fleetDisplayHeader,
+  formatDisplayElapsed,
+  formatDisplaySpend,
+  formatDisplayTurns,
   hashFileBytes,
   inspect as inspectWorkspaceLease,
   isBuildStale,
