@@ -852,7 +852,7 @@ export function register(on: On) {
         ) : null}
         {s.error ? (
           <Box paddingLeft={4}>
-            <Text color="yellow" wrap="wrap">status unavailable · {s.error}</Text>
+            <Text color={ATTENTION} wrap="wrap">status unavailable · {s.error}</Text>
           </Box>
         ) : null}
         {rows.length > 0 || s.flash ? fleetBody($, s, { Box, Text, Button, Input }, rows, 'band', DETAIL_BAND_LINES) : null}
@@ -873,7 +873,7 @@ export function register(on: On) {
     return (
       <Box flexDirection="column">
         <Text bold>{headerTextOf(s.fleet)}</Text>
-        {s.error ? <Text color="yellow" wrap="wrap">status unavailable · {s.error}</Text> : null}
+        {s.error ? <Text color={ATTENTION} wrap="wrap">status unavailable · {s.error}</Text> : null}
         {s.fleet.activations.length === 0 ? <Text dimColor wrap="wrap">No live activations.</Text> : null}
         {fleetBody($, s, { Box, Text, Button, Input }, orderedOf(s.fleet), 'pane', DETAIL_PANE_LINES)}
         <Text dimColor wrap="wrap">esc closes · select a row to read its result or feed, or to reply, steer, resume or stop</Text>
