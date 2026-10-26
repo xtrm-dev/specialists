@@ -29,7 +29,7 @@ It does not shell out to the `sp` CLI for that.
 | Runtime | Surface | Operator guidance |
 |---|---|---|
 | Pi | the `native-specialists` extension | the tool descriptions |
-| Claude Code | the `specialists` plugin MCP server; channel push wakes you | `/specialists:supervising-activations` |
+| Claude Code | the `specialists` plugin MCP server; channel push wakes you | `/specialists:using-specialists` |
 
 Two execution paths remain during XTRM-93. Native activation (below) is the primary flow for Substrate-backed work; legacy `sp run`/Supervisor behavior is a compatibility path for operators. Agent work authority comes from the typed Substrate service.
 
@@ -140,7 +140,8 @@ list|reconcile`, `sp config show <name> --resolved`, and the advanced surfaces b
 Load only the one you need: `references/chain-recipes.md` (role/gate recipes),
 `references/monitoring.md` (wakes, results, failures), `references/merge-and-integration.md`
 (integration/publication), `references/registry-and-locations.md` (registry),
-`references/dispatch-preconditions.md` (git/workspace prerequisites). Operator surfaces:
+`references/dispatch-preconditions.md` (git/workspace prerequisites),
+`references/claude-code.md` (Claude Code notes: store resolution, wakes, headless limits). Operator surfaces:
 `references/kpi.md` (cost/stall analysis), `references/nodes.md` (NodeSupervisor),
 `references/script-class.md` (`sp script`/`sp serve`), `references/specialist-definitions.md`
 (definition authoring; helpers under `scripts/specialist-definitions/`, including when a

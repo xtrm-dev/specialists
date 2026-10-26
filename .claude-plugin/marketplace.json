@@ -9,7 +9,7 @@
     {
       "name": "specialists",
       "source": "./plugins/specialists",
-      "description": "Specialists execution runtime in Claude Code: activation and dispatch over MCP, session continuity hooks, and the supervising-activations skill."
+      "description": "Specialists execution runtime in Claude Code: activation and dispatch over MCP, session continuity hooks, and the using-specialists skill."
     },
     {
       "name": "specialists-ui",

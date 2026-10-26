@@ -17,6 +17,7 @@ const RETIRED_ROOTS = [
 const RETAINED_REFERENCES = [
   'issue-contracts.md',
   'chain-recipes.md',
+  'claude-code.md',
   'dispatch-preconditions.md',
   'kpi.md',
   'merge-and-integration.md',

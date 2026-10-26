@@ -7,6 +7,10 @@
       "sha256": "a82c52949b23b842ad7ce0fc9ecb107648e2c1149de42358c54f858383056d8f"
     },
     {
+      "path": "config/skills/using-specialists/references/claude-code.md",
+      "sha256": "eaa67abe05a9054855a0eaa02b31baf762ef4141fdfad8e32dcce24beec43b45"
+    },
+    {
       "path": "config/skills/using-specialists/references/dispatch-preconditions.md",
       "sha256": "25c832dbf087699d8752a0de2094c5aecd8c173a9899b6c7552fa98736c8d51a"
     },
@@ -60,7 +64,7 @@
     },
     {
       "path": "config/skills/using-specialists/SKILL.md",
-      "sha256": "f4be9a47dc1faeccc9ca5295be6a545fe44e141e493b0c5c8a3b98c54f22eb03"
+      "sha256": "e8d893d6303eed306e4a2ded8e8afeaaa7a2e00462387a784ebe9ed0fb57fb55"
     }
   ],
   "shipped_specialists": [
