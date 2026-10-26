@@ -44,4 +44,14 @@ describe('pr-reviewer package specialist', () => {
     expect(system).toContain('- Verdict: PASS | PARTIAL | FAIL');
     expect(system).toContain('## OCR Preflight');
   });
+
+  it('puts CI status first and reproduces every red check on the merge ref', async () => {
+    const system = (await loadPrReviewer()).specialist.prompt.system ?? '';
+
+    expect(system).toContain('CI status is mandatory and comes before you read code');
+    expect(system).toContain('reproduce it on the merge ref before you claim anything passes');
+    expect(system).toContain('A run on the PR head alone does not clear a red check');
+    expect(system).toContain('A required check that is red and unexplained prevents PASS.');
+    expect(system).toContain('- Verdict: PASS | PARTIAL | FAIL (exactly one of these three words');
+  });
 });
