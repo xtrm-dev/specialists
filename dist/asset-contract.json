@@ -4,7 +4,7 @@
   "shipped_skills": [
     {
       "path": "config/skills/using-specialists/references/chain-recipes.md",
-      "sha256": "ea4b8672c4334f9c1b0da5f1053728c865597a31025e2637b0eb5cd5498b7d57"
+      "sha256": "a82c52949b23b842ad7ce0fc9ecb107648e2c1149de42358c54f858383056d8f"
     },
     {
       "path": "config/skills/using-specialists/references/dispatch-preconditions.md",
@@ -226,6 +226,9 @@
     },
     {
       "path": "config/catalog/python-kernel.json"
+    },
+    {
+      "path": "config/catalog/role-specialist-map.json"
     },
     {
       "path": "config/catalog/service-knowledge.json"
