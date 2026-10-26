@@ -48,6 +48,16 @@ import { DispatchRejectedError } from '../../activation/types.js';
 import type { PendingAsk } from '../../activation/interaction.js';
 import type { RuntimeEventPusher } from '../../activation/async-events.js';
 import type { ActivationResult } from '../../activation/types.js';
+import {
+  SPECIALIST_DISPATCH_PARAMS,
+  SPECIALIST_DISPATCH_RUNTIME_PARAMS,
+  SPECIALIST_REPLY_PARAMS,
+  SPECIALIST_RETRY_PARAMS,
+  SPECIALIST_STEER_PARAMS,
+  SPECIALIST_STOP_PARAMS,
+  SPECIALIST_FULL_PARAM,
+  specialistToolDescription,
+} from './descriptions.js';
 
 /**
  * Transport-neutral projection of one activation.
@@ -338,82 +348,35 @@ function renderDispatchRejection(error: DispatchRejectedError) {
  * returns the compact projection unless it is set. `full: true` restores the
  * pre-142 verbose shape byte-for-shape, so existing consumers opt back in. */
 export const fullFlag = {
-  full: z.boolean().optional().describe(
-    'Return the full verbose payload (pre-SPECIALISTS-142 shape). Default compact.',
-  ),
+  full: z.boolean().optional().describe(SPECIALIST_FULL_PARAM),
 };
 
 export const specialistDispatchSchema = z.object({
-  specialist: z.string().describe('Specialist name, e.g. codebase-explorer'),
-  issue_ref: z.string().optional().describe(
-    "The Substrate Issue locator for this activation's task contract — XTRM-227, XTRM-184.2.3, " +
-    'iss_..., a historical locator, or an imported Beads alias. Only a Substrate Issue locator is accepted here; ' +
-    'any other locator is refused as unresolvable. The ' +
-    "issue must be READY: a COMPLETE 7-section contract (PROBLEM, SUCCESS, SCOPE, NON_GOALS, " +
-    'CONSTRAINTS, VALIDATION, OUTPUT) plus a SCRUTINY level, which must be exactly one of LOW, ' +
-    'MEDIUM, HIGH or CRITICAL. That is EIGHT required parts, not seven; SCRUTINY is the one most ' +
-    'often left out. Write each section as a heading: either the section name on its own line ' +
-    'with its body beneath, or `PROBLEM: the body` on one line. Both forms are accepted. ' +
-    'A draft or incomplete issue is refused before any model turn. No free-form task text is ' +
-    'accepted: a task that needs more definition belongs in the Issue (see the planning skill). ' +
-    'Supply EXACTLY ONE of issue_ref, bead_id or contract.',
-  ),
-  bead_id: z.string().optional().describe(
-    'Permanent compatibility alias for issue_ref — the same Substrate Issue locator, resolved at ' +
-    'this tool boundary to the same value. Both names are accepted forever and behave identically; ' +
-    'prefer issue_ref in new calls. Compatibility note: a bare `bd` id is not a Substrate Issue and is refused as unresolvable. ' +
-    'Supply EXACTLY ONE ' +
-    'of issue_ref, bead_id or contract.',
-  ),
-  contract: z.string().optional().describe(
-    'An INLINE task contract, used instead of issue_ref: the SAME readiness gate ' +
-    'runs first, then a Substrate Issue is created from it and dispatched. The contract ' +
-    'must contain all seven sections — PROBLEM, SUCCESS, SCOPE, NON_GOALS, ' +
-    'CONSTRAINTS, VALIDATION, OUTPUT — plus a SCRUTINY level, which must be exactly ' +
-    'one of LOW, MEDIUM, HIGH or CRITICAL. Note that this is EIGHT required parts, ' +
-    'not seven; SCRUTINY is the one most often left out. Write each section as a ' +
-    'heading: either the section name on its own line with its body beneath, or ' +
-    '`PROBLEM: the body` on one line. Both forms are accepted. ' +
-    'A contract missing any section is refused and nothing is created.',
-  ),
-  title: z.string().optional().describe(
-    'Optional title for the Substrate Issue created from `contract` (default: `<specialist>: <first PROBLEM line>`). ' +
-    'An explicit title wins; blank counts as absent. Ignored when issue_ref (or its bead_id alias) is given.',
-  ),
-  parent_ref: z.string().optional().describe(
-    'Parent locator for the Substrate Issue created from `contract` — any locator the shared ' +
-    'work boundary resolves. ONLY with contract: refused alongside issue_ref/bead_id, and ' +
-    'refused without contract. The parent must exist and not be terminal ' +
-    '(done/cancelled/archived; deferred is accepted); the check runs BEFORE anything is ' +
-    'created, and creation-with-parent is one atomic step.',
-  ),
+  specialist: z.string().describe(SPECIALIST_DISPATCH_PARAMS.specialist),
+  issue_ref: z.string().optional().describe(SPECIALIST_DISPATCH_PARAMS.issue_ref),
+  bead_id: z.string().optional().describe(SPECIALIST_DISPATCH_PARAMS.bead_id),
+  contract: z.string().optional().describe(SPECIALIST_DISPATCH_PARAMS.contract),
+  title: z.string().optional().describe(SPECIALIST_DISPATCH_PARAMS.title),
+  parent_ref: z.string().optional().describe(SPECIALIST_DISPATCH_PARAMS.parent_ref),
   kind: z.enum(['task', 'bug', 'research', 'decision', 'followup']).optional().describe(
-    'Substrate kind for the Substrate Issue created from `contract` (never epic — refused ' +
-    'structurally). ONLY with contract: refused alongside issue_ref/bead_id, and refused ' +
-    'without contract. Absent means the default from the Specialist output_type ' +
-    '(research/analysis give research, everything else gives task).',
+    SPECIALIST_DISPATCH_PARAMS.kind,
   ),
   // Deliberately a bare number, not min(1).max(2): out-of-range values must reach
   // execute and come back as a structured refusal via the shared renderer, not as a
   // zod throw that surfaces as an opaque MCP error (server.ts parses before execute).
   epic_context_depth: z.number().optional().describe(
-    'Walk Substrate parent_child edges UP this many hops (1 = immediate parent Issue, ' +
-    "2 = parent + grandparent) and render each ancestor contract into the turn-1 prompt as an '" +
-    "'## Epic lineage' section. Must be 1 or 2; anything else is refused. Omit for " +
-    'a single-Issue dispatch with no lineage. Honoured for an inline contract ONLY when ' +
-    'parent_ref is given (a parentless auto-created Issue has no lineage); still dropped ' +
-    'for parentless inline creates.',
+    SPECIALIST_DISPATCH_PARAMS.epic_context_depth,
   ),
-  model_override: z.string().optional().describe(
-    'Override the configured model for THIS activation only. An unavailable model is refused before the session is created, never silently replaced.',
-  ),
+  model_override: z.string().optional().describe(SPECIALIST_DISPATCH_PARAMS.model_override),
   thinking_override: z.enum(THINKING_LEVELS).optional().describe(
-    'Override the definition thinking_level for THIS activation only. Absent means the definition level. An unknown value is refused before the session is created.',
+    SPECIALIST_DISPATCH_PARAMS.thinking_override,
   ),
   requested_by: z.string().optional().describe(
-    'ParticipantId of the requesting coordinator. Defaults to the MCP gateway participant.',
+    SPECIALIST_DISPATCH_RUNTIME_PARAMS.mcp.requested_by,
   ),
-  coordinator_session_id: z.string().optional().describe('MCP session id, for lineage.'),
+  coordinator_session_id: z.string().optional().describe(
+    SPECIALIST_DISPATCH_RUNTIME_PARAMS.mcp.coordinator_session_id,
+  ),
   ...fullFlag,
 });
 
@@ -438,24 +401,7 @@ export function createSpecialistDispatchTool(
 ) {
   return {
     name: 'specialist_dispatch' as const,
-    description:
-      'Dispatch a Specialist on the native in-process runtime. No CLI process is spawned. ' +
-      'Provide EITHER issue_ref (a READY Substrate Issue locator — XTRM-227, XTRM-184.2.3, ' +
-      'iss_..., a historical locator, or an imported Beads alias; bead_id is a permanent ' +
-      'compatibility alias for the same value) OR contract (an inline 7-section contract plus ' +
-      'a SCRUTINY level). Never both. An inline contract is accepted through the SAME pipeline ' +
-      'as an existing Issue: structural validation, Substrate Issue creation, readiness ' +
-      'attestation, claim, ExecutionBinding, activation. The Issue contract IS the prompt and ' +
-      'MUST be complete — PROBLEM, SUCCESS, SCOPE, NON_GOALS, CONSTRAINTS, VALIDATION, OUTPUT ' +
-      'plus a SCRUTINY level, eight required parts, not seven; a draft or incomplete Issue is ' +
-      'refused here, before a model turn is spent guessing at scope it does not carry — fix ' +
-      'the Issue (planning skill), not the dispatch. Returns once the activation is ADMITTED ' +
-      'and started, not when it completes: the Channel push is the PRIMARY wake, ' +
-      'specialist_status is the AUTHORITATIVE read, and polling is the degraded fallback. ' +
-      'Answer a raised question with specialist_reply. Write-capable Specialists (MEDIUM/HIGH ' +
-      'tiers) activate only when they can acquire the workspace lease (as does a read-tier ' +
-      'specialist with `lease_waiver: true`, on its isolated worktree); otherwise dispatch is ' +
-      'refused with a structured reason.',
+    description: specialistToolDescription('specialist_dispatch', 'mcp'),
     inputSchema: specialistDispatchSchema,
     async execute(input: z.infer<typeof specialistDispatchSchema>) {
       const build = () => describeBuildIdentity(LOADED_BUILD_ID, readBuildId(DIST_LIB_PATH));
@@ -641,8 +587,8 @@ export function createSpecialistDispatchTool(
 }
 
 export const specialistSteerSchema = z.object({
-  activation_id: z.string().describe('The running activation to redirect mid-run.'),
-  message: z.string().describe('Steering instruction delivered into the live session — the child receives it after its current tool calls finish, before the next model call, with context intact.'),
+  activation_id: z.string().describe(SPECIALIST_STEER_PARAMS.activation_id),
+  message: z.string().describe(SPECIALIST_STEER_PARAMS.message),
   ...fullFlag,
 });
 
@@ -658,12 +604,7 @@ export const specialistSteerSchema = z.object({
 export function createSpecialistSteerTool(getHost: () => NativeActivationHost) {
   return {
     name: 'specialist_steer' as const,
-    description:
-      'Redirect a RUNNING Specialist mid-run with a new instruction, keeping its session ' +
-      'and context intact. Use for a quiet executor that never raised a question; answer an ' +
-      'outstanding ask with specialist_reply, resume a settled activation with ' +
-      'specialist_resume, re-run a failed one with specialist_retry. Refused on any ' +
-      'non-running state with a pointer to the owning tool.',
+    description: specialistToolDescription('specialist_steer', 'mcp'),
     inputSchema: specialistSteerSchema,
     async execute(input: z.infer<typeof specialistSteerSchema>) {
       const build = () => describeBuildIdentity(LOADED_BUILD_ID, readBuildId(DIST_LIB_PATH));
@@ -687,10 +628,8 @@ export function createSpecialistSteerTool(getHost: () => NativeActivationHost) {
 }
 
 export const specialistReplySchema = z.object({
-  message_id: z.string().describe(
-    'The message_id of the outstanding ask, from specialist_status.pending_asks. Correlation is by message id and nothing else — there is no "answer the latest ask", because with two asks outstanding that is a coin flip.',
-  ),
-  body: z.string().describe('The answer. Returned to the Specialist as its tool result.'),
+  message_id: z.string().describe(SPECIALIST_REPLY_PARAMS.message_id),
+  body: z.string().describe(SPECIALIST_REPLY_PARAMS.body),
 });
 
 /**
@@ -703,13 +642,7 @@ export const specialistReplySchema = z.object({
 export function createSpecialistReplyTool(getHost: () => NativeActivationHost) {
   return {
     name: 'specialist_reply' as const,
-    description:
-      'Answer an outstanding Specialist question or escalation by its message_id (read ' +
-      'them from specialist_status.pending_asks). The answer returns as that tool call\'s ' +
-      'result, so the Specialist continues with its context intact. An unknown or already ' +
-      'answered message_id is reported, not silently accepted. Where the Channel is ' +
-      'available the ask arrives as a push first; specialist_status is the AUTHORITATIVE ' +
-      'read when it does not, and polling is the degraded fallback.',
+    description: specialistToolDescription('specialist_reply', 'mcp'),
     inputSchema: specialistReplySchema,
     async execute(input: z.infer<typeof specialistReplySchema>) {
       const message = await getHost().answer(input.message_id, input.body);
@@ -732,8 +665,8 @@ export function createSpecialistReplyTool(getHost: () => NativeActivationHost) {
 }
 
 export const specialistStopSchema = z.object({
-  activation_id: z.string().describe('Activation to stop and dispose.'),
-  reason: z.string().optional().describe('Recorded forensically with the disposal.'),
+  activation_id: z.string().describe(SPECIALIST_STOP_PARAMS.activation_id),
+  reason: z.string().optional().describe(SPECIALIST_STOP_PARAMS.reason),
 });
 /**
  * Stop and dispose a native activation.
@@ -745,10 +678,7 @@ export const specialistStopSchema = z.object({
 export function createSpecialistStopActivationTool(getHost: () => NativeActivationHost) {
   return {
     name: 'specialist_stop_activation' as const,
-    description:
-      'Stop and dispose a native activation. This is the only ordinary path to disposal — ' +
-      'a settled Specialist is waiting and resumable, not finished. Use stop_specialist ' +
-      'instead for legacy CLI-started jobs, which are separate processes.',
+    description: specialistToolDescription('specialist_stop_activation', 'mcp'),
     inputSchema: specialistStopSchema,
     async execute(input: z.infer<typeof specialistStopSchema>) {
       const before = getHost().inspect(input.activation_id);
@@ -766,15 +696,9 @@ export function createSpecialistStopActivationTool(getHost: () => NativeActivati
 }
 
 export const specialistRetrySchema = z.object({
-  activation_id: z.string().describe('The failed activation to re-run in place.'),
-  model_override: z.string().optional().describe(
-    'Re-run on a named model instead of the one that failed (manual switch after a quota ' +
-    'window kills a run). A new session is built for the new model; without this the SAME ' +
-    'session is re-prompted and its context survives.',
-  ),
-  prompt: z.string().optional().describe(
-    'Replacement turn prompt. Defaults to the dispatch-time render of the same Issue.',
-  ),
+  activation_id: z.string().describe(SPECIALIST_RETRY_PARAMS.activation_id),
+  model_override: z.string().optional().describe(SPECIALIST_RETRY_PARAMS.model_override),
+  prompt: z.string().optional().describe(SPECIALIST_RETRY_PARAMS.prompt),
   ...fullFlag,
 });
 
@@ -795,13 +719,7 @@ export function createSpecialistRetryTool(
 ) {
   return {
     name: 'specialist_retry' as const,
-    description:
-      'Re-run a FAILED native activation in place, optionally on a named model. ' +
-      'Keeps the activation id and the Issue; the workspace lease is REACQUIRED for the new ' +
-      'attempt and can be refused when another writer holds the workspace. Without ' +
-      'model_override the same session is re-prompted with its context intact. Failed only — ' +
-      'answer an outstanding question with specialist_reply and resume a settled activation ' +
-      'with specialist_resume instead.',
+    description: specialistToolDescription('specialist_retry', 'mcp'),
     inputSchema: specialistRetrySchema,
     async execute(input: z.infer<typeof specialistRetrySchema>) {
       try {

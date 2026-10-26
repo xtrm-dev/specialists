@@ -191,6 +191,36 @@ export { leaseScopeFor } from './activation/workspace-reconcile.js';
 // read the SAME verdict the runtime uses rather than re-deriving one.
 export { inspect as inspectWorkspaceLease } from './activation/workspace-lease.js';
 
+// One source for specialist_* tool descriptions (SPECIALISTS-4342): the MCP servers
+// consume them through the tool factories; the Pi extension imports them from here.
+// The drift test pins the expected tool set per surface against these sets.
+export {
+  SPECIALIST_TOOL_NAMES,
+  V2_SPECIALIST_TOOL_NAMES,
+  V1_SPECIALIST_TOOL_NAMES,
+  PI_SPECIALIST_TOOL_NAMES,
+  SPECIALIST_TOOL_DESCRIPTIONS,
+  MCP_TOOL_DESCRIPTION_SUFFIXES,
+  PI_TOOL_DESCRIPTION_SUFFIXES,
+  specialistToolDescription,
+  specialistFeedLimitDescription,
+  SPECIALIST_FULL_PARAM,
+  SPECIALIST_DISPATCH_PARAMS,
+  SPECIALIST_DISPATCH_RUNTIME_PARAMS,
+  SPECIALIST_STATUS_PARAMS,
+  SPECIALIST_RESULT_PARAMS,
+  SPECIALIST_FEED_PARAMS,
+  SPECIALIST_REPLY_PARAMS,
+  SPECIALIST_RESUME_PARAMS,
+  SPECIALIST_RETRY_PARAMS,
+  SPECIALIST_STEER_PARAMS,
+  SPECIALIST_STOP_PARAMS,
+  SPECIALIST_LIST_PARAMS,
+  SPECIALIST_LEASE_PARAMS,
+  SPECIALIST_TOOL_PARAM_DESCRIPTIONS,
+} from './tools/specialist/descriptions.js';
+export type { SpecialistToolName } from './tools/specialist/descriptions.js';
+
 // Shared refusal renderer (unitAI-t2kol.4): the single gate-outcome shape both
 // coordinator surfaces use. MCP imports it; the Pi extension follows (recorded follow-up).
 export {

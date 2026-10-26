@@ -53,7 +53,20 @@ import {
   resolveExecutionExtensionSelection,
   resolveRuntimeToolContract,
   SpecialistLoader,
-  THINKING_LEVELS,
+  SPECIALIST_DISPATCH_PARAMS,
+  SPECIALIST_DISPATCH_RUNTIME_PARAMS,
+  SPECIALIST_FEED_PARAMS,
+  SPECIALIST_LEASE_PARAMS,
+  SPECIALIST_LIST_PARAMS,
+  SPECIALIST_REPLY_PARAMS,
+  SPECIALIST_RESUME_PARAMS,
+  SPECIALIST_RESULT_PARAMS,
+  SPECIALIST_RETRY_PARAMS,
+  SPECIALIST_STEER_PARAMS,
+  SPECIALIST_STATUS_PARAMS,
+  SPECIALIST_STOP_PARAMS,
+  specialistFeedLimitDescription,
+  specialistToolDescription,
   admitCoordinatorToolCall,
   createSpecialistLeaseReconcileTool,
   releaseHolderLease,
@@ -2174,129 +2187,74 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   pi.registerTool({
     name: 'specialist_dispatch',
     label: 'Specialist dispatch',
-    description:
-      'Dispatch a Specialist on the native in-process runtime. No CLI process is ' +
-      'spawned. Provide EITHER issue_ref (primary: an existing READY pinned Substrate ' +
-      'Issue revision), bead_id (legacy compatibility alias for the same Issue locator), ' +
-      'OR contract (an inline 7-section contract: the same readiness gate runs first, ' +
-      'then a Substrate Issue is created, attested, claimed and dispatched). Provide ' +
-      'exactly one work locator/contract. Returns once the activation is ADMITTED and ' +
-      'started, not when it completes; use specialist_status and the event/ask channel ' +
-      'for continuation, and specialist_reply for questions. A draft or incomplete ' +
-      'contract is refused before a model turn is spent guessing at scope — repair the ' +
-      'Issue through planning, not dispatch prose. Write-capable Specialists (MEDIUM/HIGH ' +
-      'tiers) activate only when they can acquire the workspace lease, as does a read-tier ' +
-      'specialist with `lease_waiver: true` (on its isolated worktree). Settlement/result ' +
-      'is evidence and does not perform Issue Closure. Each dispatch creates a persistent ' +
-      'activation YOU own: stop it with specialist_stop_activation when you are done with it.',
+    description: specialistToolDescription('specialist_dispatch', 'pi'),
     promptSnippet: 'Dispatch an XTRM Specialist (specialist_dispatch: specialist, issue_ref)',
     renderCall: humanCallOf((args) => `Dispatch ${args.specialist ?? '?'} on ${args.issue_ref || args.bead_id || 'inline contract'}`),
     renderResult: humanResultOf(),
     outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_dispatch,
     namespace: TOOL_NAMESPACE,
     parameters: Type.Object({
-      specialist: Type.String({ description: 'Specialist name, e.g. codebase-explorer' }),
+      specialist: Type.String({ description: SPECIALIST_DISPATCH_PARAMS.specialist }),
       issue_ref: Type.Optional(
         Type.String({
-          description:
-            'Primary work locator: an EXISTING READY Substrate Issue ref. Mutually exclusive ' +
-            'with bead_id and contract: provide exactly one locator/contract.',
+          description: SPECIALIST_DISPATCH_PARAMS.issue_ref,
         }),
       ),
       bead_id: Type.Optional(
         Type.String({
-          description:
-            'Legacy compatibility alias for issue_ref. It resolves through the same Substrate ' +
-            'work boundary and does NOT make Beads the durable authority. Prefer issue_ref in ' +
-            'new calls. Mutually exclusive with issue_ref and contract.',
+          description: SPECIALIST_DISPATCH_PARAMS.bead_id,
         }),
       ),
       contract: Type.Optional(
         Type.String({
-          description:
-            'An INLINE task contract, used instead of issue_ref/bead_id: the SAME readiness gate ' +
-            'runs first, then a Substrate Issue is created, attested, claimed and dispatched. The contract ' +
-            'must contain all seven sections — PROBLEM, SUCCESS, SCOPE, NON_GOALS, ' +
-            'CONSTRAINTS, VALIDATION, OUTPUT — plus a SCRUTINY level, which must be exactly ' +
-            'one of LOW, MEDIUM, HIGH or CRITICAL. Note that this is EIGHT required parts, ' +
-            'not seven; SCRUTINY is the one most often left out. Write each section as a ' +
-            'heading: either the section name on its own line with its body beneath, or ' +
-            '`PROBLEM: the body` on one line. Both forms are accepted. ' +
-            'THIS IS THE PATH FOR ALL DELEGATED WORK, including small and quick questions. ' +
-            'A short contract is a fine contract — a one-line body per section is enough for a ' +
-            'bounded question, and dispatching here is what gives you the Fleet view, the ' +
-            'ask/answer channel, the workspace lease and forensics. Do NOT shell out to the ' +
-            '`sp` CLI to avoid writing a contract; a native activation is cheaper, not dearer. ' +
-            'Use the planning skill (/planning) for genuinely complex work; a contract missing ' +
-            'any section is refused and nothing is created.',
+          description: SPECIALIST_DISPATCH_PARAMS.contract,
         }),
       ),
       title: Type.Optional(
         Type.String({
-          description: 'Optional title for the Substrate Issue created from `contract` (default: `<specialist>: <first PROBLEM line>`). An explicit title wins; blank counts as absent.',
+          description: SPECIALIST_DISPATCH_PARAMS.title,
         }),
       ),
       parent_ref: Type.Optional(
         Type.String({
-          description:
-            'Parent locator for the Substrate Issue created from `contract` — any locator the shared ' +
-            'work boundary resolves. ONLY with contract: refused alongside issue_ref/bead_id, and ' +
-            'refused without contract. The parent must exist and not be terminal ' +
-            '(done/cancelled/archived; deferred is accepted); the check runs BEFORE anything is ' +
-            'created, and creation-with-parent is one atomic step.',
+          description: SPECIALIST_DISPATCH_PARAMS.parent_ref,
         }),
       ),
       kind: Type.Optional(
         Type.Union(
           [Type.Literal('task'), Type.Literal('bug'), Type.Literal('research'), Type.Literal('decision'), Type.Literal('followup')],
           {
-            description:
-              'Substrate kind for the Substrate Issue created from `contract` (never epic — refused ' +
-              'structurally). ONLY with contract: refused alongside issue_ref/bead_id, and refused ' +
-              'without contract. Absent means the default from the Specialist output_type ' +
-              '(research/analysis give research, everything else gives task).',
+            description: SPECIALIST_DISPATCH_PARAMS.kind,
           },
         ),
       ),
       model_override: Type.Optional(
         Type.String({
-          description:
-            'Override the configured model for THIS activation only. An unavailable ' +
-            'model is refused before the session is created, never silently replaced.',
+          description: SPECIALIST_DISPATCH_PARAMS.model_override,
         }),
       ),
       thinking_override: Type.Optional(
         Type.String({
-          description:
-            'Override the thinking level for THIS activation only ' +
-            `(${THINKING_LEVELS.join('|')}). An unknown level is refused before the ` +
-            'session is created, never silently replaced.',
+          description: SPECIALIST_DISPATCH_PARAMS.thinking_override,
         }),
       ),
       requested_by: Type.Optional(
         Type.String({
-          description:
-            'ParticipantId of the requesting coordinator. Defaults to the Pi extension ' +
-            'adapter participant.',
+          description: SPECIALIST_DISPATCH_RUNTIME_PARAMS.pi.requested_by,
         }),
       ),
       coordinator_session_id: Type.Optional(
-        Type.String({ description: 'Pi session id, for lineage.' }),
+        Type.String({ description: SPECIALIST_DISPATCH_RUNTIME_PARAMS.pi.coordinator_session_id }),
       ),
       epic_context_depth: Type.Optional(
         Type.Integer({
-          description:
-            'Walk the Substrate Issue parent relation UP this many hops (1 = immediate parent, ' +
-            "2 = parent + grandparent) and render each ancestor contract into the turn-1 " +
-            "'## Epic lineage' section. Omit when no lineage is requested. Honoured for an " +
-            'inline contract ONLY when parent_ref is given (a parentless auto-created Issue has ' +
-            'no lineage); still dropped for parentless inline creates.',
+          description: SPECIALIST_DISPATCH_PARAMS.epic_context_depth,
           minimum: 1,
           maximum: 2,
         }),
       ),
       full: Type.Optional(Type.Boolean({
-        description: 'Return the full verbose view (pre-SPECIALISTS-142 shape). Default compact.',
+        description: SPECIALIST_DISPATCH_PARAMS.full,
       })),
     }),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
@@ -2467,23 +2425,14 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   pi.registerTool({
     name: 'specialist_status',
     label: 'Specialist fleet status',
-    description:
-      'The Fleet: every native activation this process hosts, with its state, and ' +
-      'every outstanding question or escalation it is waiting on (answer those with ' +
-      'specialist_reply). Compact by default — identity, state, cost, intent per row, ' +
-      'settled rows carrying only the result status. Pass full:true for the verbose ' +
-      'shape (full ActivationView rows, whole validated results, health sections). ' +
-      'Activations stay listed until stopped: a settled entry is either waiting for ' +
-      'a follow-up or waiting to be stopped. Stop with specialist_stop_activation ' +
-      'every activation you will not resume. No CLI background jobs are shown — ' +
-      'this surface only hosts in-process activations.',
+    description: specialistToolDescription('specialist_status', 'pi'),
     promptSnippet: 'Show the Specialist Fleet (specialist_status)',
     renderResult: humanResultOf(),
     outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_status,
     namespace: TOOL_NAMESPACE,
     parameters: Type.Object({
       full: Type.Optional(Type.Boolean({
-        description: 'Return the full verbose payload (pre-SPECIALISTS-142 shape). Default compact.',
+        description: SPECIALIST_STATUS_PARAMS.full,
       })),
     }),
     async execute(toolCallId, params = {}) {
@@ -2662,25 +2611,14 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   pi.registerTool({
     name: 'specialist_result',
     label: 'Specialist result',
-    description:
-      'Read ONE settled activation\'s complete result as a single object — the drill-down ' +
-      'specialist_status deliberately withholds from its compact rows and projects whole ' +
-      'only under full:true amidst every other result. Accepts a full activation_id or a ' +
-      'unique short prefix (with or without the act: lead). Lookup reads the in-memory results ' +
-      'of this process (the same result specialist_status projects); a result from before ' +
-      'a restart is not available here. An activation that exists but has no result yet is answered with its ' +
-      'state and the tool that owns it (next: running→specialist_steer, blocked→specialist_reply, ' +
-      'failed→specialist_retry, settled→specialist_resume). An unknown or ambiguous id is a structured error naming the candidates.',
+    description: specialistToolDescription('specialist_result', 'pi'),
     promptSnippet: 'Read one Specialist result (specialist_result: activation_id)',
     renderResult: humanResultOf(),
     outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_result,
     namespace: TOOL_NAMESPACE,
     parameters: Type.Object({
       activation_id: Type.String({
-        description:
-          'The activation to read. Either the full activation id (act:...) or a unique ' +
-          'short prefix — the leading hex of the id with or without the act: lead, e.g. ' +
-          '`a2924153` or `act:a2924153`. Ambiguous prefixes are refused with the candidates named.',
+        description: SPECIALIST_RESULT_PARAMS.activation_id,
       }),
     }),
     execute: resultExecute,
@@ -2689,10 +2627,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   pi.registerTool({
     name: 'specialist_feed',
     label: 'Specialist feed',
-    description:
-      "Read one activation's event feed: tool calls, text, turns, status changes and completion " +
-      "(view 'terminal', default), or every lifecycle event (view 'forensic'). Works on running, settled and " +
-      'earlier-session activations. Pass since_seq (the last call\'s last_seq) to follow a running one.',
+    description: specialistToolDescription('specialist_feed', 'pi'),
     promptSnippet: 'Read one activation\'s event feed (specialist_feed: activation_id)',
     renderCall: humanCallOf((args) => `Feed ${args.activation_id ?? '?'}${args.view ? ` (${args.view})` : ''}`),
     renderResult: humanResultOf(),
@@ -2700,24 +2635,19 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     namespace: TOOL_NAMESPACE,
     parameters: Type.Object({
       activation_id: Type.String({
-        description:
-          "Activation id: the full id or a unique short prefix, e.g. 'act:a2924153' or 'a2924153'.",
+        description: SPECIALIST_FEED_PARAMS.activation_id,
       }),
       view: Type.Optional(Type.Union([Type.Literal('terminal'), Type.Literal('forensic')], {
-        description:
-          "'terminal' (default): what the specialist did — tool calls, text, turns, status, completion — " +
-          "one line each. 'forensic': every recorded lifecycle event name.",
+        description: SPECIALIST_FEED_PARAMS.view,
       })),
       since_seq: Type.Optional(Type.Integer({
         minimum: 0,
-        description:
-          'Only events with a sequence number above this. Pass the previous call\'s last_seq to follow a running activation.',
+        description: SPECIALIST_FEED_PARAMS.since_seq,
       })),
       limit: Type.Optional(Type.Integer({
         minimum: 1,
         maximum: FEED_MAX_LIMIT,
-        description:
-          `Newest events to return (default ${FEED_DEFAULT_LIMIT}, max ${FEED_MAX_LIMIT}).`,
+        description: specialistFeedLimitDescription(FEED_DEFAULT_LIMIT, FEED_MAX_LIMIT),
       })),
     }),
     execute: feedExecute,
@@ -2726,12 +2656,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   pi.registerTool({
     name: 'specialist_reply',
     label: 'Specialist reply',
-    description:
-      'Answer an outstanding Specialist question or escalation by its message_id (read ' +
-      'them from specialist_status.pending_asks). The answer returns as that tool call\'s ' +
-      'result, so the Specialist continues with its context intact rather than being ' +
-      'restarted with an answer pasted into a fresh prompt. An unknown or already ' +
-      'answered message_id is reported, not silently accepted.',
+    description: specialistToolDescription('specialist_reply', 'pi'),
     promptSnippet: 'Answer a Specialist question (specialist_reply: message_id, body)',
     renderCall: humanCallOf((args) => `Reply to ${args.message_id ?? '?'}`),
     renderResult: humanResultOf(),
@@ -2739,12 +2664,9 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     namespace: TOOL_NAMESPACE,
     parameters: Type.Object({
       message_id: Type.String({
-        description:
-          'The message_id of the outstanding ask, from specialist_status.pending_asks. ' +
-          'Correlation is by message id and nothing else — there is no "answer the ' +
-          'latest ask", because with two asks outstanding that is a coin flip.',
+        description: SPECIALIST_REPLY_PARAMS.message_id,
       }),
-      body: Type.String({ description: 'The answer. Returned to the Specialist as its tool result.' }),
+      body: Type.String({ description: SPECIALIST_REPLY_PARAMS.body }),
     }),
     async execute(toolCallId, params) {
       const message = await getHost().answer(params.message_id, params.body);
@@ -2774,23 +2696,17 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   pi.registerTool({
     name: 'specialist_resume',
     label: 'Specialist resume',
-    description:
-      'Resume a settled or waiting Specialist with a new prompt, in the SAME session. ' +
-      'This is not a second dispatch: the activation_id is kept and the attempt_id advances, ' +
-      'so the child keeps its context and its workspace lease rather than starting over. ' +
-      'Use this after answering a question, or to give a settled Specialist more work. ' +
-      'A disposed activation cannot be resumed — that is what makes specialist_stop_activation ' +
-      'the irreversible one.',
+    description: specialistToolDescription('specialist_resume', 'pi'),
     promptSnippet: 'Resume a settled Specialist (specialist_resume: activation_id, prompt)',
     renderCall: humanCallOf((args) => `Resume ${args.activation_id ?? '?'}`),
     renderResult: humanResultOf(),
     outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_resume,
     namespace: TOOL_NAMESPACE,
     parameters: Type.Object({
-      activation_id: Type.String({ description: 'The settled or waiting activation to resume.' }),
-      prompt: Type.String({ description: 'The new instruction for the resumed Specialist.' }),
+      activation_id: Type.String({ description: SPECIALIST_RESUME_PARAMS.activation_id }),
+      prompt: Type.String({ description: SPECIALIST_RESUME_PARAMS.prompt }),
       full: Type.Optional(Type.Boolean({
-        description: 'Return the full verbose view (pre-SPECIALISTS-142 shape). Default compact.',
+        description: SPECIALIST_RESUME_PARAMS.full,
       })),
     }),
     async execute(toolCallId, params) {
@@ -2850,24 +2766,18 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   pi.registerTool({
     name: 'specialist_retry',
     label: 'Specialist retry',
-    description:
-      'Re-run a FAILED Specialist in place, optionally on a named model. ' +
-      'This is not a second dispatch: the activation_id is kept and the attempt_id advances, ' +
-      'so the bead and the workspace lease survive the retry. Without model_override the ' +
-      'SAME session is re-prompted and its context survives. Failed only — answer an ' +
-      'outstanding question with specialist_reply and resume a settled Specialist with ' +
-      'specialist_resume instead.',
+    description: specialistToolDescription('specialist_retry', 'pi'),
     promptSnippet: 'Re-run a failed Specialist (specialist_retry: activation_id, model_override?)',
     renderCall: humanCallOf((args) => `Retry ${args.activation_id ?? '?'}`),
     renderResult: humanResultOf(),
     outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_retry,
     namespace: TOOL_NAMESPACE,
     parameters: Type.Object({
-      activation_id: Type.String({ description: 'The failed activation to re-run.' }),
-      model_override: Type.Optional(Type.String({ description: 'Re-run on this model instead of the one that failed.' })),
-      prompt: Type.Optional(Type.String({ description: 'Replacement turn prompt. Defaults to the dispatch-time render of the same bead.' })),
+      activation_id: Type.String({ description: SPECIALIST_RETRY_PARAMS.activation_id }),
+      model_override: Type.Optional(Type.String({ description: SPECIALIST_RETRY_PARAMS.model_override })),
+      prompt: Type.Optional(Type.String({ description: SPECIALIST_RETRY_PARAMS.prompt })),
       full: Type.Optional(Type.Boolean({
-        description: 'Return the full verbose view (pre-SPECIALISTS-142 shape). Default compact.',
+        description: SPECIALIST_RETRY_PARAMS.full,
       })),
     }),
     async execute(toolCallId, params) {
@@ -2925,28 +2835,19 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   pi.registerTool({
     name: 'specialist_steer',
     label: 'Specialist steer',
-    description:
-      'Redirect a RUNNING Specialist mid-run with a new instruction, keeping its ' +
-      'session and context intact. Use for a quiet executor that never raised a ' +
-      'question; answer an outstanding ask with specialist_reply, resume a settled ' +
-      'activation with specialist_resume, re-run a failed one with ' +
-      'specialist_retry. Refused on any non-running state with a pointer to the ' +
-      'owning tool.',
+    description: specialistToolDescription('specialist_steer', 'pi'),
     promptSnippet: 'Steer a running Specialist (specialist_steer: activation_id, message)',
     renderCall: humanCallOf((args) => `Steer ${args.activation_id ?? '?'}`),
     renderResult: humanResultOf(),
     outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_steer,
     namespace: TOOL_NAMESPACE,
     parameters: Type.Object({
-      activation_id: Type.String({ description: 'The running activation to redirect mid-run.' }),
+      activation_id: Type.String({ description: SPECIALIST_STEER_PARAMS.activation_id }),
       message: Type.String({
-        description:
-          'Steering instruction delivered into the live session — the child receives ' +
-          'it after its current tool calls finish, before the next model call, with ' +
-          'context intact.',
+        description: SPECIALIST_STEER_PARAMS.message,
       }),
       full: Type.Optional(Type.Boolean({
-        description: 'Return the full verbose view (pre-SPECIALISTS-142 shape). Default compact.',
+        description: SPECIALIST_STEER_PARAMS.full,
       })),
     }),
     async execute(toolCallId, params) {
@@ -2980,21 +2881,15 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   pi.registerTool({
     name: 'specialist_stop_activation',
     label: 'Specialist stop',
-    description:
-      'Stop and dispose a native activation. This is the only ordinary path to ' +
-      'disposal — a settled Specialist is waiting and resumable, not finished. ' +
-      'There is no child process to signal; disposal is a method call on the ' +
-      'in-process AgentSession. You MUST stop every activation you are unlikely ' +
-      'to use again: a settled or waiting activation keeps its session and Fleet ' +
-      'entry until YOU stop it — nothing expires it for you.',
+    description: specialistToolDescription('specialist_stop_activation', 'pi'),
     promptSnippet: 'Stop a Specialist (specialist_stop_activation: activation_id)',
     renderCall: humanCallOf((args) => `Stop ${args.activation_id ?? '?'}`),
     renderResult: humanResultOf(),
     outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_stop_activation,
     namespace: TOOL_NAMESPACE,
     parameters: Type.Object({
-      activation_id: Type.String({ description: 'Activation to stop and dispose.' }),
-      reason: Type.Optional(Type.String({ description: 'Recorded forensically with the disposal.' })),
+      activation_id: Type.String({ description: SPECIALIST_STOP_PARAMS.activation_id }),
+      reason: Type.Optional(Type.String({ description: SPECIALIST_STOP_PARAMS.reason })),
     }),
     async execute(toolCallId, params) {
       if (!getHost().inspect(params.activation_id)) {
@@ -3034,13 +2929,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   pi.registerTool({
     name: 'specialist_lease_reconcile',
     label: 'Workspace lease reconcile',
-    description:
-      'List uncertain writer leases, or resolve one, from inside the session. Use it only ' +
-      'when a coordinator write was refused or warned as fenced by a lease whose holder looks gone: ' +
-      'the coordinator needs this because a held or uncertain lease fences its own writes and a dead holder ' +
-      'is only recoverable by an operator out of band. The caller states the outcome; it is ' +
-      'never inferred, and a refusal returns its refusal_reason. Normally unnecessary: a lease ' +
-      'whose holder is verifiably gone now heals on its own.',
+    description: specialistToolDescription('specialist_lease_reconcile', 'pi'),
     promptSnippet: 'Inspect or resolve a workspace writer lease (specialist_lease_reconcile)',
     outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_lease_reconcile,
     namespace: TOOL_NAMESPACE,
@@ -3049,16 +2938,16 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     parameters: {
       type: 'object',
       properties: {
-        action: Type.Optional(Type.Union([Type.Literal('list'), Type.Literal('reconcile')])),
-        worktree: Type.Optional(Type.String({ description: "reconcile: the worktree whose lease is uncertain." })),
-        outcome: Type.Optional(Type.Union([Type.Literal('safe_free'), Type.Literal('superseded'), Type.Literal('manual_attention_required')])),
+        action: Type.Optional(Type.Union([Type.Literal('list'), Type.Literal('reconcile')], { description: SPECIALIST_LEASE_PARAMS.action })),
+        worktree: Type.Optional(Type.String({ description: SPECIALIST_LEASE_PARAMS.worktree })),
+        outcome: Type.Optional(Type.Union([Type.Literal('safe_free'), Type.Literal('superseded'), Type.Literal('manual_attention_required')], { description: SPECIALIST_LEASE_PARAMS.outcome })),
         basis: Type.Optional(Type.Array(Type.String(), {
-          description: 'reconcile: the durable evidence consulted, one entry per source. Empty is refused.',
+          description: SPECIALIST_LEASE_PARAMS.basis,
         })),
         superseded_by: Type.Optional(Type.String({
-          description: "reconcile: required for 'superseded'; the activation that now owns the workspace.",
+          description: SPECIALIST_LEASE_PARAMS.superseded_by,
         })),
-        note: Type.Optional(Type.String({ description: 'reconcile: free-form note carried into the durable record.' })),
+        note: Type.Optional(Type.String({ description: SPECIALIST_LEASE_PARAMS.note })),
       },
     },
     async execute(toolCallId, params) {
@@ -3074,29 +2963,20 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   pi.registerTool({
     name: 'specialist_list',
     label: 'Specialist registry',
-    description:
-      'List the resolved Specialist registry after repo and user layer overrides. ' +
-      'Returns a COMPACT line per specialist by default — name, permission tier, ' +
-      'category, and a reason only where the native runtime cannot dispatch it. ' +
-      'Pass `name` for one specialist\'s full record including its description, or ' +
-      'detail:"full" for every field of every specialist (large — prefer `name`). ' +
-      'Write-capable tiers (MEDIUM/HIGH) still need the workspace lease at dispatch ' +
-      'time; a read-tier specialist with `lease_waiver: true` is provisioned an isolated ' +
-      'worktree and holds its lease instead of running in place. This extension is the dispatch surface: do not shell out to the specialists ' +
-      'CLI to run a Specialist.',
+    description: specialistToolDescription('specialist_list', 'pi'),
     promptSnippet: 'List configured Specialists (specialist_list; name= for detail)',
     renderResult: humanResultOf(),
     outputSchema: TOOL_OUTPUT_SCHEMAS.specialist_list,
     namespace: TOOL_NAMESPACE,
     parameters: Type.Object({
       name: Type.Optional(Type.String({
-        description: 'Return the full record for this one specialist instead of the compact list.',
+        description: SPECIALIST_LIST_PARAMS.name,
       })),
       detail: Type.Optional(Type.String({
-        description: '"compact" (default) is one line each; "full" returns every field for every specialist.',
+        description: SPECIALIST_LIST_PARAMS.detail,
       })),
       full: Type.Optional(Type.Boolean({
-        description: 'Alias for detail:"full" (SPECIALISTS-142 one-flag vocabulary). Default compact.',
+        description: SPECIALIST_LIST_PARAMS.full,
       })),
     }),
     // Progressive disclosure (operator report 2026-09-08). The unconditional form returned

@@ -37,6 +37,8 @@ export { isWorkspaceWriteTool, recoverDeadHolder, releaseHolderLease, WORKSPACE_
 export { createSpecialistLeaseReconcileTool } from './tools/specialist/specialist_lease_reconcile.tool.js';
 export { leaseScopeFor } from './activation/workspace-reconcile.js';
 export { inspect as inspectWorkspaceLease } from './activation/workspace-lease.js';
+export { SPECIALIST_TOOL_NAMES, V2_SPECIALIST_TOOL_NAMES, V1_SPECIALIST_TOOL_NAMES, PI_SPECIALIST_TOOL_NAMES, SPECIALIST_TOOL_DESCRIPTIONS, MCP_TOOL_DESCRIPTION_SUFFIXES, PI_TOOL_DESCRIPTION_SUFFIXES, specialistToolDescription, specialistFeedLimitDescription, SPECIALIST_FULL_PARAM, SPECIALIST_DISPATCH_PARAMS, SPECIALIST_DISPATCH_RUNTIME_PARAMS, SPECIALIST_STATUS_PARAMS, SPECIALIST_RESULT_PARAMS, SPECIALIST_FEED_PARAMS, SPECIALIST_REPLY_PARAMS, SPECIALIST_RESUME_PARAMS, SPECIALIST_RETRY_PARAMS, SPECIALIST_STEER_PARAMS, SPECIALIST_STOP_PARAMS, SPECIALIST_LIST_PARAMS, SPECIALIST_LEASE_PARAMS, SPECIALIST_TOOL_PARAM_DESCRIPTIONS, } from './tools/specialist/descriptions.js';
+export type { SpecialistToolName } from './tools/specialist/descriptions.js';
 export { DISPATCH_REFUSAL_REASONS, FIX_BY_REASON, fixForRefusalReason, renderRejection, supersedeStaleRefusal, STALE_RUNTIME_REASON, } from './activation/rejection.js';
 export type { DispatchRefusalReason, RejectionInput, RefusalPayload } from './activation/rejection.js';
 //# sourceMappingURL=lib.d.ts.map

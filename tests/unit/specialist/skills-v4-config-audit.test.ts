@@ -163,8 +163,17 @@ describe('skills-v4 default specialist wiring', () => {
       'utf8',
     );
     expect(extensionSource).toContain("issue_ref: Type.Optional");
-    expect(extensionSource).toContain('Primary work locator');
-    expect(extensionSource).toContain('Legacy compatibility alias for issue_ref');
+    // SPECIALISTS-4342: description text lives once in
+    // src/tools/specialist/descriptions.ts; the bundle consumes it by reference,
+    // so the pinned phrasing is asserted on the shared module, not the bundle.
+    expect(extensionSource).toContain('SPECIALIST_DISPATCH_PARAMS.issue_ref');
+    expect(extensionSource).toContain('SPECIALIST_DISPATCH_PARAMS.bead_id');
+    const sharedSource = readFileSync(
+      join(repoRoot, 'src', 'tools', 'specialist', 'descriptions.ts'),
+      'utf8',
+    );
+    expect(sharedSource).toContain('Primary work locator');
+    expect(sharedSource).toContain('Legacy compatibility alias for issue_ref');
     expect(extensionSource).toContain('created_issue_ref');
     expect(extensionSource).toContain('settlement is not Issue Closure');
     expect(extensionSource).not.toContain('existing READY Bead');
