@@ -6,8 +6,8 @@ import { join } from 'node:path';
 /**
  * Drift guard for the role-to-specialist map (SPECIALISTS-4343): the generated
  * map must match the specialist catalog — every named specialist needs its
- * definition file, and absent roles (pr-reviewer, deploy-watcher,
- * production-monitor) must never appear.
+ * definition file, and absent roles (deploy-watcher, production-monitor)
+ * must never appear.
  */
 const REPO = join(import.meta.dirname, '..', '..', '..');
 const CANONICAL = join(REPO, 'config', 'catalog', 'role-specialist-map.json');
@@ -46,7 +46,7 @@ describe('role-specialist map drift', () => {
 
   it('names no absent role', () => {
     const body = readFileSync(CANONICAL, 'utf8');
-    for (const absent of ['pr-reviewer', 'deploy-watcher', 'production-monitor']) {
+    for (const absent of ['deploy-watcher', 'production-monitor']) {
       expect(body, `absent role leaked into the map: ${absent}`).not.toContain(absent);
     }
   });

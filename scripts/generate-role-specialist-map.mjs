@@ -28,9 +28,9 @@ const RUNTIME_TS = join(ROOT, 'plugins', 'specialists', 'hooks', 'role-specialis
 
 // Generic task role -> candidate specialist names. Candidates MUST name real
 // dispatchable specialists; anything without a definition file is dropped below
-// (so pr-reviewer, deploy-watcher, production-monitor can never appear here).
+// (so deploy-watcher, production-monitor can never appear here).
 const CANDIDATES = [
-  ['review', ['reviewer', 'seconder']],
+  ['review', ['reviewer', 'seconder', 'pr-reviewer']],
   ['quant', ['quant-methodologist', 'quant-researcher']],
   ['deep-analysis', ['overthinker']],
   ['deploy', ['test-runner', 'reviewer']],
