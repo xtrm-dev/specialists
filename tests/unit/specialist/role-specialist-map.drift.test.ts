@@ -51,6 +51,14 @@ describe('role-specialist map drift', () => {
     }
   });
 
+  it('maps pr-reviewer to the review role (SPECIALISTS-4382)', () => {
+    // Catalog coverage above only proves pr-reviewer appears *somewhere*; the
+    // generator's CANDIDATES table must keep it under the review role.
+    const map = JSON.parse(readFileSync(CANONICAL, 'utf8')) as { roles: Record<string, string[]> };
+    expect(map.roles.review, 'review role is missing from the map').toBeDefined();
+    expect(map.roles.review).toContain('pr-reviewer');
+  });
+
   it('covers every dispatchable catalog specialist', () => {
     const map = JSON.parse(readFileSync(CANONICAL, 'utf8')) as { roles: Record<string, string[]> };
     const covered = new Set(Object.values(map.roles).flat());
