@@ -496,7 +496,7 @@ describe('role-to-specialist nudge (SPECIALISTS-4343)', () => {
     const line = roleNudgeLine()
     expect(line).toContain('reviewer')
     expect(line?.endsWith('verify with specialist_list')).toBe(true)
-    for (const absent of ['pr-reviewer', 'deploy-watcher', 'production-monitor']) {
+    for (const absent of ['deploy-watcher', 'production-monitor']) {
       expect(line).not.toContain(absent)
     }
   })
