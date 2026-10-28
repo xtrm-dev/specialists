@@ -4,7 +4,7 @@
   "shipped_skills": [
     {
       "path": "config/skills/using-specialists/references/chain-recipes.md",
-      "sha256": "a82c52949b23b842ad7ce0fc9ecb107648e2c1149de42358c54f858383056d8f"
+      "sha256": "65e90426d39400fe407b67af3a03bfc45c52cdb4f12d35ca2260ef0c107eb972"
     },
     {
       "path": "config/skills/using-specialists/references/claude-code.md",
@@ -44,7 +44,7 @@
     },
     {
       "path": "config/skills/using-specialists/references/specialist-definitions.md",
-      "sha256": "eeed5170841cd5c13c125216b3184ef52d454676e67007de183a37f0bfbf731a"
+      "sha256": "e8656980a7a35f6173d25dc2a109e4a03a1fe2cafc57ed6ff94d23e41c076755"
     },
     {
       "path": "config/skills/using-specialists/scripts/specialist-definitions/audit-spec-uniformity.mjs",
@@ -100,6 +100,9 @@
     },
     {
       "path": "config/specialists/planner.specialist.json"
+    },
+    {
+      "path": "config/specialists/pr-reviewer.specialist.json"
     },
     {
       "path": "config/specialists/quant-methodologist.specialist.json"

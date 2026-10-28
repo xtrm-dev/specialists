@@ -67,7 +67,7 @@ release-prep, doc-sync, restitch) carry no pipeline.
 
 ### Validity against the live catalog (`config/specialists/`)
 
-Checked each template's `role:` labels against the 24 live specialist files.
+Checked each template's `role:` labels against the live specialist files in `config/specialists/`.
 All roles named below are present unless marked otherwise.
 
 | Template | Roles (in sequence) | Verdict |

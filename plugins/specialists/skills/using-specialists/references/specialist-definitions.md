@@ -90,7 +90,7 @@ of thing:
 ```json
 "extensions": {
   "gitnexus": false,
-  "/home/me/dev/core/packages/pi-extensions/extensions/background": true,
+  "/path/to/core/packages/pi-extensions/extensions/background": true,
   "npm:pi-ast-grep": true,
   "git:github.com/owner/repo": true
 }
@@ -115,7 +115,7 @@ Worked case: a read-tier watcher that must sample on a timer needs both the leas
 "execution": {
   "permission_required": "LOW",
   "lease_waiver": true,
-  "extensions": { "/home/me/dev/core/packages/pi-extensions/extensions/background": true }
+  "extensions": { "/path/to/core/packages/pi-extensions/extensions/background": true }
 }
 ```
 
@@ -201,7 +201,7 @@ let the schema stay authoritative if the two ever disagree.
       "thinking_level": "high",
       "auto_commit": "never",
       "extensions": {
-        "/home/me/dev/core/packages/pi-extensions/extensions/background": true
+        "/path/to/core/packages/pi-extensions/extensions/background": true
       }
     },
     "prompt": {
