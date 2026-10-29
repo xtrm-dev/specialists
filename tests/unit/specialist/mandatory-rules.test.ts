@@ -606,6 +606,7 @@ describe('mandatory rules budget compiler', () => {
     ['executor', [
       'core-session-boundary',
       'git-workflow-safe',
+      'test-canon',
       'executor-delivery',
       'code-quality-defaults',
       'gitnexus-required',
@@ -616,6 +617,7 @@ describe('mandatory rules budget compiler', () => {
     ['reviewer', [
       'core-session-boundary',
       'git-workflow-safe',
+      'test-canon',
       'reviewer-verdict-format',
       'code-quality-defaults',
       'gitnexus-required',

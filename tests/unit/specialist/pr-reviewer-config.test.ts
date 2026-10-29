@@ -31,7 +31,7 @@ describe('pr-reviewer package specialist', () => {
     const spec = await loadPrReviewer();
     const system = spec.specialist.prompt.system ?? '';
 
-    expect(spec.specialist.metadata.version).toBe('1.3.1');
+    expect(spec.specialist.metadata.version).toBe('1.3.2');
     expect(system).toContain('If only `BashBackground`, `Monitor` and `BackgroundStop` are exposed, there are no delegate, attested-run or fusion tools');
   });
 
