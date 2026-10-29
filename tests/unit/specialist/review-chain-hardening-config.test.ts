@@ -38,7 +38,7 @@ describe('review-chain hardening specialist configs', () => {
     const spec = await loadSpec('reviewer');
     const system = spec.specialist.prompt.system ?? '';
 
-    expect(spec.specialist.metadata.version).toBe('2.6.0');
+    expect(spec.specialist.metadata.version).toBe('2.6.1');
     expect(system).toContain('ocr-preflight.mjs');
     expect(system).toContain('Run the ocr lane in one codemode cell');
     expect(system).toContain('must exit 0 before you report coverage');
@@ -126,7 +126,7 @@ describe('review-chain hardening specialist configs', () => {
     const system = spec.specialist.prompt.system ?? '';
     const schema = spec.specialist.prompt.output_schema ?? {};
 
-    expect(spec.specialist.metadata.version).toBe('1.5.0');
+    expect(spec.specialist.metadata.version).toBe('1.5.1');
     expect(system).toContain('## AgentRun + ocr delegation wiring (ocr always on for a git range)');
     expect(system).toContain('the SCOPE does not need to name it');
     expect(system).toContain('Never run `ocr review` or `ocr scan`');
@@ -141,7 +141,7 @@ describe('review-chain hardening specialist configs', () => {
     expect(system).toContain('## Bounded failure-mode inversion check');
     expect(system).toContain('## Bounded root-cause placement check');
     expect(system).toContain('Spend at most two of the eight tool calls on this check.');
-    expect(system).toContain('Do not validate release readiness, security posture, broad architecture, or test coverage.');
+    expect(system).toContain('Do not validate release readiness, security posture, broad architecture, or broad test coverage.');
     expect(schema).toEqual(expect.objectContaining({
       type: 'object',
       required: ['scope_verdict', 'scope_findings', 'quality_verdict', 'quality_findings', 'overall_verdict'],
