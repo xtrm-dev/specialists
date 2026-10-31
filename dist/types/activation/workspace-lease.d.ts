@@ -102,9 +102,10 @@ export declare function workspaceIdentityFor(cwd: string): WorkspaceIdentity;
  * Run-in-place assumed the dispatcher already sat in an isolated worktree. Over MCP the host's
  * cwd is whatever checkout the coordinator was launched in, and an executor dispatched from a
  * main checkout checked out its branch and ran `npm ci` there. A writer therefore never gets
- * the dispatcher's checkout: it gets `<main checkout>/.worktrees/<issue>` on branch
- * `sp/<issue>`, created from the dispatcher's HEAD on first use and reused by every later
- * writer on the same Issue, so a fix loop lands on the same tree and its PR is the merge path.
+ * the dispatcher's checkout: it gets `<main checkout>/.xtrm/worktrees/<repo>-sp-<role>-<issue>`
+ * on branch `sp/<issue>`, created from `origin/<default branch>` (after a fetch) on first use
+ * and reused by every later writer on the same Issue — including a worktree at the legacy
+ * `<main checkout>/.worktrees/<issue>` root, so a fix loop lands on the same tree and its PR is the merge path.
  *
  * `repositoryRoot` stays the dispatcher's checkout so leases keep living where
  * `leaseScopeFor(process.cwd())` reconciles them. A directory that is not a git checkout
@@ -114,7 +115,7 @@ export type ProvisionedWorkspace = WorkspaceIdentity & {
     /** True when this call created the worktree, so a refused dispatch may remove it again. */
     created?: boolean;
 };
-export declare function provisionWriterWorkspace(cwd: string, issueRef: string): ProvisionedWorkspace;
+export declare function provisionWriterWorkspace(cwd: string, issueRef: string, role: string): ProvisionedWorkspace;
 /**
  * Undo a `provisionWriterWorkspace` that created a fresh worktree and branch for a dispatch that
  * was then refused. Best effort: a refusal stays a refusal even when cleanup cannot run.

@@ -218,6 +218,9 @@
       "path": "config/mandatory-rules/sync-docs-scope-discipline.md"
     },
     {
+      "path": "config/mandatory-rules/test-canon.md"
+    },
+    {
       "path": "config/mandatory-rules/test-runner-execution-scope.md"
     }
   ],

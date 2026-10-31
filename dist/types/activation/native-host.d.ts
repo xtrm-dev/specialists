@@ -387,7 +387,7 @@ export interface NativeActivationHostDeps {
     /** Defaults to `process.cwd()`. */
     cwd?: string;
     /** The isolated worktree a writer runs in. Defaults to `provisionWriterWorkspace` (git). */
-    provisionWriterWorkspace?: (cwd: string, issueRef: string) => ProvisionedWorkspace;
+    provisionWriterWorkspace?: (cwd: string, issueRef: string, role: string) => ProvisionedWorkspace;
     /** Background tasks this activation started that are still running; see `liveBackgroundTasks`. */
     backgroundTaskAlive?: (pid: number) => boolean;
     /** How often a lease held over running background tasks re-checks them. Defaults to 5s. */
