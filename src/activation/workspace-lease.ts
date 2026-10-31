@@ -90,7 +90,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { DispatchRejectedError, type ActivationId, type AttemptId, type WorkspaceIdentity } from './types.js';
 
 /**
@@ -111,9 +111,10 @@ export function workspaceIdentityFor(cwd: string): WorkspaceIdentity {
  * Run-in-place assumed the dispatcher already sat in an isolated worktree. Over MCP the host's
  * cwd is whatever checkout the coordinator was launched in, and an executor dispatched from a
  * main checkout checked out its branch and ran `npm ci` there. A writer therefore never gets
- * the dispatcher's checkout: it gets `<main checkout>/.worktrees/<issue>` on branch
- * `sp/<issue>`, created from the dispatcher's HEAD on first use and reused by every later
- * writer on the same Issue, so a fix loop lands on the same tree and its PR is the merge path.
+ * the dispatcher's checkout: it gets `<main checkout>/.xtrm/worktrees/<repo>-sp-<role>-<issue>`
+ * on branch `sp/<issue>`, created from `origin/<default branch>` (after a fetch) on first use
+ * and reused by every later writer on the same Issue — including a worktree at the legacy
+ * `<main checkout>/.worktrees/<issue>` root, so a fix loop lands on the same tree and its PR is the merge path.
  *
  * `repositoryRoot` stays the dispatcher's checkout so leases keep living where
  * `leaseScopeFor(process.cwd())` reconciles them. A directory that is not a git checkout
@@ -124,10 +125,40 @@ export type ProvisionedWorkspace = WorkspaceIdentity & {
   created?: boolean;
 };
 
-export function provisionWriterWorkspace(cwd: string, issueRef: string): ProvisionedWorkspace {
+/**
+ * The remote's default branch: its live HEAD (`ls-remote --symref`), else the local
+ * `origin/HEAD`, else a `main`/`master` probe. A failing `ls-remote` propagates, so an
+ * unreachable remote refuses the dispatch instead of silently choosing a stale base.
+ */
+function resolveOriginDefaultBranch(git: (...args: string[]) => string): string {
+  const live = git('ls-remote', '--symref', 'origin', 'HEAD').match(/^ref: refs\/heads\/(\S+)\s+HEAD$/m)?.[1];
+  if (live) return live;
+  try {
+    return git('symbolic-ref', '--short', 'refs/remotes/origin/HEAD').replace(/^origin\//, '');
+  } catch {
+    const present = ['main', 'master'].filter((b) => git('ls-remote', '--heads', 'origin', b) !== '');
+    if (present.length > 1) console.warn(`[workspace-lease] origin HEAD unresolvable and both main and master exist; using ${present[0]}`);
+    if (present.length > 0) return present[0];
+  }
+  throw new Error('origin has no resolvable default branch (no remote HEAD, no origin/HEAD, no main or master)');
+}
+
+/** `origin/<default>` after a fetch, or `HEAD` with a warning when the checkout has no remote. */
+function resolveWorktreeBase(git: (...args: string[]) => string): string {
+  if (!git('remote').split('\n').includes('origin')) {
+    console.warn('[workspace-lease] no "origin" remote; creating the writer worktree from the dispatcher HEAD');
+    return 'HEAD';
+  }
+  const defaultBranch = resolveOriginDefaultBranch(git);
+  git('fetch', 'origin', defaultBranch);
+  return `origin/${defaultBranch}`;
+}
+
+export function provisionWriterWorkspace(cwd: string, issueRef: string, role: string): ProvisionedWorkspace {
   const git = (...args: string[]): string =>
     execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   const slug = issueRef.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const roleSlug = role.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   const branch = `sp/${slug}`;
   try {
     const existing = git('worktree', 'list', '--porcelain')
@@ -137,13 +168,14 @@ export function provisionWriterWorkspace(cwd: string, issueRef: string): Provisi
     let created = false;
     if (!worktreePath) {
       const mainRoot = dirname(git('rev-parse', '--path-format=absolute', '--git-common-dir'));
-      worktreePath = join(mainRoot, '.worktrees', slug);
-      // An unignored nested worktree would show up as `?? .worktrees/` in the dispatcher's status.
+      worktreePath = join(mainRoot, '.xtrm', 'worktrees', `${basename(mainRoot)}-sp-${roleSlug}-${slug}`);
+      // An unignored nested worktree would show up as `?? .xtrm/` in the dispatcher's status.
       if (spawnSync('git', ['check-ignore', '-q', join(worktreePath, 'x')], { cwd: mainRoot }).status !== 0) {
-        appendFileSync(git('rev-parse', '--path-format=absolute', '--git-path', 'info/exclude'), '\n/.worktrees/\n');
+        appendFileSync(git('rev-parse', '--path-format=absolute', '--git-path', 'info/exclude'), '\n/.xtrm/worktrees/\n');
       }
       const branchExists = spawnSync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], { cwd }).status === 0;
-      git('worktree', 'add', ...(branchExists ? [worktreePath, branch] : ['-b', branch, worktreePath, 'HEAD']));
+      const base = branchExists ? undefined : resolveWorktreeBase(git);
+      git('worktree', 'add', ...(base ? ['-b', branch, worktreePath, base] : [worktreePath, branch]));
       created = !branchExists;
     }
     return { repositoryRoot: cwd, worktreePath, branch, created };
