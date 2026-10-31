@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// node_modules/yaml/dist/nodes/identity.js
+// ../specialists/node_modules/yaml/dist/nodes/identity.js
 var require_identity = __commonJS(function(exports) {
   var ALIAS = Symbol.for("yaml.alias");
   var DOC = Symbol.for("yaml.document");
@@ -56,7 +56,7 @@ var require_identity = __commonJS(function(exports) {
   exports.isSeq = isSeq;
 });
 
-// node_modules/yaml/dist/visit.js
+// ../specialists/node_modules/yaml/dist/visit.js
 var require_visit = __commonJS(function(exports) {
   var identity = require_identity();
   var BREAK = Symbol("break visit");
@@ -211,7 +211,7 @@ var require_visit = __commonJS(function(exports) {
   exports.visitAsync = visitAsync;
 });
 
-// node_modules/yaml/dist/doc/directives.js
+// ../specialists/node_modules/yaml/dist/doc/directives.js
 var require_directives = __commonJS(function(exports) {
   var identity = require_identity();
   var visit = require_visit();
@@ -284,8 +284,8 @@ var require_directives = __commonJS(function(exports) {
             this.yaml.version = version;
             return true;
           } else {
-            const isValid = /^\d+\.\d+$/.test(version);
-            onError(6, `Unsupported YAML version ${version}`, isValid);
+            const isValid2 = /^\d+\.\d+$/.test(version);
+            onError(6, `Unsupported YAML version ${version}`, isValid2);
             return false;
           }
         }
@@ -363,7 +363,7 @@ var require_directives = __commonJS(function(exports) {
   exports.Directives = Directives;
 });
 
-// node_modules/yaml/dist/doc/anchors.js
+// ../specialists/node_modules/yaml/dist/doc/anchors.js
 var require_anchors = __commonJS(function(exports) {
   var identity = require_identity();
   var visit = require_visit();
@@ -425,7 +425,7 @@ var require_anchors = __commonJS(function(exports) {
   exports.findNewAnchor = findNewAnchor;
 });
 
-// node_modules/yaml/dist/doc/applyReviver.js
+// ../specialists/node_modules/yaml/dist/doc/applyReviver.js
 var require_applyReviver = __commonJS(function(exports) {
   function applyReviver(reviver, obj, key, val) {
     if (val && typeof val === "object") {
@@ -472,7 +472,7 @@ var require_applyReviver = __commonJS(function(exports) {
   exports.applyReviver = applyReviver;
 });
 
-// node_modules/yaml/dist/nodes/toJS.js
+// ../specialists/node_modules/yaml/dist/nodes/toJS.js
 var require_toJS = __commonJS(function(exports) {
   var identity = require_identity();
   function toJS(value, arg, ctx) {
@@ -483,8 +483,8 @@ var require_toJS = __commonJS(function(exports) {
         return value.toJSON(arg, ctx);
       const data = { aliasCount: 0, count: 1, res: undefined };
       ctx.anchors.set(value, data);
-      ctx.onCreate = (res) => {
-        data.res = res;
+      ctx.onCreate = (res2) => {
+        data.res = res2;
         delete ctx.onCreate;
       };
       const res = value.toJSON(arg, ctx);
@@ -499,7 +499,7 @@ var require_toJS = __commonJS(function(exports) {
   exports.toJS = toJS;
 });
 
-// node_modules/yaml/dist/nodes/Node.js
+// ../specialists/node_modules/yaml/dist/nodes/Node.js
 var require_Node = __commonJS(function(exports) {
   var applyReviver = require_applyReviver();
   var identity = require_identity();
@@ -528,15 +528,15 @@ var require_Node = __commonJS(function(exports) {
       };
       const res = toJS.toJS(this, "", ctx);
       if (typeof onAnchor === "function")
-        for (const { count, res } of ctx.anchors.values())
-          onAnchor(res, count);
+        for (const { count, res: res2 } of ctx.anchors.values())
+          onAnchor(res2, count);
       return typeof reviver === "function" ? applyReviver.applyReviver(reviver, { "": res }, "", res) : res;
     }
   }
   exports.NodeBase = NodeBase;
 });
 
-// node_modules/yaml/dist/nodes/Alias.js
+// ../specialists/node_modules/yaml/dist/nodes/Alias.js
 var require_Alias = __commonJS(function(exports) {
   var anchors = require_anchors();
   var visit = require_visit();
@@ -583,16 +583,16 @@ var require_Alias = __commonJS(function(exports) {
     toJSON(_arg, ctx) {
       if (!ctx)
         return { source: this.source };
-      const { anchors, doc, maxAliasCount } = ctx;
+      const { anchors: anchors2, doc, maxAliasCount } = ctx;
       const source = this.resolve(doc, ctx);
       if (!source) {
         const msg = `Unresolved alias (the anchor must be set before the alias): ${this.source}`;
         throw new ReferenceError(msg);
       }
-      let data = anchors.get(source);
+      let data = anchors2.get(source);
       if (!data) {
         toJS.toJS(source, null, ctx);
-        data = anchors.get(source);
+        data = anchors2.get(source);
       }
       if (data?.res === undefined) {
         const msg = "This should not happen: Alias anchor was not resolved?";
@@ -601,7 +601,7 @@ var require_Alias = __commonJS(function(exports) {
       if (maxAliasCount >= 0) {
         data.count += 1;
         if (data.aliasCount === 0)
-          data.aliasCount = getAliasCount(doc, source, anchors);
+          data.aliasCount = getAliasCount(doc, source, anchors2);
         if (data.count * data.aliasCount > maxAliasCount) {
           const msg = "Excessive alias count indicates a resource exhaustion attack";
           throw new ReferenceError(msg);
@@ -623,22 +623,22 @@ var require_Alias = __commonJS(function(exports) {
       return src;
     }
   }
-  function getAliasCount(doc, node, anchors) {
+  function getAliasCount(doc, node, anchors2) {
     if (identity.isAlias(node)) {
       const source = node.resolve(doc);
-      const anchor = anchors && source && anchors.get(source);
+      const anchor = anchors2 && source && anchors2.get(source);
       return anchor ? anchor.count * anchor.aliasCount : 0;
     } else if (identity.isCollection(node)) {
       let count = 0;
       for (const item of node.items) {
-        const c = getAliasCount(doc, item, anchors);
+        const c = getAliasCount(doc, item, anchors2);
         if (c > count)
           count = c;
       }
       return count;
     } else if (identity.isPair(node)) {
-      const kc = getAliasCount(doc, node.key, anchors);
-      const vc = getAliasCount(doc, node.value, anchors);
+      const kc = getAliasCount(doc, node.key, anchors2);
+      const vc = getAliasCount(doc, node.value, anchors2);
       return Math.max(kc, vc);
     }
     return 1;
@@ -646,7 +646,7 @@ var require_Alias = __commonJS(function(exports) {
   exports.Alias = Alias;
 });
 
-// node_modules/yaml/dist/nodes/Scalar.js
+// ../specialists/node_modules/yaml/dist/nodes/Scalar.js
 var require_Scalar = __commonJS(function(exports) {
   var identity = require_identity();
   var Node = require_Node();
@@ -674,7 +674,7 @@ var require_Scalar = __commonJS(function(exports) {
   exports.isScalarValue = isScalarValue;
 });
 
-// node_modules/yaml/dist/doc/createNode.js
+// ../specialists/node_modules/yaml/dist/doc/createNode.js
 var require_createNode = __commonJS(function(exports) {
   var Alias = require_Alias();
   var identity = require_identity();
@@ -723,10 +723,10 @@ var require_createNode = __commonJS(function(exports) {
         value = value.toJSON();
       }
       if (!value || typeof value !== "object") {
-        const node = new Scalar.Scalar(value);
+        const node2 = new Scalar.Scalar(value);
         if (ref)
-          ref.node = node;
-        return node;
+          ref.node = node2;
+        return node2;
       }
       tagObj = value instanceof Map ? schema[identity.MAP] : (Symbol.iterator in Object(value)) ? schema[identity.SEQ] : schema[identity.MAP];
     }
@@ -746,7 +746,7 @@ var require_createNode = __commonJS(function(exports) {
   exports.createNode = createNode;
 });
 
-// node_modules/yaml/dist/nodes/Collection.js
+// ../specialists/node_modules/yaml/dist/nodes/Collection.js
 var require_Collection = __commonJS(function(exports) {
   var createNode = require_createNode();
   var identity = require_identity();
@@ -861,7 +861,7 @@ var require_Collection = __commonJS(function(exports) {
   exports.isEmptyPath = isEmptyPath;
 });
 
-// node_modules/yaml/dist/stringify/stringifyComment.js
+// ../specialists/node_modules/yaml/dist/stringify/stringifyComment.js
 var require_stringifyComment = __commonJS(function(exports) {
   var stringifyComment = (str) => str.replace(/^(?!$)(?: $)?/gm, "#");
   function indentComment(comment, indent) {
@@ -878,7 +878,7 @@ var require_stringifyComment = __commonJS(function(exports) {
   exports.stringifyComment = stringifyComment;
 });
 
-// node_modules/yaml/dist/stringify/foldFlowLines.js
+// ../specialists/node_modules/yaml/dist/stringify/foldFlowLines.js
 var require_foldFlowLines = __commonJS(function(exports) {
   var FOLD_FLOW = "flow";
   var FOLD_BLOCK = "block";
@@ -975,17 +975,17 @@ var require_foldFlowLines = __commonJS(function(exports) {
     if (onFold)
       onFold();
     let res = text.slice(0, folds[0]);
-    for (let i = 0;i < folds.length; ++i) {
-      const fold = folds[i];
-      const end = folds[i + 1] || text.length;
+    for (let i2 = 0;i2 < folds.length; ++i2) {
+      const fold = folds[i2];
+      const end2 = folds[i2 + 1] || text.length;
       if (fold === 0)
         res = `
-${indent}${text.slice(0, end)}`;
+${indent}${text.slice(0, end2)}`;
       else {
         if (mode === FOLD_QUOTED && escapedFolds[fold])
           res += `${text[fold]}\\`;
         res += `
-${indent}${text.slice(fold + 1, end)}`;
+${indent}${text.slice(fold + 1, end2)}`;
       }
     }
     return res;
@@ -1015,7 +1015,7 @@ ${indent}${text.slice(fold + 1, end)}`;
   exports.foldFlowLines = foldFlowLines;
 });
 
-// node_modules/yaml/dist/stringify/stringifyString.js
+// ../specialists/node_modules/yaml/dist/stringify/stringifyString.js
 var require_stringifyString = __commonJS(function(exports) {
   var Scalar = require_Scalar();
   var foldFlowLines = require_foldFlowLines();
@@ -1313,7 +1313,7 @@ ${indent}`);
   exports.stringifyString = stringifyString;
 });
 
-// node_modules/yaml/dist/stringify/stringify.js
+// ../specialists/node_modules/yaml/dist/stringify/stringify.js
 var require_stringify = __commonJS(function(exports) {
   var anchors = require_anchors();
   var identity = require_identity();
@@ -1434,7 +1434,7 @@ ${ctx.indent}${str}`;
   exports.stringify = stringify;
 });
 
-// node_modules/yaml/dist/stringify/stringifyPair.js
+// ../specialists/node_modules/yaml/dist/stringify/stringifyPair.js
 var require_stringifyPair = __commonJS(function(exports) {
   var identity = require_identity();
   var Scalar = require_Scalar();
@@ -1570,7 +1570,7 @@ ${ctx.indent}`;
   exports.stringifyPair = stringifyPair;
 });
 
-// node_modules/yaml/dist/log.js
+// ../specialists/node_modules/yaml/dist/log.js
 var require_log = __commonJS(function(exports) {
   var node_process = __require("process");
   function debug(logLevel, ...messages) {
@@ -1589,7 +1589,7 @@ var require_log = __commonJS(function(exports) {
   exports.warn = warn;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/merge.js
+// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/merge.js
 var require_merge = __commonJS(function(exports) {
   var identity = require_identity();
   var Scalar = require_Scalar();
@@ -1621,15 +1621,15 @@ var require_merge = __commonJS(function(exports) {
     if (!identity.isMap(source))
       throw new Error("Merge sources must be maps or map aliases");
     const srcMap = source.toJSON(null, ctx, Map);
-    for (const [key, value] of srcMap) {
+    for (const [key, value2] of srcMap) {
       if (map instanceof Map) {
         if (!map.has(key))
-          map.set(key, value);
+          map.set(key, value2);
       } else if (map instanceof Set) {
         map.add(key);
       } else if (!Object.prototype.hasOwnProperty.call(map, key)) {
         Object.defineProperty(map, key, {
-          value,
+          value: value2,
           writable: true,
           enumerable: true,
           configurable: true
@@ -1646,7 +1646,7 @@ var require_merge = __commonJS(function(exports) {
   exports.merge = merge;
 });
 
-// node_modules/yaml/dist/nodes/addPairToJSMap.js
+// ../specialists/node_modules/yaml/dist/nodes/addPairToJSMap.js
 var require_addPairToJSMap = __commonJS(function(exports) {
   var log = require_log();
   var merge = require_merge();
@@ -1707,7 +1707,7 @@ var require_addPairToJSMap = __commonJS(function(exports) {
   exports.addPairToJSMap = addPairToJSMap;
 });
 
-// node_modules/yaml/dist/nodes/Pair.js
+// ../specialists/node_modules/yaml/dist/nodes/Pair.js
 var require_Pair = __commonJS(function(exports) {
   var createNode = require_createNode();
   var stringifyPair = require_stringifyPair();
@@ -1745,15 +1745,15 @@ var require_Pair = __commonJS(function(exports) {
   exports.createPair = createPair;
 });
 
-// node_modules/yaml/dist/stringify/stringifyCollection.js
+// ../specialists/node_modules/yaml/dist/stringify/stringifyCollection.js
 var require_stringifyCollection = __commonJS(function(exports) {
   var identity = require_identity();
   var stringify = require_stringify();
   var stringifyComment = require_stringifyComment();
   function stringifyCollection(collection, ctx, options) {
     const flow = ctx.inFlow ?? collection.flow;
-    const stringify = flow ? stringifyFlowCollection : stringifyBlockCollection;
-    return stringify(collection, ctx, options);
+    const stringify2 = flow ? stringifyFlowCollection : stringifyBlockCollection;
+    return stringify2(collection, ctx, options);
   }
   function stringifyBlockCollection({ comment, items }, ctx, { blockItemPrefix, flowChars, itemIndent, onChompKeep, onComment }) {
     const { indent, options: { commentString } } = ctx;
@@ -1762,13 +1762,13 @@ var require_stringifyCollection = __commonJS(function(exports) {
     const lines = [];
     for (let i = 0;i < items.length; ++i) {
       const item = items[i];
-      let comment = null;
+      let comment2 = null;
       if (identity.isNode(item)) {
         if (!chompKeep && item.spaceBefore)
           lines.push("");
         addCommentBefore(ctx, lines, item.commentBefore, chompKeep);
         if (item.comment)
-          comment = item.comment;
+          comment2 = item.comment;
       } else if (identity.isPair(item)) {
         const ik = identity.isNode(item.key) ? item.key : null;
         if (ik) {
@@ -1778,12 +1778,12 @@ var require_stringifyCollection = __commonJS(function(exports) {
         }
       }
       chompKeep = false;
-      let str = stringify.stringify(item, itemCtx, () => comment = null, () => chompKeep = true);
-      if (comment)
-        str += stringifyComment.lineComment(str, itemIndent, commentString(comment));
-      if (chompKeep && comment)
+      let str2 = stringify.stringify(item, itemCtx, () => comment2 = null, () => chompKeep = true);
+      if (comment2)
+        str2 += stringifyComment.lineComment(str2, itemIndent, commentString(comment2));
+      if (chompKeep && comment2)
         chompKeep = false;
-      lines.push(blockItemPrefix + str);
+      lines.push(blockItemPrefix + str2);
     }
     let str;
     if (lines.length === 0) {
@@ -1897,7 +1897,7 @@ ${indent}${end}`;
   exports.stringifyCollection = stringifyCollection;
 });
 
-// node_modules/yaml/dist/nodes/YAMLMap.js
+// ../specialists/node_modules/yaml/dist/nodes/YAMLMap.js
 var require_YAMLMap = __commonJS(function(exports) {
   var stringifyCollection = require_stringifyCollection();
   var addPairToJSMap = require_addPairToJSMap();
@@ -2024,7 +2024,7 @@ var require_YAMLMap = __commonJS(function(exports) {
   exports.findPair = findPair;
 });
 
-// node_modules/yaml/dist/schema/common/map.js
+// ../specialists/node_modules/yaml/dist/schema/common/map.js
 var require_map = __commonJS(function(exports) {
   var identity = require_identity();
   var YAMLMap = require_YAMLMap();
@@ -2033,17 +2033,17 @@ var require_map = __commonJS(function(exports) {
     default: true,
     nodeClass: YAMLMap.YAMLMap,
     tag: "tag:yaml.org,2002:map",
-    resolve(map, onError) {
-      if (!identity.isMap(map))
+    resolve(map2, onError) {
+      if (!identity.isMap(map2))
         onError("Expected a mapping for this tag");
-      return map;
+      return map2;
     },
     createNode: (schema, obj, ctx) => YAMLMap.YAMLMap.from(schema, obj, ctx)
   };
   exports.map = map;
 });
 
-// node_modules/yaml/dist/nodes/YAMLSeq.js
+// ../specialists/node_modules/yaml/dist/nodes/YAMLSeq.js
 var require_YAMLSeq = __commonJS(function(exports) {
   var createNode = require_createNode();
   var stringifyCollection = require_stringifyCollection();
@@ -2136,7 +2136,7 @@ var require_YAMLSeq = __commonJS(function(exports) {
   exports.YAMLSeq = YAMLSeq;
 });
 
-// node_modules/yaml/dist/schema/common/seq.js
+// ../specialists/node_modules/yaml/dist/schema/common/seq.js
 var require_seq = __commonJS(function(exports) {
   var identity = require_identity();
   var YAMLSeq = require_YAMLSeq();
@@ -2145,17 +2145,17 @@ var require_seq = __commonJS(function(exports) {
     default: true,
     nodeClass: YAMLSeq.YAMLSeq,
     tag: "tag:yaml.org,2002:seq",
-    resolve(seq, onError) {
-      if (!identity.isSeq(seq))
+    resolve(seq2, onError) {
+      if (!identity.isSeq(seq2))
         onError("Expected a sequence for this tag");
-      return seq;
+      return seq2;
     },
     createNode: (schema, obj, ctx) => YAMLSeq.YAMLSeq.from(schema, obj, ctx)
   };
   exports.seq = seq;
 });
 
-// node_modules/yaml/dist/schema/common/string.js
+// ../specialists/node_modules/yaml/dist/schema/common/string.js
 var require_string = __commonJS(function(exports) {
   var stringifyString = require_stringifyString();
   var string = {
@@ -2171,7 +2171,7 @@ var require_string = __commonJS(function(exports) {
   exports.string = string;
 });
 
-// node_modules/yaml/dist/schema/common/null.js
+// ../specialists/node_modules/yaml/dist/schema/common/null.js
 var require_null = __commonJS(function(exports) {
   var Scalar = require_Scalar();
   var nullTag = {
@@ -2186,7 +2186,7 @@ var require_null = __commonJS(function(exports) {
   exports.nullTag = nullTag;
 });
 
-// node_modules/yaml/dist/schema/core/bool.js
+// ../specialists/node_modules/yaml/dist/schema/core/bool.js
 var require_bool = __commonJS(function(exports) {
   var Scalar = require_Scalar();
   var boolTag = {
@@ -2207,7 +2207,7 @@ var require_bool = __commonJS(function(exports) {
   exports.boolTag = boolTag;
 });
 
-// node_modules/yaml/dist/stringify/stringifyNumber.js
+// ../specialists/node_modules/yaml/dist/stringify/stringifyNumber.js
 var require_stringifyNumber = __commonJS(function(exports) {
   function stringifyNumber({ format, minFractionDigits, tag, value }) {
     if (typeof value === "bigint")
@@ -2231,7 +2231,7 @@ var require_stringifyNumber = __commonJS(function(exports) {
   exports.stringifyNumber = stringifyNumber;
 });
 
-// node_modules/yaml/dist/schema/core/float.js
+// ../specialists/node_modules/yaml/dist/schema/core/float.js
 var require_float = __commonJS(function(exports) {
   var Scalar = require_Scalar();
   var stringifyNumber = require_stringifyNumber();
@@ -2274,7 +2274,7 @@ var require_float = __commonJS(function(exports) {
   exports.floatNaN = floatNaN;
 });
 
-// node_modules/yaml/dist/schema/core/int.js
+// ../specialists/node_modules/yaml/dist/schema/core/int.js
 var require_int = __commonJS(function(exports) {
   var stringifyNumber = require_stringifyNumber();
   var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
@@ -2316,7 +2316,7 @@ var require_int = __commonJS(function(exports) {
   exports.intOct = intOct;
 });
 
-// node_modules/yaml/dist/schema/core/schema.js
+// ../specialists/node_modules/yaml/dist/schema/core/schema.js
 var require_schema = __commonJS(function(exports) {
   var map = require_map();
   var _null = require_null();
@@ -2341,7 +2341,7 @@ var require_schema = __commonJS(function(exports) {
   exports.schema = schema;
 });
 
-// node_modules/yaml/dist/schema/json/schema.js
+// ../specialists/node_modules/yaml/dist/schema/json/schema.js
 var require_schema2 = __commonJS(function(exports) {
   var Scalar = require_Scalar();
   var map = require_map();
@@ -2405,7 +2405,7 @@ var require_schema2 = __commonJS(function(exports) {
   exports.schema = schema;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/binary.js
+// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/binary.js
 var require_binary = __commonJS(function(exports) {
   var node_buffer = __require("buffer");
   var Scalar = require_Scalar();
@@ -2460,7 +2460,7 @@ var require_binary = __commonJS(function(exports) {
   exports.binary = binary;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/pairs.js
+// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/pairs.js
 var require_pairs = __commonJS(function(exports) {
   var identity = require_identity();
   var Pair = require_Pair();
@@ -2494,8 +2494,8 @@ ${cn.comment}` : item.comment;
   }
   function createPairs(schema, iterable, ctx) {
     const { replacer } = ctx;
-    const pairs = new YAMLSeq.YAMLSeq(schema);
-    pairs.tag = "tag:yaml.org,2002:pairs";
+    const pairs2 = new YAMLSeq.YAMLSeq(schema);
+    pairs2.tag = "tag:yaml.org,2002:pairs";
     let i = 0;
     if (iterable && Symbol.iterator in Object(iterable))
       for (let it of iterable) {
@@ -2519,9 +2519,9 @@ ${cn.comment}` : item.comment;
         } else {
           key = it;
         }
-        pairs.items.push(Pair.createPair(key, value, ctx));
+        pairs2.items.push(Pair.createPair(key, value, ctx));
       }
-    return pairs;
+    return pairs2;
   }
   var pairs = {
     collection: "seq",
@@ -2535,7 +2535,7 @@ ${cn.comment}` : item.comment;
   exports.resolvePairs = resolvePairs;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/omap.js
+// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/omap.js
 var require_omap = __commonJS(function(exports) {
   var identity = require_identity();
   var toJS = require_toJS();
@@ -2575,9 +2575,9 @@ var require_omap = __commonJS(function(exports) {
     }
     static from(schema, iterable, ctx) {
       const pairs$1 = pairs.createPairs(schema, iterable, ctx);
-      const omap = new this;
-      omap.items = pairs$1.items;
-      return omap;
+      const omap2 = new this;
+      omap2.items = pairs$1.items;
+      return omap2;
     }
   }
   YAMLOMap.tag = "tag:yaml.org,2002:omap";
@@ -2607,7 +2607,7 @@ var require_omap = __commonJS(function(exports) {
   exports.omap = omap;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/bool.js
+// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/bool.js
 var require_bool2 = __commonJS(function(exports) {
   var Scalar = require_Scalar();
   function boolStringify({ value, source }, ctx) {
@@ -2636,7 +2636,7 @@ var require_bool2 = __commonJS(function(exports) {
   exports.trueTag = trueTag;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/float.js
+// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/float.js
 var require_float2 = __commonJS(function(exports) {
   var Scalar = require_Scalar();
   var stringifyNumber = require_stringifyNumber();
@@ -2682,7 +2682,7 @@ var require_float2 = __commonJS(function(exports) {
   exports.floatNaN = floatNaN;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/int.js
+// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/int.js
 var require_int2 = __commonJS(function(exports) {
   var stringifyNumber = require_stringifyNumber();
   var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
@@ -2703,8 +2703,8 @@ var require_int2 = __commonJS(function(exports) {
           str = `0x${str}`;
           break;
       }
-      const n = BigInt(str);
-      return sign === "-" ? BigInt(-1) * n : n;
+      const n2 = BigInt(str);
+      return sign === "-" ? BigInt(-1) * n2 : n2;
     }
     const n = parseInt(str, radix);
     return sign === "-" ? -1 * n : n;
@@ -2758,7 +2758,7 @@ var require_int2 = __commonJS(function(exports) {
   exports.intOct = intOct;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/set.js
+// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/set.js
 var require_set = __commonJS(function(exports) {
   var identity = require_identity();
   var Pair = require_Pair();
@@ -2808,14 +2808,14 @@ var require_set = __commonJS(function(exports) {
     }
     static from(schema, iterable, ctx) {
       const { replacer } = ctx;
-      const set = new this(schema);
+      const set2 = new this(schema);
       if (iterable && Symbol.iterator in Object(iterable))
         for (let value of iterable) {
           if (typeof replacer === "function")
             value = replacer.call(iterable, value, value);
-          set.items.push(Pair.createPair(value, null, ctx));
+          set2.items.push(Pair.createPair(value, null, ctx));
         }
-      return set;
+      return set2;
     }
   }
   YAMLSet.tag = "tag:yaml.org,2002:set";
@@ -2841,14 +2841,14 @@ var require_set = __commonJS(function(exports) {
   exports.set = set;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/timestamp.js
+// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/timestamp.js
 var require_timestamp = __commonJS(function(exports) {
   var stringifyNumber = require_stringifyNumber();
   function parseSexagesimal(str, asBigInt) {
     const sign = str[0];
     const parts = sign === "-" || sign === "+" ? str.substring(1) : str;
     const num = (n) => asBigInt ? BigInt(n) : Number(n);
-    const res = parts.replace(/_/g, "").split(":").reduce((res, p) => res * num(60) + num(p), num(0));
+    const res = parts.replace(/_/g, "").split(":").reduce((res2, p) => res2 * num(60) + num(p), num(0));
     return sign === "-" ? num(-1) * res : res;
   }
   function stringifySexagesimal(node) {
@@ -2923,7 +2923,7 @@ var require_timestamp = __commonJS(function(exports) {
   exports.timestamp = timestamp;
 });
 
-// node_modules/yaml/dist/schema/yaml-1.1/schema.js
+// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/schema.js
 var require_schema3 = __commonJS(function(exports) {
   var map = require_map();
   var _null = require_null();
@@ -2964,7 +2964,7 @@ var require_schema3 = __commonJS(function(exports) {
   exports.schema = schema;
 });
 
-// node_modules/yaml/dist/schema/tags.js
+// ../specialists/node_modules/yaml/dist/schema/tags.js
 var require_tags = __commonJS(function(exports) {
   var map = require_map();
   var _null = require_null();
@@ -3039,23 +3039,23 @@ var require_tags = __commonJS(function(exports) {
     }
     if (addMergeTag)
       tags = tags.concat(merge.merge);
-    return tags.reduce((tags, tag) => {
+    return tags.reduce((tags2, tag) => {
       const tagObj = typeof tag === "string" ? tagsByName[tag] : tag;
       if (!tagObj) {
         const tagName = JSON.stringify(tag);
         const keys = Object.keys(tagsByName).map((key) => JSON.stringify(key)).join(", ");
         throw new Error(`Unknown custom tag ${tagName}; use one of ${keys}`);
       }
-      if (!tags.includes(tagObj))
-        tags.push(tagObj);
-      return tags;
+      if (!tags2.includes(tagObj))
+        tags2.push(tagObj);
+      return tags2;
     }, []);
   }
   exports.coreKnownTags = coreKnownTags;
   exports.getTags = getTags;
 });
 
-// node_modules/yaml/dist/schema/Schema.js
+// ../specialists/node_modules/yaml/dist/schema/Schema.js
 var require_Schema = __commonJS(function(exports) {
   var identity = require_identity();
   var map = require_map();
@@ -3085,7 +3085,7 @@ var require_Schema = __commonJS(function(exports) {
   exports.Schema = Schema;
 });
 
-// node_modules/yaml/dist/stringify/stringifyDocument.js
+// ../specialists/node_modules/yaml/dist/stringify/stringifyDocument.js
 var require_stringifyDocument = __commonJS(function(exports) {
   var identity = require_identity();
   var stringify = require_stringify();
@@ -3165,7 +3165,7 @@ var require_stringifyDocument = __commonJS(function(exports) {
   exports.stringifyDocument = stringifyDocument;
 });
 
-// node_modules/yaml/dist/doc/Document.js
+// ../specialists/node_modules/yaml/dist/doc/Document.js
 var require_Document = __commonJS(function(exports) {
   var Alias = require_Alias();
   var Collection = require_Collection();
@@ -3375,8 +3375,8 @@ var require_Document = __commonJS(function(exports) {
       };
       const res = toJS.toJS(this.contents, jsonArg ?? "", ctx);
       if (typeof onAnchor === "function")
-        for (const { count, res } of ctx.anchors.values())
-          onAnchor(res, count);
+        for (const { count, res: res2 } of ctx.anchors.values())
+          onAnchor(res2, count);
       return typeof reviver === "function" ? applyReviver.applyReviver(reviver, { "": res }, "", res) : res;
     }
     toJSON(jsonArg, onAnchor) {
@@ -3400,7 +3400,7 @@ var require_Document = __commonJS(function(exports) {
   exports.Document = Document;
 });
 
-// node_modules/yaml/dist/errors.js
+// ../specialists/node_modules/yaml/dist/errors.js
 var require_errors = __commonJS(function(exports) {
   class YAMLError extends Error {
     constructor(name, pos, code, message) {
@@ -3465,7 +3465,7 @@ ${pointer}
   exports.prettifyError = prettifyError;
 });
 
-// node_modules/yaml/dist/compose/resolve-props.js
+// ../specialists/node_modules/yaml/dist/compose/resolve-props.js
 var require_resolve_props = __commonJS(function(exports) {
   function resolveProps(tokens, { flow, indicator, next, offset, onError, parentIndent, startOnNewline }) {
     let spaceBefore = false;
@@ -3595,7 +3595,7 @@ var require_resolve_props = __commonJS(function(exports) {
   exports.resolveProps = resolveProps;
 });
 
-// node_modules/yaml/dist/compose/util-contains-newline.js
+// ../specialists/node_modules/yaml/dist/compose/util-contains-newline.js
 var require_util_contains_newline = __commonJS(function(exports) {
   function containsNewline(key) {
     if (!key)
@@ -3635,7 +3635,7 @@ var require_util_contains_newline = __commonJS(function(exports) {
   exports.containsNewline = containsNewline;
 });
 
-// node_modules/yaml/dist/compose/util-flow-indent-check.js
+// ../specialists/node_modules/yaml/dist/compose/util-flow-indent-check.js
 var require_util_flow_indent_check = __commonJS(function(exports) {
   var utilContainsNewline = require_util_contains_newline();
   function flowIndentCheck(indent, fc, onError) {
@@ -3650,7 +3650,7 @@ var require_util_flow_indent_check = __commonJS(function(exports) {
   exports.flowIndentCheck = flowIndentCheck;
 });
 
-// node_modules/yaml/dist/compose/util-map-includes.js
+// ../specialists/node_modules/yaml/dist/compose/util-map-includes.js
 var require_util_map_includes = __commonJS(function(exports) {
   var identity = require_identity();
   function mapIncludes(ctx, items, search) {
@@ -3663,7 +3663,7 @@ var require_util_map_includes = __commonJS(function(exports) {
   exports.mapIncludes = mapIncludes;
 });
 
-// node_modules/yaml/dist/compose/resolve-block-map.js
+// ../specialists/node_modules/yaml/dist/compose/resolve-block-map.js
 var require_resolve_block_map = __commonJS(function(exports) {
   var Pair = require_Pair();
   var YAMLMap = require_YAMLMap();
@@ -3680,10 +3680,10 @@ var require_resolve_block_map = __commonJS(function(exports) {
     let offset = bm.offset;
     let commentEnd = null;
     for (const collItem of bm.items) {
-      const { start, key, sep, value } = collItem;
+      const { start, key, sep: sep3, value } = collItem;
       const keyProps = resolveProps.resolveProps(start, {
         indicator: "explicit-key-ind",
-        next: key ?? sep?.[0],
+        next: key ?? sep3?.[0],
         offset,
         onError,
         parentIndent: bm.indent,
@@ -3697,7 +3697,7 @@ var require_resolve_block_map = __commonJS(function(exports) {
           else if ("indent" in key && key.indent !== bm.indent)
             onError(offset, "BAD_INDENT", startColMsg);
         }
-        if (!keyProps.anchor && !keyProps.tag && !sep) {
+        if (!keyProps.anchor && !keyProps.tag && !sep3) {
           commentEnd = keyProps.end;
           if (keyProps.comment) {
             if (map.comment)
@@ -3722,7 +3722,7 @@ var require_resolve_block_map = __commonJS(function(exports) {
       ctx.atKey = false;
       if (utilMapIncludes.mapIncludes(ctx, map.items, keyNode))
         onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
-      const valueProps = resolveProps.resolveProps(sep ?? [], {
+      const valueProps = resolveProps.resolveProps(sep3 ?? [], {
         indicator: "map-value-ind",
         next: value,
         offset: keyNode.range[2],
@@ -3738,7 +3738,7 @@ var require_resolve_block_map = __commonJS(function(exports) {
           if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
             onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
         }
-        const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep, null, valueProps, onError);
+        const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep3, null, valueProps, onError);
         if (ctx.schema.compat)
           utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
         offset = valueNode.range[2];
@@ -3770,7 +3770,7 @@ var require_resolve_block_map = __commonJS(function(exports) {
   exports.resolveBlockMap = resolveBlockMap;
 });
 
-// node_modules/yaml/dist/compose/resolve-block-seq.js
+// ../specialists/node_modules/yaml/dist/compose/resolve-block-seq.js
 var require_resolve_block_seq = __commonJS(function(exports) {
   var YAMLSeq = require_YAMLSeq();
   var resolveProps = require_resolve_props();
@@ -3818,13 +3818,13 @@ var require_resolve_block_seq = __commonJS(function(exports) {
   exports.resolveBlockSeq = resolveBlockSeq;
 });
 
-// node_modules/yaml/dist/compose/resolve-end.js
+// ../specialists/node_modules/yaml/dist/compose/resolve-end.js
 var require_resolve_end = __commonJS(function(exports) {
   function resolveEnd(end, offset, reqSpace, onError) {
     let comment = "";
     if (end) {
       let hasSpace = false;
-      let sep = "";
+      let sep3 = "";
       for (const token of end) {
         const { source, type } = token;
         switch (type) {
@@ -3838,13 +3838,13 @@ var require_resolve_end = __commonJS(function(exports) {
             if (!comment)
               comment = cb;
             else
-              comment += sep + cb;
-            sep = "";
+              comment += sep3 + cb;
+            sep3 = "";
             break;
           }
           case "newline":
             if (comment)
-              sep += source;
+              sep3 += source;
             hasSpace = true;
             break;
           default:
@@ -3858,7 +3858,7 @@ var require_resolve_end = __commonJS(function(exports) {
   exports.resolveEnd = resolveEnd;
 });
 
-// node_modules/yaml/dist/compose/resolve-flow-collection.js
+// ../specialists/node_modules/yaml/dist/compose/resolve-flow-collection.js
 var require_resolve_flow_collection = __commonJS(function(exports) {
   var identity = require_identity();
   var Pair = require_Pair();
@@ -3884,18 +3884,18 @@ var require_resolve_flow_collection = __commonJS(function(exports) {
     let offset = fc.offset + fc.start.source.length;
     for (let i = 0;i < fc.items.length; ++i) {
       const collItem = fc.items[i];
-      const { start, key, sep, value } = collItem;
+      const { start, key, sep: sep3, value } = collItem;
       const props = resolveProps.resolveProps(start, {
         flow: fcName,
         indicator: "explicit-key-ind",
-        next: key ?? sep?.[0],
+        next: key ?? sep3?.[0],
         offset,
         onError,
         parentIndent: fc.indent,
         startOnNewline: false
       });
       if (!props.found) {
-        if (!props.anchor && !props.tag && !sep && !value) {
+        if (!props.anchor && !props.tag && !sep3 && !value) {
           if (i === 0 && props.comma)
             onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
           else if (i < fc.items.length - 1)
@@ -3947,8 +3947,8 @@ var require_resolve_flow_collection = __commonJS(function(exports) {
           }
         }
       }
-      if (!isMap && !sep && !props.found) {
-        const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep, null, props, onError);
+      if (!isMap && !sep3 && !props.found) {
+        const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep3, null, props, onError);
         coll.items.push(valueNode);
         offset = valueNode.range[2];
         if (isBlock(value))
@@ -3960,7 +3960,7 @@ var require_resolve_flow_collection = __commonJS(function(exports) {
         if (isBlock(key))
           onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
         ctx.atKey = false;
-        const valueProps = resolveProps.resolveProps(sep ?? [], {
+        const valueProps = resolveProps.resolveProps(sep3 ?? [], {
           flow: fcName,
           indicator: "map-value-ind",
           next: value,
@@ -3971,8 +3971,8 @@ var require_resolve_flow_collection = __commonJS(function(exports) {
         });
         if (valueProps.found) {
           if (!isMap && !props.found && ctx.options.strict) {
-            if (sep)
-              for (const st of sep) {
+            if (sep3)
+              for (const st of sep3) {
                 if (st === valueProps.found)
                   break;
                 if (st.type === "newline") {
@@ -3989,7 +3989,7 @@ var require_resolve_flow_collection = __commonJS(function(exports) {
           else
             onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
         }
-        const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep, null, valueProps, onError) : null;
+        const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep3, null, valueProps, onError) : null;
         if (valueNode) {
           if (isBlock(value))
             onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
@@ -4049,7 +4049,7 @@ var require_resolve_flow_collection = __commonJS(function(exports) {
   exports.resolveFlowCollection = resolveFlowCollection;
 });
 
-// node_modules/yaml/dist/compose/compose-collection.js
+// ../specialists/node_modules/yaml/dist/compose/compose-collection.js
 var require_compose_collection = __commonJS(function(exports) {
   var identity = require_identity();
   var Scalar = require_Scalar();
@@ -4111,7 +4111,7 @@ var require_compose_collection = __commonJS(function(exports) {
   exports.composeCollection = composeCollection;
 });
 
-// node_modules/yaml/dist/compose/resolve-block-scalar.js
+// ../specialists/node_modules/yaml/dist/compose/resolve-block-scalar.js
 var require_resolve_block_scalar = __commonJS(function(exports) {
   var Scalar = require_Scalar();
   function resolveBlockScalar(ctx, scalar, onError) {
@@ -4130,12 +4130,12 @@ var require_resolve_block_scalar = __commonJS(function(exports) {
         break;
     }
     if (chompStart === 0) {
-      const value = header.chomp === "+" && lines.length > 0 ? `
+      const value2 = header.chomp === "+" && lines.length > 0 ? `
 `.repeat(Math.max(1, lines.length - 1)) : "";
-      let end = start + header.length;
+      let end2 = start + header.length;
       if (scalar.source)
-        end += scalar.source.length;
-      return { value, type, comment: header.comment, range: [start, end, end] };
+        end2 += scalar.source.length;
+      return { value: value2, type, comment: header.comment, range: [start, end2, end2] };
     }
     let trimIndent = scalar.indent + header.indent;
     let offset = scalar.offset + header.length;
@@ -4166,7 +4166,7 @@ var require_resolve_block_scalar = __commonJS(function(exports) {
         chompStart = i + 1;
     }
     let value = "";
-    let sep = "";
+    let sep3 = "";
     let prevMoreIndented = false;
     for (let i = 0;i < contentStart; ++i)
       value += lines[i][0].slice(trimIndent) + `
@@ -4184,33 +4184,33 @@ var require_resolve_block_scalar = __commonJS(function(exports) {
         indent = "";
       }
       if (type === Scalar.Scalar.BLOCK_LITERAL) {
-        value += sep + indent.slice(trimIndent) + content;
-        sep = `
+        value += sep3 + indent.slice(trimIndent) + content;
+        sep3 = `
 `;
       } else if (indent.length > trimIndent || content[0] === "\t") {
-        if (sep === " ")
-          sep = `
+        if (sep3 === " ")
+          sep3 = `
 `;
-        else if (!prevMoreIndented && sep === `
+        else if (!prevMoreIndented && sep3 === `
 `)
-          sep = `
+          sep3 = `
 
 `;
-        value += sep + indent.slice(trimIndent) + content;
-        sep = `
+        value += sep3 + indent.slice(trimIndent) + content;
+        sep3 = `
 `;
         prevMoreIndented = true;
       } else if (content === "") {
-        if (sep === `
+        if (sep3 === `
 `)
           value += `
 `;
         else
-          sep = `
+          sep3 = `
 `;
       } else {
-        value += sep + content;
-        sep = " ";
+        value += sep3 + content;
+        sep3 = " ";
         prevMoreIndented = false;
       }
     }
@@ -4304,7 +4304,7 @@ var require_resolve_block_scalar = __commonJS(function(exports) {
   exports.resolveBlockScalar = resolveBlockScalar;
 });
 
-// node_modules/yaml/dist/compose/resolve-flow-scalar.js
+// ../specialists/node_modules/yaml/dist/compose/resolve-flow-scalar.js
 var require_resolve_flow_scalar = __commonJS(function(exports) {
   var Scalar = require_Scalar();
   var resolveEnd = require_resolve_end();
@@ -4391,27 +4391,27 @@ var require_resolve_flow_scalar = __commonJS(function(exports) {
     if (!match)
       return source;
     let res = match[1];
-    let sep = " ";
+    let sep3 = " ";
     let pos = first.lastIndex;
     line.lastIndex = pos;
     while (match = line.exec(source)) {
       if (match[1] === "") {
-        if (sep === `
+        if (sep3 === `
 `)
-          res += sep;
+          res += sep3;
         else
-          sep = `
+          sep3 = `
 `;
       } else {
-        res += sep + match[1];
-        sep = " ";
+        res += sep3 + match[1];
+        sep3 = " ";
       }
       pos = line.lastIndex;
     }
     const last = /[ \t]*(.*)/sy;
     last.lastIndex = pos;
     match = last.exec(source);
-    return res + sep + (match?.[1] ?? "");
+    return res + sep3 + (match?.[1] ?? "");
   }
   function doubleQuotedValue(source, onError) {
     let res = "";
@@ -4521,7 +4521,7 @@ var require_resolve_flow_scalar = __commonJS(function(exports) {
   exports.resolveFlowScalar = resolveFlowScalar;
 });
 
-// node_modules/yaml/dist/compose/compose-scalar.js
+// ../specialists/node_modules/yaml/dist/compose/compose-scalar.js
 var require_compose_scalar = __commonJS(function(exports) {
   var identity = require_identity();
   var Scalar = require_Scalar();
@@ -4584,9 +4584,9 @@ var require_compose_scalar = __commonJS(function(exports) {
     return schema[identity.SCALAR];
   }
   function findScalarTagByTest({ atKey, directives, schema }, value, token, onError) {
-    const tag = schema.tags.find((tag) => (tag.default === true || atKey && tag.default === "key") && tag.test?.test(value)) || schema[identity.SCALAR];
+    const tag = schema.tags.find((tag2) => (tag2.default === true || atKey && tag2.default === "key") && tag2.test?.test(value)) || schema[identity.SCALAR];
     if (schema.compat) {
-      const compat = schema.compat.find((tag) => tag.default && tag.test?.test(value)) ?? schema[identity.SCALAR];
+      const compat = schema.compat.find((tag2) => tag2.default && tag2.test?.test(value)) ?? schema[identity.SCALAR];
       if (tag.tag !== compat.tag) {
         const ts = directives.tagString(tag.tag);
         const cs = directives.tagString(compat.tag);
@@ -4599,7 +4599,7 @@ var require_compose_scalar = __commonJS(function(exports) {
   exports.composeScalar = composeScalar;
 });
 
-// node_modules/yaml/dist/compose/util-empty-scalar-position.js
+// ../specialists/node_modules/yaml/dist/compose/util-empty-scalar-position.js
 var require_util_empty_scalar_position = __commonJS(function(exports) {
   function emptyScalarPosition(offset, before, pos) {
     if (before) {
@@ -4626,7 +4626,7 @@ var require_util_empty_scalar_position = __commonJS(function(exports) {
   exports.emptyScalarPosition = emptyScalarPosition;
 });
 
-// node_modules/yaml/dist/compose/compose-node.js
+// ../specialists/node_modules/yaml/dist/compose/compose-node.js
 var require_compose_node = __commonJS(function(exports) {
   var Alias = require_Alias();
   var identity = require_identity();
@@ -4729,7 +4729,7 @@ var require_compose_node = __commonJS(function(exports) {
   exports.composeNode = composeNode;
 });
 
-// node_modules/yaml/dist/compose/compose-doc.js
+// ../specialists/node_modules/yaml/dist/compose/compose-doc.js
 var require_compose_doc = __commonJS(function(exports) {
   var Document = require_Document();
   var composeNode = require_compose_node();
@@ -4769,7 +4769,7 @@ var require_compose_doc = __commonJS(function(exports) {
   exports.composeDoc = composeDoc;
 });
 
-// node_modules/yaml/dist/compose/composer.js
+// ../specialists/node_modules/yaml/dist/compose/composer.js
 var require_composer = __commonJS(function(exports) {
   var node_process = __require("process");
   var directives = require_directives();
@@ -4960,7 +4960,7 @@ ${end.comment}` : end.comment;
   exports.Composer = Composer;
 });
 
-// node_modules/yaml/dist/parse/cst-scalar.js
+// ../specialists/node_modules/yaml/dist/parse/cst-scalar.js
 var require_cst_scalar = __commonJS(function(exports) {
   var resolveBlockScalar = require_resolve_block_scalar();
   var resolveFlowScalar = require_resolve_flow_scalar();
@@ -5150,7 +5150,7 @@ var require_cst_scalar = __commonJS(function(exports) {
   exports.setScalarValue = setScalarValue;
 });
 
-// node_modules/yaml/dist/parse/cst-stringify.js
+// ../specialists/node_modules/yaml/dist/parse/cst-stringify.js
 var require_cst_stringify = __commonJS(function(exports) {
   var stringify = (cst) => ("type" in cst) ? stringifyToken(cst) : stringifyItem(cst);
   function stringifyToken(token) {
@@ -5192,14 +5192,14 @@ var require_cst_stringify = __commonJS(function(exports) {
       }
     }
   }
-  function stringifyItem({ start, key, sep, value }) {
+  function stringifyItem({ start, key, sep: sep3, value }) {
     let res = "";
     for (const st of start)
       res += st.source;
     if (key)
       res += stringifyToken(key);
-    if (sep)
-      for (const st of sep)
+    if (sep3)
+      for (const st of sep3)
         res += st.source;
     if (value)
       res += stringifyToken(value);
@@ -5208,7 +5208,7 @@ var require_cst_stringify = __commonJS(function(exports) {
   exports.stringify = stringify;
 });
 
-// node_modules/yaml/dist/parse/cst-visit.js
+// ../specialists/node_modules/yaml/dist/parse/cst-visit.js
 var require_cst_visit = __commonJS(function(exports) {
   var BREAK = Symbol("break visit");
   var SKIP = Symbol("skip children");
@@ -5267,7 +5267,7 @@ var require_cst_visit = __commonJS(function(exports) {
   exports.visit = visit;
 });
 
-// node_modules/yaml/dist/parse/cst.js
+// ../specialists/node_modules/yaml/dist/parse/cst.js
 var require_cst = __commonJS(function(exports) {
   var cstScalar = require_cst_scalar();
   var cstStringify = require_cst_stringify();
@@ -5368,7 +5368,7 @@ var require_cst = __commonJS(function(exports) {
   exports.tokenType = tokenType;
 });
 
-// node_modules/yaml/dist/parse/lexer.js
+// ../specialists/node_modules/yaml/dist/parse/lexer.js
 var require_lexer = __commonJS(function(exports) {
   var cst = require_cst();
   function isEmpty(ch) {
@@ -5742,18 +5742,18 @@ var require_lexer = __commonJS(function(exports) {
       let indent = 0;
       let ch;
       loop:
-        for (let i = this.pos;ch = this.buffer[i]; ++i) {
+        for (let i2 = this.pos;ch = this.buffer[i2]; ++i2) {
           switch (ch) {
             case " ":
               indent += 1;
               break;
             case `
 `:
-              nl = i;
+              nl = i2;
               indent = 0;
               break;
             case "\r": {
-              const next = this.buffer[i + 1];
+              const next = this.buffer[i2 + 1];
               if (!next && !this.atEnd)
                 return this.setNext("block-scalar");
               if (next === `
@@ -5796,16 +5796,16 @@ var require_lexer = __commonJS(function(exports) {
         nl = i - 1;
       } else if (!this.blockScalarKeep) {
         do {
-          let i = nl - 1;
-          let ch = this.buffer[i];
-          if (ch === "\r")
-            ch = this.buffer[--i];
-          const lastChar = i;
-          while (ch === " ")
-            ch = this.buffer[--i];
-          if (ch === `
-` && i >= this.pos && i + 1 + indent > lastChar)
-            nl = i;
+          let i2 = nl - 1;
+          let ch2 = this.buffer[i2];
+          if (ch2 === "\r")
+            ch2 = this.buffer[--i2];
+          const lastChar = i2;
+          while (ch2 === " ")
+            ch2 = this.buffer[--i2];
+          if (ch2 === `
+` && i2 >= this.pos && i2 + 1 + indent > lastChar)
+            nl = i2;
           else
             break;
         } while (true);
@@ -5965,7 +5965,7 @@ var require_lexer = __commonJS(function(exports) {
   exports.Lexer = Lexer;
 });
 
-// node_modules/yaml/dist/parse/line-counter.js
+// ../specialists/node_modules/yaml/dist/parse/line-counter.js
 var require_line_counter = __commonJS(function(exports) {
   class LineCounter {
     constructor() {
@@ -5993,7 +5993,7 @@ var require_line_counter = __commonJS(function(exports) {
   exports.LineCounter = LineCounter;
 });
 
-// node_modules/yaml/dist/parse/parser.js
+// ../specialists/node_modules/yaml/dist/parse/parser.js
 var require_parser = __commonJS(function(exports) {
   var node_process = __require("process");
   var cst = require_cst();
@@ -6347,18 +6347,18 @@ var require_parser = __commonJS(function(exports) {
       if (this.type === "map-value-ind") {
         const prev = getPrevProps(this.peek(2));
         const start = getFirstKeyStartProps(prev);
-        let sep;
+        let sep3;
         if (scalar.end) {
-          sep = scalar.end;
-          sep.push(this.sourceToken);
+          sep3 = scalar.end;
+          sep3.push(this.sourceToken);
           delete scalar.end;
         } else
-          sep = [this.sourceToken];
+          sep3 = [this.sourceToken];
         const map = {
           type: "block-map",
           offset: scalar.offset,
           indent: scalar.indent,
-          items: [{ start, key: scalar, sep }]
+          items: [{ start, key: scalar, sep: sep3 }]
         };
         this.onKeyLine = true;
         this.stack[this.stack.length - 1] = map;
@@ -6492,12 +6492,12 @@ var require_parser = __commonJS(function(exports) {
                 if (includesToken(it.start, "newline")) {
                   Object.assign(it, { key: null, sep: [this.sourceToken] });
                 } else {
-                  const start = getFirstKeyStartProps(it.start);
+                  const start2 = getFirstKeyStartProps(it.start);
                   this.stack.push({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start, key: null, sep: [this.sourceToken] }]
+                    items: [{ start: start2, key: null, sep: [this.sourceToken] }]
                   });
                 }
               } else if (it.value) {
@@ -6510,17 +6510,17 @@ var require_parser = __commonJS(function(exports) {
                   items: [{ start, key: null, sep: [this.sourceToken] }]
                 });
               } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
-                const start = getFirstKeyStartProps(it.start);
+                const start2 = getFirstKeyStartProps(it.start);
                 const key = it.key;
-                const sep = it.sep;
-                sep.push(this.sourceToken);
+                const sep3 = it.sep;
+                sep3.push(this.sourceToken);
                 delete it.key;
                 delete it.sep;
                 this.stack.push({
                   type: "block-map",
                   offset: this.offset,
                   indent: this.indent,
-                  items: [{ start, key, sep }]
+                  items: [{ start: start2, key, sep: sep3 }]
                 });
               } else if (start.length > 0) {
                 it.sep = it.sep.concat(start, this.sourceToken);
@@ -6714,13 +6714,13 @@ var require_parser = __commonJS(function(exports) {
           const prev = getPrevProps(parent);
           const start = getFirstKeyStartProps(prev);
           fixFlowSeqItems(fc);
-          const sep = fc.end.splice(1, fc.end.length);
-          sep.push(this.sourceToken);
+          const sep3 = fc.end.splice(1, fc.end.length);
+          sep3.push(this.sourceToken);
           const map = {
             type: "block-map",
             offset: fc.offset,
             indent: fc.indent,
-            items: [{ start, key: fc, sep }]
+            items: [{ start, key: fc, sep: sep3 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map;
@@ -6849,7 +6849,7 @@ var require_parser = __commonJS(function(exports) {
   exports.Parser = Parser;
 });
 
-// node_modules/yaml/dist/public-api.js
+// ../specialists/node_modules/yaml/dist/public-api.js
 var require_public_api = __commonJS(function(exports) {
   var composer = require_composer();
   var Document = require_Document();
@@ -6864,22 +6864,22 @@ var require_public_api = __commonJS(function(exports) {
     return { lineCounter: lineCounter$1, prettyErrors };
   }
   function parseAllDocuments(source, options = {}) {
-    const { lineCounter, prettyErrors } = parseOptions(options);
-    const parser$1 = new parser.Parser(lineCounter?.addNewLine);
+    const { lineCounter: lineCounter2, prettyErrors } = parseOptions(options);
+    const parser$1 = new parser.Parser(lineCounter2?.addNewLine);
     const composer$1 = new composer.Composer(options);
     const docs = Array.from(composer$1.compose(parser$1.parse(source)));
-    if (prettyErrors && lineCounter)
+    if (prettyErrors && lineCounter2)
       for (const doc of docs) {
-        doc.errors.forEach(errors.prettifyError(source, lineCounter));
-        doc.warnings.forEach(errors.prettifyError(source, lineCounter));
+        doc.errors.forEach(errors.prettifyError(source, lineCounter2));
+        doc.warnings.forEach(errors.prettifyError(source, lineCounter2));
       }
     if (docs.length > 0)
       return docs;
     return Object.assign([], { empty: true }, composer$1.streamInfo());
   }
   function parseDocument(source, options = {}) {
-    const { lineCounter, prettyErrors } = parseOptions(options);
-    const parser$1 = new parser.Parser(lineCounter?.addNewLine);
+    const { lineCounter: lineCounter2, prettyErrors } = parseOptions(options);
+    const parser$1 = new parser.Parser(lineCounter2?.addNewLine);
     const composer$1 = new composer.Composer(options);
     let doc = null;
     for (const _doc of composer$1.compose(parser$1.parse(source), true, source.length)) {
@@ -6890,9 +6890,9 @@ var require_public_api = __commonJS(function(exports) {
         break;
       }
     }
-    if (prettyErrors && lineCounter) {
-      doc.errors.forEach(errors.prettifyError(source, lineCounter));
-      doc.warnings.forEach(errors.prettifyError(source, lineCounter));
+    if (prettyErrors && lineCounter2) {
+      doc.errors.forEach(errors.prettifyError(source, lineCounter2));
+      doc.warnings.forEach(errors.prettifyError(source, lineCounter2));
     }
     return doc;
   }
@@ -7408,37 +7408,37 @@ function formatResolvedToolContract(contract, admission = "tool-policy-gate") {
 `);
 }
 
-// node_modules/zod/v3/helpers/util.js
+// ../specialists/node_modules/zod/v3/helpers/util.js
 var util;
-(function(util) {
-  util.assertEqual = (_) => {};
+(function(util2) {
+  util2.assertEqual = (_) => {};
   function assertIs(_arg) {}
-  util.assertIs = assertIs;
+  util2.assertIs = assertIs;
   function assertNever(_x) {
     throw new Error;
   }
-  util.assertNever = assertNever;
-  util.arrayToEnum = (items) => {
+  util2.assertNever = assertNever;
+  util2.arrayToEnum = (items) => {
     const obj = {};
     for (const item of items) {
       obj[item] = item;
     }
     return obj;
   };
-  util.getValidEnumValues = (obj) => {
-    const validKeys = util.objectKeys(obj).filter((k) => typeof obj[obj[k]] !== "number");
+  util2.getValidEnumValues = (obj) => {
+    const validKeys = util2.objectKeys(obj).filter((k) => typeof obj[obj[k]] !== "number");
     const filtered = {};
     for (const k of validKeys) {
       filtered[k] = obj[k];
     }
-    return util.objectValues(filtered);
+    return util2.objectValues(filtered);
   };
-  util.objectValues = (obj) => {
-    return util.objectKeys(obj).map(function(e) {
+  util2.objectValues = (obj) => {
+    return util2.objectKeys(obj).map(function(e) {
       return obj[e];
     });
   };
-  util.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object) => {
+  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object) => {
     const keys = [];
     for (const key in object) {
       if (Object.prototype.hasOwnProperty.call(object, key)) {
@@ -7447,19 +7447,19 @@ var util;
     }
     return keys;
   };
-  util.find = (arr, checker) => {
+  util2.find = (arr, checker) => {
     for (const item of arr) {
       if (checker(item))
         return item;
     }
     return;
   };
-  util.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
+  util2.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
   function joinValues(array, separator = " | ") {
     return array.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
   }
-  util.joinValues = joinValues;
-  util.jsonStringifyReplacer = (_, value) => {
+  util2.joinValues = joinValues;
+  util2.jsonStringifyReplacer = (_, value) => {
     if (typeof value === "bigint") {
       return value.toString();
     }
@@ -7467,8 +7467,8 @@ var util;
   };
 })(util || (util = {}));
 var objectUtil;
-(function(objectUtil) {
-  objectUtil.mergeShapes = (first, second) => {
+(function(objectUtil2) {
+  objectUtil2.mergeShapes = (first, second) => {
     return {
       ...first,
       ...second
@@ -7539,7 +7539,7 @@ var getParsedType = (data) => {
   }
 };
 
-// node_modules/zod/v3/ZodError.js
+// ../specialists/node_modules/zod/v3/ZodError.js
 var ZodIssueCode = util.arrayToEnum([
   "invalid_type",
   "invalid_literal",
@@ -7653,7 +7653,7 @@ ZodError.create = (issues) => {
   return error;
 };
 
-// node_modules/zod/v3/locales/en.js
+// ../specialists/node_modules/zod/v3/locales/en.js
 var errorMap = (issue, _ctx) => {
   let message;
   switch (issue.code) {
@@ -7756,13 +7756,13 @@ var errorMap = (issue, _ctx) => {
 };
 var en_default = errorMap;
 
-// node_modules/zod/v3/errors.js
+// ../specialists/node_modules/zod/v3/errors.js
 var overrideErrorMap = en_default;
 function getErrorMap() {
   return overrideErrorMap;
 }
 
-// node_modules/zod/v3/helpers/parseUtil.js
+// ../specialists/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
   const { data, path, errorMaps, issueData } = params;
   const fullPath = [...path, ...issueData.path || []];
@@ -7868,14 +7868,14 @@ var isDirty = (x) => x.status === "dirty";
 var isValid = (x) => x.status === "valid";
 var isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
 
-// node_modules/zod/v3/helpers/errorUtil.js
+// ../specialists/node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil;
-(function(errorUtil) {
-  errorUtil.errToObj = (message) => typeof message === "string" ? { message } : message || {};
-  errorUtil.toString = (message) => typeof message === "string" ? message : message?.message;
+(function(errorUtil2) {
+  errorUtil2.errToObj = (message) => typeof message === "string" ? { message } : message || {};
+  errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
 })(errorUtil || (errorUtil = {}));
 
-// node_modules/zod/v3/types.js
+// ../specialists/node_modules/zod/v3/types.js
 class ParseInputLazyPath {
   constructor(parent, value, path, key) {
     this._cachedPath = [];
@@ -7917,12 +7917,12 @@ var handleResult = (ctx, result) => {
 function processCreateParams(params) {
   if (!params)
     return {};
-  const { errorMap, invalid_type_error, required_error, description } = params;
-  if (errorMap && (invalid_type_error || required_error)) {
+  const { errorMap: errorMap2, invalid_type_error, required_error, description } = params;
+  if (errorMap2 && (invalid_type_error || required_error)) {
     throw new Error(`Can't use "invalid_type_error" or "required_error" in conjunction with custom error map.`);
   }
-  if (errorMap)
-    return { errorMap, description };
+  if (errorMap2)
+    return { errorMap: errorMap2, description };
   const customMap = (iss, ctx) => {
     const { message } = params;
     if (iss.code === "invalid_enum_value") {
@@ -8309,11 +8309,11 @@ class ZodString extends ZodType {
     }
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.string) {
-      const ctx = this._getOrReturnCtx(input);
-      addIssueToContext(ctx, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.string,
-        received: ctx.parsedType
+        received: ctx2.parsedType
       });
       return INVALID;
     }
@@ -8867,11 +8867,11 @@ class ZodNumber extends ZodType {
     }
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.number) {
-      const ctx = this._getOrReturnCtx(input);
-      addIssueToContext(ctx, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.number,
-        received: ctx.parsedType
+        received: ctx2.parsedType
       });
       return INVALID;
     }
@@ -9293,17 +9293,17 @@ class ZodDate extends ZodType {
     }
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.date) {
-      const ctx = this._getOrReturnCtx(input);
-      addIssueToContext(ctx, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.date,
-        received: ctx.parsedType
+        received: ctx2.parsedType
       });
       return INVALID;
     }
     if (Number.isNaN(input.data.getTime())) {
-      const ctx = this._getOrReturnCtx(input);
-      addIssueToContext(ctx, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_date
       });
       return INVALID;
@@ -9591,8 +9591,8 @@ class ZodArray extends ZodType {
     if (ctx.common.async) {
       return Promise.all([...ctx.data].map((item, i) => {
         return def.type._parseAsync(new ParseInputLazyPath(ctx, item, ctx.path, i));
-      })).then((result) => {
-        return ParseStatus.mergeArray(status, result);
+      })).then((result2) => {
+        return ParseStatus.mergeArray(status, result2);
       });
     }
     const result = [...ctx.data].map((item, i) => {
@@ -9680,11 +9680,11 @@ class ZodObject extends ZodType {
   _parse(input) {
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.object) {
-      const ctx = this._getOrReturnCtx(input);
-      addIssueToContext(ctx, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.object,
-        received: ctx.parsedType
+        received: ctx2.parsedType
       });
       return INVALID;
     }
@@ -9988,7 +9988,7 @@ class ZodUnion extends ZodType {
         ctx.common.issues.push(...dirty.ctx.common.issues);
         return dirty.result;
       }
-      const unionErrors = issues.map((issues) => new ZodError(issues));
+      const unionErrors = issues.map((issues2) => new ZodError(issues2));
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_union,
         unionErrors
@@ -10428,9 +10428,9 @@ class ZodSet extends ZodType {
       }
     }
     const valueType = this._def.valueType;
-    function finalizeSet(elements) {
+    function finalizeSet(elements2) {
       const parsedSet = new Set;
-      for (const element of elements) {
+      for (const element of elements2) {
         if (element.status === "aborted")
           return INVALID;
         if (element.status === "dirty")
@@ -10441,7 +10441,7 @@ class ZodSet extends ZodType {
     }
     const elements = [...ctx.data.values()].map((item, i) => valueType._parse(new ParseInputLazyPath(ctx, item, ctx.path, i)));
     if (ctx.common.async) {
-      return Promise.all(elements).then((elements) => finalizeSet(elements));
+      return Promise.all(elements).then((elements2) => finalizeSet(elements2));
     } else {
       return finalizeSet(elements);
     }
@@ -10794,11 +10794,11 @@ class ZodEffects extends ZodType {
     if (effect.type === "preprocess") {
       const processed = effect.transform(ctx.data, checkCtx);
       if (ctx.common.async) {
-        return Promise.resolve(processed).then(async (processed) => {
+        return Promise.resolve(processed).then(async (processed2) => {
           if (status.value === "aborted")
             return INVALID;
           const result = await this._def.schema._parseAsync({
-            data: processed,
+            data: processed2,
             path: ctx.path,
             parent: ctx
           });
@@ -10990,10 +10990,10 @@ class ZodCatch extends ZodType {
       }
     });
     if (isAsync(result)) {
-      return result.then((result) => {
+      return result.then((result2) => {
         return {
           status: "valid",
-          value: result.status === "valid" ? result.value : this._def.catchValue({
+          value: result2.status === "valid" ? result2.value : this._def.catchValue({
             get error() {
               return new ZodError(newCtx.common.issues);
             },
@@ -11146,43 +11146,43 @@ var late = {
   object: ZodObject.lazycreate
 };
 var ZodFirstPartyTypeKind;
-(function(ZodFirstPartyTypeKind) {
-  ZodFirstPartyTypeKind["ZodString"] = "ZodString";
-  ZodFirstPartyTypeKind["ZodNumber"] = "ZodNumber";
-  ZodFirstPartyTypeKind["ZodNaN"] = "ZodNaN";
-  ZodFirstPartyTypeKind["ZodBigInt"] = "ZodBigInt";
-  ZodFirstPartyTypeKind["ZodBoolean"] = "ZodBoolean";
-  ZodFirstPartyTypeKind["ZodDate"] = "ZodDate";
-  ZodFirstPartyTypeKind["ZodSymbol"] = "ZodSymbol";
-  ZodFirstPartyTypeKind["ZodUndefined"] = "ZodUndefined";
-  ZodFirstPartyTypeKind["ZodNull"] = "ZodNull";
-  ZodFirstPartyTypeKind["ZodAny"] = "ZodAny";
-  ZodFirstPartyTypeKind["ZodUnknown"] = "ZodUnknown";
-  ZodFirstPartyTypeKind["ZodNever"] = "ZodNever";
-  ZodFirstPartyTypeKind["ZodVoid"] = "ZodVoid";
-  ZodFirstPartyTypeKind["ZodArray"] = "ZodArray";
-  ZodFirstPartyTypeKind["ZodObject"] = "ZodObject";
-  ZodFirstPartyTypeKind["ZodUnion"] = "ZodUnion";
-  ZodFirstPartyTypeKind["ZodDiscriminatedUnion"] = "ZodDiscriminatedUnion";
-  ZodFirstPartyTypeKind["ZodIntersection"] = "ZodIntersection";
-  ZodFirstPartyTypeKind["ZodTuple"] = "ZodTuple";
-  ZodFirstPartyTypeKind["ZodRecord"] = "ZodRecord";
-  ZodFirstPartyTypeKind["ZodMap"] = "ZodMap";
-  ZodFirstPartyTypeKind["ZodSet"] = "ZodSet";
-  ZodFirstPartyTypeKind["ZodFunction"] = "ZodFunction";
-  ZodFirstPartyTypeKind["ZodLazy"] = "ZodLazy";
-  ZodFirstPartyTypeKind["ZodLiteral"] = "ZodLiteral";
-  ZodFirstPartyTypeKind["ZodEnum"] = "ZodEnum";
-  ZodFirstPartyTypeKind["ZodEffects"] = "ZodEffects";
-  ZodFirstPartyTypeKind["ZodNativeEnum"] = "ZodNativeEnum";
-  ZodFirstPartyTypeKind["ZodOptional"] = "ZodOptional";
-  ZodFirstPartyTypeKind["ZodNullable"] = "ZodNullable";
-  ZodFirstPartyTypeKind["ZodDefault"] = "ZodDefault";
-  ZodFirstPartyTypeKind["ZodCatch"] = "ZodCatch";
-  ZodFirstPartyTypeKind["ZodPromise"] = "ZodPromise";
-  ZodFirstPartyTypeKind["ZodBranded"] = "ZodBranded";
-  ZodFirstPartyTypeKind["ZodPipeline"] = "ZodPipeline";
-  ZodFirstPartyTypeKind["ZodReadonly"] = "ZodReadonly";
+(function(ZodFirstPartyTypeKind2) {
+  ZodFirstPartyTypeKind2["ZodString"] = "ZodString";
+  ZodFirstPartyTypeKind2["ZodNumber"] = "ZodNumber";
+  ZodFirstPartyTypeKind2["ZodNaN"] = "ZodNaN";
+  ZodFirstPartyTypeKind2["ZodBigInt"] = "ZodBigInt";
+  ZodFirstPartyTypeKind2["ZodBoolean"] = "ZodBoolean";
+  ZodFirstPartyTypeKind2["ZodDate"] = "ZodDate";
+  ZodFirstPartyTypeKind2["ZodSymbol"] = "ZodSymbol";
+  ZodFirstPartyTypeKind2["ZodUndefined"] = "ZodUndefined";
+  ZodFirstPartyTypeKind2["ZodNull"] = "ZodNull";
+  ZodFirstPartyTypeKind2["ZodAny"] = "ZodAny";
+  ZodFirstPartyTypeKind2["ZodUnknown"] = "ZodUnknown";
+  ZodFirstPartyTypeKind2["ZodNever"] = "ZodNever";
+  ZodFirstPartyTypeKind2["ZodVoid"] = "ZodVoid";
+  ZodFirstPartyTypeKind2["ZodArray"] = "ZodArray";
+  ZodFirstPartyTypeKind2["ZodObject"] = "ZodObject";
+  ZodFirstPartyTypeKind2["ZodUnion"] = "ZodUnion";
+  ZodFirstPartyTypeKind2["ZodDiscriminatedUnion"] = "ZodDiscriminatedUnion";
+  ZodFirstPartyTypeKind2["ZodIntersection"] = "ZodIntersection";
+  ZodFirstPartyTypeKind2["ZodTuple"] = "ZodTuple";
+  ZodFirstPartyTypeKind2["ZodRecord"] = "ZodRecord";
+  ZodFirstPartyTypeKind2["ZodMap"] = "ZodMap";
+  ZodFirstPartyTypeKind2["ZodSet"] = "ZodSet";
+  ZodFirstPartyTypeKind2["ZodFunction"] = "ZodFunction";
+  ZodFirstPartyTypeKind2["ZodLazy"] = "ZodLazy";
+  ZodFirstPartyTypeKind2["ZodLiteral"] = "ZodLiteral";
+  ZodFirstPartyTypeKind2["ZodEnum"] = "ZodEnum";
+  ZodFirstPartyTypeKind2["ZodEffects"] = "ZodEffects";
+  ZodFirstPartyTypeKind2["ZodNativeEnum"] = "ZodNativeEnum";
+  ZodFirstPartyTypeKind2["ZodOptional"] = "ZodOptional";
+  ZodFirstPartyTypeKind2["ZodNullable"] = "ZodNullable";
+  ZodFirstPartyTypeKind2["ZodDefault"] = "ZodDefault";
+  ZodFirstPartyTypeKind2["ZodCatch"] = "ZodCatch";
+  ZodFirstPartyTypeKind2["ZodPromise"] = "ZodPromise";
+  ZodFirstPartyTypeKind2["ZodBranded"] = "ZodBranded";
+  ZodFirstPartyTypeKind2["ZodPipeline"] = "ZodPipeline";
+  ZodFirstPartyTypeKind2["ZodReadonly"] = "ZodReadonly";
 })(ZodFirstPartyTypeKind || (ZodFirstPartyTypeKind = {}));
 var stringType = ZodString.create;
 var numberType = ZodNumber.create;
@@ -12335,8 +12335,8 @@ class PiAgentSession {
       env: worktreeBoundary ? { ...hookEnv, [WORKTREE_BOUNDARY_ENV_KEY]: worktreeBoundary } : hookEnv,
       detached: true
     });
-    const donePromise = new Promise((resolve, reject) => {
-      this._doneResolve = resolve;
+    const donePromise = new Promise((resolve6, reject) => {
+      this._doneResolve = resolve6;
       this._doneReject = reject;
     });
     donePromise.catch(() => {});
@@ -12754,7 +12754,7 @@ ${stderrTail}` : ""}`;
     }
   }
   sendCommand(cmd, timeoutMs = 30000) {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve6, reject) => {
       if (!this.proc?.stdin) {
         reject(new Error("No stdin available"));
         return;
@@ -12764,7 +12764,7 @@ ${stderrTail}` : ""}`;
         this._pendingRequests.delete(id);
         reject(new Error(`RPC timeout: no response for command id=${id} after ${timeoutMs}ms`));
       }, timeoutMs);
-      this._pendingRequests.set(id, { resolve, reject, timer });
+      this._pendingRequests.set(id, { resolve: resolve6, reject, timer });
       this.proc.stdin.write(JSON.stringify({ ...cmd, id }) + `
 `, (err) => {
         if (err) {
@@ -12845,15 +12845,15 @@ ${stderrTail}` : ""}`;
     this.proc?.stdin?.end();
     if (this.proc) {
       const proc = this.proc;
-      await new Promise((resolve) => {
-        proc.on("close", () => resolve());
+      await new Promise((resolve6) => {
+        proc.on("close", () => resolve6());
         setTimeout(() => {
           if (proc.exitCode === null && proc.pid != null) {
             try {
               process.kill(-proc.pid, "SIGKILL");
             } catch {}
           }
-          resolve();
+          resolve6();
         }, 8000);
       });
     }
@@ -12908,8 +12908,8 @@ ${stderrTail}` : ""}`;
       throw new Error("Session is not active");
     }
     this._agentEndReceived = false;
-    const donePromise = new Promise((resolve, reject) => {
-      this._doneResolve = resolve;
+    const donePromise = new Promise((resolve6, reject) => {
+      this._doneResolve = resolve6;
       this._doneReject = reject;
     });
     donePromise.catch(() => {});
@@ -18500,12 +18500,12 @@ function createSessionStatsEvent(session_stats) {
     session_stats
   };
 }
-function createSessionStatsErrorEvent(errorMessage, timeoutMs) {
+function createSessionStatsErrorEvent(errorMessage2, timeoutMs) {
   return {
     t: Date.now(),
     type: TIMELINE_EVENT_TYPES.SESSION_STATS_ERROR,
     source: "settlement",
-    error_message: errorMessage,
+    error_message: errorMessage2,
     ...timeoutMs !== undefined ? { timeout_ms: timeoutMs } : {}
   };
 }
@@ -19082,7 +19082,7 @@ async function runScriptSpecialist(input, options) {
     const preScriptResults = preScripts.map((script) => runScript(getLocalScriptCommand(script), baseDir, scriptDisplayName(script)));
     const requiredPreFailure = findRequiredPreScriptFailure(preScripts, preScriptResults);
     if (requiredPreFailure) {
-      const modelCandidates = collectModelCandidates(input, spec, options);
+      const modelCandidates2 = collectModelCandidates(input, spec, options);
       return {
         success: false,
         error: formatRequiredPreScriptFailure(requiredPreFailure),
@@ -19091,7 +19091,7 @@ async function runScriptSpecialist(input, options) {
           specialist: resolvedSpecialist,
           requested_specialist: input.requested_specialist ?? input.specialist,
           resolved_specialist: resolvedSpecialist,
-          model: modelCandidates[0],
+          model: modelCandidates2[0],
           duration_ms: Date.now() - startedAt,
           trace_id: traceId
         }
@@ -19107,7 +19107,7 @@ async function runScriptSpecialist(input, options) {
       template = resolveRequestedTemplate(input, spec);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const modelCandidates = collectModelCandidates(input, spec, options);
+      const modelCandidates2 = collectModelCandidates(input, spec, options);
       return {
         success: false,
         error: message,
@@ -19116,7 +19116,7 @@ async function runScriptSpecialist(input, options) {
           specialist: resolvedSpecialist,
           requested_specialist: input.requested_specialist ?? input.specialist,
           resolved_specialist: resolvedSpecialist,
-          model: modelCandidates[0],
+          model: modelCandidates2[0],
           duration_ms: Date.now() - startedAt,
           trace_id: traceId
         }
@@ -19263,7 +19263,7 @@ ${mandatoryRulesBlock}`;
       const parsed = classifyAttempt(attempt);
       if (parsed.retryable && parsed.errorType !== "auth")
         continue;
-      const durationMs = Date.now() - startedAt;
+      const durationMs2 = Date.now() - startedAt;
       if (parsed.kind === "success") {
         let parsed_json;
         if (shouldParseJson) {
@@ -19292,7 +19292,7 @@ ${mandatoryRulesBlock}`;
               });
             }
             runPostScripts();
-            return { success: false, error: error instanceof Error ? error.message : String(error), error_type: "invalid_json", meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model, duration_ms: durationMs, trace_id: traceId } };
+            return { success: false, error: error instanceof Error ? error.message : String(error), error_type: "invalid_json", meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model, duration_ms: durationMs2, trace_id: traceId } };
           }
         }
         if (observability) {
@@ -19312,7 +19312,7 @@ ${mandatoryRulesBlock}`;
           });
         }
         runPostScripts();
-        return { success: true, output: parsed.text, parsed_json, meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model, duration_ms: durationMs, trace_id: traceId } };
+        return { success: true, output: parsed.text, parsed_json, meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model, duration_ms: durationMs2, trace_id: traceId } };
       }
       if (observability) {
         persistTerminalOnce({
@@ -19332,7 +19332,7 @@ ${mandatoryRulesBlock}`;
         });
       }
       runPostScripts();
-      return { success: false, error: parsed.error, error_type: parsed.errorType, meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model, duration_ms: durationMs, trace_id: traceId } };
+      return { success: false, error: parsed.error, error_type: parsed.errorType, meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model, duration_ms: durationMs2, trace_id: traceId } };
     }
     const lastAttempt = attempts.at(-1);
     const durationMs = Date.now() - startedAt;
@@ -19538,7 +19538,7 @@ async function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assista
       });
     }
   }
-  return await new Promise((resolve, reject) => {
+  return await new Promise((resolve11, reject) => {
     const args = ["--mode", "json", "--no-session", "--no-extensions", "--no-skills"];
     if (extensionSelection.offline !== false)
       args.push("--offline");
@@ -19633,7 +19633,7 @@ async function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assista
     pi.on("error", reject);
     pi.on("close", (code) => {
       clearTimeout(timer);
-      resolve({
+      resolve11({
         model,
         text: assistantText,
         stderr,
@@ -19682,7 +19682,7 @@ import { basename as basename3, join as join12 } from "node:path";
 import { existsSync as existsSync15, realpathSync as realpathSync4 } from "node:fs";
 import { homedir as homedir6 } from "node:os";
 
-// node_modules/yaml/dist/index.js
+// ../specialists/node_modules/yaml/dist/index.js
 var composer = require_composer();
 var Document = require_Document();
 var Schema = require_Schema();
@@ -19899,24 +19899,24 @@ function getFriendlyMessage(issue) {
   return issue.message;
 }
 async function validateSpecialist(jsonContent) {
-  const errors = [];
+  const errors2 = [];
   const warnings = [];
   let raw;
   try {
     raw = JSON.parse(jsonContent);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    errors.push({
+    errors2.push({
       path: "json",
       message: `JSON parse error: ${msg}`,
       code: "json_parse_error"
     });
-    return { valid: false, errors, warnings };
+    return { valid: false, errors: errors2, warnings };
   }
   const result = SpecialistSchema.safeParse(raw);
   if (!result.success) {
     for (const issue of result.error.issues) {
-      errors.push({
+      errors2.push({
         path: formatPath(issue.path),
         message: getFriendlyMessage(issue),
         code: issue.code
@@ -19929,7 +19929,7 @@ async function validateSpecialist(jsonContent) {
       warnings.push(`Model "${declaredModel}" doesn't include a provider prefix. Expected format: "provider/model-id" (e.g., "anthropic/claude-sonnet-4-5")`);
     }
   }
-  return { valid: errors.length === 0, errors, warnings };
+  return { valid: errors2.length === 0, errors: errors2, warnings };
 }
 async function parseSpecialist(jsonContent) {
   const result = await validateSpecialist(jsonContent);
@@ -21572,8 +21572,8 @@ function renderContextRefsSection(context, opts = {}) {
     const fence = fenceFor(raw);
     const block = (body, notice) => [heading, fence, body, fence, ...notice ? [notice] : []].join(`
 `);
-    const join = blocks.length > 0 ? utf8Bytes(separator) : 0;
-    const room = Math.min(entryMax, totalMax - OMITTED_NOTICE_RESERVE_BYTES - used - join);
+    const join15 = blocks.length > 0 ? utf8Bytes(separator) : 0;
+    const room = Math.min(entryMax, totalMax - OMITTED_NOTICE_RESERVE_BYTES - used - join15);
     let rendered = block(raw);
     if (utf8Bytes(rendered) > room) {
       const notice = `[cut at NNNNNNNN of ${utf8Bytes(raw)} bytes; the full value is contextRef ${displayKey(entry.key)} on ${source}]`;
@@ -21586,7 +21586,7 @@ function renderContextRefsSection(context, opts = {}) {
       rendered = block(body, notice.replace("NNNNNNNN", String(utf8Bytes(body))));
     }
     blocks.push(rendered);
-    used += join + utf8Bytes(rendered);
+    used += join15 + utf8Bytes(rendered);
   }
   if (omitted > 0) {
     blocks.push(`[${omitted} more context entr${omitted === 1 ? "y" : "ies"} omitted: section budget of ${totalMax} bytes reached]`);
@@ -21641,8 +21641,8 @@ class InteractionTransport {
   }
   async request(input) {
     const messageId = this.newId();
-    const waited = new Promise((resolve) => {
-      this.waiters.set(messageId, resolve);
+    const waited = new Promise((resolve11) => {
+      this.waiters.set(messageId, resolve11);
     });
     await this.send({ ...input, kind: input.kind ?? "question" }, messageId);
     const early = this.answered.get(messageId);
@@ -21701,9 +21701,9 @@ class InteractionTransport {
     }
   }
 }
-function composeInteractionMessage(input, identity) {
+function composeInteractionMessage(input, identity2) {
   return {
-    messageId: identity.messageId,
+    messageId: identity2.messageId,
     kind: input.kind,
     from: input.from,
     to: input.to,
@@ -21712,7 +21712,7 @@ function composeInteractionMessage(input, identity) {
     ...input.piSessionId ? { piSessionId: input.piSessionId } : {},
     body: input.body,
     ...input.inReplyTo ? { inReplyTo: input.inReplyTo } : {},
-    createdAt: identity.createdAt
+    createdAt: identity2.createdAt
   };
 }
 
@@ -21909,13 +21909,13 @@ async function awaitReply(repoRoot, activationId, messageId, options) {
   }
 }
 function sleep(ms, signal) {
-  return new Promise((resolve) => {
+  return new Promise((resolve11) => {
     const timer = setTimeout(done, ms);
     signal?.addEventListener("abort", done, { once: true });
     function done() {
       clearTimeout(timer);
       signal?.removeEventListener("abort", done);
-      resolve();
+      resolve11();
     }
   });
 }
@@ -21943,8 +21943,8 @@ function procProbe() {
             return;
           bootSeconds = Number(match[1]);
         }
-        const stat = readFileSync10(`/proc/${pid}/stat`, "utf-8");
-        const afterComm = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/);
+        const stat2 = readFileSync10(`/proc/${pid}/stat`, "utf-8");
+        const afterComm = stat2.slice(stat2.lastIndexOf(")") + 2).trim().split(/\s+/);
         const ticksSinceBoot = Number(afterComm[19]);
         if (!Number.isFinite(ticksSinceBoot))
           return;
@@ -21959,9 +21959,9 @@ var PROC_START_TOLERANCE_SECONDS = 2;
 function procStartMatches(claim, actual) {
   if (typeof claim === "number")
     return claim === actual.ticksSinceBoot;
-  const asNumber = Number(claim);
-  if (claim.trim() !== "" && Number.isFinite(asNumber))
-    return asNumber === actual.ticksSinceBoot;
+  const asNumber2 = Number(claim);
+  if (claim.trim() !== "" && Number.isFinite(asNumber2))
+    return asNumber2 === actual.ticksSinceBoot;
   const claimedMs = Date.parse(claim);
   if (!Number.isFinite(claimedMs))
     return false;
@@ -22052,7 +22052,7 @@ function buildUserFrame(input) {
   };
 }
 function sendFrame(socketPath, frame, timeoutMs = 5000) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve11, reject) => {
     const payload = `${JSON.stringify(frame)}
 `;
     if (Buffer.byteLength(payload) > MAX_LINE_BYTES) {
@@ -22065,7 +22065,7 @@ function sendFrame(socketPath, frame, timeoutMs = 5000) {
       reject(new Error(`timed out writing to ${socketPath}`));
     });
     socket.on("error", reject);
-    socket.on("connect", () => socket.end(payload, () => resolve()));
+    socket.on("connect", () => socket.end(payload, () => resolve11()));
   });
 }
 
@@ -22212,7 +22212,7 @@ function isDeliveredStatus(status) {
 import { execFileSync as execFileSync2, spawnSync as spawnSync4 } from "node:child_process";
 import { createHash as createHash5 } from "node:crypto";
 import { appendFileSync, existsSync as existsSync19, linkSync, mkdirSync as mkdirSync6, readFileSync as readFileSync11, realpathSync as realpathSync5, renameSync as renameSync3, rmSync as rmSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "node:fs";
-import { dirname as dirname11, join as join17 } from "node:path";
+import { basename as basename4, dirname as dirname11, join as join17 } from "node:path";
 
 // src/activation/types.ts
 var THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"];
@@ -22261,9 +22261,35 @@ ${detail.missing.map((m) => `  - ${m}`).join(`
 function workspaceIdentityFor(cwd) {
   return { repositoryRoot: cwd, worktreePath: cwd };
 }
-function provisionWriterWorkspace(cwd, issueRef) {
+function resolveOriginDefaultBranch(git) {
+  const live = git("ls-remote", "--symref", "origin", "HEAD").match(/^ref: refs\/heads\/(\S+)\s+HEAD$/m)?.[1];
+  if (live)
+    return live;
+  try {
+    return git("symbolic-ref", "--short", "refs/remotes/origin/HEAD").replace(/^origin\//, "");
+  } catch {
+    const present = ["main", "master"].filter((b) => git("ls-remote", "--heads", "origin", b) !== "");
+    if (present.length > 1)
+      console.warn(`[workspace-lease] origin HEAD unresolvable and both main and master exist; using ${present[0]}`);
+    if (present.length > 0)
+      return present[0];
+  }
+  throw new Error("origin has no resolvable default branch (no remote HEAD, no origin/HEAD, no main or master)");
+}
+function resolveWorktreeBase(git) {
+  if (!git("remote").split(`
+`).includes("origin")) {
+    console.warn('[workspace-lease] no "origin" remote; creating the writer worktree from the dispatcher HEAD');
+    return "HEAD";
+  }
+  const defaultBranch = resolveOriginDefaultBranch(git);
+  git("fetch", "origin", defaultBranch);
+  return `origin/${defaultBranch}`;
+}
+function provisionWriterWorkspace(cwd, issueRef, role) {
   const git = (...args) => execFileSync2("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   const slug = issueRef.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const roleSlug = role.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   const branch = `sp/${slug}`;
   try {
     const existing = git("worktree", "list", "--porcelain").split(`
@@ -22274,14 +22300,15 @@ function provisionWriterWorkspace(cwd, issueRef) {
     let created = false;
     if (!worktreePath) {
       const mainRoot = dirname11(git("rev-parse", "--path-format=absolute", "--git-common-dir"));
-      worktreePath = join17(mainRoot, ".worktrees", slug);
+      worktreePath = join17(mainRoot, ".xtrm", "worktrees", `${basename4(mainRoot)}-sp-${roleSlug}-${slug}`);
       if (spawnSync4("git", ["check-ignore", "-q", join17(worktreePath, "x")], { cwd: mainRoot }).status !== 0) {
         appendFileSync(git("rev-parse", "--path-format=absolute", "--git-path", "info/exclude"), `
-/.worktrees/
+/.xtrm/worktrees/
 `);
       }
       const branchExists = spawnSync4("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd }).status === 0;
-      git("worktree", "add", ...branchExists ? [worktreePath, branch] : ["-b", branch, worktreePath, "HEAD"]);
+      const base = branchExists ? undefined : resolveWorktreeBase(git);
+      git("worktree", "add", ...base ? ["-b", branch, worktreePath, base] : [worktreePath, branch]);
       created = !branchExists;
     }
     return { repositoryRoot: cwd, worktreePath, branch, created };
@@ -22304,8 +22331,8 @@ function procLeaseProbe() {
     canVerify: () => existsSync19("/proc/self/stat"),
     startTicks(pid) {
       try {
-        const stat = readFileSync11(`/proc/${pid}/stat`, "utf-8");
-        const afterComm = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/);
+        const stat2 = readFileSync11(`/proc/${pid}/stat`, "utf-8");
+        const afterComm = stat2.slice(stat2.lastIndexOf(")") + 2).trim().split(/\s+/);
         const ticks = Number(afterComm[19]);
         return Number.isFinite(ticks) ? ticks : undefined;
       } catch {
@@ -22604,14 +22631,14 @@ function createGuardedTools(sdk, input) {
         const verdict = input.admit(name);
         if (verdict.allow)
           return originalExecute(...args);
-        const refusal = {
+        const refusal2 = {
           content: [{
             type: "text",
             text: `Refused: ${verdict.reason ?? `${name} is not admitted against this workspace`}`
           }],
           details: { blocked: true, tool: name }
         };
-        return refusal;
+        return refusal2;
       }
     });
     guarded.push(name);
@@ -23238,8 +23265,8 @@ async function validateModelAvailable(sdk, modelRuntime, requested) {
 // src/activation/registry.ts
 class FleetRegistry {
   records = new Map;
-  register(record) {
-    this.records.set(record.snapshot.activationId, record);
+  register(record2) {
+    this.records.set(record2.snapshot.activationId, record2);
   }
   get(activationId) {
     return this.records.get(activationId);
@@ -23365,9 +23392,9 @@ function buildBoundedResult(opts) {
   if (opts.valid) {
     out.outcome = "completed";
   } else {
-    const errors = (opts.errors ?? ["validation failed"]).filter((e) => e.trim() !== "");
-    out.outcome = trunc(`completed_with_validation_errors: ${errors.join("; ")}`, SUMMARY_MAX);
-    out.validation = errors.slice(0, RESULT_ARRAY_MAX).map((e) => trunc(e, RESULT_ITEM_MAX));
+    const errors2 = (opts.errors ?? ["validation failed"]).filter((e) => e.trim() !== "");
+    out.outcome = trunc(`completed_with_validation_errors: ${errors2.join("; ")}`, SUMMARY_MAX);
+    out.validation = errors2.slice(0, RESULT_ARRAY_MAX).map((e) => trunc(e, RESULT_ITEM_MAX));
   }
   const bounded = (refs) => refs.length > 0 ? refs.slice(0, RESULT_ARRAY_MAX).map((r) => trunc(r, RESULT_ITEM_MAX)) : undefined;
   const artifactRefs = bounded(opts.artifactRefs);
@@ -23437,41 +23464,41 @@ function buildSettlementExecutionContext(opts) {
   return ctx;
 }
 function republishSettlement(opts) {
-  const { boundary, store, record } = opts;
+  const { boundary, store, record: record2 } = opts;
   const now = opts.now ?? Date.now();
   const emit = opts.emit ?? (() => {});
-  if (record.status !== "completed") {
+  if (record2.status !== "completed") {
     return { outcome: "refused", note: "a failed settlement publishes nothing" };
   }
-  if (record.receiptId && record.journalEntryId) {
-    return { outcome: "published", journalEntryId: record.journalEntryId, receiptId: record.receiptId };
+  if (record2.receiptId && record2.journalEntryId) {
+    return { outcome: "published", journalEntryId: record2.journalEntryId, receiptId: record2.receiptId };
   }
   if (!boundary.appendResult || !boundary.allocateReceipt) {
     const note = "work boundary carries no settlement surface; not republishable by THIS runtime";
-    saveState(store, record, "refused", note, {}, "runtime_lacks_settlement_surface");
-    emit("settlement_republish_refused", { activationId: record.activationId, attemptId: record.attemptId, note });
+    saveState(store, record2, "refused", note, {}, "runtime_lacks_settlement_surface");
+    emit("settlement_republish_refused", { activationId: record2.activationId, attemptId: record2.attemptId, note });
     return { outcome: "refused", note };
   }
   const allocateReceipt = boundary.allocateReceipt;
   const appendResult = boundary.appendResult;
   const defer = (reason) => {
-    saveState(store, record, "pending", reason);
+    saveState(store, record2, "pending", reason);
     emit("settlement_republish_deferred", {
-      activationId: record.activationId,
-      attemptId: record.attemptId,
+      activationId: record2.activationId,
+      attemptId: record2.attemptId,
       note: reason
     });
     return { outcome: "pending", note: reason };
   };
   const reconcileAndPublish = () => {
-    let journalEntryId = record.journalEntryId;
+    let journalEntryId = record2.journalEntryId;
     if (!journalEntryId) {
       if (!boundary.findResultEntry) {
         return defer("work boundary exposes no Journal reconciliation, so a republish cannot prove it is the first");
       }
-      const lookup = boundary.findResultEntry(record.issueRef, {
-        activationId: record.activationId,
-        attemptId: record.attemptId
+      const lookup = boundary.findResultEntry(record2.issueRef, {
+        activationId: record2.activationId,
+        attemptId: record2.attemptId
       });
       if (lookup.status === "unavailable") {
         return defer(`Journal reconciliation unavailable: ${lookup.reason}`);
@@ -23479,12 +23506,12 @@ function republishSettlement(opts) {
       if (lookup.status === "found")
         journalEntryId = lookup.value.entryId;
     }
-    let receiptId = record.receiptId;
+    let receiptId = record2.receiptId;
     if (!receiptId) {
       if (!boundary.findReceiptForBinding) {
         return defer("work boundary exposes no receipt reconciliation, so a republish cannot prove it is the first");
       }
-      const lookup = boundary.findReceiptForBinding(record.issueRef, record.executionBindingId);
+      const lookup = boundary.findReceiptForBinding(record2.issueRef, record2.executionBindingId);
       if (lookup.status === "unavailable") {
         return defer(`receipt reconciliation unavailable: ${lookup.reason}`);
       }
@@ -23493,31 +23520,31 @@ function republishSettlement(opts) {
     }
     if (journalEntryId) {
       if (!receiptId) {
-        const note = `Journal result ${journalEntryId} exists but no WorkReceipt is recorded for binding ` + `${record.executionBindingId} and none is resolvable; the provenance chain cannot be completed`;
-        saveState(store, record, "refused", note, { journalEntryId }, "receipt_unreconstructable");
-        emit("settlement_republish_refused", { activationId: record.activationId, attemptId: record.attemptId, note });
+        const note = `Journal result ${journalEntryId} exists but no WorkReceipt is recorded for binding ` + `${record2.executionBindingId} and none is resolvable; the provenance chain cannot be completed`;
+        saveState(store, record2, "refused", note, { journalEntryId }, "receipt_unreconstructable");
+        emit("settlement_republish_refused", { activationId: record2.activationId, attemptId: record2.attemptId, note });
         return { outcome: "refused", note, journalEntryId };
       }
-      saveState(store, record, "published", "reconciled with the existing Journal result", {
+      saveState(store, record2, "published", "reconciled with the existing Journal result", {
         journalEntryId,
         receiptId
       });
       emit("settlement_republish_reconciled", {
-        activationId: record.activationId,
-        attemptId: record.attemptId,
+        activationId: record2.activationId,
+        attemptId: record2.attemptId,
         entry: journalEntryId
       });
       return { outcome: "published", journalEntryId, receiptId };
     }
     try {
-      const storedRef = store.save(record);
+      const storedRef = store.save(record2);
       if (!receiptId) {
-        const receipt = allocateReceipt(record.executionBindingId);
+        const receipt = allocateReceipt(record2.executionBindingId);
         receiptId = receipt.id;
         emit("settlement_receipt_allocated", { receipt: receipt.id, republish: true });
       }
-      let artifactValue = record.artifactRef ?? storedRef;
-      if (boundary.attachArtifact && !record.artifactRef) {
+      let artifactValue = record2.artifactRef ?? storedRef;
+      if (boundary.attachArtifact && !record2.artifactRef) {
         try {
           artifactValue = boundary.attachArtifact(receiptId, "artifact", storedRef).value;
           emit("settlement_artifact_attached", { receipt: receiptId, kind: "artifact", republish: true });
@@ -23527,20 +23554,20 @@ function republishSettlement(opts) {
           });
         }
       }
-      const entry = appendResult(record.issueRef, {
+      const entry = appendResult(record2.issueRef, {
         result: buildBoundedResult({
-          output: record.output,
-          valid: record.validation.valid,
-          errors: record.validation.errors,
+          output: record2.output,
+          valid: record2.validation.valid,
+          errors: record2.validation.errors,
           artifactRefs: [artifactValue],
           receiptRefs: [receiptId],
-          provenanceRefs: [record.executionBindingId, receiptId]
+          provenanceRefs: [record2.executionBindingId, receiptId]
         }),
         executionContext: buildSettlementExecutionContext({
           participantId: opts.participantId,
-          specialistName: record.specialist,
-          activationId: record.activationId,
-          attemptId: record.attemptId,
+          specialistName: record2.specialist,
+          activationId: record2.activationId,
+          attemptId: record2.attemptId,
           coordinatorParticipantId: opts.coordinator?.participantId,
           coordinatorSessionId: opts.coordinator?.sessionId,
           repoPath: opts.repositoryRoot,
@@ -23553,25 +23580,25 @@ function republishSettlement(opts) {
           { kind: "receipt", key: receiptId }
         ],
         participantId: opts.participantId,
-        activationId: record.activationId
+        activationId: record2.activationId
       });
       store.save({
-        ...record,
+        ...record2,
         receiptId,
         journalEntryId: entry.entryId,
         artifactRef: artifactValue,
-        publication: { state: "published", attempts: (record.publication?.attempts ?? 0) + 1, updatedAt: now }
+        publication: { state: "published", attempts: (record2.publication?.attempts ?? 0) + 1, updatedAt: now }
       });
       emit("settlement_result_published", { entry: entry.entryId, receipt: receiptId, republish: true });
       return { outcome: "published", journalEntryId: entry.entryId, receiptId };
     } catch (error) {
       const note = error instanceof Error ? error.message : String(error);
-      saveState(store, record, "pending", note, { ...receiptId ? { receiptId } : {} });
+      saveState(store, record2, "pending", note, { ...receiptId ? { receiptId } : {} });
       emit("settlement_degraded", { note, republish: true });
       return { outcome: "pending", note, ...receiptId ? { receiptId } : {} };
     }
   };
-  const guarded = withSettlementExclusion({ repositoryRoot: opts.repositoryRoot, activationId: record.activationId, attemptId: record.attemptId }, reconcileAndPublish, { reclaimStale: true });
+  const guarded = withSettlementExclusion({ repositoryRoot: opts.repositoryRoot, activationId: record2.activationId, attemptId: record2.attemptId }, reconcileAndPublish, { reclaimStale: true });
   return guarded.ok ? guarded.value : defer(guarded.reason);
 }
 var REPUBLISH_PASS_LIMIT = 50;
@@ -23581,12 +23608,12 @@ function republishPendingSettlements(opts) {
   const revivable = opts.boundary.appendResult && opts.boundary.allocateReceipt ? opts.store.listRuntimeRefused?.() ?? [] : [];
   const pending = [...opts.store.listPendingPublication?.() ?? [], ...revivable].sort((a, b) => a.completedAt - b.completedAt).slice(0, limit);
   const outcomes = [];
-  for (const record of pending) {
+  for (const record2 of pending) {
     try {
       const result = republishSettlement({
         boundary: opts.boundary,
         store: opts.store,
-        record,
+        record: record2,
         participantId: opts.participantId,
         repositoryRoot: opts.repositoryRoot,
         ...opts.worktreePath ? { worktreePath: opts.worktreePath } : {},
@@ -23594,12 +23621,12 @@ function republishPendingSettlements(opts) {
         ...opts.now ? { now: opts.now() } : {},
         emit
       });
-      outcomes.push({ activationId: record.activationId, attemptId: record.attemptId, outcome: result.outcome });
+      outcomes.push({ activationId: record2.activationId, attemptId: record2.attemptId, outcome: result.outcome });
     } catch (error) {
-      outcomes.push({ activationId: record.activationId, attemptId: record.attemptId, outcome: "error" });
+      outcomes.push({ activationId: record2.activationId, attemptId: record2.attemptId, outcome: "error" });
       emit("settlement_republish_error", {
-        activationId: record.activationId,
-        attemptId: record.attemptId,
+        activationId: record2.activationId,
+        attemptId: record2.attemptId,
         note: error instanceof Error ? error.message : String(error)
       });
     }
@@ -23625,7 +23652,7 @@ function publishSettlement(opts) {
     env: opts.env,
     now
   });
-  const record = {
+  const record2 = {
     activationId: subject.activationId,
     attemptId: subject.attemptId,
     specialist: subject.specialist,
@@ -23640,7 +23667,7 @@ function publishSettlement(opts) {
   };
   let storedRef;
   try {
-    storedRef = store.save(record);
+    storedRef = store.save(record2);
   } catch (error) {
     const note = error instanceof Error ? error.message : String(error);
     emit("settlement_store_failed", { note });
@@ -23651,7 +23678,7 @@ function publishSettlement(opts) {
     return { storedRef, publicationState: "not-applicable" };
   if (!boundary.allocateReceipt || !boundary.appendResult) {
     const note = "work boundary carries no settlement surface; result stored only";
-    saveState(store, record, "refused", note, {}, "runtime_lacks_settlement_surface");
+    saveState(store, record2, "refused", note, {}, "runtime_lacks_settlement_surface");
     emit("settlement_degraded", { note });
     return { storedRef, degraded: "boundary without settlement surface", publicationState: "refused" };
   }
@@ -23698,11 +23725,11 @@ function publishSettlement(opts) {
       });
       emit("settlement_result_published", { entry: entry.entryId, receipt: receipt.id });
       const published = {
-        ...record,
+        ...record2,
         receiptId: receipt.id,
         journalEntryId: entry.entryId,
         artifactRef: artifactValue,
-        publication: { state: "published", attempts: (record.publication?.attempts ?? 0) + 1, updatedAt: now }
+        publication: { state: "published", attempts: (record2.publication?.attempts ?? 0) + 1, updatedAt: now }
       };
       try {
         store.save(published);
@@ -23716,7 +23743,7 @@ function publishSettlement(opts) {
       };
     } catch (error) {
       const note = error instanceof Error ? error.message : String(error);
-      saveState(store, record, "pending", note, {
+      saveState(store, record2, "pending", note, {
         ...allocatedReceiptId ? { receiptId: allocatedReceiptId } : {},
         ...allocatedArtifactRef ? { artifactRef: allocatedArtifactRef } : {}
       });
@@ -23726,22 +23753,22 @@ function publishSettlement(opts) {
   };
   const guarded = withSettlementExclusion({ repositoryRoot: subject.repositoryRoot, activationId: subject.activationId, attemptId: subject.attemptId }, publishNow);
   if (!guarded.ok) {
-    saveState(store, record, "pending", guarded.reason);
+    saveState(store, record2, "pending", guarded.reason);
     emit("settlement_degraded", { note: guarded.reason, contended: true });
     return { storedRef, degraded: guarded.reason, publicationState: "pending" };
   }
   return guarded.value;
 }
-function saveState(store, record, state, note, links = {}, refusal) {
+function saveState(store, record2, state, note, links = {}, refusal2) {
   try {
-    const existing = store.get(record.activationId, record.attemptId) ?? record;
+    const existing = store.get(record2.activationId, record2.attemptId) ?? record2;
     store.save({
       ...existing,
       ...links,
       publication: {
         state,
         note,
-        ...refusal ? { refusal } : {},
+        ...refusal2 ? { refusal: refusal2 } : {},
         attempts: (existing.publication?.attempts ?? 0) + 1,
         updatedAt: Date.now()
       }
@@ -23758,27 +23785,27 @@ function safeSegment(id) {
     throw new Error(`unusable settlement id: ${id}`);
   return safe;
 }
-function isRuntimeRefused(record) {
-  return publicationStateOf(record) === "refused" && record.publication?.refusal === "runtime_lacks_settlement_surface";
+function isRuntimeRefused(record2) {
+  return publicationStateOf(record2) === "refused" && record2.publication?.refusal === "runtime_lacks_settlement_surface";
 }
-function isPendingPublication(record) {
-  return publicationStateOf(record) === "pending";
+function isPendingPublication(record2) {
+  return publicationStateOf(record2) === "pending";
 }
-function publicationStateOf(record) {
-  if (record.status !== "completed")
+function publicationStateOf(record2) {
+  if (record2.status !== "completed")
     return "not-applicable";
-  if (record.journalEntryId && record.receiptId)
+  if (record2.journalEntryId && record2.receiptId)
     return "published";
-  return record.publication?.state === "refused" ? "refused" : "pending";
+  return record2.publication?.state === "refused" ? "refused" : "pending";
 }
 function createFileSettlementStore(root) {
   const pathFor = (activationId, attemptId) => join19(root, safeSegment(activationId), `${safeSegment(attemptId)}.json`);
   return {
-    save(record) {
-      const path = pathFor(record.activationId, record.attemptId);
-      mkdirSync7(join19(root, safeSegment(record.activationId)), { recursive: true });
-      writeFileSync6(path, JSON.stringify(record), "utf8");
-      return `${safeSegment(record.activationId)}/${safeSegment(record.attemptId)}.json`;
+    save(record2) {
+      const path = pathFor(record2.activationId, record2.attemptId);
+      mkdirSync7(join19(root, safeSegment(record2.activationId)), { recursive: true });
+      writeFileSync6(path, JSON.stringify(record2), "utf8");
+      return `${safeSegment(record2.activationId)}/${safeSegment(record2.attemptId)}.json`;
     },
     get(activationId, attemptId) {
       try {
@@ -23818,8 +23845,8 @@ function createFileSettlementStore(root) {
     }
     const out = [];
     for (const activation of activations) {
-      for (const record of readActivationDir(activation))
-        out.push(record);
+      for (const record2 of readActivationDir(activation))
+        out.push(record2);
     }
     return out;
   }
@@ -23860,10 +23887,10 @@ function extractTokenUsage(event) {
   for (const candidate of candidates) {
     if (!candidate || typeof candidate !== "object")
       continue;
-    const record = candidate;
+    const record2 = candidate;
     const usage = {};
     for (const key of TOKEN_USAGE_KEYS) {
-      const value = record[key];
+      const value = record2[key];
       if (typeof value === "number" && Number.isFinite(value))
         usage[key] = value;
     }
@@ -24194,18 +24221,18 @@ class NativeActivationHost {
     const releaseLeaseOnRefusal = () => {
       if (!releaseOwnLease)
         return;
-      const release = releaseOwnLease;
+      const release2 = releaseOwnLease;
       releaseOwnLease = null;
-      release();
+      release2();
     };
     let createdRefForRefusals;
     let releaseInlineClaimOnRefusal = null;
     const releaseClaimForRefusal = () => {
       if (!releaseInlineClaimOnRefusal)
         return;
-      const release = releaseInlineClaimOnRefusal;
+      const release2 = releaseInlineClaimOnRefusal;
       releaseInlineClaimOnRefusal = null;
-      release();
+      release2();
     };
     const reject = (reason, detail = {}) => {
       releaseLeaseOnRefusal();
@@ -24350,7 +24377,7 @@ class NativeActivationHost {
     }
     if (access === "write" || leaseWaiver) {
       try {
-        const { created, ...provisioned } = this.provisionWriterWorkspace(this.cwd, issueRef);
+        const { created, ...provisioned } = this.provisionWriterWorkspace(this.cwd, issueRef, request.specialist);
         workspace = provisioned;
         if (created)
           removeFreshWorkspace = () => removeWriterWorkspace(this.cwd, provisioned);
@@ -24672,19 +24699,19 @@ class NativeActivationHost {
       self: participantId,
       parent: request.requestedByParticipantId,
       onAsk: (kind, body) => {
-        const record = this.registry.get(activationId);
-        if (record)
-          record.snapshot.state = kind === "escalation" ? "escalated" : "needs_reply";
-        if (record)
-          this.save(record.snapshot);
+        const record3 = this.registry.get(activationId);
+        if (record3)
+          record3.snapshot.state = kind === "escalation" ? "escalated" : "needs_reply";
+        if (record3)
+          this.save(record3.snapshot);
         emit(kind === "escalation" ? "escalation_raised" : "clarification_requested", { body });
       },
       onAnswered: (kind) => {
-        const record = this.registry.get(activationId);
-        if (record)
-          record.snapshot.state = "running";
-        if (record)
-          this.save(record.snapshot);
+        const record3 = this.registry.get(activationId);
+        if (record3)
+          record3.snapshot.state = "running";
+        if (record3)
+          this.save(record3.snapshot);
         emit(kind === "escalation" ? "escalation_resolved" : "clarification_answered");
       }
     });
@@ -24824,7 +24851,7 @@ class NativeActivationHost {
     };
     emit("activation_started", { pi_session_id: session.sessionId });
     const unsubscribe = session.subscribe((event) => this.onSessionEvent(snapshot, event, emit));
-    const record = {
+    const record2 = {
       snapshot,
       session,
       unsubscribe,
@@ -24839,7 +24866,7 @@ class NativeActivationHost {
       workItems,
       ...typeof binding.baseCommit === "string" && binding.baseCommit.trim() !== "" ? { bindingBaseCommit: binding.baseCommit } : {}
     };
-    const result = this.runWithFallback(record, {
+    const result = this.runWithFallback(record2, {
       modelChain,
       modelIndex,
       sdk,
@@ -24847,8 +24874,8 @@ class NativeActivationHost {
       initialPrompt: rendered.initial_prompt,
       emit
     });
-    record.result = result;
-    this.registry.register(record);
+    record2.result = result;
+    this.registry.register(record2);
     this.save(snapshot);
     releaseOwnLease = null;
     return {
@@ -24952,10 +24979,10 @@ class NativeActivationHost {
         this.releaseIfWriter(snapshot, "settled");
         if (unframedWake) {
           this.wakeDirty.delete(snapshot.activationId);
-          const record = this.registry.get(snapshot.activationId);
-          if (record && !this.wakeFinalising.has(snapshot.activationId)) {
+          const record2 = this.registry.get(snapshot.activationId);
+          if (record2 && !this.wakeFinalising.has(snapshot.activationId)) {
             this.wakeFinalising.add(snapshot.activationId);
-            this.finalizeWakeTurn(snapshot, record, emit).finally(() => {
+            this.finalizeWakeTurn(snapshot, record2, emit).finally(() => {
               this.wakeFinalising.delete(snapshot.activationId);
             });
           }
@@ -25027,23 +25054,23 @@ class NativeActivationHost {
     const label = text?.split(`
 `)[0]?.trim() || (typeof details?.summary === "string" ? details.summary : undefined);
     if (taskId) {
-      const tasks = this.backgroundTasks.get(activationId) ?? new Map;
+      const tasks2 = this.backgroundTasks.get(activationId) ?? new Map;
       if (status !== undefined && TERMINAL_BACKGROUND_STATUSES.has(status)) {
-        const existing = tasks.get(taskId);
+        const existing = tasks2.get(taskId);
         if (existing)
           existing.live = false;
-        this.backgroundTasks.set(activationId, tasks);
+        this.backgroundTasks.set(activationId, tasks2);
         return;
       }
       if (status === undefined || !LIVE_BACKGROUND_STATUSES.has(status))
         return;
-      tasks.set(taskId, {
+      tasks2.set(taskId, {
         id: taskId,
         label: label ?? taskId,
         deadlineMs: this.now() + BACKGROUND_TASK_MAX_HOLD_MS,
         live: true
       });
-      this.backgroundTasks.set(activationId, tasks);
+      this.backgroundTasks.set(activationId, tasks2);
       return;
     }
     const pid = Number(text?.match(/^PID: (\d+)$/m)?.[1]);
@@ -25122,18 +25149,18 @@ class NativeActivationHost {
     if (elapsed <= thresholdMs)
       return;
     watch.warned = true;
-    const record = this.registry.get(activationId);
-    if (!record || record.snapshot.state !== "starting" && record.snapshot.state !== "running") {
+    const record2 = this.registry.get(activationId);
+    if (!record2 || record2.snapshot.state !== "starting" && record2.snapshot.state !== "running") {
       this.stopToolDurationWatch(activationId);
       return;
     }
     try {
       this.forensics.emit({
         activationId,
-        attemptId: record.snapshot.attemptId,
-        participantId: record.snapshot.participantId,
-        specialist: record.snapshot.specialist,
-        beadId: record.snapshot.issueRef,
+        attemptId: record2.snapshot.attemptId,
+        participantId: record2.snapshot.participantId,
+        specialist: record2.snapshot.specialist,
+        beadId: record2.snapshot.issueRef,
         name: "stale_warning",
         payload: {
           reason: "tool_duration",
@@ -25151,7 +25178,7 @@ class NativeActivationHost {
     clearInterval(watch.timer);
     this.toolDurationWatch.delete(activationId);
   }
-  async runToSettled(snapshot, session, initialPrompt, emit, record) {
+  async runToSettled(snapshot, session, initialPrompt, emit, record2) {
     this.framedTurns.add(snapshot.activationId);
     let settlementRecorded = false;
     const recordSettlementOnce = async () => {
@@ -25164,7 +25191,7 @@ class NativeActivationHost {
       await session.prompt(initialPrompt);
       await session.waitForIdle();
       await recordSettlementOnce();
-      return this.settleTurnTail(snapshot, session, emit, record, { notifyWake: false });
+      return this.settleTurnTail(snapshot, session, emit, record2, { notifyWake: false });
     } catch (error) {
       snapshot.state = "failed";
       this.save(snapshot);
@@ -25194,11 +25221,11 @@ class NativeActivationHost {
         fallbackUsed: false,
         completedAt: this.now()
       };
-      this.publishTerminalSettlement(snapshot, thrownResult, record, emit);
+      this.publishTerminalSettlement(snapshot, thrownResult, record2, emit);
       return thrownResult;
     }
   }
-  settleTurnTail(snapshot, session, emit, record, opts) {
+  settleTurnTail(snapshot, session, emit, record2, opts) {
     const last = lastAssistantMessage(session.messages);
     if (last && (last.stopReason === "error" || last.stopReason === "aborted")) {
       const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
@@ -25227,7 +25254,7 @@ class NativeActivationHost {
         fallbackUsed: false,
         completedAt: this.now()
       };
-      this.publishTerminalSettlement(snapshot, failedResult, record, emit);
+      this.publishTerminalSettlement(snapshot, failedResult, record2, emit);
       if (opts.notifyWake)
         this.notifyWakeSettlement(failedResult);
       return failedResult;
@@ -25268,7 +25295,7 @@ class NativeActivationHost {
       fallbackUsed: false,
       completedAt: this.now()
     };
-    this.publishTerminalSettlement(snapshot, completedResult, record, emit);
+    this.publishTerminalSettlement(snapshot, completedResult, record2, emit);
     if (opts.notifyWake)
       this.notifyWakeSettlement(completedResult);
     return completedResult;
@@ -25277,11 +25304,11 @@ class NativeActivationHost {
     if (snapshot.state === "settled")
       this.wakeDirty.add(snapshot.activationId);
   }
-  async finalizeWakeTurn(snapshot, record, emit) {
+  async finalizeWakeTurn(snapshot, record2, emit) {
     try {
-      const session = record.session;
+      const session = record2.session;
       await this.captureSessionStats(session, emit);
-      this.settleTurnTail(snapshot, session, emit, record, { notifyWake: true });
+      this.settleTurnTail(snapshot, session, emit, record2, { notifyWake: true });
     } catch {}
   }
   notifyWakeSettlement(result) {
@@ -25292,7 +25319,7 @@ class NativeActivationHost {
       notify(result);
     } catch {}
   }
-  publishTerminalSettlement(snapshot, result, record, emit) {
+  publishTerminalSettlement(snapshot, result, record2, emit) {
     this.wakeDirty.delete(snapshot.activationId);
     this.framedTurns.delete(snapshot.activationId);
     try {
@@ -25309,18 +25336,18 @@ class NativeActivationHost {
         repositoryRoot: snapshot.workspace.repositoryRoot,
         worktreePath: snapshot.workspace.worktreePath,
         ...snapshot.workspace.branch ? { branch: snapshot.workspace.branch } : {},
-        ...record.bindingBaseCommit ? { bindingBaseCommit: record.bindingBaseCommit } : {}
+        ...record2.bindingBaseCommit ? { bindingBaseCommit: record2.bindingBaseCommit } : {}
       };
       publishSettlement({
-        boundary: record.workItems,
+        boundary: record2.workItems,
         store: this.settlements,
         subject,
         status: result.status,
         output: result.output,
         validation: result.validation,
         coordinator: {
-          ...record.lineage.coordinatorParticipantId ? { participantId: record.lineage.coordinatorParticipantId } : {},
-          ...record.lineage.coordinatorSessionId ? { sessionId: record.lineage.coordinatorSessionId } : {}
+          ...record2.lineage.coordinatorParticipantId ? { participantId: record2.lineage.coordinatorParticipantId } : {},
+          ...record2.lineage.coordinatorSessionId ? { sessionId: record2.lineage.coordinatorSessionId } : {}
         },
         env: this.env,
         now: this.now(),
@@ -25331,7 +25358,7 @@ class NativeActivationHost {
     if (result.status !== "uncertain")
       this.forgetBackgroundTasks(snapshot.activationId);
   }
-  async runWithFallback(record, ctx) {
+  async runWithFallback(record2, ctx) {
     let index = ctx.modelIndex;
     let fallbackUsed = index > 0;
     let heldFailure;
@@ -25350,22 +25377,22 @@ class NativeActivationHost {
       ctx.emit("activation_failed", payload);
     };
     try {
-      return await this.walkFallbackChain(record, ctx, legEmit, flushFailure, index, fallbackUsed);
+      return await this.walkFallbackChain(record2, ctx, legEmit, flushFailure, index, fallbackUsed);
     } finally {
       flushFailure(false);
     }
   }
-  async walkFallbackChain(record, ctx, legEmit, flushFailure, index, fallbackUsed) {
-    let result = await this.runToSettled(record.snapshot, record.session, ctx.initialPrompt, legEmit, record);
+  async walkFallbackChain(record2, ctx, legEmit, flushFailure, index, fallbackUsed) {
+    let result = await this.runToSettled(record2.snapshot, record2.session, ctx.initialPrompt, legEmit, record2);
     while (result.status === "failed" && index < ctx.modelChain.length - 1) {
-      if (this.registry.get(record.snapshot.activationId) !== record)
+      if (this.registry.get(record2.snapshot.activationId) !== record2)
         break;
       const detail = result.validation.errors?.[0] ?? "unknown failure";
       const errorClass = classifyFallbackError(detail);
       if (!FALLBACK_RETRYABLE_CLASSES.has(errorClass))
         break;
       const nextModel = ctx.modelChain[index + 1];
-      const fromModel = record.snapshot.resolvedModel;
+      const fromModel = record2.snapshot.resolvedModel;
       const check = await validateModelAvailable(ctx.sdk, ctx.modelRuntime, nextModel);
       if (!check.ok || !check.model) {
         ctx.emit("model_fallback", {
@@ -25386,23 +25413,23 @@ class NativeActivationHost {
         attempt_n: index + 2,
         resolved_model: check.resolvedModel ?? nextModel
       });
-      if (record.snapshot.access === "write" || record.snapshot.leaseWaiver) {
+      if (record2.snapshot.access === "write" || record2.snapshot.leaseWaiver) {
         try {
           acquire({
-            workspace: record.snapshot.workspace,
-            activationId: record.snapshot.activationId,
-            attemptId: record.snapshot.attemptId,
-            specialist: record.snapshot.specialist,
-            ...record.snapshot.leaseWaiver ? { leaseWaiver: true } : {}
+            workspace: record2.snapshot.workspace,
+            activationId: record2.snapshot.activationId,
+            attemptId: record2.snapshot.attemptId,
+            specialist: record2.snapshot.specialist,
+            ...record2.snapshot.leaseWaiver ? { leaseWaiver: true } : {}
           });
         } catch (error) {
           if (error instanceof DispatchRejectedError) {
             this.forensics.emit({
-              activationId: record.snapshot.activationId,
-              attemptId: record.snapshot.attemptId,
-              participantId: record.snapshot.participantId,
-              specialist: record.snapshot.specialist,
-              beadId: record.snapshot.issueRef,
+              activationId: record2.snapshot.activationId,
+              attemptId: record2.snapshot.attemptId,
+              participantId: record2.snapshot.participantId,
+              specialist: record2.snapshot.specialist,
+              beadId: record2.snapshot.issueRef,
               name: "lease_denied",
               payload: { reason: error.reason, note: error.detail.holder, on: "fallback" }
             });
@@ -25420,9 +25447,9 @@ class NativeActivationHost {
       }
       let nextSession;
       try {
-        nextSession = await record.createSession(check.model);
+        nextSession = await record2.createSession(check.model);
       } catch (error) {
-        this.releaseIfWriter(record.snapshot, "fallback_session_unavailable");
+        this.releaseIfWriter(record2.snapshot, "fallback_session_unavailable");
         ctx.emit("model_fallback", {
           from_model: fromModel,
           to_model: nextModel,
@@ -25434,32 +25461,32 @@ class NativeActivationHost {
         break;
       }
       try {
-        record.session.dispose();
+        record2.session.dispose();
       } catch {}
-      record.unsubscribe();
-      record.session = nextSession;
-      record.snapshot.resolvedModel = check.resolvedModel ?? nextModel;
-      record.snapshot.piSessionId = nextSession.sessionId;
-      record.snapshot.state = "starting";
-      record.snapshot.lastActivityAt = this.now();
-      this.save(record.snapshot);
-      record.unsubscribe = nextSession.subscribe((event) => this.onSessionEvent(record.snapshot, event, ctx.emit));
+      record2.unsubscribe();
+      record2.session = nextSession;
+      record2.snapshot.resolvedModel = check.resolvedModel ?? nextModel;
+      record2.snapshot.piSessionId = nextSession.sessionId;
+      record2.snapshot.state = "starting";
+      record2.snapshot.lastActivityAt = this.now();
+      this.save(record2.snapshot);
+      record2.unsubscribe = nextSession.subscribe((event) => this.onSessionEvent(record2.snapshot, event, ctx.emit));
       flushFailure(true);
       ctx.emit("activation_started", { pi_session_id: nextSession.sessionId });
       index += 1;
       fallbackUsed = true;
-      result = await this.runToSettled(record.snapshot, record.session, ctx.initialPrompt, legEmit, record);
+      result = await this.runToSettled(record2.snapshot, record2.session, ctx.initialPrompt, legEmit, record2);
     }
     result.fallbackUsed = fallbackUsed;
     return result;
   }
   async retry(activationId, opts) {
-    const record = this.registry.get(activationId);
-    if (!record) {
+    const record2 = this.registry.get(activationId);
+    if (!record2) {
       throw new DispatchRejectedError("unknown_activation", { activationId });
     }
-    if (!RETRYABLE_STATES.has(record.snapshot.state)) {
-      const state = record.snapshot.state;
+    if (!RETRYABLE_STATES.has(record2.snapshot.state)) {
+      const state = record2.snapshot.state;
       const hint = state === "waiting" || state === "settled" || state === "needs_reply" || state === "escalated" ? `Activation ${activationId} is ${state} — use resume, which keeps the live session.` : `Activation ${activationId} is ${state} — steer it or stop it first.`;
       throw new DispatchRejectedError("not_resumable", {
         activationId,
@@ -25482,23 +25509,23 @@ class NativeActivationHost {
       overrideModel = check.model;
       overrideResolved = check.resolvedModel ?? overrideName;
     }
-    const attemptId = nextAttemptId(record.snapshot.attemptId);
-    if (record.snapshot.access === "write" || record.snapshot.leaseWaiver) {
+    const attemptId = nextAttemptId(record2.snapshot.attemptId);
+    if (record2.snapshot.access === "write" || record2.snapshot.leaseWaiver) {
       try {
         acquire({
-          workspace: record.snapshot.workspace,
+          workspace: record2.snapshot.workspace,
           activationId,
           attemptId,
-          specialist: record.snapshot.specialist
+          specialist: record2.snapshot.specialist
         });
       } catch (error) {
         if (error instanceof DispatchRejectedError) {
           this.forensics.emit({
             activationId,
             attemptId,
-            participantId: record.snapshot.participantId,
-            specialist: record.snapshot.specialist,
-            beadId: record.snapshot.issueRef,
+            participantId: record2.snapshot.participantId,
+            specialist: record2.snapshot.specialist,
+            beadId: record2.snapshot.issueRef,
             name: "lease_denied",
             payload: { reason: error.reason, note: error.detail.holder, on: "retry" }
           });
@@ -25506,16 +25533,16 @@ class NativeActivationHost {
         throw error;
       }
     }
-    record.snapshot.attemptId = attemptId;
-    record.snapshot.state = "starting";
-    record.snapshot.lastActivityAt = this.now();
-    this.save(record.snapshot);
+    record2.snapshot.attemptId = attemptId;
+    record2.snapshot.state = "starting";
+    record2.snapshot.lastActivityAt = this.now();
+    this.save(record2.snapshot);
     const emit = (name, payload) => this.forensics.emit({
       activationId,
       attemptId,
-      participantId: record.snapshot.participantId,
-      specialist: record.snapshot.specialist,
-      beadId: record.snapshot.issueRef,
+      participantId: record2.snapshot.participantId,
+      specialist: record2.snapshot.specialist,
+      beadId: record2.snapshot.issueRef,
       name,
       payload
     });
@@ -25523,47 +25550,47 @@ class NativeActivationHost {
     if (overrideModel && overrideResolved && overrideName) {
       let nextSession;
       try {
-        nextSession = await record.createSession(overrideModel);
+        nextSession = await record2.createSession(overrideModel);
       } catch (error) {
-        record.snapshot.state = "failed";
-        record.snapshot.lastActivityAt = this.now();
-        this.save(record.snapshot);
-        this.releaseIfWriter(record.snapshot, "tool_contract_unsatisfied_on_retry");
+        record2.snapshot.state = "failed";
+        record2.snapshot.lastActivityAt = this.now();
+        this.save(record2.snapshot);
+        this.releaseIfWriter(record2.snapshot, "tool_contract_unsatisfied_on_retry");
         throw error;
       }
       try {
-        record.session.dispose();
+        record2.session.dispose();
       } catch {}
-      record.unsubscribe();
-      record.session = nextSession;
-      record.snapshot.requestedModel = overrideName;
-      record.snapshot.resolvedModel = overrideResolved;
-      record.snapshot.modelOverride = true;
-      record.snapshot.piSessionId = nextSession.sessionId;
+      record2.unsubscribe();
+      record2.session = nextSession;
+      record2.snapshot.requestedModel = overrideName;
+      record2.snapshot.resolvedModel = overrideResolved;
+      record2.snapshot.modelOverride = true;
+      record2.snapshot.piSessionId = nextSession.sessionId;
       reusedSession = false;
     } else {
-      record.unsubscribe();
+      record2.unsubscribe();
     }
-    record.unsubscribe = record.session.subscribe((event) => this.onSessionEvent(record.snapshot, event, emit));
+    record2.unsubscribe = record2.session.subscribe((event) => this.onSessionEvent(record2.snapshot, event, emit));
     emit("activation_retried", {
-      requested_model: record.snapshot.requestedModel ?? null,
-      resolved_model: record.snapshot.resolvedModel,
-      model_override: record.snapshot.modelOverride,
+      requested_model: record2.snapshot.requestedModel ?? null,
+      resolved_model: record2.snapshot.resolvedModel,
+      model_override: record2.snapshot.modelOverride,
       reused_session: reusedSession
     });
-    const result = this.runToSettled(record.snapshot, record.session, opts?.prompt ?? record.initialPrompt, emit, record);
-    record.result = result;
+    const result = this.runToSettled(record2.snapshot, record2.session, opts?.prompt ?? record2.initialPrompt, emit, record2);
+    record2.result = result;
     return {
       activationId,
-      participantId: record.snapshot.participantId,
+      participantId: record2.snapshot.participantId,
       attemptId,
-      specialist: record.snapshot.specialist,
-      issueId: record.snapshot.issueId,
-      issueRef: record.snapshot.issueRef,
-      access: record.snapshot.access,
-      workspace: record.snapshot.workspace,
-      resolvedModel: record.snapshot.resolvedModel,
-      stepContract: record.stepContract,
+      specialist: record2.snapshot.specialist,
+      issueId: record2.snapshot.issueId,
+      issueRef: record2.snapshot.issueRef,
+      access: record2.snapshot.access,
+      workspace: record2.snapshot.workspace,
+      resolvedModel: record2.snapshot.resolvedModel,
+      stepContract: record2.stepContract,
       result
     };
   }
@@ -25627,21 +25654,21 @@ class NativeActivationHost {
     }
   }
   admitToolCall(activationId, toolName) {
-    const record = this.registry.get(activationId);
-    if (!record)
+    const record2 = this.registry.get(activationId);
+    if (!record2)
       return { allow: false, reason: `unknown activation ${activationId}` };
     const verdict = admitToolCall({
       toolName,
-      workspace: record.snapshot.workspace,
+      workspace: record2.snapshot.workspace,
       activationId
     });
     if (!verdict.allow) {
       this.forensics.emit({
         activationId,
-        attemptId: record.snapshot.attemptId,
-        participantId: record.snapshot.participantId,
-        specialist: record.snapshot.specialist,
-        beadId: record.snapshot.issueRef,
+        attemptId: record2.snapshot.attemptId,
+        participantId: record2.snapshot.participantId,
+        specialist: record2.snapshot.specialist,
+        beadId: record2.snapshot.issueRef,
         name: "tool_blocked",
         payload: { tool: toolName, note: verdict.reason }
       });
@@ -25690,11 +25717,11 @@ class NativeActivationHost {
   waitForFleetChange(timeoutMs, sinceEpoch = this.fleetEpoch) {
     if (this.fleetEpoch > sinceEpoch)
       return Promise.resolve("change");
-    return new Promise((resolve) => {
+    return new Promise((resolve11) => {
       const settle = (outcome) => {
         clearTimeout(timer);
         this.fleetWaiters.delete(wake);
-        resolve(outcome);
+        resolve11(outcome);
       };
       const wake = () => settle("change");
       const timer = setTimeout(() => settle("timeout"), Math.max(0, timeoutMs));
@@ -25708,12 +25735,12 @@ class NativeActivationHost {
     this.fleetWaiters.clear();
   }
   async stop(activationId, reason = "operator request") {
-    const record = this.registry.get(activationId);
-    if (!record)
+    const record2 = this.registry.get(activationId);
+    if (!record2)
       return;
-    record.snapshot.state = "stopping";
+    record2.snapshot.state = "stopping";
     try {
-      await record.session.abort();
+      await record2.session.abort();
     } finally {
       this.stopToolDurationWatch(activationId);
       this.toolDurationWarnMsByActivation.delete(activationId);
@@ -25721,17 +25748,17 @@ class NativeActivationHost {
       this.wakeDirty.delete(activationId);
       this.wakeFinalising.delete(activationId);
       this.framedTurns.delete(activationId);
-      record.unsubscribe();
-      record.session.dispose();
-      record.snapshot.state = "stopped";
-      this.forget(record.snapshot.activationId);
-      this.releaseIfWriter(record.snapshot, reason);
+      record2.unsubscribe();
+      record2.session.dispose();
+      record2.snapshot.state = "stopped";
+      this.forget(record2.snapshot.activationId);
+      this.releaseIfWriter(record2.snapshot, reason);
       this.forensics.emit({
         activationId,
-        attemptId: record.snapshot.attemptId,
-        participantId: record.snapshot.participantId,
-        specialist: record.snapshot.specialist,
-        beadId: record.snapshot.issueRef,
+        attemptId: record2.snapshot.attemptId,
+        participantId: record2.snapshot.participantId,
+        specialist: record2.snapshot.specialist,
+        beadId: record2.snapshot.issueRef,
         name: "activation_disposed",
         payload: { reason }
       });
@@ -25739,66 +25766,66 @@ class NativeActivationHost {
     }
   }
   async steer(activationId, message) {
-    const record = this.registry.get(activationId);
-    if (!record) {
+    const record2 = this.registry.get(activationId);
+    if (!record2) {
       throw new DispatchRejectedError("unknown_activation", { activationId });
     }
-    if (record.snapshot.state !== "running" && record.snapshot.state !== "starting") {
-      const state = record.snapshot.state;
+    if (record2.snapshot.state !== "running" && record2.snapshot.state !== "starting") {
+      const state = record2.snapshot.state;
       const hint = state === "settled" || state === "waiting" || state === "needs_reply" || state === "escalated" ? `Activation ${activationId} is ${state} — use resume, which keeps the live session.` : state === "failed" ? `Activation ${activationId} is failed — use retry to re-run it in place.` : `Activation ${activationId} is ${state} — steer it or stop it first.`;
       throw new DispatchRejectedError("not_steerable", {
         activationId,
         note: `state is "${state}". steer only redirects running activations. ${hint}`
       });
     }
-    await record.session.steer(message);
+    await record2.session.steer(message);
     this.forensics.emit({
       activationId,
-      attemptId: record.snapshot.attemptId,
-      participantId: record.snapshot.participantId,
-      specialist: record.snapshot.specialist,
-      beadId: record.snapshot.issueRef,
+      attemptId: record2.snapshot.attemptId,
+      participantId: record2.snapshot.participantId,
+      specialist: record2.snapshot.specialist,
+      beadId: record2.snapshot.issueRef,
       name: "activation_steered",
       payload: {}
     });
   }
   attach(activationId, listener) {
-    const record = this.registry.get(activationId);
-    if (!record)
+    const record2 = this.registry.get(activationId);
+    if (!record2)
       return;
-    return { snapshot: record.snapshot, detach: record.session.subscribe(listener) };
+    return { snapshot: record2.snapshot, detach: record2.session.subscribe(listener) };
   }
   return(attachment) {
     attachment.detach();
   }
   async resume(activationId, prompt) {
-    const record = this.registry.get(activationId);
-    if (!record) {
+    const record2 = this.registry.get(activationId);
+    if (!record2) {
       throw new DispatchRejectedError("unknown_activation", { activationId });
     }
-    if (!RESUMABLE_STATES.has(record.snapshot.state)) {
+    if (!RESUMABLE_STATES.has(record2.snapshot.state)) {
       throw new DispatchRejectedError("not_resumable", {
         activationId,
-        note: `state is "${record.snapshot.state}"`
+        note: `state is "${record2.snapshot.state}"`
       });
     }
-    const attemptId = nextAttemptId(record.snapshot.attemptId);
-    if (record.snapshot.access === "write" || record.snapshot.leaseWaiver) {
+    const attemptId = nextAttemptId(record2.snapshot.attemptId);
+    if (record2.snapshot.access === "write" || record2.snapshot.leaseWaiver) {
       try {
         acquire({
-          workspace: record.snapshot.workspace,
+          workspace: record2.snapshot.workspace,
           activationId,
           attemptId,
-          specialist: record.snapshot.specialist
+          specialist: record2.snapshot.specialist
         });
       } catch (error) {
         if (error instanceof DispatchRejectedError) {
           this.forensics.emit({
             activationId,
             attemptId,
-            participantId: record.snapshot.participantId,
-            specialist: record.snapshot.specialist,
-            beadId: record.snapshot.issueRef,
+            participantId: record2.snapshot.participantId,
+            specialist: record2.snapshot.specialist,
+            beadId: record2.snapshot.issueRef,
             name: "lease_denied",
             payload: { reason: error.reason, note: error.detail.holder, on: "resume" }
           });
@@ -25806,40 +25833,40 @@ class NativeActivationHost {
         throw error;
       }
     }
-    record.snapshot.attemptId = attemptId;
-    record.snapshot.state = "starting";
-    this.save(record.snapshot);
+    record2.snapshot.attemptId = attemptId;
+    record2.snapshot.state = "starting";
+    this.save(record2.snapshot);
     const emit = (name, payload) => this.forensics.emit({
       activationId,
       attemptId,
-      participantId: record.snapshot.participantId,
-      specialist: record.snapshot.specialist,
-      beadId: record.snapshot.issueRef,
+      participantId: record2.snapshot.participantId,
+      specialist: record2.snapshot.specialist,
+      beadId: record2.snapshot.issueRef,
       name,
       payload
     });
     emit("activation_resumed", {
-      requested_model: record.snapshot.requestedModel,
-      resolved_model: record.snapshot.resolvedModel,
-      model_override: record.snapshot.modelOverride,
-      thinking_level: record.snapshot.thinkingLevel ?? null,
-      thinking_override: record.snapshot.thinkingOverride
+      requested_model: record2.snapshot.requestedModel,
+      resolved_model: record2.snapshot.resolvedModel,
+      model_override: record2.snapshot.modelOverride,
+      thinking_level: record2.snapshot.thinkingLevel ?? null,
+      thinking_override: record2.snapshot.thinkingOverride
     });
-    record.unsubscribe();
-    record.unsubscribe = record.session.subscribe((event) => this.onSessionEvent(record.snapshot, event, emit));
-    const result = this.runToSettled(record.snapshot, record.session, prompt, emit, record);
-    record.result = result;
+    record2.unsubscribe();
+    record2.unsubscribe = record2.session.subscribe((event) => this.onSessionEvent(record2.snapshot, event, emit));
+    const result = this.runToSettled(record2.snapshot, record2.session, prompt, emit, record2);
+    record2.result = result;
     return {
       activationId,
-      participantId: record.snapshot.participantId,
+      participantId: record2.snapshot.participantId,
       attemptId,
-      specialist: record.snapshot.specialist,
-      issueId: record.snapshot.issueId,
-      issueRef: record.snapshot.issueRef,
-      access: record.snapshot.access,
-      workspace: record.snapshot.workspace,
-      resolvedModel: record.snapshot.resolvedModel,
-      stepContract: record.stepContract,
+      specialist: record2.snapshot.specialist,
+      issueId: record2.snapshot.issueId,
+      issueRef: record2.snapshot.issueRef,
+      access: record2.snapshot.access,
+      workspace: record2.snapshot.workspace,
+      resolvedModel: record2.snapshot.resolvedModel,
+      stepContract: record2.stepContract,
       result
     };
   }
@@ -26408,15 +26435,15 @@ function displayCounter(usage, key) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 function displayLastActivityAt(view) {
-  const at = view.lastActivityAt ?? view.last_activity_at;
-  return typeof at === "number" && Number.isFinite(at) ? at : undefined;
+  const at2 = view.lastActivityAt ?? view.last_activity_at;
+  return typeof at2 === "number" && Number.isFinite(at2) ? at2 : undefined;
 }
 function displayAskActivationId(ask) {
   return ask.message?.activationId ?? ask.message?.activation_id ?? ask.activationId ?? ask.activation_id ?? "";
 }
 function displayAskedAt(ask, nowMs) {
-  const at = ask.askedAt ?? ask.asked_at;
-  return typeof at === "number" && Number.isFinite(at) ? at : nowMs;
+  const at2 = ask.askedAt ?? ask.asked_at;
+  return typeof at2 === "number" && Number.isFinite(at2) ? at2 : nowMs;
 }
 function formatDisplayElapsed(elapsedS) {
   const total = Math.max(0, Math.floor(elapsedS ?? 0));
@@ -26444,10 +26471,10 @@ function formatDisplayTurns(turnCount) {
   return `${turnCount} turn${turnCount === 1 ? "" : "s"}`;
 }
 function displayIdleS(view, nowMs) {
-  const at = displayLastActivityAt(view);
-  if (at == null)
+  const at2 = displayLastActivityAt(view);
+  if (at2 == null)
     return null;
-  return Math.max(0, Math.floor((nowMs - at) / 1000));
+  return Math.max(0, Math.floor((nowMs - at2) / 1000));
 }
 function isDisplayActiveState(state) {
   return state === "running" || state === "starting";
@@ -26906,7 +26933,7 @@ function createSpecialistFeedTool(getHost, openObservability = () => createObser
           return { status: "error", error: "observability.db is unavailable; specialist_status still answers for live activations" };
         const live = (getHost?.()?.list() ?? []).map((s) => s.activationId);
         const known = new Set([...live, ...client.listNativeActivationIds({ limit: 500 })]);
-        const matches = known.has(wanted) ? [wanted] : [...known].filter((id) => id.startsWith(wanted)).sort();
+        const matches = known.has(wanted) ? [wanted] : [...known].filter((id2) => id2.startsWith(wanted)).sort();
         if (matches.length > 1) {
           return { status: "error", error: `Ambiguous activation prefix: ${input.activation_id}`, candidates: matches.slice(0, 10) };
         }
@@ -26916,14 +26943,14 @@ function createSpecialistFeedTool(getHost, openObservability = () => createObser
           const rows = client.readForensicEvents({ jobId: id, limit: 5000 }).filter((r) => r.seq > since);
           if (rows.length === 0 && since < 0)
             return { status: "error", error: `No events for activation: ${input.activation_id}` };
-          const shown = rows.slice(-limit);
+          const shown2 = rows.slice(-limit);
           return {
             activation_id: id,
             view,
-            events: shown.map((r) => `${clock(r.t)} #${r.seq} ${r.event_name}`),
-            last_seq: shown.at(-1)?.seq ?? since,
+            events: shown2.map((r) => `${clock(r.t)} #${r.seq} ${r.event_name}`),
+            last_seq: shown2.at(-1)?.seq ?? since,
             total: rows.length,
-            truncated: rows.length > shown.length
+            truncated: rows.length > shown2.length
           };
         }
         const all = client.readEvents(id);
@@ -27112,13 +27139,13 @@ function validateLaunchOutcome(value) {
   if (value.identity !== undefined) {
     if (!isObject(value.identity))
       fail("invalid_outcome", "identity must be an object");
-    const identity = value.identity;
+    const identity2 = value.identity;
     for (const key of ["thread_id", "session_name", "tmux_session_id", "pane_id"]) {
-      if (!(key in identity))
+      if (!(key in identity2))
         fail("invalid_outcome", `identity.${key} is required when identity is present`);
     }
     const nullableId = (field) => {
-      const v = identity[field];
+      const v = identity2[field];
       if (v === null)
         return null;
       return boundedString(v, `identity.${field}`, 256);
@@ -27126,8 +27153,8 @@ function validateLaunchOutcome(value) {
     outcome.identity = {
       thread_id: nullableId("thread_id"),
       session_name: nullableId("session_name"),
-      tmux_session_id: nullablePatternString(identity.tmux_session_id, "identity.tmux_session_id", 32, TMUX_SESSION_ID_RE),
-      pane_id: nullablePatternString(identity.pane_id, "identity.pane_id", 32, PANE_ID_RE)
+      tmux_session_id: nullablePatternString(identity2.tmux_session_id, "identity.tmux_session_id", 32, TMUX_SESSION_ID_RE),
+      pane_id: nullablePatternString(identity2.pane_id, "identity.pane_id", 32, PANE_ID_RE)
     };
   }
   if (value.worktree !== undefined) {
@@ -27363,10 +27390,10 @@ function reconcile(workspace, request, options = {}) {
   const probe = options.probe ?? procLeaseProbe();
   const now = options.now ?? Date.now;
   const status = inspect(workspace, probe);
-  const record = decide(workspace, request, status, now());
-  appendRecord(workspace, record);
-  emit(options.forensics, record, status.lease);
-  return record;
+  const record2 = decide(workspace, request, status, now());
+  appendRecord(workspace, record2);
+  emit(options.forensics, record2, status.lease);
+  return record2;
 }
 function decide(workspace, request, status, decidedAtMs) {
   const base = {
@@ -27428,9 +27455,9 @@ function basenameKey(path) {
 function reconciliationLogPath(workspace) {
   return `${leasePath(workspace).slice(0, -".json".length)}.reconcile.jsonl`;
 }
-function appendRecord(workspace, record) {
+function appendRecord(workspace, record2) {
   mkdirSync8(leaseDir(workspace), { recursive: true, mode: 448 });
-  appendFileSync2(reconciliationLogPath(workspace), `${JSON.stringify(record)}
+  appendFileSync2(reconciliationLogPath(workspace), `${JSON.stringify(record2)}
 `, { mode: 384 });
 }
 function readLogAt(path) {
@@ -27447,31 +27474,31 @@ function readLogAt(path) {
   }
   return out;
 }
-function emit(sink, record, lease) {
+function emit(sink, record2, lease) {
   if (!sink)
     return;
   try {
     sink.emit({
-      activationId: lease?.activationId ?? `workspace:${record.workspaceKey}`,
+      activationId: lease?.activationId ?? `workspace:${record2.workspaceKey}`,
       attemptId: lease?.attemptId ?? "reconciliation",
       participantId: lease?.specialist ? `specialist::${lease.specialist}` : "specialist::unknown",
       specialist: lease?.specialist ?? "unknown",
-      name: record.applied ? "lease_reconciled" : "lease_uncertain",
+      name: record2.applied ? "lease_reconciled" : "lease_uncertain",
       payload: {
-        workspace: record.worktreePath,
-        workspace_key: record.workspaceKey,
-        outcome: record.outcome,
-        applied: record.applied,
-        proposed_outcome: record.proposedOutcome,
-        refusal_reason: record.refusalReason,
-        observed_state: record.observedState,
-        uncertain_reason: record.observedUncertainReason,
-        decided_by: record.decidedBy,
-        basis: record.basis,
-        superseded_by: record.supersededBy,
-        note: record.note,
-        holder_activation_id: record.holder?.activationId,
-        holder_pid: record.holder?.pid,
+        workspace: record2.worktreePath,
+        workspace_key: record2.workspaceKey,
+        outcome: record2.outcome,
+        applied: record2.applied,
+        proposed_outcome: record2.proposedOutcome,
+        refusal_reason: record2.refusalReason,
+        observed_state: record2.observedState,
+        uncertain_reason: record2.observedUncertainReason,
+        decided_by: record2.decidedBy,
+        basis: record2.basis,
+        superseded_by: record2.supersededBy,
+        note: record2.note,
+        holder_activation_id: record2.holder?.activationId,
+        holder_pid: record2.holder?.pid,
         attributed_to_workspace: lease === undefined
       }
     });
@@ -27554,7 +27581,7 @@ function createSpecialistLeaseReconcileTool(probe) {
       if (!input.worktree || !input.outcome) {
         return { status: "error", error: "reconcile requires 'worktree' and 'outcome'" };
       }
-      const record = reconcile(leaseScopeFor(resolve12(input.worktree)), {
+      const record2 = reconcile(leaseScopeFor(resolve12(input.worktree)), {
         outcome: input.outcome,
         decidedBy: operatorIdentity("mcp"),
         basis: (input.basis ?? []).map((entry) => entry.trim()).filter((entry) => entry.length > 0),
@@ -27562,10 +27589,10 @@ function createSpecialistLeaseReconcileTool(probe) {
         ...input.note ? { note: input.note } : {}
       }, { probe });
       return {
-        applied: record.applied,
-        outcome: record.outcome,
-        refusal_reason: record.refusalReason ?? null,
-        record
+        applied: record2.applied,
+        outcome: record2.outcome,
+        refusal_reason: record2.refusalReason ?? null,
+        record: record2
       };
     }
   };

@@ -920,7 +920,7 @@ export interface NativeActivationHostDeps {
   /** Defaults to `process.cwd()`. */
   cwd?: string;
   /** The isolated worktree a writer runs in. Defaults to `provisionWriterWorkspace` (git). */
-  provisionWriterWorkspace?: (cwd: string, issueRef: string) => ProvisionedWorkspace;
+  provisionWriterWorkspace?: (cwd: string, issueRef: string, role: string) => ProvisionedWorkspace;
   /** Background tasks this activation started that are still running; see `liveBackgroundTasks`. */
   backgroundTaskAlive?: (pid: number) => boolean;
   /** How often a lease held over running background tasks re-checks them. Defaults to 5s. */
@@ -1033,7 +1033,7 @@ export class NativeActivationHost {
   private readonly forensics: ActivationForensicSink;
   private readonly loadSdk: () => Promise<PiSdk>;
   private readonly cwd: string;
-  private readonly provisionWriterWorkspace: (cwd: string, issueRef: string) => ProvisionedWorkspace;
+  private readonly provisionWriterWorkspace: (cwd: string, issueRef: string, role: string) => ProvisionedWorkspace;
   private readonly backgroundTaskAlive: (pid: number) => boolean;
   /**
    * Per activation: background tasks its tools reported as started, by the identity the
@@ -1225,7 +1225,7 @@ export class NativeActivationHost {
      */
     let releaseOwnLease: (() => void) | null = null;
     // A worktree THIS dispatch created is removed again when the dispatch is refused, so a refused
-    // writer leaves no `.worktrees/<issue>` or `sp/<issue>` behind (SPECIALISTS-4310). A reused one stays.
+    // writer leaves no `.xtrm/worktrees/<name>` or `sp/<issue>` behind (SPECIALISTS-4310). A reused one stays.
     let removeFreshWorkspace: (() => void) | null = null;
     const removeWorkspaceOnRefusal = (): void => {
       const remove = removeFreshWorkspace;
@@ -1489,7 +1489,7 @@ export class NativeActivationHost {
     // dispatch check so the gate, the bind, the lease and the session all see one workspace.
     if (access === 'write' || leaseWaiver) {
       try {
-        const { created, ...provisioned } = this.provisionWriterWorkspace(this.cwd, issueRef);
+        const { created, ...provisioned } = this.provisionWriterWorkspace(this.cwd, issueRef, request.specialist);
         workspace = provisioned;
         if (created) removeFreshWorkspace = () => removeWriterWorkspace(this.cwd, provisioned);
       } catch (error) {

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
@@ -135,7 +135,7 @@ describe('write-capable native activation workspace (SPECIALISTS-4310)', () => {
     const handle = await host(repo, session).start(dispatch);
     await handle.result;
 
-    const expected = join(repo, '.worktrees', 'core-2412');
+    const expected = join(repo, '.xtrm', 'worktrees', `${basename(repo)}-sp-executor-core-2412`);
     expect(handle.workspace.worktreePath).toBe(expected);
     expect(handle.workspace.branch).toBe('sp/core-2412');
     expect(session.cwd).toBe(expected);
@@ -159,7 +159,7 @@ describe('write-capable native activation workspace (SPECIALISTS-4310)', () => {
       .catch((caught: unknown) => caught);
 
     expect(refusal).toBeInstanceOf(DispatchRejectedError);
-    expect(git('worktree', 'list', '--porcelain')).not.toContain('.worktrees/core-2412');
+    expect(git('worktree', 'list', '--porcelain')).not.toContain('.xtrm/worktrees/');
     expect(git('branch', '--list', 'sp/core-2412')).toBe('');
     expect(git('status', '--porcelain')).toBe('');
   });
@@ -375,7 +375,7 @@ describe('lease-waived read-tier activation workspace', () => {
     const handle = await waiverHost(repo, session, true).start(watcherDispatch);
     await handle.result;
 
-    const expected = join(repo, '.worktrees', 'core-2412');
+    const expected = join(repo, '.xtrm', 'worktrees', `${basename(repo)}-sp-watcher-core-2412`);
     expect(handle.workspace.worktreePath).toBe(expected);
     expect(session.cwd).toBe(expected);
     expect(git('status', '--porcelain')).toBe('');
@@ -411,7 +411,7 @@ describe('lease-waived read-tier activation workspace', () => {
     // The watch is still running, so the activation is uncertain rather than finished, and the
     // lease it needs for the wake turn is still held (SPECIALISTS-4320).
     expect((await handle.result).status).toBe('uncertain');
-    expect(handle.workspace.worktreePath).toBe(join(repo, '.worktrees', 'core-2412'));
+    expect(handle.workspace.worktreePath).toBe(join(repo, '.xtrm', 'worktrees', `${basename(repo)}-sp-watcher-core-2412`));
     expect(sink.names).not.toContain('lease_released');
 
     session.emit({
