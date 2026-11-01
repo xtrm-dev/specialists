@@ -21,8 +21,9 @@ const retiredTools = [
 ];
 
 describe('researcher Exa integration', () => {
-  it('loads the managed MCP adapter explicitly for isolated Specialist sessions', () => {
-    expect(researcher.execution.extensions?.['npm:pi-mcp-adapter']).toBe(true);
+  it('relies on Pi built-in MCP: the retired pi-mcp-adapter is not enabled', () => {
+    expect(researcher.execution.extensions?.['npm:pi-mcp-adapter']).toBeUndefined();
+    expect(JSON.stringify(config)).not.toContain('pi-mcp-adapter');
     expect(researcher.capabilities?.external_commands ?? []).toEqual([]);
     expect(researcher.capabilities?.required_tools ?? []).toEqual([]);
   });

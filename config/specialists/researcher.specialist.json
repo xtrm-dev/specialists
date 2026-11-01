@@ -2,7 +2,7 @@
   "specialist": {
     "metadata": {
       "name": "researcher",
-      "version": "1.5.0",
+      "version": "1.5.1",
       "description": "External-evidence researcher for current docs/APIs, semantic web discovery and retrieval, public implementation patterns, recent ecosystem evidence, multi-step deep research, and fact checking. Use when the answer depends on information outside the repository or on facts/APIs that may have changed. Not for local code mapping — use explorer.",
       "category": "analysis",
       "tags": [
@@ -31,10 +31,7 @@
       "lease_waiver": false,
       "interactive": true,
       "max_retries": 0,
-      "bare": false,
-      "extensions": {
-        "npm:pi-mcp-adapter": true
-      }
+      "bare": false
     },
     "mandatory_rules": {
       "template_sets": [
