@@ -59,12 +59,22 @@ export interface PiResourceLoaderOptions {
   noContextFiles?: boolean;
   noPromptTemplates?: boolean;
   noThemes?: boolean;
+  /**
+   * The ONLY channels through which a session's system prompt reaches the model: pi's
+   * `AgentSession` rebuilds its prompt from `resourceLoader.getSystemPrompt()` /
+   * `getAppendSystemPrompt()`, and `createAgentSession` ignores a `systemPrompt` option.
+   * Same pair the pi CLI fills from `--system-prompt` / `--append-system-prompt`.
+   */
+  systemPrompt?: string;
+  appendSystemPrompt?: string[];
 }
 
 /** Structural view of a pi `ResourceLoader` — only what the host constructs and reads. */
 export interface PiResourceLoaderLike {
   reload(): Promise<void>;
   getSkills(): { skills: Array<{ name: string }>; diagnostics: unknown[] };
+  getSystemPrompt?(): string | undefined;
+  getAppendSystemPrompt?(): string[];
 }
 
 export interface PiSdk {
@@ -123,6 +133,8 @@ export interface PiAgentSessionLike {
   getActiveToolNames(): string[];
   setActiveToolsByName(names: string[]): void;
   waitForIdle(): Promise<void>;
+  /** The system prompt as the provider sees it. Present on real pi sessions; absent on older doubles. */
+  readonly systemPrompt?: string;
   /**
    * Pi's own session token/cost/context totals (SPECIALISTS-120). Aggregates EVERY session
    * entry — including tool-reported usage, compaction and branch-summary generation, and

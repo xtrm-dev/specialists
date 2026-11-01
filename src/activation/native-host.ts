@@ -743,8 +743,29 @@ function processAlive(pid: number): boolean {
 
 export function createActivationResourceLoader(
   sdk: PiSdk,
-  options: { cwd: string; skillPaths: string[]; extensionPaths?: string[] },
+  options: {
+    cwd: string;
+    skillPaths: string[];
+    extensionPaths?: string[];
+    rolePrompt?: { text: string; mode?: 'append' | 'replace' };
+  },
 ): PiResourceLoaderLike {
+  // Role prompt wiring (HIRYUEN-774). pi takes a session's system prompt ONLY from the
+  // resource loader: `createAgentSession` seeds the agent with an empty prompt and ignores a
+  // `systemPrompt` option, and `AgentSession` rebuilds the prompt from the loader's
+  // `getSystemPrompt()` / `getAppendSystemPrompt()`. A loader built without them gave every
+  // native activation pi's generic coding preamble and no role prompt at all. The two modes
+  // mirror the legacy CLI (src/pi/session.ts): `append` (the default) is
+  // `--append-system-prompt`, `replace` is `--system-prompt`; the CLI fills these same two
+  // loader options from those flags. An empty prompt is omitted, as the legacy runner does.
+  const rolePromptText = options.rolePrompt?.text ?? '';
+  const rolePromptOptions =
+    rolePromptText.length === 0
+      ? {}
+      : options.rolePrompt?.mode === 'replace'
+        ? { systemPrompt: rolePromptText }
+        : { appendSystemPrompt: [rolePromptText] };
+
   // Codemode builtin wiring (SPECIALISTS-4260 follow-up).
   //
   // The `codemode` tool registers ONLY through pi's codemode extension, and SDK sessions do not
@@ -789,6 +810,7 @@ export function createActivationResourceLoader(
     noContextFiles: true,
     noPromptTemplates: true,
     noThemes: true,
+    ...rolePromptOptions,
   });
 }
 
@@ -2093,8 +2115,19 @@ export class NativeActivationHost {
       cwd: workspace.worktreePath,
       skillPaths: specialist.specialist.skills?.paths ?? [],
       extensionPaths: [...curatedExtensions.all, ...dynamicExtensions],
+      rolePrompt: { text: systemPrompt.text, mode: specialist.specialist.prompt.system_prompt_mode },
     });
     await resourceLoader.reload();
+    // HIRYUEN-774: the loader is pi's only system-prompt channel, so it must carry the role
+    // prompt after reload. Fail closed when it does not, or cannot say: a loader without the
+    // getters cannot feed pi's prompt either. The per-session check below adds pi's view.
+    const loaderPrompts = [resourceLoader.getSystemPrompt?.() ?? '', ...(resourceLoader.getAppendSystemPrompt?.() ?? [])];
+    if (systemPrompt.text.length > 0 && !loaderPrompts.some((text) => text.includes(systemPrompt.text))) {
+      return reject('system_prompt_not_applied', {
+        ...(autoCreatedRef ? { created_ref: autoCreatedRef } : {}),
+        note: 'the resource loader does not carry the built role prompt; a native activation never runs without its role prompt',
+      });
+    }
 
     // Session options are built once so every later attempt on a new model — the fallback
     // walk below, a retry with an override — creates its session identically to the first.
@@ -2127,7 +2160,8 @@ export class NativeActivationHost {
       // contract the child was shown. The hard filter stays: `tools` is never omitted on a
       // prompted session.
       tools: [...effectiveToolContract.toolsList, ASK_TOOL, ESCALATE_TOOL],
-      systemPrompt: systemPrompt.text,
+      // No `systemPrompt` here: pi ignores that option. The role prompt rides the resource
+      // loader above (HIRYUEN-774) and is verified on every created session below.
     };
 
     // SPECIALISTS-42 (c): post-load verification on the NATIVE path.
@@ -2183,6 +2217,29 @@ export class NativeActivationHost {
           });
         }
         return reject('tool_contract_unsatisfied', detail);
+      }
+      // HIRYUEN-774: the role prompt must be in the session's system prompt. A session that
+      // dropped it runs with none of the role's rules and still settles with a normal-looking
+      // result, which is how this went unnoticed. Checked once, at creation, against pi's live
+      // `session.systemPrompt` (pi 1.4.0 has it; the loader check above already failed closed
+      // for a loader that cannot carry the prompt); a reused session keeps the same loader. Not
+      // covered: an extension that rewrites the prompt per turn via before_agent_start, which is
+      // that extension's deliberate choice.
+      const livePrompt = created.session.systemPrompt;
+      if (systemPrompt.text.length > 0 && typeof livePrompt === 'string' && !livePrompt.includes(systemPrompt.text)) {
+        created.session.dispose();
+        const detail = {
+          ...(autoCreatedRef ? { created_ref: autoCreatedRef } : {}),
+          note: 'the session system prompt does not contain the built role prompt; a native activation never runs without its role prompt',
+        };
+        if (options.viaFallback) {
+          throw new DispatchRejectedError('system_prompt_not_applied', {
+            specialist: request.specialist,
+            issueRef: request.issueRef,
+            ...detail,
+          });
+        }
+        return reject('system_prompt_not_applied', detail);
       }
       return created.session;
     };
