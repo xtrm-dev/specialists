@@ -35,7 +35,7 @@ import {
   resolveRuntimeToolContract,
 } from '../../../src/pi/session.js';
 import type { PiAgentSessionEvent, PiAgentSessionLike, PiSdk } from '../../../src/activation/pi-sdk.js';
-import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
+import { FAKE_AGENT_DIR, FakeResourceLoader, loaderRolePrompt } from '../../utils/pi-resource-loader-double.js';
 import { testWorkItems } from '../../utils/test-work-items.js';
 
 /**
@@ -223,7 +223,8 @@ async function nativeAssembly(root: string, opts: ProbeOptions, overrides: { nam
   return {
     createArgs,
     loader: createArgs.resourceLoader as FakeResourceLoader,
-    systemPrompt: createArgs.systemPrompt as string,
+    // The loader is pi's only system-prompt channel; a session `systemPrompt` option is ignored (HIRYUEN-774).
+    systemPrompt: loaderRolePrompt(createArgs.resourceLoader as FakeResourceLoader),
     tools: createArgs.tools as string[],
     prompt: session.prompts[0],
     sessionCwd: createArgs.cwd as string,

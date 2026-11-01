@@ -22,6 +22,14 @@ export class FakeResourceLoader {
     this.reloadCalls += 1;
   }
 
+  getSystemPrompt(): string | undefined {
+    return this.options.systemPrompt as string | undefined;
+  }
+
+  getAppendSystemPrompt(): string[] {
+    return (this.options.appendSystemPrompt as string[] | undefined) ?? [];
+  }
+
   getSkills(): { skills: Array<{ name: string; filePath: string; baseDir: string }>; diagnostics: never[] } {
     const paths = (this.options.additionalSkillPaths as string[] | undefined) ?? [];
     return {
@@ -44,3 +52,24 @@ export function skillNameFromPath(path: string): string {
 
 /** Deterministic agent dir so doubles never touch the operator's real `~/.pi/agent`. */
 export const FAKE_AGENT_DIR = '/tmp/specialists-test-agent-dir';
+
+/** pi's built-in preamble, used when the loader supplies no `systemPrompt` (HIRYUEN-774). */
+export const PI_DEFAULT_PREAMBLE = 'You are an expert coding assistant operating inside pi, a coding agent harness.';
+
+/**
+ * The system prompt a real pi session would show the provider for this loader: the loader's
+ * `systemPrompt` or pi's default preamble, then each `appendSystemPrompt` entry. Faithful to the
+ * one property that matters here — pi reads the prompt ONLY from the resource loader and
+ * ignores a `systemPrompt` passed to `createAgentSession` (pi 1.4.0 sdk.js / agent-session.js).
+ */
+export function piSessionSystemPrompt(loader: unknown): string {
+  const real = loader as { getSystemPrompt?: () => string | undefined; getAppendSystemPrompt?: () => string[] } | undefined;
+  const preamble = real?.getSystemPrompt?.() || PI_DEFAULT_PREAMBLE;
+  const append = real?.getAppendSystemPrompt?.() ?? [];
+  return [preamble, ...append.map((text) => `<addendum>\n${text}\n</addendum>`)].join('\n\n');
+}
+
+/** The role prompt as the host handed it to pi's loader: `systemPrompt` (replace) or the appended entries. */
+export function loaderRolePrompt(loader: FakeResourceLoader): string {
+  return [loader.getSystemPrompt() ?? '', ...loader.getAppendSystemPrompt()].filter(Boolean).join('\n\n');
+}
