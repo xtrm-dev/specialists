@@ -163,27 +163,24 @@ export function withRail(line) {
 // XTRM accent (#9a8bff, custom-footer/index.ts) — this file introduces no new palette.
 const DIM = (text) => `\x1b[2m${text}\x1b[22m`;
 const BOLD = (text) => `\x1b[1m${text}\x1b[22m`;
-/** Plain white big dot — matches the xtrm-ui tool rows and substrate-suggest cards. */
-const DOT = '●';
-// Text-only headers: no background fills anywhere. The header is one bold row —
-// white name, tinted state, dim bead — and run metadata moves to a dim footer.
-// Tints are lightened for AA text contrast on a dark terminal (all >= 7:1).
-const FG_OFF = '\x1b[39m';
-const NAME_TEXT = (text) => `\x1b[38;2;255;255;255m${text}${FG_OFF}`;
-const STATE_TINT = {
-  done: '\x1b[38;2;120;160;255m',
-  asked: '\x1b[38;2;232;190;70m',
-  failed: '\x1b[38;2;255;110;70m',
-  escalated: '\x1b[38;2;255;110;70m',
-};
+/** Folded wake markers: hollow for an automatic wake, `!` when the run failed. */
+const HOLLOW = '○';
+/** The verb a folded wake row leads with, keyed by the state the wake reports. */
+const WAKE_VERB = { asked: 'Asked', escalated: 'Escalated', done: 'Finished', failed: 'Failed' };
 /**
- * One minimal header for every wake card: dot, white bold name, tinted state,
- * dim bead — separated by double spaces, no dividers, no backgrounds.
- * `\x1b[39m` resets foreground only, so the row-wide bold survives to the
- * single closing `\x1b[22m`; only the bead opens dim, and it closes the row.
+ * One folded wake row — the collapsed form of every wake card: marker, bold verb,
+ * Specialist identity, the event's own tail, then the dim facts. The verb is the only
+ * bold text on the row, the marker leads untinted, and the facts close it — separated
+ * by double spaces, no dividers, no backgrounds, no 24-bit colour.
  */
-const wakeHeader = (name, state, bead) =>
-  `${DOT} \x1b[1m${NAME_TEXT(name)}  ${STATE_TINT[state]}${state}${FG_OFF}  \x1b[2m${bead}\x1b[22m`;
+export function wakeHeader(name, state, bead, tail = '', facts = '') {
+  const marker = state === 'failed' ? '!' : HOLLOW;
+  return [
+    `${marker} ${BOLD(WAKE_VERB[state] ?? state)} ${name}  ${bead}`,
+    ...(tail ? [tail] : []),
+    ...(facts ? [DIM(facts)] : []),
+  ].join('  ');
+}
 // Italic is set with `3` and cleared with `23`; `22m` after it clears the dim. Pi theme
 // helpers have no italic token, so the raw SGR is the only way to mark the purpose excerpt.
 const ITALIC_DIM = (text) => `\x1b[2m\x1b[3m${text}\x1b[23m\x1b[22m`;
@@ -1088,17 +1085,18 @@ export function createAskObserverSink(base, onAsk, onTerminal) {
 /**
  * ── Wake/event cards ────────────────────────────────────────────────────────
  *
- * A wake is an EVENT, not a panel. It is the smallest thing that carries the event, the
- * context, whatever the Specialist wrote and the one instruction the coordinator must act
- * on — with the rail running down every line, no background, and no blank lines:
+ * A wake is an EVENT, not a panel. Collapsed, it is ONE row that carries the event, its
+ * work and the one thing worth reading — and ctrl+o opens it to the full card: whatever
+ * the Specialist wrote, the one instruction the coordinator must act on, and the run
+ * facts. No background, no blank lines:
  *
- *   │ ! researcher:act:b38da383-b44  asked  XTRM-241
- *   │ Does the bracket look right?
- *   │ Call specialist_status to obtain the pending message_id, then reply with specialist_reply. · activation act:b38da383-b44
+ *   ○ Asked researcher:act:b38da383-b44  XTRM-241  Does the bracket look right?
+ *   ○ Escalated reviewer:act:b38da383-b44  XTRM-241  The current implementation cannot…
+ *   ○ Finished executor:act:b38da383-b44  XTRM-241  CODEMODE TOOL: ABSENT  42s
+ *   ! Failed executor:act:b38da383-b44  XTRM-241  Provider rate limit exhausted…  42s
  *
- *   │ ✓ executor:act:b38da383-b44  done  XTRM-241
- *   │ Call specialist_result to read the complete result. · activation act:b38da383-b44
- *   │ 42s • 3t • 43k
+ * No 24-bit colour anywhere in this lane: the marker is untinted, the verb is the only
+ * bold text, and the facts close the row in dim.
  *
  * No `[customType]` label and no background: pi's DEFAULT custom-message component paints a
  * `customMessageBg` box and a bold `[specialist_ask]` header, which is where the card look
@@ -1106,9 +1104,9 @@ export function createAskObserverSink(base, onAsk, onTerminal) {
  * component entirely, so the message renders as the lines this module produces and nothing
  * else.
  *
- * Hierarchy is typography plus colour: glyph for state, bold Specialist name, dim work id,
- * dim+italic purpose and instruction, plain foreground for anything a Specialist wrote.
- * Purple stays scarce — the rail and the live spinner only.
+ * Hierarchy is typography: bold verb for state, plain Specialist name, dim+italic purpose
+ * and instruction, plain foreground for anything a Specialist wrote. Purple stays scarce —
+ * the rail and the live spinner only.
  */
 
 /**
@@ -1139,7 +1137,7 @@ function costFacts(view) {
 function modelFacts(view) {
   return [
     view?.resolved_model ?? null,
-    view?.thinking_level ? ACCENT(view.thinking_level) : null,
+    view?.thinking_level ?? null,
   ].filter(Boolean).join(' · ');
 }
 
@@ -1152,23 +1150,65 @@ function instructionLine(instruction, activationId) {
   return withRail(`${ITALIC_DIM(instruction)} ${DIM('·')} ${DIM(`activation ${activationId}`)}`);
 }
 
+/** Work reference for a wake: the event's own ref first, the view's second. */
+const wakeRef = (event, view) =>
+  event.issueRef ?? event.beadId ?? view?.issue_ref ?? view?.bead_id ?? '—';
+
+/** The one fact a folded row carries: how long the run took, when the view has it. */
+const elapsedFact = (view) => (view ? formatElapsedShort(view.elapsed_s) : '');
+
+/** Bound on a folded row's tail, so the row stays one row on a normal terminal. */
+const WAKE_ROW_TAIL_MAX = 60;
+
+/**
+ * The first non-blank line of a text, whitespace-collapsed and bounded: the summary a
+ * folded row carries for a question, a result verdict or a failure reason.
+ */
+function firstLineOf(text) {
+  const line = String(text ?? '')
+    .split('\n')
+    .map((part) => part.replace(/\s+/g, ' ').trim())
+    .find((part) => part !== '');
+  if (!line) return '';
+  return line.length <= WAKE_ROW_TAIL_MAX ? line : `${line.slice(0, WAKE_ROW_TAIL_MAX - 1)}…`;
+}
+
+/**
+ * The model-visible form of a wake card: the same text with every SGR sequence removed.
+ *
+ * `content` reaches the model, so it carries no styling at all; the styled variants are
+ * display-only (`details.collapsedContent`, `details.expandedContent`).
+ */
+export function plainWake(text) {
+  return String(text ?? '').replace(/\x1b\[[0-9;]*m/g, '');
+}
+
 /**
  * The wake message a blocked child produces. Exported so its shape is testable.
+ *
+ * Collapsed (`opts.full` unset) this is ONE row: marker, bold verb, identity, the question's
+ * first line. With `{ full: true }` it is the whole card the renderer opens on ctrl+o: the
+ * header, every body line and the instruction the coordinator acts on.
  *
  * `view` is the SAME `ActivationView` the tools serialise — the purpose excerpt and the work
  * id are read from it, never re-derived here. It is optional because a wake is worth
  * delivering even when the snapshot is already gone.
  */
-export function formatAskWake(ask, view) {
+export function formatAskWake(ask, view, opts = {}) {
   const escalated = ask.kind === 'escalation';
-  const beadId = ask.issueRef ?? ask.beadId ?? view?.issue_ref ?? view?.bead_id ?? '—';
-  // The state word names what happened: `asked` (blocked on your reply) vs
-  // `escalated` (raised for intervention) — never the overloaded `waiting`,
-  // which core also uses for idle keep-alive jobs. Asks carry no run metadata,
-  // so there is no footer: header, question, instruction.
-  const header = wakeHeader(`${ask.specialist}:${ask.activationId}`, escalated ? 'escalated' : 'asked', beadId);
+  // The verb names what happened: `Asked` (blocked on your reply) vs `Escalated`
+  // (raised for intervention) — never the overloaded `waiting`, which core also uses
+  // for idle keep-alive jobs. Escalation is not failure: it keeps the hollow marker.
+  const state = escalated ? 'escalated' : 'asked';
+  const headerName = `${ask.specialist}:${ask.activationId}`;
+  const beadId = wakeRef(ask, view);
+  if (!opts.full) {
+    // Ids leave the folded row (CORE-2573 seq 8): the activation id stays on the card
+    // ctrl+o opens and in the model content, never on the one-row fold.
+    return withRail(wakeHeader(ask.specialist, state, beadId, firstLineOf(ask.body || '(no body)')));
+  }
   return indentBody([
-    withRail(header),
+    withRail(wakeHeader(headerName, state, beadId)),
     // Blank body lines are dropped: the rail used to render paragraph breaks
     // as a bare gutter; unrailed, they would become blank lines, which event
     // cards never carry.
@@ -1180,20 +1220,31 @@ export function formatAskWake(ask, view) {
 /**
  * The wake message a finished child produces. Exported so its shape is testable.
  *
- * Same compact object as {@link formatAskWake}: the header names the event, its work and its
- * context (run cost when completed, the failing model when failed); the error string, when
- * there is one, is the only body line. `view` supplies elapsed/turns/spend and the failure
- * model — all existing snapshot telemetry, projected by `toActivationView`, never
- * recomputed here.
+ * Three shapes, one builder:
+ * - folded (no opts) is ONE row: marker, bold verb, identity, the verdict (a completed
+ *   run's first result line) or the failure reason, then the dim elapsed. A failure leads
+ *   with `!`; everything else keeps the hollow marker.
+ * - `{ excerpt: true }` is the model-visible card: adjudication, the bounded result
+ *   excerpt, the error, the instruction and the run facts.
+ * - `{ full: true }` is the display card ctrl+o opens: the same content, unclipped.
+ *
+ * `view` supplies elapsed/turns/spend and the failure model — all existing snapshot
+ * telemetry, projected by `toActivationView`, never recomputed here.
  */
 export function formatSettlementWake(done, view, opts = {}) {
   const failed = done.outcome === 'failed';
-  const beadId = done.issueRef ?? done.beadId ?? view?.issue_ref ?? view?.bead_id ?? '—';
+  const state = failed ? 'failed' : 'done';
+  const headerName = `${done.specialist}:${done.activationId}`;
+  const beadId = wakeRef(done, view);
+  if (!opts.full && !opts.excerpt) {
+    // Ids leave the folded row (CORE-2573 seq 8); `headerName` stays on the opened card.
+    const tail = failed ? firstLineOf(done.error) : firstLineOf(opts.resultText ?? done.output);
+    return withRail(wakeHeader(done.specialist, state, beadId, tail, elapsedFact(view)));
+  }
   const facts = failed ? modelFacts(view) : costFacts(view);
-  const header = wakeHeader(`${done.specialist}:${done.activationId}`, failed ? 'failed' : 'done', beadId);
   const body = resultLines(opts.resultText ?? done.output, opts);
   return indentBody([
-    withRail(header),
+    withRail(wakeHeader(headerName, state, beadId)),
     // The marker sits between the header and the body, on the line a reader passes to
     // reach the conclusion (SPECIALISTS-4280). Only cards that actually show a result
     // carry it: a card with no body has no headline to misread.
@@ -1209,9 +1260,9 @@ export function formatSettlementWake(done, view, opts = {}) {
 /**
  * The specialist's result text, as bounded italic lines under the header.
  *
- * Collapsed shows at most RESULT_EXCERPT_LINES lines plus a dim remainder hint
- * (ctrl+o expands); expanded (`full`) shows every line of the capped text. A
- * failed card usually has no output at all, in which case this is empty.
+ * The model-visible card (`excerpt`) shows at most RESULT_EXCERPT_LINES lines plus a dim
+ * remainder hint (ctrl+o expands); `full` shows every line of the capped text. A failed
+ * card usually has no output at all, in which case this is empty.
  */
 export const RESULT_EXCERPT_LINES = 3;
 const RESULT_TEXT_CAP = 4000;
@@ -1268,10 +1319,14 @@ export function wrapRailedLine(line, width, wrap = null) {
 export function makeEventCardRenderer(getWrap) {
   return (message, renderCtx = {}) => {
     // ctrl+o toggles _expanded on the CustomMessageComponent, which re-invokes
-    // this renderer with the flag. A settlement card embeds its full variant in
-    // details.expandedContent at wake time; cards without one render unchanged.
+    // this renderer with the flag. A wake card embeds its folded one-row variant in
+    // details.collapsedContent and its full variant in details.expandedContent; cards
+    // that carry neither render their own content.
     const expanded = renderCtx?.expanded === true && typeof message?.details?.expandedContent === 'string';
-    const content = expanded ? message.details.expandedContent : (typeof message?.content === 'string' ? message.content : '');
+    const collapsed = typeof message?.details?.collapsedContent === 'string'
+      ? message.details.collapsedContent
+      : (typeof message?.content === 'string' ? message.content : '');
+    const content = expanded ? message.details.expandedContent : collapsed;
     return {
       dispose: () => {},
       invalidate: () => {},
@@ -2027,13 +2082,19 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     }
 
     const view = viewFor(done.activationId);
+    // ONE builder produces every variant, so the fold cannot drift from the card it
+    // folds. `content` is the excerpt card with the styling stripped: it reaches the
+    // model, and raw SGR must never enter model context. The styled variants are
+    // display-only, selected by the message renderer.
+    const card = formatSettlementWake(done, view, { resultText: done.output, excerpt: true });
     pi.sendMessage(
       {
         customType: 'specialist_settled',
-        content: formatSettlementWake(done, view, { resultText: done.output }),
+        content: plainWake(card),
         display: true,
         details: {
           ...done,
+          collapsedContent: formatSettlementWake(done, view),
           expandedContent: formatSettlementWake(done, view, { resultText: done.output, full: true }),
         },
       },
@@ -2057,12 +2118,18 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
       }
     }
 
+    const view = viewFor(ask.activationId);
+    const full = formatAskWake(ask, view, { full: true });
     pi.sendMessage(
       {
         customType: 'specialist_ask',
-        content: formatAskWake(ask, viewFor(ask.activationId)),
+        content: plainWake(full),
         display: true,
-        details: ask,
+        details: {
+          ...ask,
+          collapsedContent: formatAskWake(ask, view),
+          expandedContent: full,
+        },
       },
       { deliverAs: 'followUp', triggerTurn: true },
     );
