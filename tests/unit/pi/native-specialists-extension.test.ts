@@ -2151,138 +2151,151 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     expect(seen).toEqual(['activation_completed']);
   });
 
-  it('event cards are railed, compact, background-free and blank-line-free (unitAI-rrdnt.65.2)', async () => {
+  it('folded event cards are ONE row: marker, bold verb, identity, tail, dim facts (CORE-2577)', async () => {
     const mod = await loadExtension();
-    const cards = [
+    const askView = { purpose: 'inspect native wake transport', bead_id: 'XTRM-241' };
+    const view = { bead_id: 'XTRM-241', elapsed_s: 42, turn_count: 3, token_usage: { input_tokens: 40000, output_tokens: 3000 } };
+    const rows = [
       mod.formatAskWake({
         activationId: 'act:aaaa', specialist: 'researcher', beadId: 'XTRM-241', kind: 'question',
         body: 'Does the bracket look right?',
-      }, { purpose: 'inspect native wake transport', bead_id: 'XTRM-241' }),
+      }, askView),
       mod.formatAskWake({
         activationId: 'act:aaaa', specialist: 'reviewer', beadId: 'XTRM-241', kind: 'escalation',
         body: 'The current implementation cannot preserve the accepted authority invariant.',
-      }, { purpose: 'verify MCP Channel semantics', bead_id: 'XTRM-241' }),
+      }, askView),
       mod.formatSettlementWake({
         activationId: 'act:aaaa', specialist: 'executor', beadId: 'XTRM-241', outcome: 'completed',
-      }, { bead_id: 'XTRM-241', elapsed_s: 42, turn_count: 3, token_usage: { input_tokens: 40000, output_tokens: 3000 } }),
+      }, view, { resultText: 'CODEMODE TOOL: ABSENT' }),
       mod.formatSettlementWake({
         activationId: 'act:aaaa', specialist: 'executor', beadId: 'XTRM-241', outcome: 'failed',
         error: 'Provider rate limit exhausted after fallback chain.',
-      }, { resolved_model: 'gpt-5.6-sol', thinking_level: 'high', bead_id: 'XTRM-241' }),
+      }, { resolved_model: 'gpt-5.6-sol', thinking_level: 'high', bead_id: 'XTRM-241', elapsed_s: 42 }),
     ];
-    const WHITE = '\u001b[38;2;255;255;255m';
-    const TINT = ['\u001b[38;2;232;190;70m', '\u001b[38;2;255;110;70m', '\u001b[38;2;120;160;255m', '\u001b[38;2;255;110;70m'];
-    cards.forEach((card, index) => {
-      const [head, ...body] = card.split('\n');
-      // Text-only headers: no background fills, no dividers, anywhere on the card.
-      expect(card).not.toContain('48;2');
-      expect(card).not.toContain('\u2502');
-      // One bold row: white name, tinted state, dim bead, double-spaced.
-      expect(head.startsWith('\u25cf \u001b[1m')).toBe(true);
-      expect(head.endsWith('\u001b[22m')).toBe(true);
-      expect(head).toContain(WHITE);
-      expect(head).toContain(TINT[index]);
-      expect(head.startsWith('\u25cf ')).toBe(true);
-      expect(card).not.toContain('\n\n');   // no blank line anywhere
-      expect(card).not.toContain('╭');      // no brackets
-      expect(card).not.toContain('╰');
-    });
-
-    expect(plain(cards[0]).split('\n')).toEqual([
-      '● researcher:act:aaaa  asked  XTRM-241',
-      '  Does the bracket look right?',
-      '  Call specialist_status to obtain the pending message_id, then reply with specialist_reply. · activation act:aaaa',
-    ]);
-    expect(plain(cards[1]).split('\n')).toEqual([
-      '● reviewer:act:aaaa  escalated  XTRM-241',
-      '  The current implementation cannot preserve the accepted authority invariant.',
-      '  Call specialist_status to inspect the escalation and respond through specialist_reply. · activation act:aaaa',
-    ]);
-    expect(plain(cards[2]).split('\n')).toEqual([
-      '● executor:act:aaaa  done  XTRM-241',
-      '  Call specialist_result to read the complete result. · activation act:aaaa',
-      '  42s • 3 turns • 43k',
-    ]);
-    expect(plain(cards[3]).split('\n')).toEqual([
-      '● executor:act:aaaa  failed  XTRM-241',
-      '  Provider rate limit exhausted after fallback chain.',
-      '  Call specialist_result for the full failure detail, then use specialist_retry if appropriate. · activation act:aaaa',
-      '  gpt-5.6-sol · high',
-    ]);
-
-    // Styling: white name, tinted state, dim bead; question plain-voiced.
-    expect(cards[0]).toContain('●');
-    // Name first in white, then the tinted state word: gold asked, ember escalated.
-    expect(cards[0]).toContain('\x1b[38;2;255;255;255mresearcher:act:aaaa\x1b[39m  \x1b[38;2;232;190;70masked');
-    // asked vs escalated: different words, different tints (gold vs ember).
-    expect(plain(cards[1]).split('\n')[0]).toContain('escalated  XTRM-241');
-    expect(cards[1]).toContain('\x1b[38;2;255;110;70mescalated');
-    expect(cards[2]).toContain('\x1b[38;2;120;160;255mdone');
-    expect(cards[3]).toContain('\x1b[38;2;255;110;70mfailed');
-    // Metadata lives in the dim footer now, never in the header.
-    expect(cards[0].split('\n')).toHaveLength(3); // asks carry no metadata: no footer
-    expect(cards[2].split('\n')[2]).toBe('  \x1b[2m42s • 3 turns • 43k\x1b[22m');
-    expect(plain(cards[3].split('\n')[3])).toContain('gpt-5.6-sol · high');
-    // Singular/plural: 1 turn, 2 turns.
-    const singular = mod.formatSettlementWake({
+    // ONE row each: the fold IS the card, not a truncated rendering of it.
+    for (const row of rows) {
+      expect(row.split('\n')).toHaveLength(1);
+      expect(row).not.toContain('48;2');
+      expect(row).not.toContain('38;2');
+      expect(row).not.toContain('\u2502');
+      expect(row).not.toContain('╭');
+      expect(row).not.toContain('╰');
+      // The verb is the ONLY bold text on the row.
+      expect(row.match(/\x1b\[1m/g)).toHaveLength(1);
+    }
+    expect(rows[0]).toBe('○ \x1b[1mAsked\x1b[22m researcher:act:aaaa  XTRM-241  Does the bracket look right?');
+    expect(plain(rows[1])).toBe('○ Escalated reviewer:act:aaaa  XTRM-241  The current implementation cannot preserve the accepted aut…');
+    expect(rows[2]).toBe('○ \x1b[1mFinished\x1b[22m executor:act:aaaa  XTRM-241  CODEMODE TOOL: ABSENT  \x1b[2m42s\x1b[22m');
+    expect(plain(rows[3])).toBe('! Failed executor:act:aaaa  XTRM-241  Provider rate limit exhausted after fallback chain.  42s');
+    // Escalation is not failure: it keeps the hollow marker, and only a failure leads with `!`.
+    expect(rows[1].startsWith('○ ')).toBe(true);
+    expect(rows[3].startsWith('! ')).toBe(true);
+    // Elapsed is the dim fact that closes a settlement row.
+    expect(rows[2].endsWith('\x1b[2m42s\x1b[22m')).toBe(true);
+    expect(rows[3].endsWith('\x1b[2m42s\x1b[22m')).toBe(true);
+    // A completed run with no result has no verdict: identity and elapsed only.
+    expect(plain(mod.formatSettlementWake({
       activationId: 'act:aaaa', specialist: 'executor', beadId: 'XTRM-241', outcome: 'completed',
-    }, { bead_id: 'XTRM-241', elapsed_s: 5, turn_count: 1 });
-    expect(plain(singular).split('\n')[2]).toBe('  5s • 1 turn');
-    // Every line below the header indents two spaces: empty space under the dot.
-    for (const line of cards[2].split('\n').slice(1)) expect(line.startsWith('  ')).toBe(true);
-    // The purpose stays off the ask header: bead + specialist identify the work.
-    expect(cards[0].split('\n')[0]).not.toContain('inspect native wake transport');
-    // The question speaks in the worker's plain voice: no italic anywhere on its line.
-    expect(cards[0].split('\n')[1]).toBe('  Does the bracket look right?');
-    expect(cards[2]).toContain('done');
-    expect(cards[3]).toContain('failed');
-    const instruction = cards[2].split('\n')[1];
-    expect(instruction.startsWith('  \x1b[2m\x1b[3m')).toBe(true); // indented under the dot
-    expect(instruction).toContain(`\x1b[2mactivation act:aaaa\x1b[22m`);
+    }, { bead_id: 'XTRM-241', elapsed_s: 5 }))).toBe('○ Finished executor:act:aaaa  XTRM-241  5s');
+    // The purpose stays off the ask row: bead + specialist identify the work.
+    expect(rows[0]).not.toContain('inspect native wake transport');
   });
 
-  it('a multiline Specialist body stays verbatim, unrailed line by line', async () => {
+  it('the full card behind ctrl+o keeps the body, adjudication, instruction and facts (CORE-2577)', async () => {
     const mod = await loadExtension();
-    const card = mod.formatAskWake({
+    const done = { activationId: 'act:aaaa', specialist: 'executor', beadId: 'XTRM-241', outcome: 'completed' };
+    const view = { bead_id: 'XTRM-241', elapsed_s: 42, turn_count: 3, token_usage: { input_tokens: 40000, output_tokens: 3000 } };
+    const full = mod.formatSettlementWake(done, view, { resultText: 'CODEMODE TOOL: ABSENT', full: true });
+    const lines = plain(full).split('\n');
+    expect(lines[0]).toBe('○ Finished executor:act:aaaa  XTRM-241');
+    expect(lines[1]).toContain('unadjudicated self-report');
+    expect(lines[1]).toContain('not verified');
+    expect(lines[1]).toContain('XTRM-241 journal/closure');
+    expect(lines[2]).toBe('  CODEMODE TOOL: ABSENT');
+    expect(lines[3]).toBe('  Call specialist_result to read the complete result. · activation act:aaaa');
+    expect(lines.at(-1)).toBe('  42s • 3 turns • 43k');
+    // Styling the display channel keeps: bold verb, italic result voice, dim+italic instruction.
+    expect(full.split('\n')[0]).toBe('○ \x1b[1mFinished\x1b[22m executor:act:aaaa  XTRM-241');
+    expect(full).toContain('\x1b[3mCODEMODE TOOL: ABSENT\x1b[23m');
+    expect(full).toContain('  \x1b[2m\x1b[3mCall specialist_result to read the complete result.\x1b[23m\x1b[22m');
+    // Every line below the header indents two spaces: empty space under the marker.
+    for (const line of full.split('\n').slice(1)) expect(line.startsWith('  ')).toBe(true);
+
+    // Failed: `!` leads, the error line is the body, the failing model closes the card.
+    const failed = mod.formatSettlementWake(
+      { ...done, outcome: 'failed', error: 'rate limited' },
+      { bead_id: 'XTRM-241', resolved_model: 'gpt-5.6-sol', thinking_level: 'high' },
+      { full: true },
+    );
+    const failedLines = plain(failed).split('\n');
+    expect(failedLines[0]).toBe('! Failed executor:act:aaaa  XTRM-241');
+    expect(failedLines).toContain('  rate limited');
+    expect(failedLines.at(-1)).toBe('  gpt-5.6-sol · high');
+
+    // Asks: full body verbatim, unrailed line by line, then the one instruction.
+    const askFull = mod.formatAskWake({
       activationId: 'act:aaaa', specialist: 'explorer', beadId: 'bd-1', kind: 'question',
       body: 'Line one?\nLine two.\nLine three.',
-    });
-    expect(card.split('\n').slice(1).join('\n')).not.toContain('│'); // divider lives in bands only
-    expect(plain(card)).toContain('  Line one?\n  Line two.\n  Line three.');
-    // A paragraph break must not introduce a blank line in the content.
+    }, undefined, { full: true });
+    expect(plain(askFull).split('\n')[0]).toBe('○ Asked explorer:act:aaaa  bd-1');
+    expect(plain(askFull)).toContain('  Line one?\n  Line two.\n  Line three.');
+    expect(plain(askFull)).toContain('  Call specialist_status to obtain the pending message_id, then reply with specialist_reply. · activation act:aaaa');
+    expect(askFull).not.toContain('\n\n');
+    expect(askFull.split('\n').slice(1).join('\n')).not.toContain('│');
+  });
+
+  it('a multiline Specialist body folds to its first line, and stays verbatim when expanded (CORE-2577)', async () => {
+    const mod = await loadExtension();
+    const ask = {
+      activationId: 'act:aaaa', specialist: 'explorer', beadId: 'bd-1', kind: 'question',
+      body: 'Line one?\nLine two.\nLine three.',
+    };
+    // Collapsed: the fold carries the first line only.
+    expect(plain(mod.formatAskWake(ask))).toBe('○ Asked explorer:act:aaaa  bd-1  Line one?');
+    // Expanded: every body line verbatim, and a paragraph break never becomes a blank line.
+    expect(plain(mod.formatAskWake(ask, undefined, { full: true }))).toContain('  Line one?\n  Line two.\n  Line three.');
     const withGap = mod.formatAskWake({
       activationId: 'act:aaaa', specialist: 'explorer', beadId: 'bd-1', kind: 'question',
       body: 'First paragraph.\n\nSecond paragraph.',
-    });
+    }, undefined, { full: true });
     expect(withGap).not.toContain('\n\n');
     expect(plain(withGap)).toContain('  First paragraph.\n  Second paragraph.');
   });
 
-  it('settlement cards embed a 3-line italic result excerpt, expandable via details', async () => {
+  it('settlement cards fold to one row and embed the full result in details.expandedContent (CORE-2577)', async () => {
     const mod = await loadExtension();
     const done = { activationId: 'act:aaaa', specialist: 'executor', beadId: 'XTRM-241', outcome: 'completed' };
     const view = { bead_id: 'XTRM-241', elapsed_s: 42, turn_count: 3, token_usage: { input_tokens: 40000, output_tokens: 3000 } };
     const output = ['line one', 'line two', 'line three', 'line four', 'line five'].join('\n');
 
     const collapsed = mod.formatSettlementWake(done, view, { resultText: output });
-    const lines = collapsed.split('\n');
-    // header + adjudication marker + 3 italic excerpt lines + hint + instruction + dim footer
-    expect(lines).toHaveLength(8);
-    expect(lines[7]).toBe('  \x1b[2m42s • 3 turns • 43k\x1b[22m');
-    expect(lines[2]).toContain('\x1b[3mline one\x1b[23m');
-    expect(lines[4]).toContain('\x1b[3mline three\x1b[23m');
-    expect(lines[5]).toContain('+2 lines');
-    expect(lines[5]).toContain('ctrl+o expands');
+    // header only: one row, the verdict (first result line) and the dim elapsed.
+    expect(collapsed.split('\n')).toHaveLength(1);
+    expect(collapsed).toBe('○ \x1b[1mFinished\x1b[22m executor:act:aaaa  XTRM-241  line one  \x1b[2m42s\x1b[22m');
     expect(collapsed).not.toContain('\x1b[3mline four');
 
+    // Expanded: the whole card, nothing clipped.
     const expanded = mod.formatSettlementWake(done, view, { resultText: output, full: true });
+    expect(expanded.split('\n').length).toBeGreaterThan(1);
+    expect(expanded).toContain('\x1b[3mline one\x1b[23m');
+    expect(expanded).toContain('\x1b[3mline three\x1b[23m');
     expect(expanded).toContain('\x1b[3mline four\x1b[23m');
     expect(expanded).toContain('\x1b[3mline five\x1b[23m');
     expect(expanded).not.toContain('ctrl+o expands');
+    expect(plain(expanded)).toContain('unadjudicated self-report');
 
-    // No output: header + instruction + footer.
-    const plain = mod.formatSettlementWake(done, view);
-    expect(plain.split('\n')).toHaveLength(3);
+    // No output: a completed row still carries identity and elapsed, and expands to
+    // header + instruction + footer.
+    const bare = mod.formatSettlementWake(done, view);
+    expect(plain(bare)).toBe('○ Finished executor:act:aaaa  XTRM-241  42s');
+    const bareFull = mod.formatSettlementWake(done, view, { full: true });
+    expect(bareFull.split('\n')).toHaveLength(3);
+    expect(plain(bareFull)).not.toContain('unadjudicated');
+    // Singular/plural: 1 turn, 2 turns.
+    const singular = mod.formatSettlementWake({
+      activationId: 'act:aaaa', specialist: 'executor', beadId: 'XTRM-241', outcome: 'completed',
+    }, { bead_id: 'XTRM-241', elapsed_s: 5, turn_count: 1 }, { full: true });
+    expect(plain(singular).split('\n').at(-1)).toBe('  5s • 1 turn');
   });
 
   it('marks every rendered result as an unadjudicated self-report (SPECIALISTS-4280)', async () => {
@@ -2291,7 +2304,7 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     const view = { bead_id: 'SPECIALISTS-4278' };
 
     // The misreading this fixes: a headline conclusion rendered as settled truth.
-    const card = mod.formatSettlementWake(done, view, { resultText: 'CODEMODE TOOL: ABSENT' });
+    const card = mod.formatSettlementWake(done, view, { resultText: 'CODEMODE TOOL: ABSENT', full: true });
     const lines = plain(card).split('\n');
     expect(lines[1]).toContain('unadjudicated self-report');
     expect(lines[1]).toContain('not verified');
@@ -2306,14 +2319,14 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     const expanded = plain(mod.formatSettlementWake(done, view, { resultText: 'CODEMODE TOOL: ABSENT', full: true })).split('\n');
     expect(expanded[1]).toContain('unadjudicated self-report');
     // A card with no result body has no headline to misread and stays marker-free.
-    expect(plain(mod.formatSettlementWake(done, view))).not.toContain('unadjudicated');
+    expect(plain(mod.formatSettlementWake(done, view, { full: true }))).not.toContain('unadjudicated');
     // A failed card's body is the error, not a conclusion: still marker-free.
     expect(plain(mod.formatSettlementWake(
-      { activationId: 'act:aaaa', specialist: 'executor', beadId: 'SPECIALISTS-4278', outcome: 'failed', error: 'rate limited' }, view,
+      { activationId: 'act:aaaa', specialist: 'executor', beadId: 'SPECIALISTS-4278', outcome: 'failed', error: 'rate limited' }, view, { full: true },
     ))).not.toContain('unadjudicated');
     // Without an Issue ref the fallback still names where adjudication lives.
     const anonymous = plain(mod.formatSettlementWake(
-      { activationId: 'act:aaaa', specialist: 'explorer', outcome: 'completed' }, null, { resultText: 'x' },
+      { activationId: 'act:aaaa', specialist: 'explorer', outcome: 'completed' }, null, { resultText: 'x', full: true },
     )).split('\n');
     expect(anonymous[1]).toContain('adjudication: the Issue journal/closure');
 
@@ -2350,6 +2363,169 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     expect(renderer(bare, { expanded: true }).render(80)).toEqual(['COLLAPSED']);
   });
 
+  /**
+   * Drive the PRODUCTION wake path: capture the sink wrapper the factory hands the host,
+   * emit one event, and return the message pi was given plus its renderer. Formatting a
+   * card directly would not prove that `content` and the display channels agree.
+   */
+  async function wakeMessage({ mod, event, snapshot }: { mod: any; event: any; snapshot: any }) {
+    const pi = makeFakePi();
+    const ctx = makeFakeCtx();
+    let wrapSink;
+    const { host } = makeFakeHost();
+    host.inspect.mockReturnValue(snapshot);
+    mod.default(pi, { createHost: (opts) => { wrapSink = opts.wrapSink; return host; } });
+    await pi.fire('session_start', { type: 'session_start' }, ctx);
+    await toolNamed(pi, 'specialist_status').execute('tc0', {});
+    wrapSink({ emit: () => {} }).emit(event);
+    const customType = event.name === 'activation_completed' || event.name === 'activation_failed'
+      ? 'specialist_settled'
+      : 'specialist_ask';
+    const sent = pi.sent.find((m) => m.message.customType === customType);
+    const render = (expanded = false) => pi.messageRenderers[customType](sent.message, { expanded }, {}).render(200);
+    return { pi, sent, render };
+  }
+
+  const settleEvent = (name: string, payload: Record<string, unknown>, specialist = 'executor') => ({
+    activationId: 'act:aaaa', attemptId: 'att:aaaa:1', participantId: `specialist::${specialist}`,
+    specialist, beadId: 'bd-1', name, payload,
+  });
+
+  it('a settlement wake renders exactly ONE row: ○ Finished, bold verb, dim elapsed (CORE-2577)', async () => {
+    const mod = await loadExtension();
+    const { render } = await wakeMessage({
+      mod,
+      snapshot: { ...SNAPSHOT, specialist: 'executor', state: 'settled', startedAt: Date.now() - 42_500 },
+      event: settleEvent('activation_completed', { output: 'REPORT: PASS\nsecond line' }),
+    });
+    const lines = render();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toBe('○ \x1b[1mFinished\x1b[22m executor:act:aaaa  bd-1  REPORT: PASS  \x1b[2m42s\x1b[22m');
+  });
+
+  it('a failed settlement renders exactly ONE row that leads with ! (CORE-2577)', async () => {
+    const mod = await loadExtension();
+    const { render } = await wakeMessage({
+      mod,
+      snapshot: {
+        ...SNAPSHOT, specialist: 'executor', state: 'failed', startedAt: Date.now() - 42_500,
+        resolvedModel: 'gpt-5.6-sol', thinkingLevel: 'high',
+      },
+      event: settleEvent('activation_failed', { error: 'Provider rate limit exhausted after fallback chain.' }),
+    });
+    const lines = render();
+    expect(lines).toHaveLength(1);
+    // The marker, not a tint: the first character of the rendered row is `!`.
+    expect(lines[0][0]).toBe('!');
+    expect(plain(lines[0])).toBe('! Failed executor:act:aaaa  bd-1  Provider rate limit exhausted after fallback chain.  42s');
+    // ctrl+o still carries the error and the failing model.
+    const opened = plain(render(true).join('\n'));
+    expect(opened).toContain('Provider rate limit exhausted after fallback chain.');
+    expect(opened).toContain('gpt-5.6-sol · high');
+  });
+
+  it('an ask wake renders exactly ONE row with the ○ Asked shape, and escalation is not failure (CORE-2577)', async () => {
+    const mod = await loadExtension();
+    const ask = await wakeMessage({
+      mod,
+      snapshot: { ...SNAPSHOT, startedAt: Date.now() - 5_000 },
+      event: settleEvent('clarification_requested', { body: 'Which option?' }, 'explorer'),
+    });
+    const lines = ask.render();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toBe('○ \x1b[1mAsked\x1b[22m explorer:act:aaaa  bd-1  Which option?');
+
+    const escalation = await wakeMessage({
+      mod,
+      snapshot: { ...SNAPSHOT, startedAt: Date.now() - 5_000 },
+      event: settleEvent('escalation_raised', { body: 'The invariant cannot be preserved.' }, 'reviewer'),
+    });
+    const escalated = escalation.render();
+    expect(escalated).toHaveLength(1);
+    expect(plain(escalated[0])).toBe('○ Escalated reviewer:act:aaaa  bd-1  The invariant cannot be preserved.');
+    expect(escalated[0].startsWith('!')).toBe(false);
+  });
+
+  it('details.expandedContent carries the full body and is longer than the folded row (CORE-2577)', async () => {
+    const mod = await loadExtension();
+    const output = ['line one', 'line two', 'line three', 'line four', 'line five'].join('\n');
+    const { sent, render } = await wakeMessage({
+      mod,
+      snapshot: {
+        ...SNAPSHOT, specialist: 'executor', state: 'settled', startedAt: Date.now() - 42_500,
+        turnCount: 3, tokenUsage: { input_tokens: 40000, output_tokens: 3000 },
+      },
+      event: settleEvent('activation_completed', { output }),
+    });
+    const folded = render().join('\n');
+    const opened = render(true).join('\n');
+    expect(folded.split('\n')).toHaveLength(1);
+    expect(opened.length).toBeGreaterThan(folded.length);
+    expect(plain(opened)).toContain('  unadjudicated self-report · not verified · adjudication: bd-1 journal/closure');
+    for (const line of ['line one', 'line two', 'line three', 'line four', 'line five']) {
+      expect(plain(opened)).toContain(line);
+    }
+    expect(plain(opened)).toContain('  Call specialist_result to read the complete result. · activation act:aaaa');
+    expect(plain(opened)).toContain('  42s • 3 turns • 43k');
+    // The renderer opens the exact string the wake embedded, unclipped.
+    expect(opened).toBe(sent.message.details.expandedContent);
+  });
+
+  it('model-visible content carries no SGR at all (CORE-2577)', async () => {
+    const mod = await loadExtension();
+    const output = ['line one', 'line two', 'line three', 'line four', 'line five'].join('\n');
+    const settlement = await wakeMessage({
+      mod,
+      snapshot: { ...SNAPSHOT, specialist: 'executor', state: 'settled', startedAt: Date.now() - 42_500, turnCount: 3 },
+      event: settleEvent('activation_completed', { output }),
+    });
+    expect(settlement.sent.message.content).not.toContain('\x1b[');
+    // Stripping styling must not strip DELIVERY CONTENT: the model still gets the
+    // body, the adjudication and the instruction it acts on — and still only the
+    // bounded excerpt, so the wake does not inflate the coordinator's context.
+    expect(settlement.sent.message.content).toContain('line one');
+    expect(settlement.sent.message.content).toContain('line three');
+    expect(settlement.sent.message.content).toContain('+2 lines · ctrl+o expands');
+    expect(settlement.sent.message.content).not.toContain('line four');
+    expect(settlement.sent.message.content).toContain('unadjudicated self-report');
+    expect(settlement.sent.message.content).toContain('Call specialist_result to read the complete result.');
+
+    const ask = await wakeMessage({
+      mod,
+      snapshot: { ...SNAPSHOT, startedAt: Date.now() - 5_000 },
+      event: settleEvent('clarification_requested', { body: 'Which option?' }, 'explorer'),
+    });
+    expect(ask.sent.message.content).not.toContain('\x1b[');
+    expect(ask.sent.message.content).toContain('Which option?');
+    expect(ask.sent.message.content).toContain('Call specialist_status to obtain the pending message_id');
+  });
+
+  it('no 24-bit SGR reaches a wake row or card (CORE-2577)', async () => {
+    const mod = await loadExtension();
+    const ask = { activationId: 'act:aaaa', specialist: 'explorer', beadId: 'bd-1', kind: 'question', body: 'Which?' };
+    const done = { activationId: 'act:aaaa', specialist: 'executor', beadId: 'bd-1', outcome: 'completed' };
+    const failed = { ...done, outcome: 'failed', error: 'rate limited' };
+    const view = {
+      bead_id: 'bd-1', elapsed_s: 42, turn_count: 3, token_usage: { input_tokens: 40000, output_tokens: 3000 },
+      resolved_model: 'gpt-5.6-sol', thinking_level: 'high',
+    };
+    const cards = [
+      mod.formatAskWake(ask, view),
+      mod.formatAskWake(ask, view, { full: true }),
+      mod.formatAskWake({ ...ask, kind: 'escalation' }, view),
+      mod.formatAskWake({ ...ask, kind: 'escalation' }, view, { full: true }),
+      mod.formatSettlementWake(done, view, { resultText: 'CODEMODE TOOL: ABSENT' }),
+      mod.formatSettlementWake(done, view, { resultText: 'CODEMODE TOOL: ABSENT', full: true }),
+      mod.formatSettlementWake(failed, view),
+      mod.formatSettlementWake(failed, view, { full: true }),
+      ...['asked', 'escalated', 'done', 'failed'].map((state) => mod.wakeHeader('x:y', state, 'bd-1', 'tail', '5s')),
+    ];
+    for (const card of cards) {
+      expect(card).not.toContain('38;2;');
+      expect(card).not.toContain('48;2;');
+    }
+  });
+
   it('wraps a card line so it fits the terminal width (unitAI-rrdnt.65.2)', async () => {
     const mod = await loadExtension();
     const line = 'word '.repeat(30).trim();
@@ -2379,8 +2555,10 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     const lines = component.render(80);
     expect(Array.isArray(lines)).toBe(true);
     expect(lines.join('\n')).not.toContain('[specialist_ask]');
-    expect(lines[0].slice(lines[0].indexOf('\u25cf ') + 2)).toContain('38;2;255;255;255mexplorer:act:aaaa');
+    // The folded row: hollow marker, bold verb, plain identity, no 24-bit colour.
+    expect(lines.join('\n')).toBe('○ \x1b[1mAsked\x1b[22m explorer:act:aaaa  bd-1  Which?');
     for (const line of lines) expect(line).not.toContain('48;2');
+    for (const line of lines) expect(line).not.toContain('38;2');
     for (const line of lines) expect(line.startsWith(mod.RAIL)).toBe(true);
     // Repeated renders agree (no first-call capture), and a missing renderer seam is safe.
     expect(component.render(80)).toEqual(lines);
