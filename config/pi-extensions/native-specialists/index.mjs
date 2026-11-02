@@ -165,18 +165,19 @@ const DIM = (text) => `\x1b[2m${text}\x1b[22m`;
 const BOLD = (text) => `\x1b[1m${text}\x1b[22m`;
 /** Folded wake markers: hollow for an automatic wake, `!` when the run failed. */
 const HOLLOW = '○';
-/** The verb a folded wake row leads with, keyed by the state the wake reports. */
-const WAKE_VERB = { asked: 'Asked', escalated: 'Escalated', done: 'Finished', failed: 'Failed' };
+/** The verb a folded wake row reports, keyed by state. Lower case: identity leads, so the
+ * verb no longer starts the phrase and never reads as a sentence-leading capital. */
+const WAKE_VERB = { asked: 'asked', escalated: 'escalated', done: 'finished', failed: 'failed' };
 /**
- * One folded wake row — the collapsed form of every wake card: marker, bold verb,
- * Specialist identity, the event's own tail, then the dim facts. The verb is the only
- * bold text on the row, the marker leads untinted, and the facts close it — separated
- * by double spaces, no dividers, no backgrounds, no 24-bit colour.
+ * One folded wake row — the collapsed form of every wake card: marker, Specialist
+ * identity, the bold verb, the event's own tail, then the dim facts. The verb is the
+ * only bold text on the row, the marker leads untinted, and the facts close it —
+ * separated by double spaces, no dividers, no backgrounds, no 24-bit colour.
  */
 export function wakeHeader(name, state, bead, tail = '', facts = '') {
   const marker = state === 'failed' ? '!' : HOLLOW;
   return [
-    `${marker} ${BOLD(WAKE_VERB[state] ?? state)} ${name}  ${bead}`,
+    `${marker} ${name} ${BOLD(WAKE_VERB[state] ?? String(state).toLowerCase())}  ${bead}`,
     ...(tail ? [tail] : []),
     ...(facts ? [DIM(facts)] : []),
   ].join('  ');
@@ -1090,10 +1091,10 @@ export function createAskObserverSink(base, onAsk, onTerminal) {
  * the Specialist wrote, the one instruction the coordinator must act on, and the run
  * facts. No background, no blank lines:
  *
- *   ○ Asked researcher:act:b38da383-b44  XTRM-241  Does the bracket look right?
- *   ○ Escalated reviewer:act:b38da383-b44  XTRM-241  The current implementation cannot…
- *   ○ Finished executor:act:b38da383-b44  XTRM-241  CODEMODE TOOL: ABSENT  42s
- *   ! Failed executor:act:b38da383-b44  XTRM-241  Provider rate limit exhausted…  42s
+ *   ○ researcher:act:b38da383-b44 asked  XTRM-241  Does the bracket look right?
+ *   ○ reviewer:act:b38da383-b44 escalated  XTRM-241  The current implementation cannot…
+ *   ○ executor:act:b38da383-b44 finished  XTRM-241  CODEMODE TOOL: ABSENT  42s
+ *   ! executor:act:b38da383-b44 failed  XTRM-241  Provider rate limit exhausted…  42s
  *
  * No 24-bit colour anywhere in this lane: the marker is untinted, the verb is the only
  * bold text, and the facts close the row in dim.
@@ -1186,7 +1187,7 @@ export function plainWake(text) {
 /**
  * The wake message a blocked child produces. Exported so its shape is testable.
  *
- * Collapsed (`opts.full` unset) this is ONE row: marker, bold verb, identity, the question's
+ * Collapsed (`opts.full` unset) this is ONE row: marker, identity, bold verb, the question's
  * first line. With `{ full: true }` it is the whole card the renderer opens on ctrl+o: the
  * header, every body line and the instruction the coordinator acts on.
  *
@@ -1221,7 +1222,7 @@ export function formatAskWake(ask, view, opts = {}) {
  * The wake message a finished child produces. Exported so its shape is testable.
  *
  * Three shapes, one builder:
- * - folded (no opts) is ONE row: marker, bold verb, identity, the verdict (a completed
+ * - folded (no opts) is ONE row: marker, identity, bold verb, the verdict (a completed
  *   run's first result line) or the failure reason, then the dim elapsed. A failure leads
  *   with `!`; everything else keeps the hollow marker.
  * - `{ excerpt: true }` is the model-visible card: adjudication, the bounded result
