@@ -2183,10 +2183,10 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
       // The verb is the ONLY bold text on the row.
       expect(row.match(/\x1b\[1m/g)).toHaveLength(1);
     }
-    expect(rows[0]).toBe('○ \x1b[1mAsked\x1b[22m researcher:act:aaaa  XTRM-241  Does the bracket look right?');
-    expect(plain(rows[1])).toBe('○ Escalated reviewer:act:aaaa  XTRM-241  The current implementation cannot preserve the accepted aut…');
-    expect(rows[2]).toBe('○ \x1b[1mFinished\x1b[22m executor:act:aaaa  XTRM-241  CODEMODE TOOL: ABSENT  \x1b[2m42s\x1b[22m');
-    expect(plain(rows[3])).toBe('! Failed executor:act:aaaa  XTRM-241  Provider rate limit exhausted after fallback chain.  42s');
+    expect(rows[0]).toBe('○ \x1b[1mAsked\x1b[22m researcher  XTRM-241  Does the bracket look right?');
+    expect(plain(rows[1])).toBe('○ Escalated reviewer  XTRM-241  The current implementation cannot preserve the accepted aut…');
+    expect(rows[2]).toBe('○ \x1b[1mFinished\x1b[22m executor  XTRM-241  CODEMODE TOOL: ABSENT  \x1b[2m42s\x1b[22m');
+    expect(plain(rows[3])).toBe('! Failed executor  XTRM-241  Provider rate limit exhausted after fallback chain.  42s');
     // Escalation is not failure: it keeps the hollow marker, and only a failure leads with `!`.
     expect(rows[1].startsWith('○ ')).toBe(true);
     expect(rows[3].startsWith('! ')).toBe(true);
@@ -2196,7 +2196,7 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     // A completed run with no result has no verdict: identity and elapsed only.
     expect(plain(mod.formatSettlementWake({
       activationId: 'act:aaaa', specialist: 'executor', beadId: 'XTRM-241', outcome: 'completed',
-    }, { bead_id: 'XTRM-241', elapsed_s: 5 }))).toBe('○ Finished executor:act:aaaa  XTRM-241  5s');
+    }, { bead_id: 'XTRM-241', elapsed_s: 5 }))).toBe('○ Finished executor  XTRM-241  5s');
     // The purpose stays off the ask row: bead + specialist identify the work.
     expect(rows[0]).not.toContain('inspect native wake transport');
   });
@@ -2251,7 +2251,7 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
       body: 'Line one?\nLine two.\nLine three.',
     };
     // Collapsed: the fold carries the first line only.
-    expect(plain(mod.formatAskWake(ask))).toBe('○ Asked explorer:act:aaaa  bd-1  Line one?');
+    expect(plain(mod.formatAskWake(ask))).toBe('○ Asked explorer  bd-1  Line one?');
     // Expanded: every body line verbatim, and a paragraph break never becomes a blank line.
     expect(plain(mod.formatAskWake(ask, undefined, { full: true }))).toContain('  Line one?\n  Line two.\n  Line three.');
     const withGap = mod.formatAskWake({
@@ -2271,7 +2271,7 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     const collapsed = mod.formatSettlementWake(done, view, { resultText: output });
     // header only: one row, the verdict (first result line) and the dim elapsed.
     expect(collapsed.split('\n')).toHaveLength(1);
-    expect(collapsed).toBe('○ \x1b[1mFinished\x1b[22m executor:act:aaaa  XTRM-241  line one  \x1b[2m42s\x1b[22m');
+    expect(collapsed).toBe('○ \x1b[1mFinished\x1b[22m executor  XTRM-241  line one  \x1b[2m42s\x1b[22m');
     expect(collapsed).not.toContain('\x1b[3mline four');
 
     // Expanded: the whole card, nothing clipped.
@@ -2287,7 +2287,7 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     // No output: a completed row still carries identity and elapsed, and expands to
     // header + instruction + footer.
     const bare = mod.formatSettlementWake(done, view);
-    expect(plain(bare)).toBe('○ Finished executor:act:aaaa  XTRM-241  42s');
+    expect(plain(bare)).toBe('○ Finished executor  XTRM-241  42s');
     const bareFull = mod.formatSettlementWake(done, view, { full: true });
     expect(bareFull.split('\n')).toHaveLength(3);
     expect(plain(bareFull)).not.toContain('unadjudicated');
@@ -2400,7 +2400,7 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     });
     const lines = render();
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toBe('○ \x1b[1mFinished\x1b[22m executor:act:aaaa  bd-1  REPORT: PASS  \x1b[2m42s\x1b[22m');
+    expect(lines[0]).toBe('○ \x1b[1mFinished\x1b[22m executor  bd-1  REPORT: PASS  \x1b[2m42s\x1b[22m');
   });
 
   it('a failed settlement renders exactly ONE row that leads with ! (CORE-2577)', async () => {
@@ -2417,7 +2417,7 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     expect(lines).toHaveLength(1);
     // The marker, not a tint: the first character of the rendered row is `!`.
     expect(lines[0][0]).toBe('!');
-    expect(plain(lines[0])).toBe('! Failed executor:act:aaaa  bd-1  Provider rate limit exhausted after fallback chain.  42s');
+    expect(plain(lines[0])).toBe('! Failed executor  bd-1  Provider rate limit exhausted after fallback chain.  42s');
     // ctrl+o still carries the error and the failing model.
     const opened = plain(render(true).join('\n'));
     expect(opened).toContain('Provider rate limit exhausted after fallback chain.');
@@ -2433,7 +2433,7 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     });
     const lines = ask.render();
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toBe('○ \x1b[1mAsked\x1b[22m explorer:act:aaaa  bd-1  Which option?');
+    expect(lines[0]).toBe('○ \x1b[1mAsked\x1b[22m explorer  bd-1  Which option?');
 
     const escalation = await wakeMessage({
       mod,
@@ -2442,7 +2442,7 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     });
     const escalated = escalation.render();
     expect(escalated).toHaveLength(1);
-    expect(plain(escalated[0])).toBe('○ Escalated reviewer:act:aaaa  bd-1  The invariant cannot be preserved.');
+    expect(plain(escalated[0])).toBe('○ Escalated reviewer  bd-1  The invariant cannot be preserved.');
     expect(escalated[0].startsWith('!')).toBe(false);
   });
 
@@ -2556,7 +2556,7 @@ describe('settlement wake — a finished child notifies its coordinator (unitAI-
     expect(Array.isArray(lines)).toBe(true);
     expect(lines.join('\n')).not.toContain('[specialist_ask]');
     // The folded row: hollow marker, bold verb, plain identity, no 24-bit colour.
-    expect(lines.join('\n')).toBe('○ \x1b[1mAsked\x1b[22m explorer:act:aaaa  bd-1  Which?');
+    expect(lines.join('\n')).toBe('○ \x1b[1mAsked\x1b[22m explorer  bd-1  Which?');
     for (const line of lines) expect(line).not.toContain('48;2');
     for (const line of lines) expect(line).not.toContain('38;2');
     for (const line of lines) expect(line.startsWith(mod.RAIL)).toBe(true);

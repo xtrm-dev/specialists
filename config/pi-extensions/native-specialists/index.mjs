@@ -1203,7 +1203,9 @@ export function formatAskWake(ask, view, opts = {}) {
   const headerName = `${ask.specialist}:${ask.activationId}`;
   const beadId = wakeRef(ask, view);
   if (!opts.full) {
-    return withRail(wakeHeader(headerName, state, beadId, firstLineOf(ask.body || '(no body)')));
+    // Ids leave the folded row (CORE-2573 seq 8): the activation id stays on the card
+    // ctrl+o opens and in the model content, never on the one-row fold.
+    return withRail(wakeHeader(ask.specialist, state, beadId, firstLineOf(ask.body || '(no body)')));
   }
   return indentBody([
     withRail(wakeHeader(headerName, state, beadId)),
@@ -1235,8 +1237,9 @@ export function formatSettlementWake(done, view, opts = {}) {
   const headerName = `${done.specialist}:${done.activationId}`;
   const beadId = wakeRef(done, view);
   if (!opts.full && !opts.excerpt) {
+    // Ids leave the folded row (CORE-2573 seq 8); `headerName` stays on the opened card.
     const tail = failed ? firstLineOf(done.error) : firstLineOf(opts.resultText ?? done.output);
-    return withRail(wakeHeader(headerName, state, beadId, tail, elapsedFact(view)));
+    return withRail(wakeHeader(done.specialist, state, beadId, tail, elapsedFact(view)));
   }
   const facts = failed ? modelFacts(view) : costFacts(view);
   const body = resultLines(opts.resultText ?? done.output, opts);
