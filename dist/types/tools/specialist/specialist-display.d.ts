@@ -5,6 +5,13 @@ export interface ActivationDisplayEntry {
     marker: string;
     /** `asked 19s` / `idle 42s`, else space-joined `elapsed turns spend`. */
     metrics: string;
+    /**
+     * The activation's state as ONE lower-case word/phrase: `starting`, `running`, `waiting`,
+     * `needs reply`, `escalated`, `settled`, `failed`, `stopped`, `blocked` (an outstanding
+     * ask) or `idle` (active but quiet past the threshold). Plain text; frontends own the
+     * styling, and the row renders it in the verb slot after the identity.
+     */
+    state_verb: string;
     /** The Substrate issue ref, or `—` when unknown. */
     work: string;
 }
@@ -67,6 +74,14 @@ export declare function formatDisplayTurns(turnCount: number | undefined): strin
  * running activation gone quiet past the idle threshold.
  */
 export declare function activationDisplayMarker(view: DisplayActivationInput, ask: DisplayAskInput | undefined, nowMs?: number): string;
+/**
+ * Canonical state word (plain, lower case): the row's verb slot.
+ *
+ * An outstanding ask outranks the activation's own state — the operator must see
+ * `blocked` — and an active activation silent past the threshold reports `idle`,
+ * the same distinction the metrics and the marker make.
+ */
+export declare function activationDisplayStateVerb(view: DisplayActivationInput, ask: DisplayAskInput | undefined, nowMs?: number): string;
 /**
  * Canonical metrics (plain): the state REASON (`asked 19s`, `idle 42s`) when
  * there is one to give, else space-separated `elapsed turns spend`.

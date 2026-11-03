@@ -26529,6 +26529,18 @@ function displayIdleS(view, nowMs) {
     return null;
   return Math.max(0, Math.floor((nowMs - at2) / 1000));
 }
+var DISPLAY_STATE_VERBS = {
+  starting: "starting",
+  running: "running",
+  waiting: "waiting",
+  needs_reply: "needs reply",
+  escalated: "escalated",
+  settled: "settled",
+  failed: "failed",
+  stopped: "stopped",
+  idle: "idle",
+  blocked: "blocked"
+};
 function isDisplayActiveState(state) {
   return state === "running" || state === "starting";
 }
@@ -26544,6 +26556,15 @@ function activationDisplayMarker(view, ask, nowMs = Date.now()) {
   if (active)
     return DISPLAY_SPINNER_FRAMES[Math.floor(nowMs / DISPLAY_SPINNER_FRAME_MS) % DISPLAY_SPINNER_FRAMES.length];
   return "●";
+}
+function activationDisplayStateVerb(view, ask, nowMs = Date.now()) {
+  if (ask)
+    return "blocked";
+  const idle = displayIdleS(view, nowMs);
+  if (isDisplayActiveState(view.state) && idle != null && idle > DISPLAY_IDLE_AFTER_S)
+    return "idle";
+  const state = String(view.state ?? "").toLowerCase();
+  return DISPLAY_STATE_VERBS[state] ?? (state || "waiting");
 }
 function activationDisplayMetrics(view, ask, nowMs = Date.now()) {
   if (ask) {
@@ -26589,6 +26610,7 @@ function activationDisplayEntry(view, ask, nowMs = Date.now()) {
     activation_id: displayActivationId(view),
     marker: activationDisplayMarker(view, ask, nowMs),
     metrics: activationDisplayMetrics(view, ask, nowMs),
+    state_verb: activationDisplayStateVerb(view, ask, nowMs),
     work: displayWorkRef(view)
   };
 }
