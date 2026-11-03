@@ -1193,6 +1193,13 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
   afterEach(() => { vi.useRealTimers(); });
 
   /** Boot the extension with a live host and a UI context already captured. */
+  /** The fleet block sits in the widget above the prompt (operator ruling 2026-11-03),
+   *  so a row assertion renders that widget instead of a footer section. */
+  const widgetLines = (ctx, width = 80) => {
+    const widget = ctx?.painted?.widgets?.['specialist-fleet'];
+    return typeof widget === 'function' ? (widget()?.render(width) ?? []) : [];
+  };
+
   async function boot(ctxOptions, extOptions = {}) {
     const mod = await loadExtension();
     const pi = makeFakePi();
@@ -1225,11 +1232,10 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     };
     const header = mod.renderFleetHeader(asking);
     expect(header).not.toContain('/fleet');
-    // Hint-free on purpose: the line states Fleet state, and both commands stay
-    // discoverable through /specialists help and its argument completions.
+    // The header names the command that opens the full table (operator ruling
+    // 2026-11-03): the row itself no longer carries model, thinking or issue ref.
     expect(header).not.toContain('/specialists:reply');
-    expect(header).not.toContain('/specialists');
-    expect(header).toContain('specialists');
+    expect(header).toContain('/specialists');
     expect(header).toContain('1 blocked');
     expect(header).not.toContain('!');
   });
@@ -1315,9 +1321,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     host.fleetChangeEpoch = vi.fn(() => 7);
     host.waitForFleetChange = vi.fn(() => new Promise((resolve) => { waiters.push(resolve); }));
     const flush = async () => { await vi.advanceTimersByTimeAsync(0); };
-    const sections = new Map();
-    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
-    mod.default(pi, { createHost: () => host, openObservability: () => fakeClient, registerFooterSection });
+    mod.default(pi, { createHost: () => host, openObservability: () => fakeClient });
     const ctx = makeFakeCtx({ hasUI: true, mode: 'tui' });
     await pi.fire('session_start', { type: 'session_start' }, ctx);
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
@@ -1326,10 +1330,10 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     await flush();
     // Rows below the statusline carry the fleet; the widget above the prompt
     // carries the header alone.
-    const rowsText = () => (sections.get('specialist-fleet')(80) ?? []).map(plain).join('\n');
+    const rowsText = () => widgetLines(ctx).map(plain).join('\n');
     const widgetText = () => (ctx.painted.widgets['specialist-fleet'] as unknown as () => { render(w: number): string[] })().render(80).map(plain).join('\n');
     expect(widgetText()).toContain('specialists');
-    expect(widgetText()).not.toContain('feed01');
+    expect(widgetText()).toContain('feed01');
     expect(rowsText()).toContain('feed01');
     expect(rowsText()).not.toContain('✓');
     // One turn advances with no settle and no ask: the change wakes the parked
@@ -1343,7 +1347,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     host.list.mockReturnValue([{ ...SNAPSHOT, activationId: 'act:feed01', state: 'settled' }]);
     waiters.splice(0).forEach((resolve) => resolve('change'));
     await flush();
-    expect(rowsText()).toContain('✓');
+    expect(rowsText()).toContain('settled');
     // session_shutdown stops background work: the parked waiter is abandoned.
     await pi.fire('session_shutdown', { type: 'session_shutdown', reason: 'quit' });
     expect(host.stop).toHaveBeenCalled();
@@ -1367,12 +1371,9 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     // sink it builds and fire an ask through it — the production wake path.
     let wrapSink;
     const { host } = makeFakeHost();
-    const sections = new Map();
-    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
     mod.default(pi, {
       createHost: ({ wrapSink: w }) => { wrapSink = w; return host; },
       openObservability: () => fakeClient,
-      registerFooterSection,
     });
     const ctx = makeFakeCtx({ hasUI: true, mode: 'tui' });
     await pi.fire('session_start', { type: 'session_start' }, ctx);
@@ -1382,7 +1383,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     const cmds = pi.getCommands();
     await cmds.find((c) => c.name === 'specialists:feed').handler('act:feed01', ctx);
     await vi.advanceTimersByTimeAsync(0);
-    const rowsText = () => (sections.get('specialist-fleet')(80) ?? []).map(plain).join('\n');
+    const rowsText = () => widgetLines(ctx).map(plain).join('\n');
     expect(rowsText()).toContain('feed01');
     // A settlement wake for the selected activation repaints its row: the
     // sink wrapper the host was built with emits activation_completed.
@@ -1390,7 +1391,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     const sink = wrapSink({ emit: () => {} });
     sink.emit({ activationId: 'act:feed01', attemptId: 'att:feed01:1', specialist: 'explorer', name: 'activation_completed', payload: { output: 'done report' } });
     await vi.advanceTimersByTimeAsync(0);
-    expect(rowsText()).toContain('✓');
+    expect(rowsText()).toContain('settled');
     expect(pi.sent.some((m) => m.message.customType === 'specialist_settled')).toBe(true);
   });
 
@@ -1410,20 +1411,18 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     const mod = await loadExtension();
     const pi = makeFakePi();
     const { host } = makeFakeHost();
-    const sections = new Map();
-    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
-    mod.default(pi, { createHost: () => host, openObservability: () => fakeClient, registerFooterSection });
+    mod.default(pi, { createHost: () => host, openObservability: () => fakeClient });
     const ctx = makeFakeCtx({ hasUI: true, mode: 'tui' });
     await pi.fire('session_start', { type: 'session_start' }, ctx);
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     host.list.mockReturnValue([{ ...SNAPSHOT, activationId: 'act:feed01', state: 'running', lastActivityAt: Date.now() }]);
     host.pendingAsks.mockReturnValue([]);
     const widgetText = () => (ctx.painted.widgets['specialist-fleet'] as unknown as () => { render(w: number): string[] })().render(80).map(plain).join('\n');
-    const rowsText = () => (sections.get('specialist-fleet')(80) ?? []).map(plain).join('\n');
+    const rowsText = () => widgetLines(ctx).map(plain).join('\n');
     // Split surface: the widget carries the header alone, rows render below
     // the statusline, and neither carries detail or a select hint.
     expect(widgetText()).toContain('specialists');
-    expect(widgetText()).not.toContain('feed01');
+    expect(widgetText()).toContain('feed01');
     const before = rowsText();
     expect(before.split('\n')[0]).toBe('');
     expect(before).toContain('feed01');
@@ -1489,16 +1488,14 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
   });
 
   it('rows below the statusline follow fleet change', async () => {
-    const sections = new Map();
-    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
-    const { pi, host, ctx } = await boot(undefined, { registerFooterSection });
+    const { pi, host, ctx } = await boot();
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     let waiters: Array<(v: unknown) => void> = [];
     host.fleetChangeEpoch = vi.fn(() => 7);
     host.waitForFleetChange = vi.fn(() => new Promise((resolve) => { waiters.push(resolve); }));
     // Repark against the new primitive: session restarts reseed the loop.
     await pi.fire('session_start', { type: 'session_start', reason: 'resume' }, ctx);
-    const rowsText = () => (sections.get('specialist-fleet')(80) ?? []).map(plain).join('\n');
+    const rowsText = () => widgetLines(ctx).map(plain).join('\n');
     expect(rowsText()).toContain('explorer');
     // A fleet change repaints the same rows without losing their shape.
     waiters.splice(0).forEach((resolve) => resolve('change'));
@@ -1520,10 +1517,9 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
   it('header counts the Fleet, and every row is a one-line unit with no forensic ids (unitAI-rrdnt.65)', async () => {
     const { mod } = await boot();
     const idle = mod.renderFleetHeader({ activations: [], asks: [] });
-    expect(mod.SECTION_LABEL).toBe('specialists');
+    expect(mod.SECTION_LABEL).toBe('/specialists');
     expect(idle).toContain('specialists');
     expect(idle).toContain('idle');
-    expect(idle).not.toContain('/specialists');
     // unitAI-4n9of: no arrow promise of any kind.
     expect(idle).not.toContain('↓');
     expect(idle).not.toContain('←');
@@ -1540,20 +1536,19 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     const header = mod.renderFleetHeader(fleet);
     expect(header).toContain('1 blocked');
     expect(header).not.toContain('!');
-    expect(header).not.toContain('/specialists');
     expect(header).not.toContain('↓');
     expect(header).not.toContain('←');
     const rows = mod.renderSectionLines(fleet, { expanded: true });
     expect(rows).toHaveLength(3); // separator + header + the blocked entry's one line
     expect(rows[0]).toBe('');
     expect(rows[1]).toContain('specialists');
-    // One line: glyph, bold name, issue ref, model, bold thinking, `·`, wait.
-    // Detail (purpose, result, feed) lives in the /specialists overlay.
+    // One row: identity, the bold state verb, the dim metrics — model, thinking
+    // level, issue ref and purpose all live in the /specialists overlay now.
     expect(plain(rows[2])).toContain('explorer');
-    expect(plain(rows[2])).toContain('SPECIALISTS-1');
-    expect(plain(rows[2])).not.toContain('map the wake transport');
-    expect(plain(rows[2])).toContain('m high');
+    expect(plain(rows[2])).toContain('blocked');
     expect(plain(rows[2])).toContain('asked');
+    expect(plain(rows[2])).not.toContain('SPECIALISTS-1');
+    expect(plain(rows[2])).not.toContain('map the wake transport');
     expect(plain(rows[2])).not.toContain('4t');
     expect(rows.join('\n')).not.toContain('act:aaaa');
     expect(rows.join('\n')).not.toContain('msg:1');
@@ -1572,7 +1567,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(lines.slice(2, -1)).toHaveLength(mod.FLEET_MAX_ROWS);
     expect(lines.at(-1)).toContain('+3 more');
     for (const line of lines.slice(2, -1)) {
-      expect(line).toMatch(/^ {4}\S/);
+      expect(line).toMatch(/^ {3}\S/);
     }
   });
 
@@ -1584,25 +1579,21 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
   });
 
   it('clears the widget and the rows when the Fleet is empty rather than painting a bare header', async () => {
-    const sections = new Map();
-    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
-    const { pi, host, ctx, command } = await boot(undefined, { registerFooterSection });
+    const { pi, host, ctx, command } = await boot();
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     expect(ctx.painted.widgets['specialist-fleet']).toBeDefined();
     host.list.mockReturnValue([]);
     host.pendingAsks.mockReturnValue([]);
     await command('specialists').handler('show', ctx);
     expect(ctx.painted.widgets['specialist-fleet']).toBeUndefined();
-    expect((sections.get('specialist-fleet')(80) ?? []).map(plain).join('\n')).toBe('');
+    expect(widgetLines(ctx).map(plain).join('\n')).toBe('');
     expect(ctx.painted.statuses['specialist-fleet']).toBeUndefined();
   });
 
   it('/specialists hide/show toggle the widget and the rows, and report text', async () => {
-    const sections = new Map();
-    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
-    const { pi, ctx, command } = await boot(undefined, { registerFooterSection });
+    const { pi, ctx, command } = await boot();
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
-    const rowsText = () => (sections.get('specialist-fleet')(80) ?? []).map(plain).join('\n');
+    const rowsText = () => widgetLines(ctx).map(plain).join('\n');
     expect(ctx.painted.widgets['specialist-fleet']).toBeDefined();
     expect(rowsText()).toContain('explorer');
     await command('specialists').handler('hide', ctx);
@@ -1644,13 +1635,13 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     const lines = mod.renderSectionLines(fleet, { nowMs: SPIN_CLOCK });
     expect(lines).toHaveLength(3); // separator + header + the entry's one line
     expect(lines[0]).toBe('');
-    expect(plain(lines[1])).toBe('  specialists 1 running');
+    expect(plain(lines[1])).toBe('/specialists 1 running');
     // One line: glyph, identity, bold state verb, issue ref, model, thinking, `·`, stats.
     // Purpose is overlay detail now, never a row second line.
-    expect(plain(lines[2])).toBe('    ◐ researcher:aaaa running  ISSUE-92 gpt-5.6-sol high · 47s 3 turns 2.1k');
+    expect(plain(lines[2])).toBe('   researcher:aaaa running 47s 3 turns 2.1k');
     expect(lines[2]).toContain(`\x1b[1mrunning\x1b[22m`);
     expect(lines[2]).not.toContain(`\x1b[1mresearcher:aaaa\x1b[22m`);
-    expect(lines[2]).toContain('ISSUE-92');
+    expect(lines[2]).toContain('running');
     expect(lines[2]).not.toContain('\x1b[1mhigh\x1b[22m');
     expect(lines[2]).not.toContain('inspect native wake transport');
     expect(lines.join('\n')).not.toContain('working'); // the glyph carries it
@@ -1668,9 +1659,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
   });
 
   it('specialists mapping never yields index-derived elapsed (unitAI-d99hb)', async () => {
-    const sections = new Map();
-    const registerFooterSection = (key, render) => { sections.set(key, render); return () => { sections.delete(key); }; };
-    const { pi, host, ctx, command } = await boot(undefined, { registerFooterSection });
+    const { pi, host, ctx, command } = await boot();
     await toolNamed(pi, 'specialist_status').execute('tc0', {});
     const startedAt = Date.now() - 41000;
     host.list.mockReturnValue([0, 1].map((i) => ({
@@ -1682,7 +1671,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     })));
     host.pendingAsks.mockReturnValue([]);
     await command('specialists').handler('show', ctx);
-    const text = (sections.get('specialist-fleet')(80) ?? []).map(plain).join('\n');
+    const text = widgetLines(ctx).map(plain).join('\n');
     // Bare `.map(toActivationView)` passed the element index as nowMs, freezing
     // every entry at 0s. Both entries must show live elapsed, neither 0s.
     expect(text).toMatch(/spec-0[\s\S]*4[12]s/);
@@ -1703,7 +1692,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     for (const view of [base, { ...base, token_usage: { input_tokens: 0, output_tokens: 0 } }]) {
       const lines = mod.renderFleetRowLines(view, [], 0); // frame 0 = ◐
       expect(lines).toHaveLength(1);
-      expect(plain(lines.join('\n'))).toBe('    ◐ explorer:x running m · 41s');
+      expect(plain(lines.join('\n'))).toBe('   explorer:x running 41s');
       expect(lines.join('\n')).not.toContain('spent');
       expect(lines.join('\n')).not.toContain('tokens');
     }
@@ -1719,7 +1708,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
       last_activity_at: SPIN_CLOCK,
     }, [], SPIN_CLOCK);
     expect(lines).toHaveLength(1);
-    expect(plain(lines[0])).toBe('    ◐ researcher:x running  ISSUE-92 gpt-5.6-sol high · 47s 4 turns 2.1k');
+    expect(plain(lines[0])).toBe('   researcher:x running 47s 4 turns 2.1k');
     expect(lines.join('\n')).not.toContain('working');
     expect(lines.join('\n')).not.toContain('spent');
   });
@@ -1738,25 +1727,25 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     const glyph = (view, nowMs, asks = []) => plain(mod.renderFleetRowLines(view, asks, nowMs)[0]);
     // Deterministic: the frame is a pure function of the injected clock.
     expect(glyph(base, SPIN_CLOCK)).toBe(glyph(base, SPIN_CLOCK));
-    expect(glyph(base, SPIN_CLOCK)).toBe('    ◐ explorer:x running m · 0s');
-    expect(glyph(base, SPIN_CLOCK + 220)).toBe('    ◓ explorer:x running m · 0s');
-    expect(glyph(base, SPIN_CLOCK + 440)).toBe('    ◑ explorer:x running m · 0s');
-    expect(glyph(base, SPIN_CLOCK + 660)).toBe('    ◒ explorer:x running m · 0s');
-    expect(glyph(base, SPIN_CLOCK + 880)).toBe('    ◐ explorer:x running m · 0s');
+    expect(glyph(base, SPIN_CLOCK)).toBe('   explorer:x running 0s');
+    expect(glyph(base, SPIN_CLOCK + 220)).toBe('   explorer:x running 0s');
+    expect(glyph(base, SPIN_CLOCK + 440)).toBe('   explorer:x running 0s');
+    expect(glyph(base, SPIN_CLOCK + 660)).toBe('   explorer:x running 0s');
+    expect(glyph(base, SPIN_CLOCK + 880)).toBe('   explorer:x running 0s');
     expect(mod.renderFleetRowLines(base, [], SPIN_CLOCK).join('\n')).not.toContain('working');
     // Running but quiet past the threshold: static marker, idle duration in the slot.
     const idle = mod.renderFleetRowLines({ ...base, elapsed_s: 120 }, [], SPIN_CLOCK + 42_000);
-    expect(plain(idle[0])).toBe('    ● explorer:x idle m · idle 42s');
+    expect(plain(idle[0])).toBe('   explorer:x idle idle 42s');
     // Terminal states: one glyph, final metrics still visible.
     const settled = mod.renderFleetRowLines({ ...base, state: 'settled', elapsed_s: 134, turn_count: 5 }, [], SPIN_CLOCK);
-    expect(plain(settled[0])).toBe('    ✓ explorer:x settled m · 2m14s 5 turns');
+    expect(plain(settled[0])).toBe('   explorer:x settled 2m14s 5 turns');
     expect(plain(mod.renderFleetRowLines({ ...base, state: 'failed' }, [], SPIN_CLOCK)[0]))
-      .toBe('    ✕ explorer:x failed m · 0s');
+      .toBe('   explorer:x failed 0s');
     // Blocked on the coordinator: `!` outranks the spinner, wait replaces the metrics.
     const blocked = mod.renderFleetRowLines({ ...base, elapsed_s: 90 }, [
       { activation_id: 'act:x', asked_at: SPIN_CLOCK - 19_000 },
     ], SPIN_CLOCK);
-    expect(plain(blocked[0])).toBe('    ! explorer:x blocked m · asked 19s');
+    expect(plain(blocked[0])).toBe('   explorer:x blocked asked 19s');
   });
 
   it('blocked entries sort before the rest (unitAI-nmxhg)', async () => {
@@ -1783,9 +1772,9 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     };
     const lines = mod.renderSectionLines(fleet, { nowMs: now }).map(plain);
     expect(lines[0]).toBe('');
-    expect(lines[1]).toBe('  specialists 2 running 1 blocked');
-    expect(lines[2]).toBe('    ! reviewer:ask blocked  ISSUE-92 gpt-5.6-sol high · asked 31s');
-    expect(lines[3]).toMatch(/^ {4}[◐◓◑◒] researcher:idle running  ISSUE-92 gpt-5.6-sol high · 47s 2 turns 2.1k$/);
+    expect(lines[1]).toBe('/specialists 2 running 1 blocked');
+    expect(lines[2]).toBe('   reviewer:ask blocked asked 31s');
+    expect(lines[3]).toMatch(/^ {3}researcher:idle running 47s 2 turns 2.1k$/);
     // Rows carry only the short dispatch token (<specialist>:<id>); the full
     // forensic `act:` id stays out of the operator surface.
     expect(lines.join('\n')).not.toContain('act:ask');
@@ -1814,7 +1803,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     ];
     for (const [state, verb, bold] of cases) {
       const line = lineOf({ ...base, state });
-      expect(plain(line)).toContain(` reviewer:status ${verb}  ISSUE-7 `);
+      expect(plain(line)).toBe(`   reviewer:status ${verb} 12s`);
       expect(line.includes(`\x1b[1m${verb}\x1b[22m`)).toBe(bold);
     }
     expect(lineOf({ ...base, state: 'failed' })).toContain('\x1b[31m');
@@ -1825,18 +1814,19 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     const blocked = lineOf({ ...base, state: 'running' }, [
       { activation_id: 'act:status', asked_at: now - 5_000 },
     ]);
-    expect(plain(blocked)).toContain(' reviewer:status blocked  ISSUE-7 ');
+    expect(plain(blocked)).toBe('   reviewer:status blocked asked 5s');
     expect(blocked).toContain('\x1b[33m');
 
-    // Active but quiet past the threshold reports idle, matching the marker and metrics.
+    // Active but quiet past the threshold reports idle in the verb slot.
     expect(plain(lineOf({ ...base, state: 'running', last_activity_at: now - 42_000 })))
-      .toContain(' reviewer:status idle  ISSUE-7 ');
+      .toBe('   reviewer:status idle idle 42s');
 
-    // The canonical display block wins when it carries a verb (SPECIALISTS-4365).
+    // The canonical display block wins when it carries a verb (SPECIALISTS-4365):
+    // its marker and work ref are deliberately NOT rendered — the row is three fields.
     const withDisplay = plain(mod.renderFleetRowLines(base, [], now, {
       marker: '✓', metrics: '2m14s 3 turns', work: 'ISSUE-7', state_verb: 'settled',
     }).join('\n'));
-    expect(withDisplay).toBe('    ✓ reviewer:status settled  ISSUE-7 m · 2m14s 3 turns');
+    expect(withDisplay).toBe('   reviewer:status settled 2m14s 3 turns');
   });
 
   it('/specialists reports in text too, so json and print modes are not blind', async () => {

@@ -154,10 +154,12 @@ describe('extension mirror dual-emit', () => {
 
   it('render paths prefer issue_ref with bead_id fallback', async () => {
     const mod = await import('../../../config/pi-extensions/native-specialists/index.mjs');
+    // The row above the prompt carries identity, state verb and metrics only: the issue
+    // ref moved into the /specialists table, so both ref shapes render the same row.
     const [primary] = mod.renderFleetRowLines({ specialist: 'explorer', activation_id: 'act:aaaa', state: 'running', bead_id: 'XTRM-old', issue_ref: 'XTRM-new' }, []);
-    expect(primary).toContain('XTRM-new');
     const [fallback] = mod.renderFleetRowLines({ specialist: 'explorer', activation_id: 'act:aaaa', state: 'running', bead_id: 'XTRM-old' }, []);
-    expect(fallback).toContain('XTRM-old');
+    expect(primary).toBe(fallback);
+    expect(primary).not.toContain('XTRM');
     const askWake = mod.formatAskWake({ specialist: 'explorer', activationId: 'act:aaaa', beadId: 'XTRM-old', issueRef: 'XTRM-new', kind: 'question', body: 'hi?' }, { bead_id: 'XTRM-old', issue_ref: 'XTRM-new' });
     expect(askWake).toContain('XTRM-new');
     const doneWake = mod.formatSettlementWake({ specialist: 'explorer', activationId: 'act:aaaa', beadId: 'XTRM-old', issueRef: 'XTRM-new', outcome: 'completed' }, { bead_id: 'XTRM-old', issue_ref: 'XTRM-new', elapsed_s: 1 });
