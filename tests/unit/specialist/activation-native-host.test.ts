@@ -55,7 +55,7 @@ import { acquire as acquireLease, leasePath, release as releaseLease, workspaceI
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
 import { createSpecialistStatusTool } from '../../../src/tools/specialist/specialist_status.tool.js';
 import { CircuitBreaker } from '../../../src/utils/circuitBreaker.js';
-import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
+import { FAKE_AGENT_DIR, FakeResourceLoader, PI_DEFAULT_PREAMBLE, piSessionSystemPrompt } from '../../utils/pi-resource-loader-double.js';
 import type { ResolvedContextView, SpecialistWorkItemBoundary, WorkItemView } from '../../../src/activation/workitem-store.js';
 
 /**
@@ -155,6 +155,8 @@ function makeSdk(record: { createArgs?: Record<string, unknown> }, session: PiAg
         };
       }
       record.createArgs = options;
+      // Model pi's prompt source faithfully: the loader, never a `systemPrompt` option (HIRYUEN-774).
+      (session as { systemPrompt?: string }).systemPrompt = piSessionSystemPrompt(options?.resourceLoader);
       // Model pi's HARD FILTER faithfully: the session exposes exactly the tools it was
       // named, no more. Without this the fake reports a fixed list and every activation
       // passes the post-load verification for the wrong reason (SPECIALISTS-42).
@@ -1588,6 +1590,8 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
         if (Array.isArray((options as { tools?: unknown } | undefined)?.tools)) {
           session.setActiveToolsByName((options as { tools: string[] }).tools);
         }
+        // Faithful to pi: the prompt comes from the loader (HIRYUEN-774).
+        (session as { systemPrompt?: string }).systemPrompt = piSessionSystemPrompt(options?.resourceLoader);
         return { session };
       },
       DefaultResourceLoader: FakeResourceLoader,
@@ -1640,6 +1644,23 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
 
   const start = (host: NativeActivationHost) => host.start({
     specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+  });
+
+  it('gives every fallback session the role prompt, not only the first (HIRYUEN-774)', async () => {
+    const first = scriptSession([{ throw: quotaError() }]);
+    const fallback = scriptSession([{ text: 'recovered' }]);
+    const { host, created } = chainHost({
+      executionExtra: { fallback_models: ['fallbackprov/fallback-model'] },
+      sessions: [first, fallback],
+    });
+
+    const result = await (await start(host)).result;
+
+    expect(result.status).toBe('completed');
+    expect(created).toHaveLength(2);
+    for (const session of [first, fallback]) {
+      expect(session.systemPrompt).toContain('You are the researcher.');
+    }
   });
 
   it('walks fallback_models after a thrown FreeUsageLimitError and records the winner', async () => {
@@ -2565,7 +2586,8 @@ describe('output contract schema parity (SPECIALISTS-5)', () => {
     await (await host.start({
       specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     })).result;
-    return record.createArgs!.systemPrompt as string;
+    // The role prompt as the loader hands it to pi, not the session option pi ignores (HIRYUEN-774).
+    return (record.createArgs!.resourceLoader as FakeResourceLoader).getAppendSystemPrompt().join('\n\n');
   }
 
   it('puts the declared schema in the native system prompt', async () => {
@@ -4577,5 +4599,137 @@ describe('createActivationResourceLoader codemode builtin', () => {
     });
     const options = (loader as unknown as FakeResourceLoader).options as Record<string, unknown>;
     expect(options.extensionFactories).toBeUndefined();
+  });
+});
+
+
+/**
+ * HIRYUEN-774. pi takes a session's system prompt ONLY from its resource loader:
+ * `createAgentSession` seeds the agent with an empty prompt and ignores a `systemPrompt`
+ * option. The native host used to pass the built role prompt as that ignored option, so every
+ * native activation ran on pi's generic coding preamble with no role prompt at all, and the
+ * tests above only ever read the ignored option back. These tests read what the provider sees.
+ */
+describe('the role prompt reaches the model (HIRYUEN-774)', () => {
+  async function run(promptExtra: Record<string, unknown> = {}) {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const spec = readOnlySpec() as { specialist: { prompt: Record<string, unknown> } };
+    Object.assign(spec.specialist.prompt, { system: 'ROLE-MARKER-774: you are the researcher.' }, promptExtra);
+    const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
+      loader: loaderFor(spec as Record<string, unknown>),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk(record, session),
+      cwd: hostWorkspace(),
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+    const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
+    return { record, session, loader, livePrompt: (session as { systemPrompt?: string }).systemPrompt ?? '' };
+  }
+
+  it('appends the built role prompt through the loader by default, after pi\'s preamble', async () => {
+    const { loader, livePrompt, record } = await run();
+    const appended = loader.getAppendSystemPrompt();
+    expect(appended).toHaveLength(1);
+    expect(appended[0]).toContain('ROLE-MARKER-774');
+    // The full built prompt, not just the template: the run-context block rides along.
+    expect(appended[0]).toContain('Your task issue is: ISSUE-1');
+    expect(loader.getSystemPrompt()).toBeUndefined();
+    expect(livePrompt).toContain(PI_DEFAULT_PREAMBLE);
+    expect(livePrompt).toContain('ROLE-MARKER-774');
+    // The option pi ignores is no longer where the prompt goes.
+    expect(record.createArgs).not.toHaveProperty('systemPrompt');
+  });
+
+  it('replaces pi\'s preamble with the role prompt when system_prompt_mode is replace', async () => {
+    const { loader, livePrompt } = await run({ system_prompt_mode: 'replace' });
+    expect(loader.getSystemPrompt()).toContain('ROLE-MARKER-774');
+    expect(loader.getAppendSystemPrompt()).toEqual([]);
+    expect(livePrompt).toContain('ROLE-MARKER-774');
+    expect(livePrompt).not.toContain(PI_DEFAULT_PREAMBLE);
+  });
+
+  it('refuses before any model turn when the live session prompt lacks the role prompt', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const sdk = makeSdk(record, session);
+    const create = sdk.createAgentSession;
+    // A runtime that drops the role prompt: the session shows pi's preamble only.
+    sdk.createAgentSession = async (options) => {
+      const created = await create(options);
+      (created.session as { systemPrompt?: string }).systemPrompt = PI_DEFAULT_PREAMBLE;
+      return created;
+    };
+    const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
+      loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+
+    const refusal = await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    }).then(() => null, (thrown: unknown) => thrown);
+
+    expect((refusal as DispatchRejectedError).reason).toBe('system_prompt_not_applied');
+    expect((session as unknown as { disposed: boolean }).disposed).toBe(true);
+    expect((session as unknown as { prompts: string[] }).prompts).toHaveLength(0);
+  });
+
+  it.each([
+    ['drops the prompt options', class extends FakeResourceLoader {
+      override getSystemPrompt(): string | undefined { return undefined; }
+      override getAppendSystemPrompt(): string[] { return []; }
+    }],
+    ['has no prompt getters', class extends FakeResourceLoader {
+      override getSystemPrompt = undefined as unknown as FakeResourceLoader['getSystemPrompt'];
+      override getAppendSystemPrompt = undefined as unknown as FakeResourceLoader['getAppendSystemPrompt'];
+    }],
+  ])('refuses before creating any session when the loader %s', async (_label, Loader) => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const base = makeSdk(record, session);
+    // The previously unguarded case: the live session exposes no string prompt, so only the
+    // loader check can refuse.
+    const sdk = {
+      ...base,
+      DefaultResourceLoader: Loader,
+      createAgentSession: async (options?: Record<string, unknown>) => {
+        const created = await base.createAgentSession(options);
+        delete (created.session as { systemPrompt?: string }).systemPrompt;
+        return created;
+      },
+    } as unknown as PiSdk;
+    const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
+      loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+
+    const refusal = await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    }).then(() => null, (thrown: unknown) => thrown);
+
+    expect((refusal as DispatchRejectedError).reason).toBe('system_prompt_not_applied');
+    expect(record.createArgs).toBeUndefined();
+    expect((session as unknown as { prompts: string[] }).prompts).toHaveLength(0);
+  });
+
+  it('createActivationResourceLoader passes no prompt option for an empty role prompt', () => {
+    const sdk = { DefaultResourceLoader: FakeResourceLoader, getAgentDir: () => FAKE_AGENT_DIR } as unknown as PiSdk;
+    const options = (createActivationResourceLoader(sdk, {
+      cwd: '/tmp/x', skillPaths: [], rolePrompt: { text: '' },
+    }) as unknown as FakeResourceLoader).options;
+    expect(options).not.toHaveProperty('systemPrompt');
+    expect(options).not.toHaveProperty('appendSystemPrompt');
   });
 });

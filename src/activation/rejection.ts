@@ -64,6 +64,7 @@ export const DISPATCH_REFUSAL_REASONS = [
   'unguardable_mutating_tools',
   'permission_guard_unavailable',
   'tool_contract_unsatisfied',
+  'system_prompt_not_applied',
   'issue_binding_failed',
   'context_changed',
   'workspace_isolation_unavailable',
@@ -140,6 +141,8 @@ export const FIX_BY_REASON: Record<DispatchRefusalReason, string> = {
     'READ_ONLY bash was granted without the permission guard in the loaded set. Load the guard extension or remove bash from the READ_ONLY contract and re-dispatch.',
   tool_contract_unsatisfied:
     'The live session did not expose every promised tool. Fix the extension and resource-loader setup so the session exposes the full contract, then re-dispatch.',
+  system_prompt_not_applied:
+    'The live session system prompt did not contain the role prompt. Check the pi SDK resource-loader wiring (systemPrompt / appendSystemPrompt), then re-dispatch.',
   issue_binding_failed:
     'Binding the Issue to this activation failed. Re-read the Issue and re-dispatch.',
   context_changed:

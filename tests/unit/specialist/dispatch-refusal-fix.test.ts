@@ -25,8 +25,9 @@ function mcpRefusalFor(reason: DispatchRefusalReason) {
 }
 
 describe('dispatch refusal reasons carry a corrective fix (SPECIALISTS-4341)', () => {
-  it('lists exactly the 37 wire reasons on master 2a450f5b8', () => {
-    expect(DISPATCH_REFUSAL_REASONS).toHaveLength(37);
+  it('lists exactly the 38 wire reasons (37 on master 2a450f5b8 + system_prompt_not_applied, HIRYUEN-774)', () => {
+    expect(DISPATCH_REFUSAL_REASONS).toHaveLength(38);
+    expect([...DISPATCH_REFUSAL_REASONS]).toContain('system_prompt_not_applied');
     // Written by reason name, not derived by counting call sites.
     expect([...DISPATCH_REFUSAL_REASONS]).toContain('unknown_specialist');
     expect([...DISPATCH_REFUSAL_REASONS]).toContain('workspace_isolation_unavailable');
