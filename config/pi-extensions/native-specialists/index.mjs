@@ -448,17 +448,15 @@ export function renderFleetRowLines(view, asks = [], nowMs = Date.now(), display
   ];
 }
 
-/** Footer-section lines: empty separator + header + bounded one-line entries with overflow.
- * The empty line renders ONLY when the fleet is non-idle, so an idle fleet is one line
- * and a live fleet breathes below the statusline. Expanded by default; blocked rows
- * sort first. `detail` selects one activation's result or feed rendered under the
+/** The fleet block: header + bounded one-line entries with overflow, no leading blank.
+ * A blank first line directly above the prompt reads as a gap against the editor, so the
+ * header is line one. Expanded by default; blocked rows sort first. `detail` selects one activation's result or feed rendered under the
  * rows (SPECIALISTS-4264); the cache carries the last completed read, so the
  * section never awaits. */
 export function renderSectionLines({ activations, asks, display }, { expanded = true, nowMs = Date.now(), detail = null, detailCache = null } = {}) {
-  const lines = [];
-  const nonIdle = (activations ?? []).length > 0 || (asks ?? []).length > 0;
-  if (nonIdle) lines.push('');
-  lines.push(renderFleetHeader({ activations, asks, display }));
+  // No leading blank line: the block sits directly above the prompt, so a blank first
+  // line reads as a gap between the prompt and the block rather than as breathing room.
+  const lines = [renderFleetHeader({ activations, asks, display })];
   if (!expanded) return lines;
   // Bounded by ENTRIES: each pushed entry is its whole one-line unit.
   const { entries, overflow } = selectFleetEntries({ activations, asks });
