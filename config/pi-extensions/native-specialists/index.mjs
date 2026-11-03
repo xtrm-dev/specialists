@@ -370,6 +370,55 @@ function styledDisplayMarker(marker) {
 }
 
 /**
+ * Every status a Specialist can hold, as the row's lower-case verb. The runtime emits
+ * the same word in `display.state_verb` (src/tools/specialist/specialist-display.ts);
+ * this map is the fallback for payloads that predate it, and the two must agree.
+ */
+const FLEET_STATE_VERB = {
+  starting: 'starting',
+  running: 'running',
+  waiting: 'waiting',
+  needs_reply: 'needs reply',
+  escalated: 'escalated',
+  settled: 'settled',
+  failed: 'failed',
+  stopped: 'stopped',
+  idle: 'idle',
+  blocked: 'blocked',
+};
+
+/** The verb slot's own styling. Running is the one bold word; a state that means the
+ * operator must act (asked, escalated) warns, a failure errors, the rest sit dim. */
+function styleFleetVerb(verb) {
+  if (verb === 'failed') return FAILURE(verb);
+  if (verb === 'blocked' || verb === 'needs reply' || verb === 'escalated') return WARNING(verb);
+  if (verb === 'running') return BOLD(verb);
+  return DIM(verb);
+}
+
+/** Local verb, used only when the payload carries no canonical `display.state_verb`. */
+function fleetStateVerb({ view, blocked, active, idle }) {
+  if (blocked) return 'blocked';
+  if (active && idle != null && idle > IDLE_AFTER_S) return 'idle';
+  const state = String(view?.state ?? '').toLowerCase();
+  return FLEET_STATE_VERB[state] ?? (state || 'waiting');
+}
+
+/**
+ * ONE fleet row, in the shipped row grammar (CORE-2576, and this file's wake rows):
+ * marker, identity, the state verb, an optional subject, then the dim facts. The verb
+ * is the only weighted text; identity and facts stay regular so the eye lands on what
+ * the Specialist is doing. The subject is the Substrate issue ref and is omitted when
+ * unknown rather than rendered as an em dash placeholder.
+ */
+function fleetRowLine({ marker, view, verb, work, metrics }) {
+  const identity = `${view.specialist}:${view.activation_id.slice(4)}`;
+  const thinking = view.thinking_level ? ` ${DIM(view.thinking_level)}` : '';
+  const subject = work && work !== '—' ? `  ${work}` : '';
+  return `    ${marker} ${identity} ${styleFleetVerb(verb)}${subject} ${DIM(view.resolved_model ?? '?model')}${thinking} ${DIM('·')} ${DIM(metrics)}`;
+}
+
+/**
  * The metric slot on a one-line entry: elapsed, turns and tokens for work in
  * flight or finished, and the state REASON (`asked 19s`, `idle 42s`) when there
  * is one to give. Stats are space-separated (`16m00s 56 turns 3843k`); the `·`
@@ -409,18 +458,25 @@ export function renderFleetRowLines(view, asks = [], nowMs = Date.now(), display
     const work = typeof displayEntry.work === 'string' && displayEntry.work
       ? displayEntry.work
       : (view.issue_ref ?? view.bead_id ?? view.issue_id ?? '—');
-    const thinking = view.thinking_level ? ` ${BOLD(view.thinking_level)}` : '';
+    const verb = typeof displayEntry.state_verb === 'string' && displayEntry.state_verb
+      ? displayEntry.state_verb
+      : fleetStateVerb({ view, blocked: Boolean(ask), active: isActiveState(view.state), idle: idleSeconds(view, nowMs) });
     return [
-      `    ${styledDisplayMarker(displayEntry.marker)} ${BOLD(`${view.specialist}:${view.activation_id.slice(4)}`)} ${work} ${DIM(view.resolved_model ?? '?model')}${thinking} ${DIM('·')} ${DIM(displayEntry.metrics)}`,
+      fleetRowLine({ marker: styledDisplayMarker(displayEntry.marker), view, verb, work, metrics: displayEntry.metrics }),
     ];
   }
   const idle = idleSeconds(view, nowMs);
   const active = isActiveState(view.state) && !ask && !(idle != null && idle > IDLE_AFTER_S);
   const marker = stateMarker({ view, blocked: Boolean(ask), active, nowMs });
   const work = view.issue_ref ?? view.bead_id ?? view.issue_id ?? '—';
-  const thinking = view.thinking_level ? ` ${BOLD(view.thinking_level)}` : '';
   return [
-    `    ${marker} ${BOLD(`${view.specialist}:${view.activation_id.slice(4)}`)} ${work} ${DIM(view.resolved_model ?? '?model')}${thinking} ${DIM('·')} ${DIM(rowMetrics({ view, ask, nowMs }))}`,
+    fleetRowLine({
+      marker,
+      view,
+      verb: fleetStateVerb({ view, blocked: Boolean(ask), active: isActiveState(view.state), idle }),
+      work,
+      metrics: rowMetrics({ view, ask, nowMs }),
+    }),
   ];
 }
 

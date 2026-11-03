@@ -29,6 +29,13 @@ export interface ActivationDisplayEntry {
   marker: string;
   /** `asked 19s` / `idle 42s`, else space-joined `elapsed turns spend`. */
   metrics: string;
+  /**
+   * The activation's state as ONE lower-case word/phrase: `starting`, `running`, `waiting`,
+   * `needs reply`, `escalated`, `settled`, `failed`, `stopped`, `blocked` (an outstanding
+   * ask) or `idle` (active but quiet past the threshold). Plain text; frontends own the
+   * styling, and the row renders it in the verb slot after the identity.
+   */
+  state_verb: string;
   /** The Substrate issue ref, or `—` when unknown. */
   work: string;
 }
@@ -174,6 +181,20 @@ function displayIdleS(view: DisplayActivationInput, nowMs: number): number | nul
   return Math.max(0, Math.floor((nowMs - at) / 1000));
 }
 
+/** Lower-case state words. A state the vocabulary does not name keeps its own word. */
+const DISPLAY_STATE_VERBS: Record<string, string> = {
+  starting: 'starting',
+  running: 'running',
+  waiting: 'waiting',
+  needs_reply: 'needs reply',
+  escalated: 'escalated',
+  settled: 'settled',
+  failed: 'failed',
+  stopped: 'stopped',
+  idle: 'idle',
+  blocked: 'blocked',
+};
+
 function isDisplayActiveState(state: string | undefined): boolean {
   return state === 'running' || state === 'starting';
 }
@@ -196,6 +217,25 @@ export function activationDisplayMarker(
     isDisplayActiveState(view.state) && !(idle != null && idle > DISPLAY_IDLE_AFTER_S);
   if (active) return DISPLAY_SPINNER_FRAMES[Math.floor(nowMs / DISPLAY_SPINNER_FRAME_MS) % DISPLAY_SPINNER_FRAMES.length]!;
   return '●';
+}
+
+/**
+ * Canonical state word (plain, lower case): the row's verb slot.
+ *
+ * An outstanding ask outranks the activation's own state — the operator must see
+ * `blocked` — and an active activation silent past the threshold reports `idle`,
+ * the same distinction the metrics and the marker make.
+ */
+export function activationDisplayStateVerb(
+  view: DisplayActivationInput,
+  ask: DisplayAskInput | undefined,
+  nowMs: number = Date.now(),
+): string {
+  if (ask) return 'blocked';
+  const idle = displayIdleS(view, nowMs);
+  if (isDisplayActiveState(view.state) && idle != null && idle > DISPLAY_IDLE_AFTER_S) return 'idle';
+  const state = String(view.state ?? '').toLowerCase();
+  return DISPLAY_STATE_VERBS[state] ?? (state || 'waiting');
 }
 
 /**
@@ -264,6 +304,7 @@ export function activationDisplayEntry(
     activation_id: displayActivationId(view),
     marker: activationDisplayMarker(view, ask, nowMs),
     metrics: activationDisplayMetrics(view, ask, nowMs),
+    state_verb: activationDisplayStateVerb(view, ask, nowMs),
     work: displayWorkRef(view),
   };
 }

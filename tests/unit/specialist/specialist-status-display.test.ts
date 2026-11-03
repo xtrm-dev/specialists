@@ -160,6 +160,7 @@ describe('specialist_status display contract (SPECIALISTS-4365)', () => {
         activation_id: expect.stringMatching(/^act:/),
         marker: expect.any(String),
         metrics: expect.any(String),
+        state_verb: expect.any(String),
         work: 'ISSUE-1',
       });
     }

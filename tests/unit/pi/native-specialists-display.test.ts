@@ -70,7 +70,7 @@ describe('Pi fleet display fallback and preference (SPECIALISTS-4365)', () => {
     }).not.toThrow();
     expect(plain(header)).toBe('  specialists 1 waiting');
     // Marker, identity, model facts, then the space-separated stats.
-    expect(plain(rows[0]!)).toContain('✓ explorer:aaaabbbb-cccc XTRM-1 test-model');
+    expect(plain(rows[0]!)).toContain('✓ explorer:aaaabbbb-cccc settled  XTRM-1 test-model');
     expect(plain(rows[0]!)).toContain('2m14s 3 turns 12k');
     // The section renderer agrees with the row renderer.
     const lines = mod.renderSectionLines(fleet, { nowMs: Date.now() });
@@ -99,7 +99,7 @@ describe('Pi fleet display fallback and preference (SPECIALISTS-4365)', () => {
       Date.now(),
       fleet.display.activations[0],
     );
-    expect(plain(rows[0]!)).toContain('✓ explorer:aaaabbbb-cccc XTRM-1 test-model');
+    expect(plain(rows[0]!)).toContain('✓ explorer:aaaabbbb-cccc settled  XTRM-1 test-model');
     expect(plain(rows[0]!)).toContain('2m14s 3 turns 12k');
     // A display entry whose strings differ from the local computation wins.
     const custom = {

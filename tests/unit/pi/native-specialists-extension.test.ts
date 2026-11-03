@@ -1645,12 +1645,13 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(lines).toHaveLength(3); // separator + header + the entry's one line
     expect(lines[0]).toBe('');
     expect(plain(lines[1])).toBe('  specialists 1 running');
-    // One line: glyph, bold name, issue ref, model, bold thinking, `·`, stats.
+    // One line: glyph, identity, bold state verb, issue ref, model, thinking, `·`, stats.
     // Purpose is overlay detail now, never a row second line.
-    expect(plain(lines[2])).toBe('    ◐ researcher:aaaa ISSUE-92 gpt-5.6-sol high · 47s 3 turns 2.1k');
-    expect(lines[2]).toContain('\x1b[1mresearcher:aaaa\x1b[22m');
+    expect(plain(lines[2])).toBe('    ◐ researcher:aaaa running  ISSUE-92 gpt-5.6-sol high · 47s 3 turns 2.1k');
+    expect(lines[2]).toContain(`\x1b[1mrunning\x1b[22m`);
+    expect(lines[2]).not.toContain(`\x1b[1mresearcher:aaaa\x1b[22m`);
     expect(lines[2]).toContain('ISSUE-92');
-    expect(lines[2]).toContain('\x1b[1mhigh\x1b[22m');
+    expect(lines[2]).not.toContain('\x1b[1mhigh\x1b[22m');
     expect(lines[2]).not.toContain('inspect native wake transport');
     expect(lines.join('\n')).not.toContain('working'); // the glyph carries it
     expect(lines.join('\n')).not.toContain('spent');
@@ -1702,7 +1703,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     for (const view of [base, { ...base, token_usage: { input_tokens: 0, output_tokens: 0 } }]) {
       const lines = mod.renderFleetRowLines(view, [], 0); // frame 0 = ◐
       expect(lines).toHaveLength(1);
-      expect(plain(lines.join('\n'))).toBe('    ◐ explorer:x — m · 41s');
+      expect(plain(lines.join('\n'))).toBe('    ◐ explorer:x running m · 41s');
       expect(lines.join('\n')).not.toContain('spent');
       expect(lines.join('\n')).not.toContain('tokens');
     }
@@ -1718,7 +1719,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
       last_activity_at: SPIN_CLOCK,
     }, [], SPIN_CLOCK);
     expect(lines).toHaveLength(1);
-    expect(plain(lines[0])).toBe('    ◐ researcher:x ISSUE-92 gpt-5.6-sol high · 47s 4 turns 2.1k');
+    expect(plain(lines[0])).toBe('    ◐ researcher:x running  ISSUE-92 gpt-5.6-sol high · 47s 4 turns 2.1k');
     expect(lines.join('\n')).not.toContain('working');
     expect(lines.join('\n')).not.toContain('spent');
   });
@@ -1737,25 +1738,25 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     const glyph = (view, nowMs, asks = []) => plain(mod.renderFleetRowLines(view, asks, nowMs)[0]);
     // Deterministic: the frame is a pure function of the injected clock.
     expect(glyph(base, SPIN_CLOCK)).toBe(glyph(base, SPIN_CLOCK));
-    expect(glyph(base, SPIN_CLOCK)).toBe('    ◐ explorer:x — m · 0s');
-    expect(glyph(base, SPIN_CLOCK + 220)).toBe('    ◓ explorer:x — m · 0s');
-    expect(glyph(base, SPIN_CLOCK + 440)).toBe('    ◑ explorer:x — m · 0s');
-    expect(glyph(base, SPIN_CLOCK + 660)).toBe('    ◒ explorer:x — m · 0s');
-    expect(glyph(base, SPIN_CLOCK + 880)).toBe('    ◐ explorer:x — m · 0s');
+    expect(glyph(base, SPIN_CLOCK)).toBe('    ◐ explorer:x running m · 0s');
+    expect(glyph(base, SPIN_CLOCK + 220)).toBe('    ◓ explorer:x running m · 0s');
+    expect(glyph(base, SPIN_CLOCK + 440)).toBe('    ◑ explorer:x running m · 0s');
+    expect(glyph(base, SPIN_CLOCK + 660)).toBe('    ◒ explorer:x running m · 0s');
+    expect(glyph(base, SPIN_CLOCK + 880)).toBe('    ◐ explorer:x running m · 0s');
     expect(mod.renderFleetRowLines(base, [], SPIN_CLOCK).join('\n')).not.toContain('working');
     // Running but quiet past the threshold: static marker, idle duration in the slot.
     const idle = mod.renderFleetRowLines({ ...base, elapsed_s: 120 }, [], SPIN_CLOCK + 42_000);
-    expect(plain(idle[0])).toBe('    ● explorer:x — m · idle 42s');
+    expect(plain(idle[0])).toBe('    ● explorer:x idle m · idle 42s');
     // Terminal states: one glyph, final metrics still visible.
     const settled = mod.renderFleetRowLines({ ...base, state: 'settled', elapsed_s: 134, turn_count: 5 }, [], SPIN_CLOCK);
-    expect(plain(settled[0])).toBe('    ✓ explorer:x — m · 2m14s 5 turns');
+    expect(plain(settled[0])).toBe('    ✓ explorer:x settled m · 2m14s 5 turns');
     expect(plain(mod.renderFleetRowLines({ ...base, state: 'failed' }, [], SPIN_CLOCK)[0]))
-      .toBe('    ✕ explorer:x — m · 0s');
+      .toBe('    ✕ explorer:x failed m · 0s');
     // Blocked on the coordinator: `!` outranks the spinner, wait replaces the metrics.
     const blocked = mod.renderFleetRowLines({ ...base, elapsed_s: 90 }, [
       { activation_id: 'act:x', asked_at: SPIN_CLOCK - 19_000 },
     ], SPIN_CLOCK);
-    expect(plain(blocked[0])).toBe('    ! explorer:x — m · asked 19s');
+    expect(plain(blocked[0])).toBe('    ! explorer:x blocked m · asked 19s');
   });
 
   it('blocked entries sort before the rest (unitAI-nmxhg)', async () => {
@@ -1783,11 +1784,59 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     const lines = mod.renderSectionLines(fleet, { nowMs: now }).map(plain);
     expect(lines[0]).toBe('');
     expect(lines[1]).toBe('  specialists 2 running 1 blocked');
-    expect(lines[2]).toBe('    ! reviewer:ask ISSUE-92 gpt-5.6-sol high · asked 31s');
-    expect(lines[3]).toMatch(/^ {4}[◐◓◑◒] researcher:idle ISSUE-92 gpt-5.6-sol high · 47s 2 turns 2.1k$/);
+    expect(lines[2]).toBe('    ! reviewer:ask blocked  ISSUE-92 gpt-5.6-sol high · asked 31s');
+    expect(lines[3]).toMatch(/^ {4}[◐◓◑◒] researcher:idle running  ISSUE-92 gpt-5.6-sol high · 47s 2 turns 2.1k$/);
     // Rows carry only the short dispatch token (<specialist>:<id>); the full
     // forensic `act:` id stays out of the operator surface.
     expect(lines.join('\n')).not.toContain('act:ask');
+  });
+
+  it('every status a Specialist can hold renders in the verb slot (CORE-2576 grammar)', async () => {
+    const { mod } = await boot();
+    const now = 1_700_000_000_000;
+    const base = {
+      activation_id: 'act:status', specialist: 'reviewer', issue_ref: 'ISSUE-7',
+      resolved_model: 'm', elapsed_s: 12, last_activity_at: now,
+    };
+    const lineOf = (view, asks = []) => mod.renderFleetRowLines(view, asks, now).join('\n');
+
+    // One word per state, lower case, in the verb slot after the identity. Running is
+    // the only bold verb; a blocked or escalated Specialist warns; a failure errors.
+    const cases = [
+      ['starting', 'starting', false],
+      ['running', 'running', true],
+      ['waiting', 'waiting', false],
+      ['needs_reply', 'needs reply', false],
+      ['escalated', 'escalated', false],
+      ['settled', 'settled', false],
+      ['failed', 'failed', false],
+      ['stopped', 'stopped', false],
+    ];
+    for (const [state, verb, bold] of cases) {
+      const line = lineOf({ ...base, state });
+      expect(plain(line)).toContain(` reviewer:status ${verb}  ISSUE-7 `);
+      expect(line.includes(`\x1b[1m${verb}\x1b[22m`)).toBe(bold);
+    }
+    expect(lineOf({ ...base, state: 'failed' })).toContain('\x1b[31m');
+    expect(lineOf({ ...base, state: 'escalated' })).toContain('\x1b[33m');
+    expect(lineOf({ ...base, state: 'needs_reply' })).toContain('\x1b[33m');
+
+    // An outstanding ask outranks the state it interrupted.
+    const blocked = lineOf({ ...base, state: 'running' }, [
+      { activation_id: 'act:status', asked_at: now - 5_000 },
+    ]);
+    expect(plain(blocked)).toContain(' reviewer:status blocked  ISSUE-7 ');
+    expect(blocked).toContain('\x1b[33m');
+
+    // Active but quiet past the threshold reports idle, matching the marker and metrics.
+    expect(plain(lineOf({ ...base, state: 'running', last_activity_at: now - 42_000 })))
+      .toContain(' reviewer:status idle  ISSUE-7 ');
+
+    // The canonical display block wins when it carries a verb (SPECIALISTS-4365).
+    const withDisplay = plain(mod.renderFleetRowLines(base, [], now, {
+      marker: '✓', metrics: '2m14s 3 turns', work: 'ISSUE-7', state_verb: 'settled',
+    }).join('\n'));
+    expect(withDisplay).toBe('    ✓ reviewer:status settled  ISSUE-7 m · 2m14s 3 turns');
   });
 
   it('/specialists reports in text too, so json and print modes are not blind', async () => {
