@@ -1424,7 +1424,7 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(widgetText()).toContain('specialists');
     expect(widgetText()).toContain('feed01');
     const before = rowsText();
-    expect(before.split('\n')[0]).toBe('');
+    expect(before.split('\n')[0]).toContain('/specialists');
     expect(before).toContain('feed01');
     expect(before).not.toContain('select a row');
     expect(before).not.toContain('▾');
@@ -1481,10 +1481,9 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(ctx.painted.widgetOptions['specialist-fleet']).toEqual({ placement: 'aboveEditor' });
     const factory = ctx.painted.widgets['specialist-fleet'] as unknown as () => { render(w: number): string[] };
     const lines = factory().render(80);
-    expect(lines[0]).toBe('');
-    expect(lines[1]).toContain('specialists');
-    expect(lines[1]).toContain('1 blocked');
-    expect(lines[1]).not.toContain('!');
+    expect(lines[0]).toContain('/specialists');
+    expect(lines[0]).toContain('1 blocked');
+    expect(lines[0]).not.toContain('!');
   });
 
   it('rows below the statusline follow fleet change', async () => {
@@ -1539,17 +1538,16 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
     expect(header).not.toContain('↓');
     expect(header).not.toContain('←');
     const rows = mod.renderSectionLines(fleet, { expanded: true });
-    expect(rows).toHaveLength(3); // separator + header + the blocked entry's one line
-    expect(rows[0]).toBe('');
-    expect(rows[1]).toContain('specialists');
+    expect(rows).toHaveLength(2); // header + the blocked entry's one line
+    expect(rows[0]).toContain('/specialists');
     // One row: identity, the bold state verb, the dim metrics — model, thinking
     // level, issue ref and purpose all live in the /specialists overlay now.
-    expect(plain(rows[2])).toContain('explorer');
-    expect(plain(rows[2])).toContain('blocked');
-    expect(plain(rows[2])).toContain('asked');
-    expect(plain(rows[2])).not.toContain('SPECIALISTS-1');
-    expect(plain(rows[2])).not.toContain('map the wake transport');
-    expect(plain(rows[2])).not.toContain('4t');
+    expect(plain(rows[1])).toContain('explorer');
+    expect(plain(rows[1])).toContain('blocked');
+    expect(plain(rows[1])).toContain('asked');
+    expect(plain(rows[1])).not.toContain('SPECIALISTS-1');
+    expect(plain(rows[1])).not.toContain('map the wake transport');
+    expect(plain(rows[1])).not.toContain('4t');
     expect(rows.join('\n')).not.toContain('act:aaaa');
     expect(rows.join('\n')).not.toContain('msg:1');
   });
@@ -1561,12 +1559,12 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
       resolved_model: 'm', elapsed_s: 10, last_activity_at: Date.now(),
     }));
     const lines = mod.renderSectionLines({ activations, asks: [] }, { expanded: true });
-    // separator + header + ONE line per entry + overflow: the bound counts entries.
-    expect(lines).toHaveLength(2 + mod.FLEET_MAX_ROWS + 1);
-    expect(lines[0]).toBe('');
-    expect(lines.slice(2, -1)).toHaveLength(mod.FLEET_MAX_ROWS);
+    // header + ONE line per entry + overflow: the bound counts entries.
+    expect(lines).toHaveLength(1 + mod.FLEET_MAX_ROWS + 1);
+    expect(lines[0]).toContain('/specialists');
+    expect(lines.slice(1, -1)).toHaveLength(mod.FLEET_MAX_ROWS);
     expect(lines.at(-1)).toContain('+3 more');
-    for (const line of lines.slice(2, -1)) {
+    for (const line of lines.slice(1, -1)) {
       expect(line).toMatch(/^ {3}\S/);
     }
   });
@@ -1633,26 +1631,25 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
       asks: [],
     };
     const lines = mod.renderSectionLines(fleet, { nowMs: SPIN_CLOCK });
-    expect(lines).toHaveLength(3); // separator + header + the entry's one line
-    expect(lines[0]).toBe('');
-    expect(plain(lines[1])).toBe('/specialists 1 running');
-    // One line: glyph, identity, bold state verb, issue ref, model, thinking, `·`, stats.
-    // Purpose is overlay detail now, never a row second line.
-    expect(plain(lines[2])).toBe('   researcher:aaaa running 47s 3 turns 2.1k');
-    expect(lines[2]).toContain(`\x1b[1mrunning\x1b[22m`);
-    expect(lines[2]).not.toContain(`\x1b[1mresearcher:aaaa\x1b[22m`);
-    expect(lines[2]).toContain('running');
-    expect(lines[2]).not.toContain('\x1b[1mhigh\x1b[22m');
-    expect(lines[2]).not.toContain('inspect native wake transport');
+    expect(lines).toHaveLength(2); // header + the entry's one line
+    expect(plain(lines[0])).toBe('/specialists 1 running');
+    // One row: identity, bold state verb, dim metrics. Model, thinking level, issue
+    // ref and purpose are overlay detail, never row fields.
+    expect(plain(lines[1])).toBe('   researcher:aaaa running 47s 3 turns 2.1k');
+    expect(lines[1]).toContain(`\x1b[1mrunning\x1b[22m`);
+    expect(lines[1]).not.toContain(`\x1b[1mresearcher:aaaa\x1b[22m`);
+    expect(lines[1]).toContain('running');
+    expect(lines[1]).not.toContain('\x1b[1mhigh\x1b[22m');
+    expect(lines[1]).not.toContain('inspect native wake transport');
     expect(lines.join('\n')).not.toContain('working'); // the glyph carries it
     expect(lines.join('\n')).not.toContain('spent');
     // Command default: /specialists with no action reports the expanded entries.
     await command('specialists').handler('', ctx);
     expect(ctx.painted.notices.at(-1)[0].split('\n').length).toBeGreaterThan(1);
     expect(ctx.painted.notices.at(-1)[0]).toContain('explorer');
-    // Opt-out: collapse drops to the separator + header alone.
+    // Opt-out: collapse drops to the header alone.
     await command('specialists').handler('collapse', ctx);
-    expect(ctx.painted.notices.at(-1)[0].split('\n')).toHaveLength(2);
+    expect(ctx.painted.notices.at(-1)[0].split('\n')).toHaveLength(1);
     // Expand restores the default entries (a no-op when already expanded).
     await command('specialists').handler('expand', ctx);
     expect(ctx.painted.notices.at(-1)[0].split('\n').length).toBeGreaterThan(1);
@@ -1771,10 +1768,9 @@ describe('operator surface: commands and Fleet view (unitAI-rrdnt.46)', () => {
       }],
     };
     const lines = mod.renderSectionLines(fleet, { nowMs: now }).map(plain);
-    expect(lines[0]).toBe('');
-    expect(lines[1]).toBe('/specialists 2 running 1 blocked');
-    expect(lines[2]).toBe('   reviewer:ask blocked asked 31s');
-    expect(lines[3]).toMatch(/^ {3}researcher:idle running 47s 2 turns 2.1k$/);
+    expect(lines[0]).toBe('/specialists 2 running 1 blocked');
+    expect(lines[1]).toBe('   reviewer:ask blocked asked 31s');
+    expect(lines[2]).toMatch(/^ {3}researcher:idle running 47s 2 turns 2.1k$/);
     // Rows carry only the short dispatch token (<specialist>:<id>); the full
     // forensic `act:` id stays out of the operator surface.
     expect(lines.join('\n')).not.toContain('act:ask');
