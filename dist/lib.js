@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// ../specialists/node_modules/yaml/dist/nodes/identity.js
+// node_modules/yaml/dist/nodes/identity.js
 var require_identity = __commonJS(function(exports) {
   var ALIAS = Symbol.for("yaml.alias");
   var DOC = Symbol.for("yaml.document");
@@ -56,7 +56,7 @@ var require_identity = __commonJS(function(exports) {
   exports.isSeq = isSeq;
 });
 
-// ../specialists/node_modules/yaml/dist/visit.js
+// node_modules/yaml/dist/visit.js
 var require_visit = __commonJS(function(exports) {
   var identity = require_identity();
   var BREAK = Symbol("break visit");
@@ -211,7 +211,7 @@ var require_visit = __commonJS(function(exports) {
   exports.visitAsync = visitAsync;
 });
 
-// ../specialists/node_modules/yaml/dist/doc/directives.js
+// node_modules/yaml/dist/doc/directives.js
 var require_directives = __commonJS(function(exports) {
   var identity = require_identity();
   var visit = require_visit();
@@ -363,7 +363,7 @@ var require_directives = __commonJS(function(exports) {
   exports.Directives = Directives;
 });
 
-// ../specialists/node_modules/yaml/dist/doc/anchors.js
+// node_modules/yaml/dist/doc/anchors.js
 var require_anchors = __commonJS(function(exports) {
   var identity = require_identity();
   var visit = require_visit();
@@ -425,7 +425,7 @@ var require_anchors = __commonJS(function(exports) {
   exports.findNewAnchor = findNewAnchor;
 });
 
-// ../specialists/node_modules/yaml/dist/doc/applyReviver.js
+// node_modules/yaml/dist/doc/applyReviver.js
 var require_applyReviver = __commonJS(function(exports) {
   function applyReviver(reviver, obj, key, val) {
     if (val && typeof val === "object") {
@@ -472,7 +472,7 @@ var require_applyReviver = __commonJS(function(exports) {
   exports.applyReviver = applyReviver;
 });
 
-// ../specialists/node_modules/yaml/dist/nodes/toJS.js
+// node_modules/yaml/dist/nodes/toJS.js
 var require_toJS = __commonJS(function(exports) {
   var identity = require_identity();
   function toJS(value, arg, ctx) {
@@ -499,7 +499,7 @@ var require_toJS = __commonJS(function(exports) {
   exports.toJS = toJS;
 });
 
-// ../specialists/node_modules/yaml/dist/nodes/Node.js
+// node_modules/yaml/dist/nodes/Node.js
 var require_Node = __commonJS(function(exports) {
   var applyReviver = require_applyReviver();
   var identity = require_identity();
@@ -536,7 +536,7 @@ var require_Node = __commonJS(function(exports) {
   exports.NodeBase = NodeBase;
 });
 
-// ../specialists/node_modules/yaml/dist/nodes/Alias.js
+// node_modules/yaml/dist/nodes/Alias.js
 var require_Alias = __commonJS(function(exports) {
   var anchors = require_anchors();
   var visit = require_visit();
@@ -646,7 +646,7 @@ var require_Alias = __commonJS(function(exports) {
   exports.Alias = Alias;
 });
 
-// ../specialists/node_modules/yaml/dist/nodes/Scalar.js
+// node_modules/yaml/dist/nodes/Scalar.js
 var require_Scalar = __commonJS(function(exports) {
   var identity = require_identity();
   var Node = require_Node();
@@ -674,7 +674,7 @@ var require_Scalar = __commonJS(function(exports) {
   exports.isScalarValue = isScalarValue;
 });
 
-// ../specialists/node_modules/yaml/dist/doc/createNode.js
+// node_modules/yaml/dist/doc/createNode.js
 var require_createNode = __commonJS(function(exports) {
   var Alias = require_Alias();
   var identity = require_identity();
@@ -746,7 +746,7 @@ var require_createNode = __commonJS(function(exports) {
   exports.createNode = createNode;
 });
 
-// ../specialists/node_modules/yaml/dist/nodes/Collection.js
+// node_modules/yaml/dist/nodes/Collection.js
 var require_Collection = __commonJS(function(exports) {
   var createNode = require_createNode();
   var identity = require_identity();
@@ -861,7 +861,7 @@ var require_Collection = __commonJS(function(exports) {
   exports.isEmptyPath = isEmptyPath;
 });
 
-// ../specialists/node_modules/yaml/dist/stringify/stringifyComment.js
+// node_modules/yaml/dist/stringify/stringifyComment.js
 var require_stringifyComment = __commonJS(function(exports) {
   var stringifyComment = (str) => str.replace(/^(?!$)(?: $)?/gm, "#");
   function indentComment(comment, indent) {
@@ -878,7 +878,7 @@ var require_stringifyComment = __commonJS(function(exports) {
   exports.stringifyComment = stringifyComment;
 });
 
-// ../specialists/node_modules/yaml/dist/stringify/foldFlowLines.js
+// node_modules/yaml/dist/stringify/foldFlowLines.js
 var require_foldFlowLines = __commonJS(function(exports) {
   var FOLD_FLOW = "flow";
   var FOLD_BLOCK = "block";
@@ -1015,7 +1015,7 @@ ${indent}${text.slice(fold + 1, end2)}`;
   exports.foldFlowLines = foldFlowLines;
 });
 
-// ../specialists/node_modules/yaml/dist/stringify/stringifyString.js
+// node_modules/yaml/dist/stringify/stringifyString.js
 var require_stringifyString = __commonJS(function(exports) {
   var Scalar = require_Scalar();
   var foldFlowLines = require_foldFlowLines();
@@ -1313,7 +1313,7 @@ ${indent}`);
   exports.stringifyString = stringifyString;
 });
 
-// ../specialists/node_modules/yaml/dist/stringify/stringify.js
+// node_modules/yaml/dist/stringify/stringify.js
 var require_stringify = __commonJS(function(exports) {
   var anchors = require_anchors();
   var identity = require_identity();
@@ -1434,7 +1434,7 @@ ${ctx.indent}${str}`;
   exports.stringify = stringify;
 });
 
-// ../specialists/node_modules/yaml/dist/stringify/stringifyPair.js
+// node_modules/yaml/dist/stringify/stringifyPair.js
 var require_stringifyPair = __commonJS(function(exports) {
   var identity = require_identity();
   var Scalar = require_Scalar();
@@ -1570,7 +1570,7 @@ ${ctx.indent}`;
   exports.stringifyPair = stringifyPair;
 });
 
-// ../specialists/node_modules/yaml/dist/log.js
+// node_modules/yaml/dist/log.js
 var require_log = __commonJS(function(exports) {
   var node_process = __require("process");
   function debug(logLevel, ...messages) {
@@ -1589,7 +1589,7 @@ var require_log = __commonJS(function(exports) {
   exports.warn = warn;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/merge.js
+// node_modules/yaml/dist/schema/yaml-1.1/merge.js
 var require_merge = __commonJS(function(exports) {
   var identity = require_identity();
   var Scalar = require_Scalar();
@@ -1646,7 +1646,7 @@ var require_merge = __commonJS(function(exports) {
   exports.merge = merge;
 });
 
-// ../specialists/node_modules/yaml/dist/nodes/addPairToJSMap.js
+// node_modules/yaml/dist/nodes/addPairToJSMap.js
 var require_addPairToJSMap = __commonJS(function(exports) {
   var log = require_log();
   var merge = require_merge();
@@ -1707,7 +1707,7 @@ var require_addPairToJSMap = __commonJS(function(exports) {
   exports.addPairToJSMap = addPairToJSMap;
 });
 
-// ../specialists/node_modules/yaml/dist/nodes/Pair.js
+// node_modules/yaml/dist/nodes/Pair.js
 var require_Pair = __commonJS(function(exports) {
   var createNode = require_createNode();
   var stringifyPair = require_stringifyPair();
@@ -1745,7 +1745,7 @@ var require_Pair = __commonJS(function(exports) {
   exports.createPair = createPair;
 });
 
-// ../specialists/node_modules/yaml/dist/stringify/stringifyCollection.js
+// node_modules/yaml/dist/stringify/stringifyCollection.js
 var require_stringifyCollection = __commonJS(function(exports) {
   var identity = require_identity();
   var stringify = require_stringify();
@@ -1897,7 +1897,7 @@ ${indent}${end}`;
   exports.stringifyCollection = stringifyCollection;
 });
 
-// ../specialists/node_modules/yaml/dist/nodes/YAMLMap.js
+// node_modules/yaml/dist/nodes/YAMLMap.js
 var require_YAMLMap = __commonJS(function(exports) {
   var stringifyCollection = require_stringifyCollection();
   var addPairToJSMap = require_addPairToJSMap();
@@ -2024,7 +2024,7 @@ var require_YAMLMap = __commonJS(function(exports) {
   exports.findPair = findPair;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/common/map.js
+// node_modules/yaml/dist/schema/common/map.js
 var require_map = __commonJS(function(exports) {
   var identity = require_identity();
   var YAMLMap = require_YAMLMap();
@@ -2043,7 +2043,7 @@ var require_map = __commonJS(function(exports) {
   exports.map = map;
 });
 
-// ../specialists/node_modules/yaml/dist/nodes/YAMLSeq.js
+// node_modules/yaml/dist/nodes/YAMLSeq.js
 var require_YAMLSeq = __commonJS(function(exports) {
   var createNode = require_createNode();
   var stringifyCollection = require_stringifyCollection();
@@ -2136,7 +2136,7 @@ var require_YAMLSeq = __commonJS(function(exports) {
   exports.YAMLSeq = YAMLSeq;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/common/seq.js
+// node_modules/yaml/dist/schema/common/seq.js
 var require_seq = __commonJS(function(exports) {
   var identity = require_identity();
   var YAMLSeq = require_YAMLSeq();
@@ -2155,7 +2155,7 @@ var require_seq = __commonJS(function(exports) {
   exports.seq = seq;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/common/string.js
+// node_modules/yaml/dist/schema/common/string.js
 var require_string = __commonJS(function(exports) {
   var stringifyString = require_stringifyString();
   var string = {
@@ -2171,7 +2171,7 @@ var require_string = __commonJS(function(exports) {
   exports.string = string;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/common/null.js
+// node_modules/yaml/dist/schema/common/null.js
 var require_null = __commonJS(function(exports) {
   var Scalar = require_Scalar();
   var nullTag = {
@@ -2186,7 +2186,7 @@ var require_null = __commonJS(function(exports) {
   exports.nullTag = nullTag;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/core/bool.js
+// node_modules/yaml/dist/schema/core/bool.js
 var require_bool = __commonJS(function(exports) {
   var Scalar = require_Scalar();
   var boolTag = {
@@ -2207,7 +2207,7 @@ var require_bool = __commonJS(function(exports) {
   exports.boolTag = boolTag;
 });
 
-// ../specialists/node_modules/yaml/dist/stringify/stringifyNumber.js
+// node_modules/yaml/dist/stringify/stringifyNumber.js
 var require_stringifyNumber = __commonJS(function(exports) {
   function stringifyNumber({ format, minFractionDigits, tag, value }) {
     if (typeof value === "bigint")
@@ -2231,7 +2231,7 @@ var require_stringifyNumber = __commonJS(function(exports) {
   exports.stringifyNumber = stringifyNumber;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/core/float.js
+// node_modules/yaml/dist/schema/core/float.js
 var require_float = __commonJS(function(exports) {
   var Scalar = require_Scalar();
   var stringifyNumber = require_stringifyNumber();
@@ -2274,7 +2274,7 @@ var require_float = __commonJS(function(exports) {
   exports.floatNaN = floatNaN;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/core/int.js
+// node_modules/yaml/dist/schema/core/int.js
 var require_int = __commonJS(function(exports) {
   var stringifyNumber = require_stringifyNumber();
   var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
@@ -2316,7 +2316,7 @@ var require_int = __commonJS(function(exports) {
   exports.intOct = intOct;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/core/schema.js
+// node_modules/yaml/dist/schema/core/schema.js
 var require_schema = __commonJS(function(exports) {
   var map = require_map();
   var _null = require_null();
@@ -2341,7 +2341,7 @@ var require_schema = __commonJS(function(exports) {
   exports.schema = schema;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/json/schema.js
+// node_modules/yaml/dist/schema/json/schema.js
 var require_schema2 = __commonJS(function(exports) {
   var Scalar = require_Scalar();
   var map = require_map();
@@ -2405,7 +2405,7 @@ var require_schema2 = __commonJS(function(exports) {
   exports.schema = schema;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/binary.js
+// node_modules/yaml/dist/schema/yaml-1.1/binary.js
 var require_binary = __commonJS(function(exports) {
   var node_buffer = __require("buffer");
   var Scalar = require_Scalar();
@@ -2460,7 +2460,7 @@ var require_binary = __commonJS(function(exports) {
   exports.binary = binary;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/pairs.js
+// node_modules/yaml/dist/schema/yaml-1.1/pairs.js
 var require_pairs = __commonJS(function(exports) {
   var identity = require_identity();
   var Pair = require_Pair();
@@ -2535,7 +2535,7 @@ ${cn.comment}` : item.comment;
   exports.resolvePairs = resolvePairs;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/omap.js
+// node_modules/yaml/dist/schema/yaml-1.1/omap.js
 var require_omap = __commonJS(function(exports) {
   var identity = require_identity();
   var toJS = require_toJS();
@@ -2607,7 +2607,7 @@ var require_omap = __commonJS(function(exports) {
   exports.omap = omap;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/bool.js
+// node_modules/yaml/dist/schema/yaml-1.1/bool.js
 var require_bool2 = __commonJS(function(exports) {
   var Scalar = require_Scalar();
   function boolStringify({ value, source }, ctx) {
@@ -2636,7 +2636,7 @@ var require_bool2 = __commonJS(function(exports) {
   exports.trueTag = trueTag;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/float.js
+// node_modules/yaml/dist/schema/yaml-1.1/float.js
 var require_float2 = __commonJS(function(exports) {
   var Scalar = require_Scalar();
   var stringifyNumber = require_stringifyNumber();
@@ -2682,7 +2682,7 @@ var require_float2 = __commonJS(function(exports) {
   exports.floatNaN = floatNaN;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/int.js
+// node_modules/yaml/dist/schema/yaml-1.1/int.js
 var require_int2 = __commonJS(function(exports) {
   var stringifyNumber = require_stringifyNumber();
   var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
@@ -2758,7 +2758,7 @@ var require_int2 = __commonJS(function(exports) {
   exports.intOct = intOct;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/set.js
+// node_modules/yaml/dist/schema/yaml-1.1/set.js
 var require_set = __commonJS(function(exports) {
   var identity = require_identity();
   var Pair = require_Pair();
@@ -2841,7 +2841,7 @@ var require_set = __commonJS(function(exports) {
   exports.set = set;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/timestamp.js
+// node_modules/yaml/dist/schema/yaml-1.1/timestamp.js
 var require_timestamp = __commonJS(function(exports) {
   var stringifyNumber = require_stringifyNumber();
   function parseSexagesimal(str, asBigInt) {
@@ -2923,7 +2923,7 @@ var require_timestamp = __commonJS(function(exports) {
   exports.timestamp = timestamp;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/yaml-1.1/schema.js
+// node_modules/yaml/dist/schema/yaml-1.1/schema.js
 var require_schema3 = __commonJS(function(exports) {
   var map = require_map();
   var _null = require_null();
@@ -2964,7 +2964,7 @@ var require_schema3 = __commonJS(function(exports) {
   exports.schema = schema;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/tags.js
+// node_modules/yaml/dist/schema/tags.js
 var require_tags = __commonJS(function(exports) {
   var map = require_map();
   var _null = require_null();
@@ -3055,7 +3055,7 @@ var require_tags = __commonJS(function(exports) {
   exports.getTags = getTags;
 });
 
-// ../specialists/node_modules/yaml/dist/schema/Schema.js
+// node_modules/yaml/dist/schema/Schema.js
 var require_Schema = __commonJS(function(exports) {
   var identity = require_identity();
   var map = require_map();
@@ -3085,7 +3085,7 @@ var require_Schema = __commonJS(function(exports) {
   exports.Schema = Schema;
 });
 
-// ../specialists/node_modules/yaml/dist/stringify/stringifyDocument.js
+// node_modules/yaml/dist/stringify/stringifyDocument.js
 var require_stringifyDocument = __commonJS(function(exports) {
   var identity = require_identity();
   var stringify = require_stringify();
@@ -3165,7 +3165,7 @@ var require_stringifyDocument = __commonJS(function(exports) {
   exports.stringifyDocument = stringifyDocument;
 });
 
-// ../specialists/node_modules/yaml/dist/doc/Document.js
+// node_modules/yaml/dist/doc/Document.js
 var require_Document = __commonJS(function(exports) {
   var Alias = require_Alias();
   var Collection = require_Collection();
@@ -3400,7 +3400,7 @@ var require_Document = __commonJS(function(exports) {
   exports.Document = Document;
 });
 
-// ../specialists/node_modules/yaml/dist/errors.js
+// node_modules/yaml/dist/errors.js
 var require_errors = __commonJS(function(exports) {
   class YAMLError extends Error {
     constructor(name, pos, code, message) {
@@ -3465,7 +3465,7 @@ ${pointer}
   exports.prettifyError = prettifyError;
 });
 
-// ../specialists/node_modules/yaml/dist/compose/resolve-props.js
+// node_modules/yaml/dist/compose/resolve-props.js
 var require_resolve_props = __commonJS(function(exports) {
   function resolveProps(tokens, { flow, indicator, next, offset, onError, parentIndent, startOnNewline }) {
     let spaceBefore = false;
@@ -3595,7 +3595,7 @@ var require_resolve_props = __commonJS(function(exports) {
   exports.resolveProps = resolveProps;
 });
 
-// ../specialists/node_modules/yaml/dist/compose/util-contains-newline.js
+// node_modules/yaml/dist/compose/util-contains-newline.js
 var require_util_contains_newline = __commonJS(function(exports) {
   function containsNewline(key) {
     if (!key)
@@ -3635,7 +3635,7 @@ var require_util_contains_newline = __commonJS(function(exports) {
   exports.containsNewline = containsNewline;
 });
 
-// ../specialists/node_modules/yaml/dist/compose/util-flow-indent-check.js
+// node_modules/yaml/dist/compose/util-flow-indent-check.js
 var require_util_flow_indent_check = __commonJS(function(exports) {
   var utilContainsNewline = require_util_contains_newline();
   function flowIndentCheck(indent, fc, onError) {
@@ -3650,7 +3650,7 @@ var require_util_flow_indent_check = __commonJS(function(exports) {
   exports.flowIndentCheck = flowIndentCheck;
 });
 
-// ../specialists/node_modules/yaml/dist/compose/util-map-includes.js
+// node_modules/yaml/dist/compose/util-map-includes.js
 var require_util_map_includes = __commonJS(function(exports) {
   var identity = require_identity();
   function mapIncludes(ctx, items, search) {
@@ -3663,7 +3663,7 @@ var require_util_map_includes = __commonJS(function(exports) {
   exports.mapIncludes = mapIncludes;
 });
 
-// ../specialists/node_modules/yaml/dist/compose/resolve-block-map.js
+// node_modules/yaml/dist/compose/resolve-block-map.js
 var require_resolve_block_map = __commonJS(function(exports) {
   var Pair = require_Pair();
   var YAMLMap = require_YAMLMap();
@@ -3770,7 +3770,7 @@ var require_resolve_block_map = __commonJS(function(exports) {
   exports.resolveBlockMap = resolveBlockMap;
 });
 
-// ../specialists/node_modules/yaml/dist/compose/resolve-block-seq.js
+// node_modules/yaml/dist/compose/resolve-block-seq.js
 var require_resolve_block_seq = __commonJS(function(exports) {
   var YAMLSeq = require_YAMLSeq();
   var resolveProps = require_resolve_props();
@@ -3818,7 +3818,7 @@ var require_resolve_block_seq = __commonJS(function(exports) {
   exports.resolveBlockSeq = resolveBlockSeq;
 });
 
-// ../specialists/node_modules/yaml/dist/compose/resolve-end.js
+// node_modules/yaml/dist/compose/resolve-end.js
 var require_resolve_end = __commonJS(function(exports) {
   function resolveEnd(end, offset, reqSpace, onError) {
     let comment = "";
@@ -3858,7 +3858,7 @@ var require_resolve_end = __commonJS(function(exports) {
   exports.resolveEnd = resolveEnd;
 });
 
-// ../specialists/node_modules/yaml/dist/compose/resolve-flow-collection.js
+// node_modules/yaml/dist/compose/resolve-flow-collection.js
 var require_resolve_flow_collection = __commonJS(function(exports) {
   var identity = require_identity();
   var Pair = require_Pair();
@@ -4049,7 +4049,7 @@ var require_resolve_flow_collection = __commonJS(function(exports) {
   exports.resolveFlowCollection = resolveFlowCollection;
 });
 
-// ../specialists/node_modules/yaml/dist/compose/compose-collection.js
+// node_modules/yaml/dist/compose/compose-collection.js
 var require_compose_collection = __commonJS(function(exports) {
   var identity = require_identity();
   var Scalar = require_Scalar();
@@ -4111,7 +4111,7 @@ var require_compose_collection = __commonJS(function(exports) {
   exports.composeCollection = composeCollection;
 });
 
-// ../specialists/node_modules/yaml/dist/compose/resolve-block-scalar.js
+// node_modules/yaml/dist/compose/resolve-block-scalar.js
 var require_resolve_block_scalar = __commonJS(function(exports) {
   var Scalar = require_Scalar();
   function resolveBlockScalar(ctx, scalar, onError) {
@@ -4304,7 +4304,7 @@ var require_resolve_block_scalar = __commonJS(function(exports) {
   exports.resolveBlockScalar = resolveBlockScalar;
 });
 
-// ../specialists/node_modules/yaml/dist/compose/resolve-flow-scalar.js
+// node_modules/yaml/dist/compose/resolve-flow-scalar.js
 var require_resolve_flow_scalar = __commonJS(function(exports) {
   var Scalar = require_Scalar();
   var resolveEnd = require_resolve_end();
@@ -4521,7 +4521,7 @@ var require_resolve_flow_scalar = __commonJS(function(exports) {
   exports.resolveFlowScalar = resolveFlowScalar;
 });
 
-// ../specialists/node_modules/yaml/dist/compose/compose-scalar.js
+// node_modules/yaml/dist/compose/compose-scalar.js
 var require_compose_scalar = __commonJS(function(exports) {
   var identity = require_identity();
   var Scalar = require_Scalar();
@@ -4599,7 +4599,7 @@ var require_compose_scalar = __commonJS(function(exports) {
   exports.composeScalar = composeScalar;
 });
 
-// ../specialists/node_modules/yaml/dist/compose/util-empty-scalar-position.js
+// node_modules/yaml/dist/compose/util-empty-scalar-position.js
 var require_util_empty_scalar_position = __commonJS(function(exports) {
   function emptyScalarPosition(offset, before, pos) {
     if (before) {
@@ -4626,7 +4626,7 @@ var require_util_empty_scalar_position = __commonJS(function(exports) {
   exports.emptyScalarPosition = emptyScalarPosition;
 });
 
-// ../specialists/node_modules/yaml/dist/compose/compose-node.js
+// node_modules/yaml/dist/compose/compose-node.js
 var require_compose_node = __commonJS(function(exports) {
   var Alias = require_Alias();
   var identity = require_identity();
@@ -4729,7 +4729,7 @@ var require_compose_node = __commonJS(function(exports) {
   exports.composeNode = composeNode;
 });
 
-// ../specialists/node_modules/yaml/dist/compose/compose-doc.js
+// node_modules/yaml/dist/compose/compose-doc.js
 var require_compose_doc = __commonJS(function(exports) {
   var Document = require_Document();
   var composeNode = require_compose_node();
@@ -4769,7 +4769,7 @@ var require_compose_doc = __commonJS(function(exports) {
   exports.composeDoc = composeDoc;
 });
 
-// ../specialists/node_modules/yaml/dist/compose/composer.js
+// node_modules/yaml/dist/compose/composer.js
 var require_composer = __commonJS(function(exports) {
   var node_process = __require("process");
   var directives = require_directives();
@@ -4960,7 +4960,7 @@ ${end.comment}` : end.comment;
   exports.Composer = Composer;
 });
 
-// ../specialists/node_modules/yaml/dist/parse/cst-scalar.js
+// node_modules/yaml/dist/parse/cst-scalar.js
 var require_cst_scalar = __commonJS(function(exports) {
   var resolveBlockScalar = require_resolve_block_scalar();
   var resolveFlowScalar = require_resolve_flow_scalar();
@@ -5150,7 +5150,7 @@ var require_cst_scalar = __commonJS(function(exports) {
   exports.setScalarValue = setScalarValue;
 });
 
-// ../specialists/node_modules/yaml/dist/parse/cst-stringify.js
+// node_modules/yaml/dist/parse/cst-stringify.js
 var require_cst_stringify = __commonJS(function(exports) {
   var stringify = (cst) => ("type" in cst) ? stringifyToken(cst) : stringifyItem(cst);
   function stringifyToken(token) {
@@ -5208,7 +5208,7 @@ var require_cst_stringify = __commonJS(function(exports) {
   exports.stringify = stringify;
 });
 
-// ../specialists/node_modules/yaml/dist/parse/cst-visit.js
+// node_modules/yaml/dist/parse/cst-visit.js
 var require_cst_visit = __commonJS(function(exports) {
   var BREAK = Symbol("break visit");
   var SKIP = Symbol("skip children");
@@ -5267,7 +5267,7 @@ var require_cst_visit = __commonJS(function(exports) {
   exports.visit = visit;
 });
 
-// ../specialists/node_modules/yaml/dist/parse/cst.js
+// node_modules/yaml/dist/parse/cst.js
 var require_cst = __commonJS(function(exports) {
   var cstScalar = require_cst_scalar();
   var cstStringify = require_cst_stringify();
@@ -5368,7 +5368,7 @@ var require_cst = __commonJS(function(exports) {
   exports.tokenType = tokenType;
 });
 
-// ../specialists/node_modules/yaml/dist/parse/lexer.js
+// node_modules/yaml/dist/parse/lexer.js
 var require_lexer = __commonJS(function(exports) {
   var cst = require_cst();
   function isEmpty(ch) {
@@ -5965,7 +5965,7 @@ var require_lexer = __commonJS(function(exports) {
   exports.Lexer = Lexer;
 });
 
-// ../specialists/node_modules/yaml/dist/parse/line-counter.js
+// node_modules/yaml/dist/parse/line-counter.js
 var require_line_counter = __commonJS(function(exports) {
   class LineCounter {
     constructor() {
@@ -5993,7 +5993,7 @@ var require_line_counter = __commonJS(function(exports) {
   exports.LineCounter = LineCounter;
 });
 
-// ../specialists/node_modules/yaml/dist/parse/parser.js
+// node_modules/yaml/dist/parse/parser.js
 var require_parser = __commonJS(function(exports) {
   var node_process = __require("process");
   var cst = require_cst();
@@ -6849,7 +6849,7 @@ var require_parser = __commonJS(function(exports) {
   exports.Parser = Parser;
 });
 
-// ../specialists/node_modules/yaml/dist/public-api.js
+// node_modules/yaml/dist/public-api.js
 var require_public_api = __commonJS(function(exports) {
   var composer = require_composer();
   var Document = require_Document();
@@ -6958,7 +6958,7 @@ import {
   realpathSync as realpathSync2
 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
-import { isAbsolute as isAbsolute2, join as join8, relative, resolve as resolve10 } from "node:path";
+import { isAbsolute as isAbsolute2, join as join9, relative, resolve as resolve10 } from "node:path";
 
 // src/pi/session.ts
 import { createHash } from "node:crypto";
@@ -7021,14 +7021,66 @@ var REQUIRED_EXTENSION_TOOLS_ENV_KEY = "PI_SPECIALIST_REQUIRED_EXTENSION_TOOLS";
 
 // src/pi/permission-guard-extension.ts
 import { existsSync as existsSync3 } from "node:fs";
-import { dirname as dirname3, join as join3, resolve as resolve3 } from "node:path";
+import { dirname as dirname4, join as join4, resolve as resolve3 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
-var HERE3 = dirname3(fileURLToPath3(import.meta.url));
-var REL3 = join3("config", "pi-extensions", "permission-guard");
+
+// src/utils/runtime-diagnostics.ts
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname as dirname3, join as join3 } from "node:path";
+var STDERR_SINK = (line) => {
+  process.stderr.write(`${line}
+`);
+};
+var sink = STDERR_SINK;
+function setRuntimeDiagnosticsSink(next) {
+  sink = next ?? (() => {});
+}
+function runtimeDiagnosticsSinkPath(root) {
+  return join3(root, ".specialists", "logs", "runtime-diagnostics.log");
+}
+function createFileDiagnosticsSink(path) {
+  let directoryReady = false;
+  return (line) => {
+    try {
+      if (!directoryReady) {
+        mkdirSync(dirname3(path), { recursive: true });
+        directoryReady = true;
+      }
+      appendFileSync(path, `${new Date().toISOString()} ${line}
+`);
+    } catch {}
+  };
+}
+function describeDetail(detail) {
+  if (detail === undefined)
+    return "";
+  if (typeof detail === "string")
+    return `: ${detail}`;
+  try {
+    return `: ${JSON.stringify(detail)}`;
+  } catch {
+    return `: ${String(detail)}`;
+  }
+}
+function emit(level, tag, message, detail) {
+  sink(`[${level}]${tag ? ` [${tag}]` : ""} ${message}${describeDetail(detail)}`);
+}
+function runtimeWarn(tag, message, detail) {
+  emit("WARN", tag, message, detail);
+}
+function runtimeDebug(tag, message, detail) {
+  if (!process.env.DEBUG)
+    return;
+  emit("DEBUG", tag, message, detail);
+}
+
+// src/pi/permission-guard-extension.ts
+var HERE3 = dirname4(fileURLToPath3(import.meta.url));
+var REL3 = join4("config", "pi-extensions", "permission-guard");
 var CANDIDATES3 = [
-  join3(HERE3, "..", REL3),
-  join3(HERE3, "..", "..", REL3),
-  join3(HERE3, "..", "..", "..", REL3)
+  join4(HERE3, "..", REL3),
+  join4(HERE3, "..", "..", REL3),
+  join4(HERE3, "..", "..", "..", REL3)
 ];
 var PERMISSION_GUARD_ENV_KEY = "SPECIALISTS_PERMISSION_GUARD";
 var PERMISSION_GUARD_TIER_ENV_KEY = "PI_SPECIALIST_PERMISSION_TIER";
@@ -7037,7 +7089,7 @@ function getPermissionGuardExtensionPath() {
   if (cached3 !== undefined)
     return cached3;
   for (const candidate of CANDIDATES3) {
-    if (existsSync3(join3(candidate, "index.mjs"))) {
+    if (existsSync3(join4(candidate, "index.mjs"))) {
       cached3 = resolve3(candidate);
       return cached3;
     }
@@ -7063,7 +7115,7 @@ function resolvePermissionGuardForSpawn(tier) {
     return null;
   const path = getPermissionGuardExtensionPath();
   if (!path) {
-    console.warn("[permission-guard] guard artifact config/pi-extensions/permission-guard is missing; " + "READ_ONLY bash withheld.");
+    runtimeWarn("permission-guard", "guard artifact config/pi-extensions/permission-guard is missing; READ_ONLY bash withheld.");
     return null;
   }
   return { path, tierEnv: { [PERMISSION_GUARD_TIER_ENV_KEY]: "READ_ONLY" } };
@@ -7071,13 +7123,13 @@ function resolvePermissionGuardForSpawn(tier) {
 
 // src/pi/python-kernel-extension.ts
 import { existsSync as existsSync4 } from "node:fs";
-import { dirname as dirname4, join as join4, resolve as resolve4 } from "node:path";
+import { dirname as dirname5, join as join5, resolve as resolve4 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
-var HERE4 = dirname4(fileURLToPath4(import.meta.url));
-var PACKAGE_DIR = join4("@jaggerxtrm", "pi-extensions");
-var EXT_REL = join4("extensions", "python-kernel", "index.ts");
+var HERE4 = dirname5(fileURLToPath4(import.meta.url));
+var PACKAGE_DIR = join5("@jaggerxtrm", "pi-extensions");
+var EXT_REL = join5("extensions", "python-kernel", "index.ts");
 function findGlobalEntry(...segments) {
-  const found = resolveGlobalNodeModulesDirs().map((root) => join4(root, ...segments)).find((candidate) => existsSync4(candidate));
+  const found = resolveGlobalNodeModulesDirs().map((root) => join5(root, ...segments)).find((candidate) => existsSync4(candidate));
   return found ? resolve4(found) : null;
 }
 var cached4;
@@ -7090,13 +7142,13 @@ function getPiExtensionsPythonKernelPath() {
 function resolvePiExtensionsPythonKernelPath() {
   return getPiExtensionsPythonKernelPath();
 }
-var SK_PACKAGE_DIR = join4("@jaggerxtrm", "pi-service-knowledge");
+var SK_PACKAGE_DIR = join5("@jaggerxtrm", "pi-service-knowledge");
 
 // src/pi/session.ts
 import { spawn, execFileSync } from "node:child_process";
-import { existsSync as existsSync6, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync as existsSync6, lstatSync, mkdirSync as mkdirSync2, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { isAbsolute, resolve as resolve5, sep, join as join5, dirname as dirname5 } from "node:path";
+import { isAbsolute, resolve as resolve5, sep, join as join6, dirname as dirname6 } from "node:path";
 
 // src/pi/backendMap.ts
 var BACKEND_MAP = {
@@ -7408,7 +7460,7 @@ function formatResolvedToolContract(contract, admission = "tool-policy-gate") {
 `);
 }
 
-// ../specialists/node_modules/zod/v3/helpers/util.js
+// node_modules/zod/v3/helpers/util.js
 var util;
 (function(util2) {
   util2.assertEqual = (_) => {};
@@ -7539,7 +7591,7 @@ var getParsedType = (data) => {
   }
 };
 
-// ../specialists/node_modules/zod/v3/ZodError.js
+// node_modules/zod/v3/ZodError.js
 var ZodIssueCode = util.arrayToEnum([
   "invalid_type",
   "invalid_literal",
@@ -7653,7 +7705,7 @@ ZodError.create = (issues) => {
   return error;
 };
 
-// ../specialists/node_modules/zod/v3/locales/en.js
+// node_modules/zod/v3/locales/en.js
 var errorMap = (issue, _ctx) => {
   let message;
   switch (issue.code) {
@@ -7756,13 +7808,13 @@ var errorMap = (issue, _ctx) => {
 };
 var en_default = errorMap;
 
-// ../specialists/node_modules/zod/v3/errors.js
+// node_modules/zod/v3/errors.js
 var overrideErrorMap = en_default;
 function getErrorMap() {
   return overrideErrorMap;
 }
 
-// ../specialists/node_modules/zod/v3/helpers/parseUtil.js
+// node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
   const { data, path, errorMaps, issueData } = params;
   const fullPath = [...path, ...issueData.path || []];
@@ -7868,14 +7920,14 @@ var isDirty = (x) => x.status === "dirty";
 var isValid = (x) => x.status === "valid";
 var isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
 
-// ../specialists/node_modules/zod/v3/helpers/errorUtil.js
+// node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil;
 (function(errorUtil2) {
   errorUtil2.errToObj = (message) => typeof message === "string" ? { message } : message || {};
   errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
 })(errorUtil || (errorUtil = {}));
 
-// ../specialists/node_modules/zod/v3/types.js
+// node_modules/zod/v3/types.js
 class ParseInputLazyPath {
   constructor(parent, value, path, key) {
     this._cachedPath = [];
@@ -11638,7 +11690,7 @@ function resolveGitnexusRuntime(options) {
       extensionState: { enabled: true, health: "not_installed", catalogCompatible: false }
     };
   }
-  const packageJsonPath = join5(packagePath, "package.json");
+  const packageJsonPath = join6(packagePath, "package.json");
   const installedVersion = readPackageVersion(packageJsonPath);
   if (!installedVersion) {
     return {
@@ -11679,9 +11731,9 @@ function resolvePiExtensionsPythonKernelRuntime(options) {
       extensionState: { enabled: true, health: "not_installed", catalogCompatible: false }
     };
   }
-  const packageJsonPath = join5(packagePath, "package.json");
+  const packageJsonPath = join6(packagePath, "package.json");
   const installedVersion = readPackageVersion(packageJsonPath);
-  const extPath = join5(packagePath, "extensions", "python-kernel", "index.ts");
+  const extPath = join6(packagePath, "extensions", "python-kernel", "index.ts");
   if (!installedVersion || !existsSync6(extPath)) {
     return {
       packageName,
@@ -11788,7 +11840,7 @@ function canonicalizeLocalExtensionIdentity(source) {
   try {
     const stat = statSync(candidate);
     if (stat.isDirectory()) {
-      const indexCandidate = join5(candidate, "index.ts");
+      const indexCandidate = join6(candidate, "index.ts");
       if (existsSync6(indexCandidate))
         candidate = indexCandidate;
     }
@@ -11864,20 +11916,20 @@ function resolveExecutionExtensionSelection(extensions) {
 }
 function resolveCuratedExtensionPaths(options) {
   const all = [];
-  const piExtDir = join5(homedir(), ".pi", "agent", "extensions");
+  const piExtDir = join6(homedir(), ".pi", "agent", "extensions");
   const permLevel = (options.permissionLevel ?? "").toUpperCase();
   if (permLevel !== "READ_ONLY") {
-    const qgPath = join5(piExtDir, "quality-gates");
+    const qgPath = join6(piExtDir, "quality-gates");
     if (existsSync6(qgPath))
       all.push(qgPath);
   }
   const pyKernelPath = resolvePiExtensionsPythonKernelPath();
   if (pyKernelPath && permLevel !== "READ_ONLY")
     all.push(pyKernelPath);
-  const cavemanPath = join5(piExtDir, "caveman");
+  const cavemanPath = join6(piExtDir, "caveman");
   if (existsSync6(cavemanPath))
     all.push(cavemanPath);
-  const nvidiaNimPath = join5(homedir(), ".pi", "agent", "git", "github.com", "xRyul", "pi-nvidia-nim");
+  const nvidiaNimPath = join6(homedir(), ".pi", "agent", "git", "github.com", "xRyul", "pi-nvidia-nim");
   if (existsSync6(nvidiaNimPath))
     all.push(nvidiaNimPath);
   const gitnexusContract = options.resolvedToolContract?.extensions.gitnexus;
@@ -11915,7 +11967,7 @@ function resolvePiVersion() {
   try {
     const packageDir = resolveGlobalPackageDir("@earendil-works/pi-coding-agent");
     if (packageDir) {
-      const parsed = JSON.parse(readFileSync(join5(packageDir, "package.json"), "utf-8"));
+      const parsed = JSON.parse(readFileSync(join6(packageDir, "package.json"), "utf-8"));
       if (typeof parsed.version === "string" && parsed.version.length > 0) {
         cachedPiVersion = parsed.version;
         return cachedPiVersion;
@@ -11932,25 +11984,25 @@ function resolveGlobalNodeModulesDirs(deps = {}) {
   const readDir = deps.readDir ?? ((path) => readdirSync(path));
   const candidates = [
     env.PI_NPM_GLOBAL_DIR,
-    env.NPM_CONFIG_PREFIX ? join5(env.NPM_CONFIG_PREFIX, "lib", "node_modules") : undefined,
-    env.npm_config_prefix ? join5(env.npm_config_prefix, "lib", "node_modules") : undefined,
-    env.NVM_BIN ? join5(dirname5(env.NVM_BIN), "lib", "node_modules") : undefined,
-    join5(dirname5(dirname5(execPath)), "lib", "node_modules"),
-    env.BUN_INSTALL ? join5(env.BUN_INSTALL, "install", "global", "node_modules") : undefined,
-    join5(home, ".bun", "install", "global", "node_modules"),
-    join5(home, ".nvm/versions/node", process.version, "lib", "node_modules"),
+    env.NPM_CONFIG_PREFIX ? join6(env.NPM_CONFIG_PREFIX, "lib", "node_modules") : undefined,
+    env.npm_config_prefix ? join6(env.npm_config_prefix, "lib", "node_modules") : undefined,
+    env.NVM_BIN ? join6(dirname6(env.NVM_BIN), "lib", "node_modules") : undefined,
+    join6(dirname6(dirname6(execPath)), "lib", "node_modules"),
+    env.BUN_INSTALL ? join6(env.BUN_INSTALL, "install", "global", "node_modules") : undefined,
+    join6(home, ".bun", "install", "global", "node_modules"),
+    join6(home, ".nvm/versions/node", process.version, "lib", "node_modules"),
     ...nvmNodeModulesDirs(home, readDir)
   ].filter((candidate) => Boolean(candidate));
   return [...new Set(candidates)].filter((candidate) => exists(candidate));
 }
 function resolveGlobalPackageDir(packageName, deps = {}) {
   const exists = deps.exists ?? existsSync6;
-  return resolveGlobalNodeModulesDirs(deps).map((root) => join5(root, packageName)).find((dir) => exists(join5(dir, "package.json")));
+  return resolveGlobalNodeModulesDirs(deps).map((root) => join6(root, packageName)).find((dir) => exists(join6(dir, "package.json")));
 }
 function nvmNodeModulesDirs(home, readDir) {
-  const root = join5(home, ".nvm", "versions", "node");
+  const root = join6(home, ".nvm", "versions", "node");
   try {
-    return readDir(root).filter((version) => version.startsWith("v")).sort().reverse().map((version) => join5(root, version, "lib", "node_modules"));
+    return readDir(root).filter((version) => version.startsWith("v")).sort().reverse().map((version) => join6(root, version, "lib", "node_modules"));
   } catch {
     return [];
   }
@@ -12144,15 +12196,15 @@ var WRITE_BOUNDARY_TOOL_NAMES = new Set(["edit", "write", "multiEdit", "notebook
 var WORKTREE_BOUNDARY_ENV_KEY = "SPECIALISTS_WORKTREE_BOUNDARY";
 function getWorktreeBoundaryExtensionPath(worktreeBoundary) {
   const boundaryHash = createHash("sha256").update(resolve5(worktreeBoundary)).digest("hex").slice(0, 16);
-  const extensionsDir = join5(tmpdir(), "specialists-pi-extensions");
+  const extensionsDir = join6(tmpdir(), "specialists-pi-extensions");
   try {
-    mkdirSync(extensionsDir, { recursive: true });
+    mkdirSync2(extensionsDir, { recursive: true });
   } catch (err) {
     process.stderr.write(`[worktree-boundary] WARN: could not create extensions directory at ${extensionsDir}: ${err.message}. ` + `Boundary enforcement will NOT apply for this session.
 `);
     return null;
   }
-  const extensionPath = join5(extensionsDir, `worktree-boundary-${boundaryHash}.mjs`);
+  const extensionPath = join6(extensionsDir, `worktree-boundary-${boundaryHash}.mjs`);
   if (existsSync6(extensionPath))
     return extensionPath;
   const extensionSource = `
@@ -13014,7 +13066,7 @@ function loadMandatoryRulesIndex(cwd) {
     tiers.push(readJsonFile(packageLiveIndexPath));
   }
   if (tiers.length === 0) {
-    console.warn("[specialist runner] Missing mandatory-rules index (checked config/, .specialists/default/, .specialists/); skipping MANDATORY_RULES injection");
+    runtimeWarn("specialist runner", "Missing mandatory-rules index (checked config/, .specialists/default/, .specialists/); skipping MANDATORY_RULES injection");
     return null;
   }
   return tiers.reduce((acc, next) => mergeIndex(acc, next));
@@ -13105,7 +13157,7 @@ function parseMandatoryRulesFrontmatter(content, setId) {
 }
 function readMandatoryRuleSet(cwd, id) {
   if (!/^[a-z][a-z0-9-]*$/.test(id)) {
-    console.warn(`[specialist runner] Rejecting unsafe mandatory-rules set id '${id}' (must be kebab-case)`);
+    runtimeWarn("specialist runner", `Rejecting unsafe mandatory-rules set id '${id}' (must be kebab-case)`);
     return null;
   }
   const packageCanonicalDir = resolveCanonicalAssetDir("mandatory-rules");
@@ -13166,7 +13218,7 @@ function collectMandatoryRuleSets(cwd, setIds) {
     seen.add(id);
     const set = readMandatoryRuleSet(cwd, id);
     if (!set) {
-      console.warn(`[specialist runner] Missing mandatory-rules set: ${id}`);
+      runtimeWarn("specialist runner", `Missing mandatory-rules set: ${id}`);
       continue;
     }
     sets.push(set);
@@ -13242,7 +13294,7 @@ function resolveModelChain(execution) {
 function resolveFallbackModels(execution) {
   if (execution.fallback_models && execution.fallback_models.length > 0) {
     if (normalizeModel(execution.fallback_model ?? null)) {
-      console.debug(`[model-chain] plural fallback_models wins; ignoring fallback_model=${execution.fallback_model}`);
+      runtimeDebug("model-chain", `plural fallback_models wins; ignoring fallback_model=${execution.fallback_model}`);
     }
     return execution.fallback_models.map(normalizeModel).filter((model) => model !== null);
   }
@@ -13258,9 +13310,9 @@ function dedupeModels(models) {
 }
 
 // src/specialist/observability-db.ts
-import { chmodSync, existsSync as existsSync8, mkdirSync as mkdirSync2, readFileSync as readFileSync3, writeFileSync as writeFileSync2 } from "node:fs";
+import { chmodSync, existsSync as existsSync8, mkdirSync as mkdirSync3, readFileSync as readFileSync3, writeFileSync as writeFileSync2 } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { join as join6, sep as sep2, resolve as resolvePath } from "node:path";
+import { join as join7, sep as sep2, resolve as resolvePath } from "node:path";
 var OBSERVABILITY_DB_FILENAME = "observability.db";
 var DEFAULT_DB_DIRECTORY_RELATIVE_TO_GIT_ROOT = [".specialists", "db"];
 function resolveGitRootFrom(cwd) {
@@ -13288,10 +13340,10 @@ function resolveGitRootFrom(cwd) {
 function resolveDbDirectory(gitRoot) {
   const xdgDataHome = process.env.XDG_DATA_HOME?.trim();
   if (xdgDataHome) {
-    return { directory: join6(xdgDataHome, "specialists"), source: "xdg-data-home" };
+    return { directory: join7(xdgDataHome, "specialists"), source: "xdg-data-home" };
   }
   return {
-    directory: join6(gitRoot, ...DEFAULT_DB_DIRECTORY_RELATIVE_TO_GIT_ROOT),
+    directory: join7(gitRoot, ...DEFAULT_DB_DIRECTORY_RELATIVE_TO_GIT_ROOT),
     source: "git-root"
   };
 }
@@ -13306,7 +13358,7 @@ function resolveObservabilityDbLocation(cwd = process.cwd()) {
   const gitRoot = resolveGitRootFrom(cwd);
   const resolved = resolveDbDirectory(gitRoot);
   const directory = relocateIfForbidden(resolved.directory);
-  const dbPath = join6(directory, OBSERVABILITY_DB_FILENAME);
+  const dbPath = join7(directory, OBSERVABILITY_DB_FILENAME);
   return {
     gitRoot,
     dbDirectory: directory,
@@ -13317,7 +13369,7 @@ function resolveObservabilityDbLocation(cwd = process.cwd()) {
   };
 }
 function ensureObservabilityDbFile(location) {
-  mkdirSync2(location.dbDirectory, { recursive: true });
+  mkdirSync3(location.dbDirectory, { recursive: true });
   const alreadyExists = existsSync8(location.dbPath);
   if (alreadyExists) {
     chmodSync(location.dbPath, 420);
@@ -13326,8 +13378,8 @@ function ensureObservabilityDbFile(location) {
 }
 
 // src/specialist/observability-sqlite.ts
-import { existsSync as existsSync9, mkdirSync as mkdirSync3, readFileSync as readFileSync4, statSync as statSync2 } from "node:fs";
-import { dirname as dirname6, join as join7, normalize, resolve as resolve7 } from "node:path";
+import { existsSync as existsSync9, mkdirSync as mkdirSync4, readFileSync as readFileSync4, statSync as statSync2 } from "node:fs";
+import { dirname as dirname7, join as join8, normalize, resolve as resolve7 } from "node:path";
 
 // src/specialist/forensic-events.ts
 var FORENSIC_SCHEMA_VERSION = "xtrm.forensic.v1";
@@ -16761,7 +16813,7 @@ function openObservabilitySqliteClient(dbPath) {
     initDb.close();
     return new SqliteClient(dbPath);
   } catch (error) {
-    console.warn(`[observability-sqlite] Failed to open observability database at ${dbPath}: ${String(error)}`);
+    runtimeWarn("observability-sqlite", `Failed to open observability database at ${dbPath}`, String(error));
     return null;
   }
 }
@@ -16772,7 +16824,7 @@ function createObservabilitySqliteClient(cwd = process.cwd()) {
   return openObservabilitySqliteClient(location.dbPath);
 }
 function createObservabilitySqliteClientAtPath(dbPath) {
-  mkdirSync3(dirname6(dbPath), { recursive: true });
+  mkdirSync4(dirname7(dbPath), { recursive: true });
   return openObservabilitySqliteClient(dbPath);
 }
 function migrateToV16(db) {
@@ -16799,7 +16851,7 @@ function migrateToV16(db) {
 }
 
 // src/specialist/task-prompt.ts
-import { basename, dirname as dirname7 } from "node:path";
+import { basename, dirname as dirname8 } from "node:path";
 import { createHash as createHash3 } from "node:crypto";
 
 // src/specialist/templateEngine.ts
@@ -16948,7 +17000,7 @@ class BeadsClient {
   constructor() {
     this.available = BeadsClient.checkAvailable();
     if (!this.available) {
-      console.warn("[specialists] bd CLI not found — beads tracking disabled");
+      runtimeWarn("specialists", "bd CLI not found — beads tracking disabled");
     }
   }
   static checkAvailable() {
@@ -16980,7 +17032,7 @@ class BeadsClient {
         return null;
       return bead;
     } catch (err) {
-      console.warn(`[specialists] readBead: JSON parse failed for id=${id}: ${err}`);
+      runtimeWarn("specialists", `readBead: JSON parse failed for id=${id}: ${err}`);
       return null;
     }
   }
@@ -17140,7 +17192,7 @@ function extractMustacheTokens(template) {
 function deriveSkillName(path) {
   const base = basename(path);
   if (base === "SKILL.md")
-    return basename(dirname7(path));
+    return basename(dirname8(path));
   return base.endsWith(".md") ? base.slice(0, -3) : base;
 }
 function buildSkillPrefix(specialist, surface) {
@@ -18597,7 +18649,7 @@ function canonicalizeSkillPath(field, path, baseDir) {
       throw new Error("not a file or directory");
     accessSync(canonical, stat.isDirectory() ? constants.R_OK | constants.X_OK : constants.R_OK);
     if (stat.isDirectory()) {
-      const skillFile = join8(canonical, "SKILL.md");
+      const skillFile = join9(canonical, "SKILL.md");
       const skillStat = lstatSync2(skillFile);
       if (skillStat.isSymbolicLink() || !skillStat.isFile())
         throw new Error("invalid SKILL.md");
@@ -18677,7 +18729,7 @@ function readSkillSourceBytes(path, noFollowFlag) {
   const declaredStat = lstatSync2(path);
   if (declaredStat.isSymbolicLink())
     throw new Error("symlinked skill source");
-  const sourcePath = declaredStat.isDirectory() ? join8(path, "SKILL.md") : path;
+  const sourcePath = declaredStat.isDirectory() ? join9(path, "SKILL.md") : path;
   if (realpathSync2(sourcePath) !== sourcePath)
     throw new Error("skill file canonical path changed");
   const sourceStat = lstatSync2(sourcePath);
@@ -19371,13 +19423,13 @@ function appendExtensionArgs(args, spec, resolvedToolContract, extensionSources 
   const readLineNumbersPath = getReadLineNumbersExtensionPath();
   if (readLineNumbersPath)
     args.push("-e", readLineNumbersPath);
-  const piExtDir = join8(homedir3(), ".pi", "agent", "extensions");
+  const piExtDir = join9(homedir3(), ".pi", "agent", "extensions");
   if (permissionLevel !== "READ_ONLY") {
-    const qualityGatesPath = join8(piExtDir, "quality-gates");
+    const qualityGatesPath = join9(piExtDir, "quality-gates");
     if (existsSync12(qualityGatesPath))
       args.push("-e", qualityGatesPath);
   }
-  const cavemanPath = join8(piExtDir, "caveman");
+  const cavemanPath = join9(piExtDir, "caveman");
   if (existsSync12(cavemanPath))
     args.push("-e", cavemanPath);
   const gitnexusContract = resolvedToolContract?.extensions.gitnexus;
@@ -19678,11 +19730,11 @@ function isAuthFailureMessage(message) {
 }
 // src/specialist/loader.ts
 import { readdir, readFile, stat } from "node:fs/promises";
-import { basename as basename3, join as join12 } from "node:path";
+import { basename as basename3, join as join13 } from "node:path";
 import { existsSync as existsSync15, realpathSync as realpathSync4 } from "node:fs";
 import { homedir as homedir6 } from "node:os";
 
-// ../specialists/node_modules/yaml/dist/index.js
+// node_modules/yaml/dist/index.js
 var composer = require_composer();
 var Document = require_Document();
 var Schema = require_Schema();
@@ -19952,13 +20004,13 @@ ${result.warnings.map((w) => `  ⚠ ${w}`).join(`
 // src/specialist/global-config.ts
 import {
   existsSync as existsSync13,
-  mkdirSync as mkdirSync4,
+  mkdirSync as mkdirSync5,
   readFileSync as readFileSync7,
   renameSync,
   rmSync,
   writeFileSync as writeFileSync3
 } from "node:fs";
-import { dirname as dirname8, join as join9 } from "node:path";
+import { dirname as dirname9, join as join10 } from "node:path";
 import { homedir as homedir4 } from "node:os";
 var CONFIG_FILENAME = "user.json";
 var SPECIALISTS_SUBDIR = "specialists";
@@ -19966,14 +20018,14 @@ function getGlobalUserConfigPath() {
   const home = process.env.HOME?.trim() || homedir4();
   const xdgConfigHome = process.env.XDG_CONFIG_HOME?.trim();
   if (xdgConfigHome) {
-    const xdgPath = join9(xdgConfigHome, SPECIALISTS_SUBDIR, CONFIG_FILENAME);
+    const xdgPath = join10(xdgConfigHome, SPECIALISTS_SUBDIR, CONFIG_FILENAME);
     return { path: xdgPath, exists: existsSync13(xdgPath), source: "xdg" };
   }
-  const configHomePath = join9(home, ".config", SPECIALISTS_SUBDIR, CONFIG_FILENAME);
+  const configHomePath = join10(home, ".config", SPECIALISTS_SUBDIR, CONFIG_FILENAME);
   if (existsSync13(configHomePath)) {
     return { path: configHomePath, exists: true, source: "config-home" };
   }
-  const legacyPath = join9(home, ".specialists", CONFIG_FILENAME);
+  const legacyPath = join10(home, ".specialists", CONFIG_FILENAME);
   if (existsSync13(legacyPath)) {
     return { path: legacyPath, exists: true, source: "legacy" };
   }
@@ -20032,7 +20084,7 @@ function readGlobalUserConfig(location) {
 
 // src/specialist/preset-resolver.ts
 import { existsSync as existsSync14, readFileSync as readFileSync8 } from "node:fs";
-import { join as join10 } from "node:path";
+import { join as join11 } from "node:path";
 var PRESET_REFERENCE_PREFIX = "@preset/";
 var PRESET_REFERENCE_MAX_DEPTH = 4;
 var presetsCache = null;
@@ -20114,8 +20166,8 @@ function loadPresets(options = {}) {
   if (presetsCache && presetsCacheBaseDir === baseDir && !options.force)
     return presetsCache;
   const paths = [
-    join10(baseDir, "config", "presets.json"),
-    join10(baseDir, "config", "specialists", "presets.json")
+    join11(baseDir, "config", "presets.json"),
+    join11(baseDir, "config", "specialists", "presets.json")
   ];
   for (const path of paths) {
     if (!existsSync14(path))
@@ -20222,7 +20274,7 @@ function formatReferenceLocation(specialist, fieldPath) {
 // src/specialist/project-pack-skill-resolver.ts
 import { accessSync as accessSync2, constants as constants2, readdirSync as readdirSync2, lstatSync as lstatSync3, realpathSync as realpathSync3 } from "node:fs";
 import { homedir as homedir5 } from "node:os";
-import { join as join11, relative as relative2, isAbsolute as isAbsolute3 } from "node:path";
+import { join as join12, relative as relative2, isAbsolute as isAbsolute3 } from "node:path";
 var RESERVED_SKILL_ROOTS = [
   "default",
   "optional",
@@ -20280,9 +20332,9 @@ function isBareLogicalSkillName(declared) {
 }
 function resolveSkillPath(declared, ctx) {
   if (declared.startsWith("~/"))
-    return join11(process.env.HOME || "", declared.slice(2));
+    return join12(process.env.HOME || "", declared.slice(2));
   if (declared.startsWith("./"))
-    return join11(ctx.fileDir, declared.slice(2));
+    return join12(ctx.fileDir, declared.slice(2));
   if (isBareLogicalSkillName(declared))
     return resolveBareLogicalSkill(declared, ctx.consumerRoot);
   return declared;
@@ -20292,7 +20344,7 @@ function isPathInside(candidate, root) {
   return rel === "" || rel.length > 0 && !rel.startsWith("..") && !isAbsolute3(rel);
 }
 function globalDefaultCandidate(skillName) {
-  return join11(homedir5(), ".xtrm", "skills", "default", skillName);
+  return join12(homedir5(), ".xtrm", "skills", "default", skillName);
 }
 function probeCandidate(skillName, canonicalConsumer, canonicalSkillsRoot, candidate) {
   const candidateRel = relative2(canonicalConsumer, candidate);
@@ -20310,7 +20362,7 @@ function probeCandidate(skillName, canonicalConsumer, canonicalSkillsRoot, candi
   if (!dirStat.isDirectory()) {
     throw new ProjectPackSkillSecurityError(skillName, candidateRel, "is not a directory (ENOTDIR); expected a skill directory");
   }
-  const skillFile = join11(candidate, "SKILL.md");
+  const skillFile = join12(candidate, "SKILL.md");
   const skillFileRel = relative2(canonicalConsumer, skillFile);
   let mdStat;
   try {
@@ -20354,7 +20406,7 @@ function resolveBareLogicalSkill(skillName, consumerRoot) {
       return globalDefaultCandidate(skillName);
     throw wrapFsError(skillName, ".", "resolving the consumer root", error);
   }
-  const skillsRoot = join11(canonicalConsumer, ".xtrm", "skills");
+  const skillsRoot = join12(canonicalConsumer, ".xtrm", "skills");
   let canonicalSkillsRoot;
   try {
     canonicalSkillsRoot = realpathSync3(skillsRoot);
@@ -20378,7 +20430,7 @@ function resolveBareLogicalSkill(skillName, consumerRoot) {
   for (const entry of entries) {
     if (entry.isSymbolicLink()) {
       if (!RESERVED_SKILL_ROOTS.includes(entry.name)) {
-        throw new ProjectPackSkillSecurityError(skillName, join11(".xtrm", "skills", entry.name), "is a symlink; symlinked pack directories are rejected");
+        throw new ProjectPackSkillSecurityError(skillName, join12(".xtrm", "skills", entry.name), "is a symlink; symlinked pack directories are rejected");
       }
       continue;
     }
@@ -20391,7 +20443,7 @@ function resolveBareLogicalSkill(skillName, consumerRoot) {
   packs.sort();
   const matches = [];
   for (const pack of packs) {
-    const candidate = join11(canonicalSkillsRoot, pack, skillName);
+    const candidate = join12(canonicalSkillsRoot, pack, skillName);
     const resolved = probeCandidate(skillName, canonicalConsumer, canonicalSkillsRoot, candidate);
     if (resolved)
       matches.push(resolved);
@@ -20405,16 +20457,16 @@ function resolveBareLogicalSkill(skillName, consumerRoot) {
   return repoDefaultCandidate(skillName, canonicalConsumer, canonicalSkillsRoot) ?? globalDefaultCandidate(skillName);
 }
 function repoDefaultCandidate(skillName, canonicalConsumer, canonicalSkillsRoot) {
-  const defaultRoot = join11(canonicalSkillsRoot, "default");
+  const defaultRoot = join12(canonicalSkillsRoot, "default");
   try {
     if (!lstatSync3(defaultRoot).isDirectory())
       return null;
   } catch (error) {
     if (error?.code === "ENOENT")
       return null;
-    throw wrapFsError(skillName, join11(".xtrm", "skills", "default"), "probing the repo default root", error);
+    throw wrapFsError(skillName, join12(".xtrm", "skills", "default"), "probing the repo default root", error);
   }
-  return probeCandidate(skillName, canonicalConsumer, canonicalSkillsRoot, join11(defaultRoot, skillName));
+  return probeCandidate(skillName, canonicalConsumer, canonicalSkillsRoot, join12(defaultRoot, skillName));
 }
 
 // src/specialist/loader.ts
@@ -20469,15 +20521,15 @@ class SpecialistLoader {
   getHomeUserDir() {
     if (!this.homeDir)
       return null;
-    return join12(this.homeDir, ".specialists", "user");
+    return join13(this.homeDir, ".specialists", "user");
   }
   getScanDirs() {
     const homeUserDir = this.getHomeUserDir();
     const dirs = [
-      { path: join12(this.projectDir, ".specialists", "user"), scope: "user", source: "user" },
-      { path: join12(this.projectDir, ".specialists", "user", "specialists"), scope: "user", source: "legacy" },
+      { path: join13(this.projectDir, ".specialists", "user"), scope: "user", source: "user" },
+      { path: join13(this.projectDir, ".specialists", "user", "specialists"), scope: "user", source: "legacy" },
       ...homeUserDir ? [{ path: homeUserDir, scope: "home", source: "home" }] : [],
-      { path: join12(this.projectDir, "config", "specialists"), scope: "package", source: "package-fallback" },
+      { path: join13(this.projectDir, "config", "specialists"), scope: "package", source: "package-fallback" },
       { path: resolveCanonicalAssetDir("specialists") ?? "", scope: "package", source: "package-live" }
     ];
     return dirs.filter((d) => d.path && existsSync15(d.path));
@@ -20488,11 +20540,11 @@ class SpecialistLoader {
     return JSON.stringify($parse(content));
   }
   resolveSpecialistPath(dirPath, specialistName) {
-    const jsonPath = join12(dirPath, `${specialistName}.specialist.json`);
+    const jsonPath = join13(dirPath, `${specialistName}.specialist.json`);
     if (existsSync15(jsonPath)) {
       return { filePath: jsonPath, deprecatedYaml: false };
     }
-    const yamlPath = join12(dirPath, `${specialistName}.specialist.yaml`);
+    const yamlPath = join13(dirPath, `${specialistName}.specialist.yaml`);
     if (existsSync15(yamlPath)) {
       return { filePath: yamlPath, deprecatedYaml: true };
     }
@@ -20953,13 +21005,13 @@ import { existsSync as existsSync21 } from "node:fs";
 import { existsSync as existsSync16 } from "node:fs";
 import { createRequire as createRequire3 } from "node:module";
 import { homedir as homedir8 } from "node:os";
-import { dirname as dirname10, join as join14 } from "node:path";
+import { dirname as dirname11, join as join15 } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // src/activation/authority-store.ts
 import { createRequire as createRequire2 } from "node:module";
 import { homedir as homedir7 } from "node:os";
-import { dirname as dirname9, join as join13 } from "node:path";
+import { dirname as dirname10, join as join14 } from "node:path";
 var require2 = createRequire2(import.meta.url);
 function resolveAuthorityDbPath(env = process.env) {
   const substrate = (env.SUBSTRATE_DB ?? "").trim();
@@ -20968,7 +21020,7 @@ function resolveAuthorityDbPath(env = process.env) {
   const legacy = (env.XTRM_STATE_DB ?? "").trim();
   if (legacy)
     return legacy;
-  return join13(homedir7(), ".xtrm", "state.db");
+  return join14(homedir7(), ".xtrm", "state.db");
 }
 var NULL_AUTHORITY_WRITER = { record: () => {}, remove: () => {} };
 
@@ -20982,20 +21034,20 @@ function resolveSubstrateDir(explicit, resolveInstalled) {
   if (resolveInstalled)
     return resolveInstalled();
   try {
-    return dirname10(require3.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
+    return dirname11(require3.resolve(`${SUBSTRATE_PACKAGE}/package.json`));
   } catch {}
   return resolveSubstrateFromGlobalPrefix();
 }
 function resolveSubstrateFromGlobalPrefix(libDirs) {
-  const runtimePrefix = dirname10(dirname10(process.execPath));
+  const runtimePrefix = dirname11(dirname11(process.execPath));
   const candidates = uniqueExistingLibDirs(libDirs ?? [
-    ...resolveGlobalNodeModulesDirs().map((modulesDir) => dirname10(modulesDir)),
-    join14(runtimePrefix, "lib"),
-    join14(homedir8(), ".bun", "install", "global")
+    ...resolveGlobalNodeModulesDirs().map((modulesDir) => dirname11(modulesDir)),
+    join15(runtimePrefix, "lib"),
+    join15(homedir8(), ".bun", "install", "global")
   ]);
   for (const libDir of candidates) {
     try {
-      return dirname10(require3.resolve(`${SUBSTRATE_PACKAGE}/package.json`, { paths: [libDir] }));
+      return dirname11(require3.resolve(`${SUBSTRATE_PACKAGE}/package.json`, { paths: [libDir] }));
     } catch {}
   }
   return null;
@@ -21006,7 +21058,7 @@ function uniqueExistingLibDirs(candidates) {
   for (const candidate of candidates) {
     if (!candidate)
       continue;
-    const normalized = join14(candidate);
+    const normalized = join15(candidate);
     if (seen.has(normalized))
       continue;
     seen.add(normalized);
@@ -21339,10 +21391,10 @@ function missingSubstrateIssueMethodsIn(issueServiceModule) {
   return SUBSTRATE_REQUIRED_ISSUE_METHODS.filter((method) => typeof prototype[method] !== "function");
 }
 function resolveSubstrateModule(substrateDir, rel) {
-  const source = join14(substrateDir, rel);
+  const source = join15(substrateDir, rel);
   if (existsSync16(source))
     return source;
-  const built = join14(substrateDir, "dist", rel.replace(/\.ts$/, ".js"));
+  const built = join15(substrateDir, "dist", rel.replace(/\.ts$/, ".js"));
   return existsSync16(built) ? built : null;
 }
 async function openWorkItemBoundary(opts = {}) {
@@ -21353,7 +21405,7 @@ async function openWorkItemBoundary(opts = {}) {
   }
   let pkgName;
   try {
-    const pkgRaw = await import(pathToFileURL(join14(substrateDir, "package.json")).href, { with: { type: "json" } });
+    const pkgRaw = await import(pathToFileURL(join15(substrateDir, "package.json")).href, { with: { type: "json" } });
     pkgName = pkgRaw.default?.name;
   } catch (error) {
     throw new Error(`work_item_store_unavailable: cannot read Substrate package identity at ${substrateDir}: ${error instanceof Error ? error.message : String(error)}`);
@@ -21572,8 +21624,8 @@ function renderContextRefsSection(context, opts = {}) {
     const fence = fenceFor(raw);
     const block = (body, notice) => [heading, fence, body, fence, ...notice ? [notice] : []].join(`
 `);
-    const join15 = blocks.length > 0 ? utf8Bytes(separator) : 0;
-    const room = Math.min(entryMax, totalMax - OMITTED_NOTICE_RESERVE_BYTES - used - join15);
+    const join16 = blocks.length > 0 ? utf8Bytes(separator) : 0;
+    const room = Math.min(entryMax, totalMax - OMITTED_NOTICE_RESERVE_BYTES - used - join16);
     let rendered = block(raw);
     if (utf8Bytes(rendered) > room) {
       const notice = `[cut at NNNNNNNN of ${utf8Bytes(raw)} bytes; the full value is contextRef ${displayKey(entry.key)} on ${source}]`;
@@ -21586,7 +21638,7 @@ function renderContextRefsSection(context, opts = {}) {
       rendered = block(body, notice.replace("NNNNNNNN", String(utf8Bytes(body))));
     }
     blocks.push(rendered);
-    used += join15 + utf8Bytes(rendered);
+    used += join16 + utf8Bytes(rendered);
   }
   if (omitted > 0) {
     blocks.push(`[${omitted} more context entr${omitted === 1 ? "y" : "ies"} omitted: section budget of ${totalMax} bytes reached]`);
@@ -21717,20 +21769,20 @@ function composeInteractionMessage(input, identity2) {
 }
 
 // src/activation/transport/pending-store.ts
-import { existsSync as existsSync17, mkdirSync as mkdirSync5, readdirSync as readdirSync3, readFileSync as readFileSync9, renameSync as renameSync2, unlinkSync, writeFileSync as writeFileSync4 } from "node:fs";
-import { join as join15 } from "node:path";
+import { existsSync as existsSync17, mkdirSync as mkdirSync6, readdirSync as readdirSync3, readFileSync as readFileSync9, renameSync as renameSync2, unlinkSync, writeFileSync as writeFileSync4 } from "node:fs";
+import { join as join16 } from "node:path";
 var KINDS_AWAITING_REPLY = new Set(["question", "escalation"]);
 function createsPendingAsk(kind) {
   return KINDS_AWAITING_REPLY.has(kind);
 }
 function interactionsRoot(repoRoot) {
-  return join15(repoRoot, ".specialists", "interactions");
+  return join16(repoRoot, ".specialists", "interactions");
 }
 function recordPath(repoRoot, activationId, messageId) {
-  return join15(interactionsRoot(repoRoot), activationId, `${messageId}.json`);
+  return join16(interactionsRoot(repoRoot), activationId, `${messageId}.json`);
 }
 function replyPath(repoRoot, activationId, messageId) {
-  return join15(interactionsRoot(repoRoot), activationId, `${messageId}.reply.json`);
+  return join16(interactionsRoot(repoRoot), activationId, `${messageId}.reply.json`);
 }
 function writeAtomic(path, value, exclusive = false) {
   if (exclusive && existsSync17(path)) {
@@ -21766,7 +21818,7 @@ function create(repoRoot, input) {
     message: input.message,
     delivery: { state: "pending", attempts: [] }
   };
-  mkdirSync5(join15(interactionsRoot(repoRoot), input.activationId), { recursive: true, mode: 448 });
+  mkdirSync6(join16(interactionsRoot(repoRoot), input.activationId), { recursive: true, mode: 448 });
   writeAtomic(recordPath(repoRoot, input.activationId, input.messageId), record, true);
   return record;
 }
@@ -21926,10 +21978,10 @@ import { connect, createServer } from "node:net";
 // src/activation/transport/roster.ts
 import { existsSync as existsSync18, readdirSync as readdirSync4, readFileSync as readFileSync10 } from "node:fs";
 import { homedir as homedir9 } from "node:os";
-import { join as join16 } from "node:path";
+import { join as join17 } from "node:path";
 var SUPPORTED_PEER_PROTOCOL = 1;
 function defaultRosterDir() {
-  return join16(homedir9(), ".claude", "sessions");
+  return join17(homedir9(), ".claude", "sessions");
 }
 function procProbe() {
   let bootSeconds;
@@ -22008,7 +22060,7 @@ function scanRoster(options = {}) {
       continue;
     let registration;
     try {
-      registration = JSON.parse(readFileSync10(join16(dir, file), "utf-8"));
+      registration = JSON.parse(readFileSync10(join17(dir, file), "utf-8"));
     } catch {
       rejected.push({ file, reason: "unparsable" });
       continue;
@@ -22076,7 +22128,7 @@ class PeerAdapter {
     this.options = options;
   }
   async push(request) {
-    const { repoRoot, emit } = this.options;
+    const { repoRoot, emit: emit2 } = this.options;
     const existing = read(repoRoot, request.activationId, request.messageId);
     const record = existing ?? create(repoRoot, {
       messageId: request.messageId,
@@ -22089,7 +22141,7 @@ class PeerAdapter {
       probe: this.options.probe
     });
     if (!route) {
-      emit?.({ event: "peer.route_absent", activationId: request.activationId, messageId: request.messageId });
+      emit2?.({ event: "peer.route_absent", activationId: request.activationId, messageId: request.messageId });
       return {
         outcome: "no_route",
         record: recordAttempt(repoRoot, request.activationId, request.messageId, {
@@ -22100,7 +22152,7 @@ class PeerAdapter {
         })
       };
     }
-    emit?.({
+    emit2?.({
       event: "peer.route_selected",
       activationId: request.activationId,
       messageId: request.messageId,
@@ -22120,7 +22172,7 @@ class PeerAdapter {
     try {
       await sendFrame(route.socketPath, frame);
     } catch (err) {
-      emit?.({
+      emit2?.({
         event: "peer.send_attempted",
         activationId: request.activationId,
         messageId: request.messageId,
@@ -22145,7 +22197,7 @@ class PeerAdapter {
     });
     const receipt = await pendingReceipt;
     if (!receipt) {
-      emit?.({
+      emit2?.({
         event: "peer.no_receipt",
         activationId: request.activationId,
         messageId: request.messageId,
@@ -22153,7 +22205,7 @@ class PeerAdapter {
       });
       return { outcome: "no_receipt", route, record: read(repoRoot, request.activationId, request.messageId) };
     }
-    emit?.({
+    emit2?.({
       event: "peer.receipt",
       activationId: request.activationId,
       messageId: request.messageId,
@@ -22211,8 +22263,8 @@ function isDeliveredStatus(status) {
 // src/activation/workspace-lease.ts
 import { execFileSync as execFileSync2, spawnSync as spawnSync4 } from "node:child_process";
 import { createHash as createHash5 } from "node:crypto";
-import { appendFileSync, existsSync as existsSync19, linkSync, mkdirSync as mkdirSync6, readFileSync as readFileSync11, realpathSync as realpathSync5, renameSync as renameSync3, rmSync as rmSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "node:fs";
-import { basename as basename4, dirname as dirname11, join as join17 } from "node:path";
+import { appendFileSync as appendFileSync2, existsSync as existsSync19, linkSync, mkdirSync as mkdirSync7, readFileSync as readFileSync11, realpathSync as realpathSync5, renameSync as renameSync3, rmSync as rmSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "node:fs";
+import { basename as basename4, dirname as dirname12, join as join18 } from "node:path";
 
 // src/activation/types.ts
 var THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"];
@@ -22270,7 +22322,7 @@ function resolveOriginDefaultBranch(git) {
   } catch {
     const present = ["main", "master"].filter((b) => git("ls-remote", "--heads", "origin", b) !== "");
     if (present.length > 1)
-      console.warn(`[workspace-lease] origin HEAD unresolvable and both main and master exist; using ${present[0]}`);
+      runtimeWarn("workspace-lease", `origin HEAD unresolvable and both main and master exist; using ${present[0]}`);
     if (present.length > 0)
       return present[0];
   }
@@ -22279,7 +22331,7 @@ function resolveOriginDefaultBranch(git) {
 function resolveWorktreeBase(git) {
   if (!git("remote").split(`
 `).includes("origin")) {
-    console.warn('[workspace-lease] no "origin" remote; creating the writer worktree from the dispatcher HEAD');
+    runtimeWarn("workspace-lease", 'no "origin" remote; creating the writer worktree from the dispatcher HEAD');
     return "HEAD";
   }
   const defaultBranch = resolveOriginDefaultBranch(git);
@@ -22299,10 +22351,10 @@ function provisionWriterWorkspace(cwd, issueRef, role) {
     let worktreePath = existing?.match(/^worktree (.+)$/m)?.[1];
     let created = false;
     if (!worktreePath) {
-      const mainRoot = dirname11(git("rev-parse", "--path-format=absolute", "--git-common-dir"));
-      worktreePath = join17(mainRoot, ".xtrm", "worktrees", `${basename4(mainRoot)}-sp-${roleSlug}-${slug}`);
-      if (spawnSync4("git", ["check-ignore", "-q", join17(worktreePath, "x")], { cwd: mainRoot }).status !== 0) {
-        appendFileSync(git("rev-parse", "--path-format=absolute", "--git-path", "info/exclude"), `
+      const mainRoot = dirname12(git("rev-parse", "--path-format=absolute", "--git-common-dir"));
+      worktreePath = join18(mainRoot, ".xtrm", "worktrees", `${basename4(mainRoot)}-sp-${roleSlug}-${slug}`);
+      if (spawnSync4("git", ["check-ignore", "-q", join18(worktreePath, "x")], { cwd: mainRoot }).status !== 0) {
+        appendFileSync2(git("rev-parse", "--path-format=absolute", "--git-path", "info/exclude"), `
 /.xtrm/worktrees/
 `);
       }
@@ -22356,10 +22408,10 @@ function workspaceKey(workspace) {
   return createHash5("sha256").update(resolved).digest("hex").slice(0, 16);
 }
 function leaseDir(workspace) {
-  return join17(workspace.gitCommonDir ?? workspace.repositoryRoot, ".specialists", "leases");
+  return join18(workspace.gitCommonDir ?? workspace.repositoryRoot, ".specialists", "leases");
 }
 function leasePath(workspace) {
-  return join17(leaseDir(workspace), `${workspaceKey(workspace)}.json`);
+  return join18(leaseDir(workspace), `${workspaceKey(workspace)}.json`);
 }
 function inspect(workspace, probe = procLeaseProbe()) {
   const path = leasePath(workspace);
@@ -22398,7 +22450,7 @@ function releaseHolderLease(workspace, input) {
   }
   const at = input.now ?? Date.now();
   try {
-    appendFileSync(join17(dirname11(path), "recoveries.jsonl"), `${JSON.stringify({
+    appendFileSync2(join18(dirname12(path), "recoveries.jsonl"), `${JSON.stringify({
       workspace: workspace.worktreePath,
       holderActivationId: lease.activationId,
       holderPid: lease.holder.pid,
@@ -22435,7 +22487,7 @@ function recoverDeadHolder(workspace, input) {
   }
   const at = input.now ?? Date.now();
   try {
-    appendFileSync(join17(dirname11(path), "recoveries.jsonl"), `${JSON.stringify({
+    appendFileSync2(join18(dirname12(path), "recoveries.jsonl"), `${JSON.stringify({
       workspace: workspace.worktreePath,
       holderActivationId: status.lease.activationId,
       holderPid: status.lease.holder.pid,
@@ -22473,7 +22525,7 @@ function acquire(request, probe = procLeaseProbe()) {
     holder: selfHolder(probe),
     acquiredAtMs: Date.now()
   };
-  mkdirSync6(leaseDir(workspace), { recursive: true, mode: 448 });
+  mkdirSync7(leaseDir(workspace), { recursive: true, mode: 448 });
   const staging = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
   writeFileSync5(staging, `${JSON.stringify(lease, null, 2)}
 `, { mode: 384 });
@@ -22700,7 +22752,7 @@ function createAskTools(sdk, ctx) {
 
 // src/activation/pi-sdk.ts
 import { existsSync as existsSync20 } from "node:fs";
-import { join as join18 } from "node:path";
+import { join as join19 } from "node:path";
 import { pathToFileURL as pathToFileURL2 } from "node:url";
 var PI_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
 var REQUIRED_EXPORTS = [
@@ -22731,7 +22783,7 @@ function piSdkCandidates(deps = {}) {
   const exists = deps.exists ?? existsSync20;
   const candidates = [PI_SDK_PACKAGE];
   for (const root of resolveGlobalNodeModulesDirs(deps)) {
-    const entry = join18(root, PI_SDK_PACKAGE, "dist", "index.js");
+    const entry = join19(root, PI_SDK_PACKAGE, "dist", "index.js");
     if (exists(entry))
       candidates.push(pathToFileURL2(entry).href);
   }
@@ -23466,7 +23518,7 @@ function buildSettlementExecutionContext(opts) {
 function republishSettlement(opts) {
   const { boundary, store, record: record2 } = opts;
   const now = opts.now ?? Date.now();
-  const emit = opts.emit ?? (() => {});
+  const emit2 = opts.emit ?? (() => {});
   if (record2.status !== "completed") {
     return { outcome: "refused", note: "a failed settlement publishes nothing" };
   }
@@ -23476,14 +23528,14 @@ function republishSettlement(opts) {
   if (!boundary.appendResult || !boundary.allocateReceipt) {
     const note = "work boundary carries no settlement surface; not republishable by THIS runtime";
     saveState(store, record2, "refused", note, {}, "runtime_lacks_settlement_surface");
-    emit("settlement_republish_refused", { activationId: record2.activationId, attemptId: record2.attemptId, note });
+    emit2("settlement_republish_refused", { activationId: record2.activationId, attemptId: record2.attemptId, note });
     return { outcome: "refused", note };
   }
   const allocateReceipt = boundary.allocateReceipt;
   const appendResult = boundary.appendResult;
   const defer = (reason) => {
     saveState(store, record2, "pending", reason);
-    emit("settlement_republish_deferred", {
+    emit2("settlement_republish_deferred", {
       activationId: record2.activationId,
       attemptId: record2.attemptId,
       note: reason
@@ -23522,14 +23574,14 @@ function republishSettlement(opts) {
       if (!receiptId) {
         const note = `Journal result ${journalEntryId} exists but no WorkReceipt is recorded for binding ` + `${record2.executionBindingId} and none is resolvable; the provenance chain cannot be completed`;
         saveState(store, record2, "refused", note, { journalEntryId }, "receipt_unreconstructable");
-        emit("settlement_republish_refused", { activationId: record2.activationId, attemptId: record2.attemptId, note });
+        emit2("settlement_republish_refused", { activationId: record2.activationId, attemptId: record2.attemptId, note });
         return { outcome: "refused", note, journalEntryId };
       }
       saveState(store, record2, "published", "reconciled with the existing Journal result", {
         journalEntryId,
         receiptId
       });
-      emit("settlement_republish_reconciled", {
+      emit2("settlement_republish_reconciled", {
         activationId: record2.activationId,
         attemptId: record2.attemptId,
         entry: journalEntryId
@@ -23541,15 +23593,15 @@ function republishSettlement(opts) {
       if (!receiptId) {
         const receipt = allocateReceipt(record2.executionBindingId);
         receiptId = receipt.id;
-        emit("settlement_receipt_allocated", { receipt: receipt.id, republish: true });
+        emit2("settlement_receipt_allocated", { receipt: receipt.id, republish: true });
       }
       let artifactValue = record2.artifactRef ?? storedRef;
       if (boundary.attachArtifact && !record2.artifactRef) {
         try {
           artifactValue = boundary.attachArtifact(receiptId, "artifact", storedRef).value;
-          emit("settlement_artifact_attached", { receipt: receiptId, kind: "artifact", republish: true });
+          emit2("settlement_artifact_attached", { receipt: receiptId, kind: "artifact", republish: true });
         } catch (error) {
-          emit("settlement_degraded", {
+          emit2("settlement_degraded", {
             note: `artifact attach failed: ${error instanceof Error ? error.message : String(error)}`
           });
         }
@@ -23589,12 +23641,12 @@ function republishSettlement(opts) {
         artifactRef: artifactValue,
         publication: { state: "published", attempts: (record2.publication?.attempts ?? 0) + 1, updatedAt: now }
       });
-      emit("settlement_result_published", { entry: entry.entryId, receipt: receiptId, republish: true });
+      emit2("settlement_result_published", { entry: entry.entryId, receipt: receiptId, republish: true });
       return { outcome: "published", journalEntryId: entry.entryId, receiptId };
     } catch (error) {
       const note = error instanceof Error ? error.message : String(error);
       saveState(store, record2, "pending", note, { ...receiptId ? { receiptId } : {} });
-      emit("settlement_degraded", { note, republish: true });
+      emit2("settlement_degraded", { note, republish: true });
       return { outcome: "pending", note, ...receiptId ? { receiptId } : {} };
     }
   };
@@ -23603,7 +23655,7 @@ function republishSettlement(opts) {
 }
 var REPUBLISH_PASS_LIMIT = 50;
 function republishPendingSettlements(opts) {
-  const emit = opts.emit ?? (() => {});
+  const emit2 = opts.emit ?? (() => {});
   const limit = Math.max(1, opts.limit ?? REPUBLISH_PASS_LIMIT);
   const revivable = opts.boundary.appendResult && opts.boundary.allocateReceipt ? opts.store.listRuntimeRefused?.() ?? [] : [];
   const pending = [...opts.store.listPendingPublication?.() ?? [], ...revivable].sort((a, b) => a.completedAt - b.completedAt).slice(0, limit);
@@ -23619,12 +23671,12 @@ function republishPendingSettlements(opts) {
         ...opts.worktreePath ? { worktreePath: opts.worktreePath } : {},
         ...opts.env ? { env: opts.env } : {},
         ...opts.now ? { now: opts.now() } : {},
-        emit
+        emit: emit2
       });
       outcomes.push({ activationId: record2.activationId, attemptId: record2.attemptId, outcome: result.outcome });
     } catch (error) {
       outcomes.push({ activationId: record2.activationId, attemptId: record2.attemptId, outcome: "error" });
-      emit("settlement_republish_error", {
+      emit2("settlement_republish_error", {
         activationId: record2.activationId,
         attemptId: record2.attemptId,
         note: error instanceof Error ? error.message : String(error)
@@ -23636,7 +23688,7 @@ function republishPendingSettlements(opts) {
 function publishSettlement(opts) {
   const { boundary, store, subject } = opts;
   const now = opts.now ?? Date.now();
-  const emit = opts.emit ?? (() => {});
+  const emit2 = opts.emit ?? (() => {});
   const executionContext = buildSettlementExecutionContext({
     participantId: subject.participantId,
     specialistName: subject.specialist,
@@ -23670,16 +23722,16 @@ function publishSettlement(opts) {
     storedRef = store.save(record2);
   } catch (error) {
     const note = error instanceof Error ? error.message : String(error);
-    emit("settlement_store_failed", { note });
+    emit2("settlement_store_failed", { note });
     return { storedRef: "", degraded: `result storage unavailable: ${note}` };
   }
-  emit("settlement_stored", { ref: storedRef, status: opts.status });
+  emit2("settlement_stored", { ref: storedRef, status: opts.status });
   if (opts.status !== "completed")
     return { storedRef, publicationState: "not-applicable" };
   if (!boundary.allocateReceipt || !boundary.appendResult) {
     const note = "work boundary carries no settlement surface; result stored only";
     saveState(store, record2, "refused", note, {}, "runtime_lacks_settlement_surface");
-    emit("settlement_degraded", { note });
+    emit2("settlement_degraded", { note });
     return { storedRef, degraded: "boundary without settlement surface", publicationState: "refused" };
   }
   const allocateReceipt = boundary.allocateReceipt;
@@ -23690,17 +23742,17 @@ function publishSettlement(opts) {
     try {
       const receipt = allocateReceipt(subject.executionBindingId);
       allocatedReceiptId = receipt.id;
-      emit("settlement_receipt_allocated", { receipt: receipt.id });
+      emit2("settlement_receipt_allocated", { receipt: receipt.id });
       let artifactValue = storedRef;
       try {
         if (boundary.attachArtifact) {
           const attached = boundary.attachArtifact(receipt.id, "artifact", storedRef);
           artifactValue = attached.value;
           allocatedArtifactRef = artifactValue;
-          emit("settlement_artifact_attached", { receipt: receipt.id, kind: "artifact" });
+          emit2("settlement_artifact_attached", { receipt: receipt.id, kind: "artifact" });
         }
       } catch (error) {
-        emit("settlement_degraded", {
+        emit2("settlement_degraded", {
           note: `artifact attach failed: ${error instanceof Error ? error.message : String(error)}`
         });
       }
@@ -23723,7 +23775,7 @@ function publishSettlement(opts) {
         activationId: subject.activationId,
         sessionId: subject.piSessionId
       });
-      emit("settlement_result_published", { entry: entry.entryId, receipt: receipt.id });
+      emit2("settlement_result_published", { entry: entry.entryId, receipt: receipt.id });
       const published = {
         ...record2,
         receiptId: receipt.id,
@@ -23747,14 +23799,14 @@ function publishSettlement(opts) {
         ...allocatedReceiptId ? { receiptId: allocatedReceiptId } : {},
         ...allocatedArtifactRef ? { artifactRef: allocatedArtifactRef } : {}
       });
-      emit("settlement_degraded", { note, ...allocatedReceiptId ? { partial_receipt: allocatedReceiptId } : {} });
+      emit2("settlement_degraded", { note, ...allocatedReceiptId ? { partial_receipt: allocatedReceiptId } : {} });
       return { storedRef, degraded: note, publicationState: "pending" };
     }
   };
   const guarded = withSettlementExclusion({ repositoryRoot: subject.repositoryRoot, activationId: subject.activationId, attemptId: subject.attemptId }, publishNow);
   if (!guarded.ok) {
     saveState(store, record2, "pending", guarded.reason);
-    emit("settlement_degraded", { note: guarded.reason, contended: true });
+    emit2("settlement_degraded", { note: guarded.reason, contended: true });
     return { storedRef, degraded: guarded.reason, publicationState: "pending" };
   }
   return guarded.value;
@@ -23777,8 +23829,8 @@ function saveState(store, record2, state, note, links = {}, refusal2) {
 }
 
 // src/activation/settlement-store.ts
-import { mkdirSync as mkdirSync7, readFileSync as readFileSync12, readdirSync as readdirSync5, writeFileSync as writeFileSync6 } from "node:fs";
-import { join as join19 } from "node:path";
+import { mkdirSync as mkdirSync8, readFileSync as readFileSync12, readdirSync as readdirSync5, writeFileSync as writeFileSync6 } from "node:fs";
+import { join as join20 } from "node:path";
 function safeSegment(id) {
   const safe = id.replace(/[^A-Za-z0-9.:_-]/g, "_");
   if (!safe || safe === "." || safe === "..")
@@ -23799,11 +23851,11 @@ function publicationStateOf(record2) {
   return record2.publication?.state === "refused" ? "refused" : "pending";
 }
 function createFileSettlementStore(root) {
-  const pathFor = (activationId, attemptId) => join19(root, safeSegment(activationId), `${safeSegment(attemptId)}.json`);
+  const pathFor = (activationId, attemptId) => join20(root, safeSegment(activationId), `${safeSegment(attemptId)}.json`);
   return {
     save(record2) {
       const path = pathFor(record2.activationId, record2.attemptId);
-      mkdirSync7(join19(root, safeSegment(record2.activationId)), { recursive: true });
+      mkdirSync8(join20(root, safeSegment(record2.activationId)), { recursive: true });
       writeFileSync6(path, JSON.stringify(record2), "utf8");
       return `${safeSegment(record2.activationId)}/${safeSegment(record2.attemptId)}.json`;
     },
@@ -23817,14 +23869,14 @@ function createFileSettlementStore(root) {
     listAttempts(activationId) {
       let files;
       try {
-        files = readdirSync5(join19(root, safeSegment(activationId)));
+        files = readdirSync5(join20(root, safeSegment(activationId)));
       } catch {
         return [];
       }
       const out = [];
       for (const file of files.filter((f) => f.endsWith(".json")).sort()) {
         try {
-          out.push(JSON.parse(readFileSync12(join19(root, safeSegment(activationId), file), "utf8")));
+          out.push(JSON.parse(readFileSync12(join20(root, safeSegment(activationId), file), "utf8")));
         } catch {}
       }
       return out;
@@ -23853,14 +23905,14 @@ function createFileSettlementStore(root) {
   function readActivationDir(activation) {
     let files;
     try {
-      files = readdirSync5(join19(root, activation));
+      files = readdirSync5(join20(root, activation));
     } catch {
       return [];
     }
     const out = [];
     for (const file of files.filter((f) => f.endsWith(".json")).sort()) {
       try {
-        out.push(JSON.parse(readFileSync12(join19(root, activation, file), "utf8")));
+        out.push(JSON.parse(readFileSync12(join20(root, activation, file), "utf8")));
       } catch {}
     }
     return out;
@@ -23868,7 +23920,7 @@ function createFileSettlementStore(root) {
 }
 
 // src/activation/native-host.ts
-import { join as join20 } from "node:path";
+import { join as join21 } from "node:path";
 var TOKEN_USAGE_KEYS = [
   "input_tokens",
   "output_tokens",
@@ -23913,7 +23965,7 @@ function isNonLocalExtensionSource(source) {
 }
 var defaultExtensionSourceResolutionEnv = {
   globalNodeModulesDirs: resolveGlobalNodeModulesDirs,
-  manifestExists: (packagePath) => existsSync21(join20(packagePath, "package.json")),
+  manifestExists: (packagePath) => existsSync21(join21(packagePath, "package.json")),
   piAgentDir: () => {
     return;
   }
@@ -23922,7 +23974,7 @@ function resolveNpmExtensionSource(source, env = defaultExtensionSourceResolutio
   const packageName = parseNpmSourceName(source);
   if (!packageName)
     return null;
-  return env.globalNodeModulesDirs().map((root) => join20(root, packageName)).find(env.manifestExists) ?? null;
+  return env.globalNodeModulesDirs().map((root) => join21(root, packageName)).find(env.manifestExists) ?? null;
 }
 function resolveGitExtensionSource(source, env = defaultExtensionSourceResolutionEnv) {
   if (!source.startsWith("git:"))
@@ -23935,7 +23987,7 @@ function resolveGitExtensionSource(source, env = defaultExtensionSourceResolutio
   const agentDir = env.piAgentDir?.();
   if (!agentDir)
     return null;
-  const checkoutPath = join20(agentDir, "git", spec);
+  const checkoutPath = join21(agentDir, "git", spec);
   return env.manifestExists(checkoutPath) ? checkoutPath : null;
 }
 function expectedRemoteExtensionLabels(declaredSources, skippedSources) {
@@ -24128,11 +24180,11 @@ function createNativeToolAdmission(input) {
 var FALLBACK_RETRYABLE_CLASSES = new Set(["rate_limit", "timeout", "transient"]);
 var NULL_FORENSIC_SINK = { emit: () => {} };
 function withFleetWake(base, wake) {
-  const emit = base.emit.bind(base);
+  const emit2 = base.emit.bind(base);
   return {
     ...base,
     emit(event) {
-      emit(event);
+      emit2(event);
       wake();
     }
   };
@@ -24173,6 +24225,7 @@ class NativeActivationHost {
   interactions;
   constructor(deps = {}) {
     this.cwd = deps.cwd ?? process.cwd();
+    setRuntimeDiagnosticsSink(createFileDiagnosticsSink(runtimeDiagnosticsSinkPath(this.cwd)));
     this.provisionWriterWorkspace = deps.provisionWriterWorkspace ?? provisionWriterWorkspace;
     this.backgroundTaskAlive = deps.backgroundTaskAlive ?? processAlive;
     this.backgroundPollMs = deps.backgroundPollMs ?? 5000;
@@ -24186,7 +24239,7 @@ class NativeActivationHost {
     this.sessionStatsTimeoutMs = deps.sessionStatsTimeoutMs;
     this.piVersion = deps.piVersion;
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
-    this.settlements = deps.settlements ?? createFileSettlementStore(join20(this.cwd, ".specialists", "settlements"));
+    this.settlements = deps.settlements ?? createFileSettlementStore(join21(this.cwd, ".specialists", "settlements"));
     this.admission = deps.admission ?? ((candidate, tier, contract) => validateBeforeRun(candidate, tier, contract));
     this.toolDurationWarnMs = normalizeToolDurationWarnMs(deps.stallDetection?.tool_duration_warn_ms) ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms;
     this.toolDurationWarnMsByDep = normalizeToolDurationWarnMs(deps.stallDetection?.tool_duration_warn_ms);
@@ -24197,7 +24250,7 @@ class NativeActivationHost {
     const attemptId = `att:${activationId.slice(4)}:1`;
     const participantId = `specialist::${request.specialist}`;
     let eventIssueRef = request.issueRef;
-    const emit = (name, payload) => this.forensics.emit({
+    const emit2 = (name, payload) => this.forensics.emit({
       activationId,
       attemptId,
       participantId,
@@ -24206,7 +24259,7 @@ class NativeActivationHost {
       name,
       payload
     });
-    emit("activation_requested", {
+    emit2("activation_requested", {
       requested_by: request.requestedByParticipantId,
       model_override: request.modelOverride ?? null,
       thinking_override: request.thinkingOverride ?? null
@@ -24238,7 +24291,7 @@ class NativeActivationHost {
       releaseLeaseOnRefusal();
       releaseClaimForRefusal();
       removeWorkspaceOnRefusal();
-      emit("activation_rejected", { reason, ...detail });
+      emit2("activation_rejected", { reason, ...detail });
       throw new DispatchRejectedError(reason, {
         specialist: request.specialist,
         issueRef: request.issueRef,
@@ -24455,7 +24508,7 @@ class NativeActivationHost {
     let modelCheck = await validateModelAvailable(sdk, modelRuntime, modelChain[0] ?? "");
     while ((!modelCheck.ok || !modelCheck.model) && modelIndex < modelChain.length - 1) {
       const skipped = modelChain[modelIndex];
-      emit("model_fallback", {
+      emit2("model_fallback", {
         from_model: skipped ?? null,
         to_model: modelChain[modelIndex + 1],
         error_class: "unavailable",
@@ -24490,7 +24543,7 @@ class NativeActivationHost {
 `);
     }
     const emitDiscoverySessionsSignal = () => {
-      emit("extension_discovery_sessions", {
+      emit2("extension_discovery_sessions", {
         fenced_sessions: 2,
         baseline_session: "builtin-enumeration (never prompted)",
         discovery_session: "extension-discovery (never prompted)",
@@ -24526,14 +24579,14 @@ class NativeActivationHost {
       refusedProvenance: discovery.refusedProvenance
     });
     if (discovery.refusedCollisions.length > 0 || discovery.refusedProvenance.length > 0) {
-      emit("extension_tools_refused", {
+      emit2("extension_tools_refused", {
         refused_collisions: discovery.refusedCollisions.join(",") || null,
         refused_provenance: discovery.refusedProvenance.join(",") || null,
         pinned: discovery.pinned.join(",") || null
       });
     }
     if (discovery.pinned.length > 0) {
-      emit("extension_tools_discovered", {
+      emit2("extension_tools_discovered", {
         pinned: discovery.pinned.join(","),
         sources: dynamicExtensions.join(",")
       });
@@ -24549,13 +24602,13 @@ class NativeActivationHost {
         });
       } catch (error) {
         if (error instanceof DispatchRejectedError) {
-          emit("lease_denied", {
+          emit2("lease_denied", {
             workspace: workspace.worktreePath,
             reason: error.reason,
             note: error.detail.holder
           });
         }
-        emit("activation_rejected", { reason: "workspace_lease_unavailable" });
+        emit2("activation_rejected", { reason: "workspace_lease_unavailable" });
         releaseClaimForRefusal();
         removeWorkspaceOnRefusal();
         if (error instanceof DispatchRejectedError && createdRefForRefusals) {
@@ -24566,13 +24619,13 @@ class NativeActivationHost {
         }
         throw error;
       }
-      emit("lease_acquired", { workspace: workspace.worktreePath, lease_waiver: leaseWaiver });
+      emit2("lease_acquired", { workspace: workspace.worktreePath, lease_waiver: leaseWaiver });
       releaseOwnLease = () => {
         try {
           release(workspace, activationId);
-          emit("lease_released", { workspace: workspace.worktreePath, reason: "activation_refused" });
+          emit2("lease_released", { workspace: workspace.worktreePath, reason: "activation_refused" });
         } catch (error) {
-          emit("lease_release_failed", {
+          emit2("lease_release_failed", {
             workspace: workspace.worktreePath,
             note: error instanceof Error ? error.message : String(error)
           });
@@ -24586,7 +24639,7 @@ class NativeActivationHost {
       responseFormat: execution.response_format,
       now: this.now
     });
-    emit("step_contract_compiled", {
+    emit2("step_contract_compiled", {
       root_work_ref: stepContract.rootWorkRef,
       inputs: stepContract.inputs.length,
       outputs: stepContract.outputs.length,
@@ -24631,7 +24684,7 @@ class NativeActivationHost {
     }
     if (rendered.mandatoryRules && rendered.mandatoryRulesBlock?.trim()) {
       const rules = rendered.mandatoryRules;
-      emit("mandatory_rules_injection", {
+      emit2("mandatory_rules_injection", {
         source: "mandatory_rules_injection",
         sets_loaded: rules.setsLoaded,
         rules_count: rules.ruleCount,
@@ -24677,7 +24730,7 @@ class NativeActivationHost {
         note: error instanceof Error ? error.message : String(error)
       });
     }
-    emit("activation_admitted", {
+    emit2("activation_admitted", {
       tier,
       access,
       lease_waiver: leaseWaiver,
@@ -24691,7 +24744,7 @@ class NativeActivationHost {
       tools: effectiveToolContract.toolsList.join(","),
       custom_tools: `${ASK_TOOL},${ESCALATE_TOOL}`
     });
-    emit("activation_starting", { pi_session_id: null });
+    emit2("activation_starting", { pi_session_id: null });
     const askTools = createAskTools(sdk, {
       transport: this.interactions,
       activationId,
@@ -24704,7 +24757,7 @@ class NativeActivationHost {
           record3.snapshot.state = kind === "escalation" ? "escalated" : "needs_reply";
         if (record3)
           this.save(record3.snapshot);
-        emit(kind === "escalation" ? "escalation_raised" : "clarification_requested", { body });
+        emit2(kind === "escalation" ? "escalation_raised" : "clarification_requested", { body });
       },
       onAnswered: (kind) => {
         const record3 = this.registry.get(activationId);
@@ -24712,7 +24765,7 @@ class NativeActivationHost {
           record3.snapshot.state = "running";
         if (record3)
           this.save(record3.snapshot);
-        emit(kind === "escalation" ? "escalation_resolved" : "clarification_answered");
+        emit2(kind === "escalation" ? "escalation_resolved" : "clarification_answered");
       }
     });
     const guardedTools = createGuardedTools(sdk, {
@@ -24725,7 +24778,7 @@ class NativeActivationHost {
       })
     });
     if (guardedTools.unguardable.length > 0) {
-      emit("lease_denied", {
+      emit2("lease_denied", {
         workspace: workspace.worktreePath,
         note: `cannot guard mutating tools: ${guardedTools.unguardable.join(", ")}`
       });
@@ -24774,7 +24827,7 @@ class NativeActivationHost {
           note: `the session did not expose ${missing.join(", ")}; the resolved contract promised them, ` + "and a native activation is never launched with a smaller tool surface than its contract declares"
         };
         if (options.viaFallback) {
-          emit("tool_contract_unsatisfied_on_fallback", { missing, model: model.id ?? null });
+          emit2("tool_contract_unsatisfied_on_fallback", { missing, model: model.id ?? null });
           throw new DispatchRejectedError("tool_contract_unsatisfied", {
             specialist: request.specialist,
             issueRef: request.issueRef,
@@ -24849,8 +24902,8 @@ class NativeActivationHost {
       ...toolContractNotes.length > 0 ? { toolContractNotes } : {},
       ...configNotes.length > 0 ? { configNotes } : {}
     };
-    emit("activation_started", { pi_session_id: session.sessionId });
-    const unsubscribe = session.subscribe((event) => this.onSessionEvent(snapshot, event, emit));
+    emit2("activation_started", { pi_session_id: session.sessionId });
+    const unsubscribe = session.subscribe((event) => this.onSessionEvent(snapshot, event, emit2));
     const record2 = {
       snapshot,
       session,
@@ -24872,7 +24925,7 @@ class NativeActivationHost {
       sdk,
       modelRuntime,
       initialPrompt: rendered.initial_prompt,
-      emit
+      emit: emit2
     });
     record2.result = result;
     this.registry.register(record2);
@@ -24938,7 +24991,7 @@ class NativeActivationHost {
 `);
     }
   }
-  onSessionEvent(snapshot, event, emit) {
+  onSessionEvent(snapshot, event, emit2) {
     snapshot.lastActivityAt = this.now();
     const usage = isNativeUsageEvent(event) ? extractTokenUsage(event) : undefined;
     if (usage) {
@@ -24964,10 +25017,10 @@ class NativeActivationHost {
         this.noteWakeTurnStart(snapshot);
         snapshot.state = "running";
         this.save(snapshot);
-        emit("turn_started");
+        emit2("turn_started");
         break;
       case "agent_end":
-        emit("turn_completed", { will_retry: Boolean(event.willRetry) });
+        emit2("turn_completed", { will_retry: Boolean(event.willRetry) });
         break;
       case "turn_end":
         snapshot.turnCount = (snapshot.turnCount ?? 0) + 1;
@@ -24982,23 +25035,23 @@ class NativeActivationHost {
           const record2 = this.registry.get(snapshot.activationId);
           if (record2 && !this.wakeFinalising.has(snapshot.activationId)) {
             this.wakeFinalising.add(snapshot.activationId);
-            this.finalizeWakeTurn(snapshot, record2, emit).finally(() => {
+            this.finalizeWakeTurn(snapshot, record2, emit2).finally(() => {
               this.wakeFinalising.delete(snapshot.activationId);
             });
           }
         }
         break;
       case "auto_retry_start":
-        emit("retry_started", { attempt: event.attempt, max_attempts: event.maxAttempts });
+        emit2("retry_started", { attempt: event.attempt, max_attempts: event.maxAttempts });
         break;
       case "auto_retry_end":
-        emit("retry_completed", { success: event.success, attempt: event.attempt });
+        emit2("retry_completed", { success: event.success, attempt: event.attempt });
         break;
       case "compaction_start":
-        emit("compaction_started", { reason: event.reason });
+        emit2("compaction_started", { reason: event.reason });
         break;
       case "compaction_end":
-        emit("compaction_completed", { reason: event.reason, aborted: event.aborted });
+        emit2("compaction_completed", { reason: event.reason, aborted: event.aborted });
         break;
       case "tool_execution_start":
         this.noteToolStart(snapshot, event);
@@ -25015,18 +25068,18 @@ class NativeActivationHost {
         break;
     }
   }
-  async captureSessionStats(session, emit) {
+  async captureSessionStats(session, emit2) {
     const timeoutMs = this.sessionStatsTimeoutMs ?? SESSION_STATS_TIMEOUT_MS;
     const piVersion = this.piVersion ?? resolvePiVersion();
     const { stats, error } = await captureNativeSessionStats(session, timeoutMs);
     if (stats) {
-      emit("session_stats_captured", {
+      emit2("session_stats_captured", {
         session_stats: stats,
         ...piVersion ? { pi_version: piVersion } : {}
       });
       return;
     }
-    emit("session_stats_failed", {
+    emit2("session_stats_failed", {
       error: error ?? "session stats unavailable",
       timeout_ms: timeoutMs,
       ...piVersion ? { pi_version: piVersion } : {}
@@ -25178,26 +25231,26 @@ class NativeActivationHost {
     clearInterval(watch.timer);
     this.toolDurationWatch.delete(activationId);
   }
-  async runToSettled(snapshot, session, initialPrompt, emit, record2) {
+  async runToSettled(snapshot, session, initialPrompt, emit2, record2) {
     this.framedTurns.add(snapshot.activationId);
     let settlementRecorded = false;
     const recordSettlementOnce = async () => {
       if (settlementRecorded)
         return;
       settlementRecorded = true;
-      await this.captureSessionStats(session, emit);
+      await this.captureSessionStats(session, emit2);
     };
     try {
       await session.prompt(initialPrompt);
       await session.waitForIdle();
       await recordSettlementOnce();
-      return this.settleTurnTail(snapshot, session, emit, record2, { notifyWake: false });
+      return this.settleTurnTail(snapshot, session, emit2, record2, { notifyWake: false });
     } catch (error) {
       snapshot.state = "failed";
       this.save(snapshot);
       const message = error instanceof Error ? error.message : String(error);
       await recordSettlementOnce();
-      emit("activation_failed", { error: message });
+      emit2("activation_failed", { error: message });
       this.releaseIfWriter(snapshot, "failed");
       const thrownResult = {
         activationId: snapshot.activationId,
@@ -25221,17 +25274,17 @@ class NativeActivationHost {
         fallbackUsed: false,
         completedAt: this.now()
       };
-      this.publishTerminalSettlement(snapshot, thrownResult, record2, emit);
+      this.publishTerminalSettlement(snapshot, thrownResult, record2, emit2);
       return thrownResult;
     }
   }
-  settleTurnTail(snapshot, session, emit, record2, opts) {
+  settleTurnTail(snapshot, session, emit2, record2, opts) {
     const last = lastAssistantMessage(session.messages);
     if (last && (last.stopReason === "error" || last.stopReason === "aborted")) {
       const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
       snapshot.state = "failed";
       this.save(snapshot);
-      emit("activation_failed", { error: detail, stop_reason: last.stopReason });
+      emit2("activation_failed", { error: detail, stop_reason: last.stopReason });
       const failedResult = {
         activationId: snapshot.activationId,
         participantId: snapshot.participantId,
@@ -25254,24 +25307,24 @@ class NativeActivationHost {
         fallbackUsed: false,
         completedAt: this.now()
       };
-      this.publishTerminalSettlement(snapshot, failedResult, record2, emit);
+      this.publishTerminalSettlement(snapshot, failedResult, record2, emit2);
       if (opts.notifyWake)
         this.notifyWakeSettlement(failedResult);
       return failedResult;
     }
     const output = textOf(last);
-    emit("activation_settled");
-    emit("output_validation_started");
+    emit2("activation_settled");
+    emit2("output_validation_started");
     const pendingTasks = this.liveBackgroundTasks(snapshot.activationId);
     const validation = pendingTasks.length > 0 ? { valid: false, errors: [`background tasks still running: ${pendingTasks.join(", ")}; resume the activation after they finish`] } : output.trim().length > 0 ? { valid: true } : { valid: false, errors: ["empty output: specialist produced no output"] };
     if (validation.valid) {
-      emit("output_validation_passed");
+      emit2("output_validation_passed");
     } else {
-      emit("output_validation_failed", { errors: validation.errors });
+      emit2("output_validation_failed", { errors: validation.errors });
     }
     snapshot.state = "settled";
     this.save(snapshot);
-    emit("activation_completed", { pi_session_id: session.sessionId, output });
+    emit2("activation_completed", { pi_session_id: session.sessionId, output });
     this.releaseIfWriter(snapshot, "completed");
     const completedResult = {
       activationId: snapshot.activationId,
@@ -25295,7 +25348,7 @@ class NativeActivationHost {
       fallbackUsed: false,
       completedAt: this.now()
     };
-    this.publishTerminalSettlement(snapshot, completedResult, record2, emit);
+    this.publishTerminalSettlement(snapshot, completedResult, record2, emit2);
     if (opts.notifyWake)
       this.notifyWakeSettlement(completedResult);
     return completedResult;
@@ -25304,11 +25357,11 @@ class NativeActivationHost {
     if (snapshot.state === "settled")
       this.wakeDirty.add(snapshot.activationId);
   }
-  async finalizeWakeTurn(snapshot, record2, emit) {
+  async finalizeWakeTurn(snapshot, record2, emit2) {
     try {
       const session = record2.session;
-      await this.captureSessionStats(session, emit);
-      this.settleTurnTail(snapshot, session, emit, record2, { notifyWake: true });
+      await this.captureSessionStats(session, emit2);
+      this.settleTurnTail(snapshot, session, emit2, record2, { notifyWake: true });
     } catch {}
   }
   notifyWakeSettlement(result) {
@@ -25319,7 +25372,7 @@ class NativeActivationHost {
       notify(result);
     } catch {}
   }
-  publishTerminalSettlement(snapshot, result, record2, emit) {
+  publishTerminalSettlement(snapshot, result, record2, emit2) {
     this.wakeDirty.delete(snapshot.activationId);
     this.framedTurns.delete(snapshot.activationId);
     try {
@@ -25351,7 +25404,7 @@ class NativeActivationHost {
         },
         env: this.env,
         now: this.now(),
-        emit
+        emit: emit2
       });
     } catch {}
     this.stopToolDurationWatch(snapshot.activationId);
@@ -25537,7 +25590,7 @@ class NativeActivationHost {
     record2.snapshot.state = "starting";
     record2.snapshot.lastActivityAt = this.now();
     this.save(record2.snapshot);
-    const emit = (name, payload) => this.forensics.emit({
+    const emit2 = (name, payload) => this.forensics.emit({
       activationId,
       attemptId,
       participantId: record2.snapshot.participantId,
@@ -25571,14 +25624,14 @@ class NativeActivationHost {
     } else {
       record2.unsubscribe();
     }
-    record2.unsubscribe = record2.session.subscribe((event) => this.onSessionEvent(record2.snapshot, event, emit));
-    emit("activation_retried", {
+    record2.unsubscribe = record2.session.subscribe((event) => this.onSessionEvent(record2.snapshot, event, emit2));
+    emit2("activation_retried", {
       requested_model: record2.snapshot.requestedModel ?? null,
       resolved_model: record2.snapshot.resolvedModel,
       model_override: record2.snapshot.modelOverride,
       reused_session: reusedSession
     });
-    const result = this.runToSettled(record2.snapshot, record2.session, opts?.prompt ?? record2.initialPrompt, emit, record2);
+    const result = this.runToSettled(record2.snapshot, record2.session, opts?.prompt ?? record2.initialPrompt, emit2, record2);
     record2.result = result;
     return {
       activationId,
@@ -25836,7 +25889,7 @@ class NativeActivationHost {
     record2.snapshot.attemptId = attemptId;
     record2.snapshot.state = "starting";
     this.save(record2.snapshot);
-    const emit = (name, payload) => this.forensics.emit({
+    const emit2 = (name, payload) => this.forensics.emit({
       activationId,
       attemptId,
       participantId: record2.snapshot.participantId,
@@ -25845,7 +25898,7 @@ class NativeActivationHost {
       name,
       payload
     });
-    emit("activation_resumed", {
+    emit2("activation_resumed", {
       requested_model: record2.snapshot.requestedModel,
       resolved_model: record2.snapshot.resolvedModel,
       model_override: record2.snapshot.modelOverride,
@@ -25853,8 +25906,8 @@ class NativeActivationHost {
       thinking_override: record2.snapshot.thinkingOverride
     });
     record2.unsubscribe();
-    record2.unsubscribe = record2.session.subscribe((event) => this.onSessionEvent(record2.snapshot, event, emit));
-    const result = this.runToSettled(record2.snapshot, record2.session, prompt, emit, record2);
+    record2.unsubscribe = record2.session.subscribe((event) => this.onSessionEvent(record2.snapshot, event, emit2));
+    const result = this.runToSettled(record2.snapshot, record2.session, prompt, emit2, record2);
     record2.result = result;
     return {
       activationId,
@@ -27377,9 +27430,9 @@ async function verifyExactLineCitation(evidence, claim) {
 import { resolve as resolve12 } from "node:path";
 
 // src/activation/workspace-reconcile.ts
-import { appendFileSync as appendFileSync2, existsSync as existsSync23, mkdirSync as mkdirSync8, readdirSync as readdirSync6, readFileSync as readFileSync14, unlinkSync as unlinkSync4 } from "node:fs";
+import { appendFileSync as appendFileSync3, existsSync as existsSync23, mkdirSync as mkdirSync9, readdirSync as readdirSync6, readFileSync as readFileSync14, unlinkSync as unlinkSync4 } from "node:fs";
 import { userInfo } from "node:os";
-import { join as join21 } from "node:path";
+import { join as join22 } from "node:path";
 var PERMITTED = {
   holder_process_gone: new Set(["safe_free", "superseded", "manual_attention_required"]),
   holder_start_mismatch: new Set(["safe_free", "superseded", "manual_attention_required"]),
@@ -27392,7 +27445,7 @@ function reconcile(workspace, request, options = {}) {
   const status = inspect(workspace, probe);
   const record2 = decide(workspace, request, status, now());
   appendRecord(workspace, record2);
-  emit(options.forensics, record2, status.lease);
+  emit2(options.forensics, record2, status.lease);
   return record2;
 }
 function decide(workspace, request, status, decidedAtMs) {
@@ -27456,8 +27509,8 @@ function reconciliationLogPath(workspace) {
   return `${leasePath(workspace).slice(0, -".json".length)}.reconcile.jsonl`;
 }
 function appendRecord(workspace, record2) {
-  mkdirSync8(leaseDir(workspace), { recursive: true, mode: 448 });
-  appendFileSync2(reconciliationLogPath(workspace), `${JSON.stringify(record2)}
+  mkdirSync9(leaseDir(workspace), { recursive: true, mode: 448 });
+  appendFileSync3(reconciliationLogPath(workspace), `${JSON.stringify(record2)}
 `, { mode: 384 });
 }
 function readLogAt(path) {
@@ -27474,11 +27527,11 @@ function readLogAt(path) {
   }
   return out;
 }
-function emit(sink, record2, lease) {
-  if (!sink)
+function emit2(sink2, record2, lease) {
+  if (!sink2)
     return;
   try {
-    sink.emit({
+    sink2.emit({
       activationId: lease?.activationId ?? `workspace:${record2.workspaceKey}`,
       attemptId: lease?.attemptId ?? "reconciliation",
       participantId: lease?.specialist ? `specialist::${lease.specialist}` : "specialist::unknown",
@@ -27516,11 +27569,11 @@ function projectUncertainWorkspaces(scope, probe = procLeaseProbe()) {
     if (!entry.endsWith(".json"))
       continue;
     const key = entry.slice(0, -".json".length);
-    const lease = readLeaseFile(join21(dir, entry));
+    const lease = readLeaseFile(join22(dir, entry));
     const status = lease ? inspect({ ...scope, worktreePath: lease.worktreePath }, probe) : { state: "uncertain", uncertainReason: "unreadable_record" };
     if (status.state !== "uncertain")
       continue;
-    const log = readLogAt(join21(dir, `${key}.reconcile.jsonl`));
+    const log = readLogAt(join22(dir, `${key}.reconcile.jsonl`));
     const last = log[log.length - 1];
     out.push({
       workspace_key: key,

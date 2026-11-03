@@ -6,6 +6,7 @@
 // NEVER fabricates a binding. NEVER logs prompt/command/terminal text.
 
 import { spawnSync } from 'node:child_process';
+import { runtimeWarn } from '../utils/runtime-diagnostics.js';
 
 export const SPECIALISTS_RUNTIME_ORIGIN_V1 = 'SPECIALISTS_RUNTIME_ORIGIN_V1';
 export const MAX_ORIGIN_JSON_BYTES = 16 * 1024;
@@ -130,7 +131,7 @@ function logLine(fields: Record<string, string | number | undefined>): void {
     if (v === undefined) continue;
     parts.push(`${k}=${v}`);
   }
-  console.warn(parts.join(' '));
+  runtimeWarn('', parts.join(' '));
 }
 
 export interface CaptureRuntimeOriginOptions {

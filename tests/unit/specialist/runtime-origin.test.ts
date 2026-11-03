@@ -8,6 +8,7 @@ import {
   SPECIALISTS_RUNTIME_ORIGIN_V1,
   type RuntimeOriginV1,
 } from '../../../src/specialist/runtime-origin.js';
+import { resetRuntimeDiagnosticsSink, setRuntimeDiagnosticsSink } from '../../../src/utils/runtime-diagnostics.js';
 
 const VALID: RuntimeOriginV1 = {
   schema_version: 'xtrm.runtime-origin.v1',
@@ -21,6 +22,14 @@ const VALID: RuntimeOriginV1 = {
   capture_source: 'xtmux-context',
   verified: true,
 };
+
+
+/** Runtime warnings go through the diagnostics sink, not console.warn. */
+function captureRuntimeWarn(): { mock: { calls: string[] }; mockRestore: () => void } {
+  const calls: string[] = [];
+  setRuntimeDiagnosticsSink((line) => calls.push(line));
+  return { mock: { calls }, mockRestore: () => resetRuntimeDiagnosticsSink() };
+}
 
 describe('validateRuntimeOrigin', () => {
   it('accepts a valid origin round-trip', () => {
@@ -99,7 +108,7 @@ describe('validateRuntimeOrigin', () => {
 
 describe('captureRuntimeOrigin', () => {
   it('returns undefined outside tmux (no TMUX_PANE)', async () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const spy = captureRuntimeWarn();
     const r = await captureRuntimeOrigin({ env: {}, subprocess: () => ({ status: 0, stdout: '', stderr: '' }) });
     expect(r).toBeUndefined();
     expect(spy.mock.calls.join(' ')).toMatch(/outcome=skipped reason=outside-tmux/);
@@ -107,7 +116,7 @@ describe('captureRuntimeOrigin', () => {
   });
 
   it('returns validated origin on success', async () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const spy = captureRuntimeWarn();
     const r = await captureRuntimeOrigin({
       env: { TMUX_PANE: '%17' },
       subprocess: () => ({ status: 0, stdout: JSON.stringify(VALID), stderr: '' }),
@@ -118,7 +127,7 @@ describe('captureRuntimeOrigin', () => {
   });
 
   it('returns undefined when binary is missing (ENOENT)', async () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const spy = captureRuntimeWarn();
     const enoentErr = Object.assign(new Error('ENOENT'), { code: 'ENOENT' }) as NodeJS.ErrnoException;
     const r = await captureRuntimeOrigin({
       env: { TMUX_PANE: '%17' },
@@ -130,7 +139,7 @@ describe('captureRuntimeOrigin', () => {
   });
 
   it('returns undefined on non-zero exit', async () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const spy = captureRuntimeWarn();
     const r = await captureRuntimeOrigin({
       env: { TMUX_PANE: '%17' },
       subprocess: () => ({ status: 2, stdout: '', stderr: 'nope' }),
@@ -141,7 +150,7 @@ describe('captureRuntimeOrigin', () => {
   });
 
   it('returns undefined on JSON parse failure', async () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const spy = captureRuntimeWarn();
     const r = await captureRuntimeOrigin({
       env: { TMUX_PANE: '%17' },
       subprocess: () => ({ status: 0, stdout: 'not-json', stderr: '' }),
@@ -152,7 +161,7 @@ describe('captureRuntimeOrigin', () => {
   });
 
   it('returns undefined on schema-validation failure', async () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const spy = captureRuntimeWarn();
     const r = await captureRuntimeOrigin({
       env: { TMUX_PANE: '%17' },
       subprocess: () => ({ status: 0, stdout: JSON.stringify({ ...VALID, kind: 'nope' }), stderr: '' }),
@@ -163,7 +172,7 @@ describe('captureRuntimeOrigin', () => {
   });
 
   it('returns undefined on oversize payload', async () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const spy = captureRuntimeWarn();
     const huge = 'x'.repeat(20 * 1024);
     const r = await captureRuntimeOrigin({
       env: { TMUX_PANE: '%17' },
@@ -175,7 +184,7 @@ describe('captureRuntimeOrigin', () => {
   });
 
   it('never throws when subprocess runner itself throws', async () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const spy = captureRuntimeWarn();
     const r = await captureRuntimeOrigin({
       env: { TMUX_PANE: '%17' },
       subprocess: () => { throw new Error('boom'); },
@@ -192,7 +201,7 @@ describe('decodePropagatedOrigin', () => {
   });
 
   it('accepts raw JSON path and marks capture_source=propagated', () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const spy = captureRuntimeWarn();
     const r = decodePropagatedOrigin({ [SPECIALISTS_RUNTIME_ORIGIN_V1]: JSON.stringify(VALID) });
     expect(r).toEqual({ ...VALID, capture_source: 'propagated' });
     expect(spy.mock.calls.join(' ')).toMatch(/event=propagate outcome=ok/);
@@ -212,7 +221,7 @@ describe('decodePropagatedOrigin', () => {
   });
 
   it('rejects malformed base64url payload', () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const spy = captureRuntimeWarn();
     const r = decodePropagatedOrigin({ [SPECIALISTS_RUNTIME_ORIGIN_V1]: 'not-base64-and-not-json' });
     expect(r).toBeUndefined();
     expect(spy.mock.calls.join(' ')).toMatch(/event=reject/);
@@ -220,7 +229,7 @@ describe('decodePropagatedOrigin', () => {
   });
 
   it('rejects oversize propagated value', () => {
-    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const spy = captureRuntimeWarn();
     const huge = 'x'.repeat(20 * 1024);
     const r = decodePropagatedOrigin({ [SPECIALISTS_RUNTIME_ORIGIN_V1]: huge });
     expect(r).toBeUndefined();

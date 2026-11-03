@@ -16,18 +16,18 @@ import {
   compileMandatoryRulesBudget,
   type MandatoryRulesSection,
 } from '../../../src/specialist/mandatory-rules.js';
+import { resetRuntimeDiagnosticsSink, setRuntimeDiagnosticsSink } from '../../../src/utils/runtime-diagnostics.js';
 
 function captureWarnings<T>(fn: () => T): { result: T; warnings: string[] } {
   const warnings: string[] = [];
-  const originalWarn = console.warn;
-  console.warn = (...args: unknown[]) => {
-    warnings.push(args.map(String).join(' '));
-  };
+  setRuntimeDiagnosticsSink((line) => {
+    warnings.push(line);
+  });
 
   try {
     return { result: fn(), warnings };
   } finally {
-    console.warn = originalWarn;
+    resetRuntimeDiagnosticsSink();
   }
 }
 

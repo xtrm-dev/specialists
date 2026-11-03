@@ -12,6 +12,7 @@
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runtimeWarn } from '../utils/runtime-diagnostics.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REL = join('config', 'pi-extensions', 'permission-guard');
@@ -88,9 +89,9 @@ export function resolvePermissionGuardForSpawn(
   if (!path) {
     // Same artifact check as shouldGrantGuardedBash, so the contract already
     // withholds bash here: warn and launch without bash, never unsandboxed.
-    console.warn(
-      '[permission-guard] guard artifact config/pi-extensions/permission-guard is missing; ' +
-        'READ_ONLY bash withheld.',
+    runtimeWarn(
+      'permission-guard',
+      'guard artifact config/pi-extensions/permission-guard is missing; READ_ONLY bash withheld.',
     );
     return null;
   }

@@ -105,6 +105,7 @@ import { FleetRegistry, RESUMABLE_STATES, RETRYABLE_STATES, nextAttemptId, type 
 import { publishSettlement, republishPendingSettlements, type SettlementSubject } from './settlement-publication.js';
 import { createFileSettlementStore, type SettlementStore } from './settlement-store.js';
 import { join } from 'node:path';
+import { createFileDiagnosticsSink, runtimeDiagnosticsSinkPath, setRuntimeDiagnosticsSink } from '../utils/runtime-diagnostics.js';
 import { NULL_AUTHORITY_WRITER, type AuthorityWriter } from './authority-store.js';
 import {
   DispatchRejectedError,
@@ -1140,6 +1141,11 @@ export class NativeActivationHost {
 
   constructor(deps: NativeActivationHostDeps = {}) {
     this.cwd = deps.cwd ?? process.cwd();
+    // Native activations run INSIDE the coordinator's Pi process. A runtime warning written
+    // to that process's stdio paints over its TUI (measured: one console.debug in the model
+    // chain drew across the statusline), so the host — the in-process boundary — redirects
+    // runtime diagnostics to a file before any activation can emit one.
+    setRuntimeDiagnosticsSink(createFileDiagnosticsSink(runtimeDiagnosticsSinkPath(this.cwd)));
     this.provisionWriterWorkspace = deps.provisionWriterWorkspace ?? provisionWriterWorkspace;
     this.backgroundTaskAlive = deps.backgroundTaskAlive ?? processAlive;
     this.backgroundPollMs = deps.backgroundPollMs ?? 5_000;
