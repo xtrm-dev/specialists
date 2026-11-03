@@ -68,9 +68,10 @@ describe('Pi fleet display fallback and preference (SPECIALISTS-4365)', () => {
       header = mod.renderFleetHeader(fleet);
       rows = mod.renderFleetRowLines(SETTLED_ROW, [], Date.now());
     }).not.toThrow();
-    expect(plain(header)).toBe('  specialists 1 waiting');
-    // Marker, identity, model facts, then the space-separated stats.
-    expect(plain(rows[0]!)).toContain('✓ explorer:aaaabbbb-cccc XTRM-1 test-model');
+    expect(plain(header)).toBe('/specialists 1 waiting');
+    // Identity, the state verb, then the space-separated stats — marker, model and
+    // issue ref are the /specialists table's job now.
+    expect(plain(rows[0]!)).toContain('explorer:aaaabbbb-cccc settled 2m14s 3 turns 12k');
     expect(plain(rows[0]!)).toContain('2m14s 3 turns 12k');
     // The section renderer agrees with the row renderer.
     const lines = mod.renderSectionLines(fleet, { nowMs: Date.now() });
@@ -92,15 +93,14 @@ describe('Pi fleet display fallback and preference (SPECIALISTS-4365)', () => {
         }],
       },
     };
-    expect(plain(mod.renderFleetHeader(fleet))).toBe('  specialists 1 waiting');
+    expect(plain(mod.renderFleetHeader(fleet))).toBe('/specialists 1 waiting');
     const rows = mod.renderFleetRowLines(
       SETTLED_ROW,
       [],
       Date.now(),
       fleet.display.activations[0],
     );
-    expect(plain(rows[0]!)).toContain('✓ explorer:aaaabbbb-cccc XTRM-1 test-model');
-    expect(plain(rows[0]!)).toContain('2m14s 3 turns 12k');
+    expect(plain(rows[0]!)).toContain('explorer:aaaabbbb-cccc settled 2m14s 3 turns 12k');
     // A display entry whose strings differ from the local computation wins.
     const custom = {
       ...fleet,
@@ -114,15 +114,14 @@ describe('Pi fleet display fallback and preference (SPECIALISTS-4365)', () => {
         }],
       },
     };
-    expect(plain(mod.renderFleetHeader(custom))).toBe('  specialists custom header');
+    expect(plain(mod.renderFleetHeader(custom))).toBe('/specialists custom header');
     const customRows = mod.renderFleetRowLines(
       SETTLED_ROW,
       [],
       Date.now(),
       custom.display.activations[0],
     );
-    expect(plain(customRows[0]!)).toContain('XTRM-9');
-    expect(plain(customRows[0]!)).toContain('asked 19s');
+    expect(plain(customRows[0]!)).toBe('   explorer:aaaabbbb-cccc settled asked 19s');
     expect(plain(customRows[0]!)).not.toContain('2m14s');
     // Section and overlay rows thread the same entry through.
     const section = mod.renderSectionLines(custom, { nowMs: Date.now() });
@@ -133,9 +132,9 @@ describe('Pi fleet display fallback and preference (SPECIALISTS-4365)', () => {
 
   it('an empty fleet still headers idle with and without display', async () => {
     const mod = await loadExtension();
-    expect(plain(mod.renderFleetHeader({ activations: [], asks: [] }))).toBe('  specialists idle');
+    expect(plain(mod.renderFleetHeader({ activations: [], asks: [] }))).toBe('/specialists idle');
     expect(
       plain(mod.renderFleetHeader({ activations: [], asks: [], display: { header: 'idle', activations: [] } })),
-    ).toBe('  specialists idle');
+    ).toBe('/specialists idle');
   });
 });

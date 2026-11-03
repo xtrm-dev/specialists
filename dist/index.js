@@ -96090,6 +96090,15 @@ function activationDisplayMarker(view, ask, nowMs = Date.now()) {
     return DISPLAY_SPINNER_FRAMES[Math.floor(nowMs / DISPLAY_SPINNER_FRAME_MS) % DISPLAY_SPINNER_FRAMES.length];
   return "\u25CF";
 }
+function activationDisplayStateVerb(view, ask, nowMs = Date.now()) {
+  if (ask)
+    return "blocked";
+  const idle = displayIdleS(view, nowMs);
+  if (isDisplayActiveState(view.state) && idle != null && idle > DISPLAY_IDLE_AFTER_S)
+    return "idle";
+  const state = String(view.state ?? "").toLowerCase();
+  return DISPLAY_STATE_VERBS[state] ?? (state || "waiting");
+}
 function activationDisplayMetrics(view, ask, nowMs = Date.now()) {
   if (ask) {
     return `asked ${formatDisplayElapsed(Math.max(0, Math.floor((nowMs - displayAskedAt(ask, nowMs)) / 1000)))}`;
@@ -96134,6 +96143,7 @@ function activationDisplayEntry(view, ask, nowMs = Date.now()) {
     activation_id: displayActivationId(view),
     marker: activationDisplayMarker(view, ask, nowMs),
     metrics: activationDisplayMetrics(view, ask, nowMs),
+    state_verb: activationDisplayStateVerb(view, ask, nowMs),
     work: displayWorkRef(view)
   };
 }
@@ -96149,10 +96159,22 @@ function buildFleetDisplay(activations, asks, nowMs = Date.now()) {
     activations: (activations ?? []).map((view) => activationDisplayEntry(view, askById.get(displayActivationId(view)), nowMs))
   };
 }
-var DISPLAY_SPINNER_FRAMES, DISPLAY_SPINNER_FRAME_MS = 220, DISPLAY_IDLE_AFTER_S = 30, DISPLAY_ACTIVE_STATES;
+var DISPLAY_SPINNER_FRAMES, DISPLAY_SPINNER_FRAME_MS = 220, DISPLAY_IDLE_AFTER_S = 30, DISPLAY_ACTIVE_STATES, DISPLAY_STATE_VERBS;
 var init_specialist_display = __esm(() => {
   DISPLAY_SPINNER_FRAMES = ["\u25D0", "\u25D3", "\u25D1", "\u25D2"];
   DISPLAY_ACTIVE_STATES = new Set(["running", "starting"]);
+  DISPLAY_STATE_VERBS = {
+    starting: "starting",
+    running: "running",
+    waiting: "waiting",
+    needs_reply: "needs reply",
+    escalated: "escalated",
+    settled: "settled",
+    failed: "failed",
+    stopped: "stopped",
+    idle: "idle",
+    blocked: "blocked"
+  };
 });
 
 // src/tools/specialist/specialist_status.tool.ts

@@ -197,9 +197,13 @@ const FAILURE = (text) => `\x1b[31m${text}\x1b[39m`;
  * Section label: bold lowercase, no background. The line keeps the two-space
  * indent where the retired `╰─` tree glyph was.
  */
-export const SECTION_LABEL = 'specialists';
-/** Two-space indent preserved from the retired `╰─` tree connector. */
-export const SECTION_INDENT = '  ';
+export const SECTION_LABEL = '/specialists';
+/** No leading indent: the header sits at the left edge, above the prompt. It names the
+ * command that opens the full table, because the row itself no longer carries the model,
+ * the thinking level or the issue ref — the overlay does. */
+export const SECTION_INDENT = '';
+/** Row indent, three spaces: rows hang under the header label, not under a tree glyph. */
+export const FLEET_ROW_INDENT = '   ';
 
 /** Header counts. `running` is live work, `blocked` is outstanding coordinator asks, and
  * `waiting` is everything else the Fleet is holding for the operator — buckets are
@@ -331,21 +335,6 @@ function waitingSeconds(ask, nowMs) {
 }
 
 /**
- * The one state signal for an entry. Never combined with a word that repeats it.
- *
- * `!` outranks the spinner (a child blocked on the coordinator is not working), then the
- * terminal states, then live work, then the static dot for everything else — including a
- * running child that has gone quiet past the idle threshold.
- */
-function stateMarker({ view, blocked, active, nowMs }) {
-  if (blocked) return WARNING('!');
-  if (view.state === 'settled') return SUCCESS('✓');
-  if (view.state === 'failed') return FAILURE('✕');
-  if (active) return ACCENT(SPINNER_FRAMES[Math.floor(nowMs / SPINNER_FRAME_MS) % SPINNER_FRAMES.length]);
-  return '●';
-}
-
-/**
  * One activation's entry from a status payload's `display` block (SPECIALISTS-4365).
  *
  * Null when the payload predates `display` — the row then falls back to its local
@@ -358,15 +347,50 @@ function displayEntryFor(fleetOrDisplay, activationId) {
 }
 
 /**
- * Style a canonical display marker the way the local stateMarker would: the runtime
- * sends plain text, the frontend owns the color.
+ * Every status a Specialist can hold, as the row's lower-case verb. The runtime emits
+ * the same word in `display.state_verb` (src/tools/specialist/specialist-display.ts);
+ * this map is the fallback for payloads that predate it, and the two must agree.
  */
-function styledDisplayMarker(marker) {
-  if (marker === '!') return WARNING('!');
-  if (marker === '✓') return SUCCESS('✓');
-  if (marker === '✕') return FAILURE('✕');
-  if (SPINNER_FRAMES.includes(marker)) return ACCENT(marker);
-  return marker ?? '●';
+const FLEET_STATE_VERB = {
+  starting: 'starting',
+  running: 'running',
+  waiting: 'waiting',
+  needs_reply: 'needs reply',
+  escalated: 'escalated',
+  settled: 'settled',
+  failed: 'failed',
+  stopped: 'stopped',
+  idle: 'idle',
+  blocked: 'blocked',
+};
+
+/** The verb slot's own styling. Running is the one bold word; a state that means the
+ * operator must act (asked, escalated) warns, a failure errors, the rest sit dim. */
+function styleFleetVerb(verb) {
+  if (verb === 'failed') return FAILURE(verb);
+  if (verb === 'blocked' || verb === 'needs reply' || verb === 'escalated') return WARNING(verb);
+  if (verb === 'running') return BOLD(verb);
+  return DIM(verb);
+}
+
+/** Local verb, used only when the payload carries no canonical `display.state_verb`. */
+function fleetStateVerb({ view, blocked, active, idle }) {
+  if (blocked) return 'blocked';
+  if (active && idle != null && idle > IDLE_AFTER_S) return 'idle';
+  const state = String(view?.state ?? '').toLowerCase();
+  return FLEET_STATE_VERB[state] ?? (state || 'waiting');
+}
+
+/**
+ * ONE fleet row: identity, the bold state verb, the dim metrics — nothing else.
+ *
+ * Operator ruling (2026-11-03): the row above the prompt keeps only what a glance needs;
+ * marker, model, thinking level and the issue ref move out of it, because `/specialists`
+ * opens the table that carries all of them. The state verb is the one weighted word.
+ */
+function fleetRowLine({ view, verb, metrics }) {
+  const identity = `${view.specialist}:${view.activation_id.slice(4)}`;
+  return `${FLEET_ROW_INDENT}${identity} ${styleFleetVerb(verb)} ${DIM(metrics)}`;
 }
 
 /**
@@ -409,18 +433,18 @@ export function renderFleetRowLines(view, asks = [], nowMs = Date.now(), display
     const work = typeof displayEntry.work === 'string' && displayEntry.work
       ? displayEntry.work
       : (view.issue_ref ?? view.bead_id ?? view.issue_id ?? '—');
-    const thinking = view.thinking_level ? ` ${BOLD(view.thinking_level)}` : '';
-    return [
-      `    ${styledDisplayMarker(displayEntry.marker)} ${BOLD(`${view.specialist}:${view.activation_id.slice(4)}`)} ${work} ${DIM(view.resolved_model ?? '?model')}${thinking} ${DIM('·')} ${DIM(displayEntry.metrics)}`,
-    ];
+    const verb = typeof displayEntry.state_verb === 'string' && displayEntry.state_verb
+      ? displayEntry.state_verb
+      : fleetStateVerb({ view, blocked: Boolean(ask), active: isActiveState(view.state), idle: idleSeconds(view, nowMs) });
+    return [fleetRowLine({ view, verb, metrics: displayEntry.metrics })];
   }
   const idle = idleSeconds(view, nowMs);
-  const active = isActiveState(view.state) && !ask && !(idle != null && idle > IDLE_AFTER_S);
-  const marker = stateMarker({ view, blocked: Boolean(ask), active, nowMs });
-  const work = view.issue_ref ?? view.bead_id ?? view.issue_id ?? '—';
-  const thinking = view.thinking_level ? ` ${BOLD(view.thinking_level)}` : '';
   return [
-    `    ${marker} ${BOLD(`${view.specialist}:${view.activation_id.slice(4)}`)} ${work} ${DIM(view.resolved_model ?? '?model')}${thinking} ${DIM('·')} ${DIM(rowMetrics({ view, ask, nowMs }))}`,
+    fleetRowLine({
+      view,
+      verb: fleetStateVerb({ view, blocked: Boolean(ask), active: isActiveState(view.state), idle }),
+      metrics: rowMetrics({ view, ask, nowMs }),
+    }),
   ];
 }
 
@@ -3331,7 +3355,9 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
         return;
       }
       ui.setWidget(FLEET_WIDGET_KEY, () => ({
-        render: (width) => renderFleetSection(readFleet(), { expanded: false, nowMs: Date.now() })
+        // Header AND rows, above the prompt (operator ruling 2026-11-03: the fleet is one
+        // block above the editor, not a header here and rows below the statusline).
+        render: (width) => renderFleetSection(readFleet(), { expanded: fleetExpanded, nowMs: Date.now() })
           .map((line) => fitOverlayWidth(line, Math.max(8, Math.floor(width) || 80))),
         invalidate: () => {},
         dispose: () => {},
@@ -3346,35 +3372,6 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
   // prompt); detail never renders here (it lives in the overlay). Collapsed
   // hides the rows, leaving the header widget alone. Renders on the footer's
   // own cycle, so repaints need no driver.
-  let fleetRowsUnregister = null;
-  const renderRowsBelow = (width) => {
-    if (!fleetVisible || !fleetExpanded) return [];
-    const fleet = readFleet();
-    const activations = fleet.activations ?? [];
-    const asks = fleet.asks ?? [];
-    if (activations.length === 0 && asks.length === 0) return [];
-    const nowMs = Date.now();
-    const { entries, overflow } = selectFleetEntries(fleet);
-    const lines = [''];
-    for (const view of entries) lines.push(...renderFleetRowLines(view, asks, nowMs, displayEntryFor(fleet.display, view.activation_id)));
-    if (overflow > 0) lines.push(`    +${overflow} more`);
-    return lines;
-  };
-
-  // Seam lookup order: explicit test seam, then the core footer's global hook,
-  // then absent. The core module is not importable from this tree, so the
-  // runtime shares it via globalThis (set by custom-footer when loaded).
-  // Without a seam the rows stay hidden; the header widget above the prompt
-  // is unaffected. Slash commands still report the full block as text.
-  const findFooterSeam = () => {
-    if (typeof options.registerFooterSection === 'function') return options.registerFooterSection;
-    try {
-      const hook = globalThis.__registerFooterSection;
-      if (typeof hook === 'function') return hook;
-    } catch { /* no global — rows stay hidden */ }
-    return null;
-  };
-
   // Inspector deferred with UI-4 (unitAI-nmxhg): /specialists inspect prints the
   // expanded text report instead of mounting a ui.custom pane.
   const openFleetInspector = async (ctx) => {
@@ -3524,15 +3521,6 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     followStopped = false;
     captureFleetUi(ctx);
     paintFleetWidget();
-    // Rows below the statusline mount through the footer seam; without one
-    // they stay hidden while the header widget above the prompt is unaffected.
-    if (ctx.hasUI) {
-      const seam = findFooterSeam();
-      if (seam && !fleetRowsUnregister) {
-        try { fleetRowsUnregister = seam(FLEET_WIDGET_KEY, renderRowsBelow) ?? null; }
-        catch { fleetRowsUnregister = null; }
-      }
-    }
     // Repark when a host already lives (never create one here: a null host is
     // an empty fleet, not an error); getHost() kicks on creation.
     if (host) kickFollowLoop();
@@ -3864,8 +3852,6 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
     // touch the host while its activations are being disposed below.
     followStopped = true;
     closeAllSubstrateDb();
-    try { fleetRowsUnregister?.(); } catch {}
-    fleetRowsUnregister = null;
     if (!host) return;
     if (!host) return;
     for (const snapshot of host.list()) {
