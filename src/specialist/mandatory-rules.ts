@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { resolveCanonicalAssetDir } from './canonical-asset-resolver.js';
+import { runtimeWarn } from '../utils/runtime-diagnostics.js';
 
 export interface MandatoryRule {
   id: string;
@@ -168,7 +169,7 @@ export function loadMandatoryRulesIndex(cwd: string): MandatoryRulesIndex | null
   }
 
   if (tiers.length === 0) {
-    console.warn('[specialist runner] Missing mandatory-rules index (checked config/, .specialists/default/, .specialists/); skipping MANDATORY_RULES injection');
+    runtimeWarn('specialist runner', 'Missing mandatory-rules index (checked config/, .specialists/default/, .specialists/); skipping MANDATORY_RULES injection');
     return null;
   }
 
@@ -277,7 +278,7 @@ function readMandatoryRuleSet(cwd: string, id: string): MandatoryRuleSet | null 
   // This is the single sink that every id route funnels through, so guarding
   // here closes both the override and index-overlay routes.
   if (!/^[a-z][a-z0-9-]*$/.test(id)) {
-    console.warn(`[specialist runner] Rejecting unsafe mandatory-rules set id '${id}' (must be kebab-case)`);
+    runtimeWarn('specialist runner', `Rejecting unsafe mandatory-rules set id '${id}' (must be kebab-case)`);
     return null;
   }
 
@@ -344,7 +345,7 @@ function collectMandatoryRuleSets(cwd: string, setIds: string[]): MandatoryRuleS
 
     const set = readMandatoryRuleSet(cwd, id);
     if (!set) {
-      console.warn(`[specialist runner] Missing mandatory-rules set: ${id}`);
+      runtimeWarn('specialist runner', `Missing mandatory-rules set: ${id}`);
       continue;
     }
 

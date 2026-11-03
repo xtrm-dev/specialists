@@ -11,6 +11,7 @@ import {
   parseJournalMode,
   verifyWalMode,
 } from '../../../src/specialist/observability-sqlite.js';
+import { resetRuntimeDiagnosticsSink, setRuntimeDiagnosticsSink } from '../../../src/utils/runtime-diagnostics.js';
 import { createForensicEvent } from '../../../src/specialist/forensic-events.js';
 import { createBranchIntegrationEvent } from '../../../src/specialist/branch-integration-events.js';
 import { loadEpicReadinessSummary } from '../../../src/specialist/epic-readiness.js';
@@ -73,14 +74,15 @@ describe('observability-sqlite', () => {
   it('warns and leaves no zero-byte placeholder when sqlite open fails', () => {
     const dbPath = join(tempRoot, 'not-a-database');
     mkdirSync(dbPath, { recursive: true });
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const warnings: string[] = [];
+    setRuntimeDiagnosticsSink((line) => warnings.push(line));
 
     const client = createObservabilitySqliteClientAtPath(dbPath);
 
     expect(client).toBeNull();
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining(`Failed to open observability database at ${dbPath}`));
+    expect(warnings.join('\n')).toContain(`Failed to open observability database at ${dbPath}`);
     expect(existsSync(join(tempRoot, 'not-a-database', 'observability.db'))).toBe(false);
-    warn.mockRestore();
+    resetRuntimeDiagnosticsSink();
   });
 
   describe('enforceWalMode', () => {

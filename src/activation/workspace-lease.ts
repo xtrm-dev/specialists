@@ -91,6 +91,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { runtimeWarn } from '../utils/runtime-diagnostics.js';
 import { DispatchRejectedError, type ActivationId, type AttemptId, type WorkspaceIdentity } from './types.js';
 
 /**
@@ -137,7 +138,7 @@ function resolveOriginDefaultBranch(git: (...args: string[]) => string): string 
     return git('symbolic-ref', '--short', 'refs/remotes/origin/HEAD').replace(/^origin\//, '');
   } catch {
     const present = ['main', 'master'].filter((b) => git('ls-remote', '--heads', 'origin', b) !== '');
-    if (present.length > 1) console.warn(`[workspace-lease] origin HEAD unresolvable and both main and master exist; using ${present[0]}`);
+    if (present.length > 1) runtimeWarn('workspace-lease', `origin HEAD unresolvable and both main and master exist; using ${present[0]}`);
     if (present.length > 0) return present[0];
   }
   throw new Error('origin has no resolvable default branch (no remote HEAD, no origin/HEAD, no main or master)');
@@ -146,7 +147,7 @@ function resolveOriginDefaultBranch(git: (...args: string[]) => string): string 
 /** `origin/<default>` after a fetch, or `HEAD` with a warning when the checkout has no remote. */
 function resolveWorktreeBase(git: (...args: string[]) => string): string {
   if (!git('remote').split('\n').includes('origin')) {
-    console.warn('[workspace-lease] no "origin" remote; creating the writer worktree from the dispatcher HEAD');
+    runtimeWarn('workspace-lease', 'no "origin" remote; creating the writer worktree from the dispatcher HEAD');
     return 'HEAD';
   }
   const defaultBranch = resolveOriginDefaultBranch(git);

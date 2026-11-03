@@ -5,6 +5,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { extractSections } from '../activation/contract-sections.js';
+import { runtimeWarn } from '../utils/runtime-diagnostics.js';
 
 
 export interface BeadDependency {
@@ -108,7 +109,7 @@ export class BeadsClient {
   constructor() {
     this.available = BeadsClient.checkAvailable();
     if (!this.available) {
-      console.warn('[specialists] bd CLI not found — beads tracking disabled');
+      runtimeWarn('specialists', 'bd CLI not found — beads tracking disabled');
     }
   }
 
@@ -152,7 +153,7 @@ export class BeadsClient {
         || typeof bead.title !== 'string') return null;
       return bead as BeadRecord;
     } catch (err) {
-      console.warn(`[specialists] readBead: JSON parse failed for id=${id}: ${err}`);
+      runtimeWarn('specialists', `readBead: JSON parse failed for id=${id}: ${err}`);
       return null;
     }
   }

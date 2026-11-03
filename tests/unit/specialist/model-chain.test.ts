@@ -1,9 +1,11 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { resolveModelChain } from '../../../src/specialist/model-chain.js';
+import { resetRuntimeDiagnosticsSink, setRuntimeDiagnosticsSink } from '../../../src/utils/runtime-diagnostics.js';
 
 describe('resolveModelChain', () => {
   afterEach(() => {
-    vi.restoreAllMocks();
+    resetRuntimeDiagnosticsSink();
+    delete process.env.DEBUG;
   });
 
   it('returns primary followed by plural fallbacks', () => {
@@ -19,10 +21,12 @@ describe('resolveModelChain', () => {
   });
 
   it('prefers plural fallbacks over singular fallback', () => {
-    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    const lines: string[] = [];
+    setRuntimeDiagnosticsSink((line) => lines.push(line));
+    process.env.DEBUG = '1';
 
     expect(resolveModelChain({ model: 'p', fallback_model: 'f', fallback_models: ['a', 'b'] })).toEqual(['p', 'a', 'b']);
-    expect(debug).toHaveBeenCalledWith('[model-chain] plural fallback_models wins; ignoring fallback_model=f');
+    expect(lines.join('\n')).toContain('[model-chain] plural fallback_models wins; ignoring fallback_model=f');
   });
 
   it('returns empty chain when model missing and no fallback exists', () => {

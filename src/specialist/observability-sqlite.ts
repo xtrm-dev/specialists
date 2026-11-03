@@ -98,6 +98,7 @@ function loadBunDatabase(): (new (path: string) => BunDb) | null {
 }
 import { resolveObservabilityDbLocation } from './observability-db.js';
 import { resolveJobsDir } from './job-root.js';
+import { runtimeWarn } from '../utils/runtime-diagnostics.js';
 import type { TimelineEvent, TimelineEventTool } from './timeline-events.js';
 import { deriveParticipantId, forensicEventFromTimelineEvent, type ForensicEvent } from './forensic-events.js';
 import type { BranchIntegrationEvent } from './branch-integration-events.js';
@@ -3799,7 +3800,7 @@ function openObservabilitySqliteClient(dbPath: string): ObservabilitySqliteClien
     // Create persistent client connection
     return new SqliteClient(dbPath);
   } catch (error) {
-    console.warn(`[observability-sqlite] Failed to open observability database at ${dbPath}: ${String(error)}`);
+    runtimeWarn('observability-sqlite', `Failed to open observability database at ${dbPath}`, String(error));
     return null;
   }
 }

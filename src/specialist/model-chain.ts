@@ -1,3 +1,5 @@
+import { runtimeDebug } from '../utils/runtime-diagnostics.js';
+
 export interface ModelChainExecution {
   model: string | null;
   fallback_model?: string | null;
@@ -13,7 +15,7 @@ export function resolveModelChain(execution: ModelChainExecution): string[] {
 function resolveFallbackModels(execution: ModelChainExecution): string[] {
   if (execution.fallback_models && execution.fallback_models.length > 0) {
     if (normalizeModel(execution.fallback_model ?? null)) {
-      console.debug(`[model-chain] plural fallback_models wins; ignoring fallback_model=${execution.fallback_model}`);
+      runtimeDebug('model-chain', `plural fallback_models wins; ignoring fallback_model=${execution.fallback_model}`);
     }
     return execution.fallback_models.map(normalizeModel).filter((model): model is string => model !== null);
   }
