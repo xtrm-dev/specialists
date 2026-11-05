@@ -262,17 +262,15 @@ function findMissingNativeAttemptError(
   if (!sqliteClient) {
     return `Cannot verify attempt '${requestedAttemptId}' for activation '${activationId}': observability database is unavailable. Run: specialists db setup`;
   }
-  let attemptRows: Array<{ attempt_id?: string | null }>;
+  let attemptIds: string[];
   try {
-    // Per-activation lookup (WHERE job_id = ?), index-backed; the 10_000 cap
-    // is the client max and covers every observed native activation (largest
-    // is 7_804 forensic rows). A future activation beyond the cap fails
-    // closed below -- never fail-open into another attempt's result.
-    attemptRows = sqliteClient.readForensicEvents({ jobId: activationId, limit: 10_000 });
+    // Exact durable attempt history, ordered by first forensic seq. Unlike the
+    // former 10_000-row event scan this is not coupled to event volume.
+    attemptIds = sqliteClient.listForensicAttemptIds(activationId);
   } catch {
     return `Cannot verify attempt '${requestedAttemptId}' for activation '${activationId}': forensic read failed.`;
   }
-  if (!attemptRows.some((row) => row.attempt_id === requestedAttemptId)) {
+  if (!attemptIds.includes(requestedAttemptId)) {
     return `No such attempt '${requestedAttemptId}' for activation '${activationId}'.`;
   }
   return null;
