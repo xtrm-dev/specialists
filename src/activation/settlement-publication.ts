@@ -27,7 +27,7 @@
 
 import type { SpecialistWorkItemBoundary } from './workitem-store.js';
 import type { SettlementRecord, SettlementRefusalReason, SettlementStore } from './settlement-store.js';
-import { withSettlementExclusion } from './settlement-lease.js';
+import { withSettlementExclusionAsync } from './settlement-lease.js';
 /** Envelope version consumed. Mirrors EXECUTION_CONTEXT_VERSION (substrate@a77d094). */
 export const SETTLEMENT_CONTEXT_VERSION = 1;
 
@@ -243,7 +243,7 @@ export interface SettlementSubject {
  * record stays `pending` with that exact reason — which is the honest outcome for a producer that
  * cannot answer "did this already land?".
  */
-export function republishSettlement(opts: {
+export async function republishSettlement(opts: {
   boundary: SpecialistWorkItemBoundary;
   store: SettlementStore;
   record: SettlementRecord;
@@ -254,7 +254,7 @@ export function republishSettlement(opts: {
   env?: Record<string, string | undefined>;
   now?: number;
   emit?: (name: string, payload?: Record<string, unknown>) => void;
-}): { outcome: 'published' | 'pending' | 'refused'; journalEntryId?: string; receiptId?: string; note?: string } {
+}): Promise<{ outcome: 'published' | 'pending' | 'refused'; journalEntryId?: string; receiptId?: string; note?: string }> {
   const { boundary, store, record } = opts;
   const now = opts.now ?? Date.now();
   const emit = opts.emit ?? ((): void => {});
@@ -293,13 +293,13 @@ export function republishSettlement(opts: {
   // (SPECIALISTS-66). Reading first and writing after is only exactly-once when no other
   // process can be mid-publication between the two: 'did this already land?' is TOCTOU
   // against a live writer, so the reads belong INSIDE the exclusion, not before it.
-  const reconcileAndPublish = (): { outcome: 'published' | 'pending' | 'refused'; journalEntryId?: string; receiptId?: string; note?: string } => {
+  const reconcileAndPublish = async (): Promise<{ outcome: 'published' | 'pending' | 'refused'; journalEntryId?: string; receiptId?: string; note?: string }> => {
     let journalEntryId = record.journalEntryId;
     if (!journalEntryId) {
       if (!boundary.findResultEntry) {
         return defer('work boundary exposes no Journal reconciliation, so a republish cannot prove it is the first');
       }
-      const lookup = boundary.findResultEntry(record.issueRef, {
+      const lookup = await boundary.findResultEntry(record.issueRef, {
         activationId: record.activationId,
         attemptId: record.attemptId,
       });
@@ -314,7 +314,7 @@ export function republishSettlement(opts: {
       if (!boundary.findReceiptForBinding) {
         return defer('work boundary exposes no receipt reconciliation, so a republish cannot prove it is the first');
       }
-      const lookup = boundary.findReceiptForBinding(record.issueRef, record.executionBindingId);
+      const lookup = await boundary.findReceiptForBinding(record.issueRef, record.executionBindingId);
       if (lookup.status === 'unavailable') {
         return defer(`receipt reconciliation unavailable: ${lookup.reason}`);
       }
@@ -347,14 +347,14 @@ export function republishSettlement(opts: {
     try {
       const storedRef = store.save(record);
       if (!receiptId) {
-        const receipt = allocateReceipt(record.executionBindingId);
+        const receipt = await allocateReceipt(record.executionBindingId);
         receiptId = receipt.id;
         emit('settlement_receipt_allocated', { receipt: receipt.id, republish: true });
       }
       let artifactValue = record.artifactRef ?? storedRef;
       if (boundary.attachArtifact && !record.artifactRef) {
         try {
-          artifactValue = boundary.attachArtifact(receiptId, 'artifact', storedRef).value;
+          artifactValue = (await boundary.attachArtifact(receiptId as string, 'artifact', storedRef)).value ?? artifactValue;
           emit('settlement_artifact_attached', { receipt: receiptId, kind: 'artifact', republish: true });
         } catch (error) {
           emit('settlement_degraded', {
@@ -362,7 +362,7 @@ export function republishSettlement(opts: {
           });
         }
       }
-      const entry = appendResult(record.issueRef, {
+      const entry = await appendResult(record.issueRef, {
         result: buildBoundedResult({
           output: record.output,
           valid: record.validation.valid,
@@ -412,7 +412,7 @@ export function republishSettlement(opts: {
   // able to make progress after a holder died mid-publication, and a holder the probe reports
   // as GONE is a proven absence — with no live writer the reconciliation reads are
   // authoritative again. Every other uncertain reason is left for recovery to decide.
-  const guarded = withSettlementExclusion(
+  const guarded = await withSettlementExclusionAsync(
     { repositoryRoot: opts.repositoryRoot, activationId: record.activationId, attemptId: record.attemptId },
     reconcileAndPublish,
     { reclaimStale: true },
@@ -429,7 +429,7 @@ export function republishSettlement(opts: {
 /** Records one pass will attempt. Bounds the work the FIRST DISPATCH of a process pays. */
 export const REPUBLISH_PASS_LIMIT = 50;
 
-export function republishPendingSettlements(opts: {
+export async function republishPendingSettlements(opts: {
   boundary: SpecialistWorkItemBoundary;
   store: SettlementStore;
   participantId: string;
@@ -440,7 +440,7 @@ export function republishPendingSettlements(opts: {
   emit?: (name: string, payload?: Record<string, unknown>) => void;
   /** Records this pass may attempt. Defaults to REPUBLISH_PASS_LIMIT. */
   limit?: number;
-}): Array<{ activationId: string; attemptId: string; outcome: 'published' | 'pending' | 'refused' | 'error' }> {
+}): Promise<Array<{ activationId: string; attemptId: string; outcome: 'published' | 'pending' | 'refused' | 'error' }>> {
   const emit = opts.emit ?? ((): void => {});
   // The backlog is unbounded by construction (a record can stay pending forever), and this pass
   // runs before the first dispatch of every process. Capped so a large or wedged backlog costs a
@@ -461,7 +461,7 @@ export function republishPendingSettlements(opts: {
   const outcomes: Array<{ activationId: string; attemptId: string; outcome: 'published' | 'pending' | 'refused' | 'error' }> = [];
   for (const record of pending) {
     try {
-      const result = republishSettlement({
+      const result = await republishSettlement({
         boundary: opts.boundary,
         store: opts.store,
         record,
@@ -512,7 +512,7 @@ export interface PublishSettlementResult {
  * Never throws: every step degrades to a forensic-grade `degraded` reason and
  * the activation result is returned unchanged.
  */
-export function publishSettlement(opts: {
+export async function publishSettlement(opts: {
   boundary: SpecialistWorkItemBoundary;
   store: SettlementStore;
   subject: SettlementSubject;
@@ -523,7 +523,7 @@ export function publishSettlement(opts: {
   env?: Record<string, string | undefined>;
   now?: number;
   emit?: (name: string, payload?: Record<string, unknown>) => void;
-}): PublishSettlementResult {
+}): Promise<PublishSettlementResult> {
   const { boundary, store, subject } = opts;
   const now = opts.now ?? Date.now();
   const emit = opts.emit ?? ((): void => {});
@@ -596,17 +596,17 @@ export function publishSettlement(opts: {
   // the record is already in another process's backlog from the `store.save` above until the
   // append returns, so a concurrent republish pass reads absent and duplicates. Contention
   // degrades to `pending` and never blocks — publication must not alter the activation result.
-  const publishNow = (): PublishSettlementResult => {
+  const publishNow = async (): Promise<PublishSettlementResult> => {
     let allocatedReceiptId: string | undefined;
     let allocatedArtifactRef: string | undefined;
     try {
-      const receipt = allocateReceipt(subject.executionBindingId);
+      const receipt = await allocateReceipt(subject.executionBindingId);
       allocatedReceiptId = receipt.id;
       emit('settlement_receipt_allocated', { receipt: receipt.id });
       let artifactValue = storedRef;
       try {
         if (boundary.attachArtifact) {
-          const attached = boundary.attachArtifact(receipt.id, 'artifact', storedRef);
+          const attached = await boundary.attachArtifact(receipt.id, 'artifact', storedRef);
           artifactValue = attached.value;
           allocatedArtifactRef = artifactValue;
           emit('settlement_artifact_attached', { receipt: receipt.id, kind: 'artifact' });
@@ -626,7 +626,7 @@ export function publishSettlement(opts: {
         receiptRefs: [receipt.id],
         provenanceRefs: [subject.executionBindingId, receipt.id],
       });
-      const entry = appendResult(subject.issueRef, {
+      const entry = await appendResult(subject.issueRef, {
         result,
         executionContext,
         refs: [
@@ -670,7 +670,7 @@ export function publishSettlement(opts: {
     }
   };
 
-  const guarded = withSettlementExclusion(
+  const guarded = await withSettlementExclusionAsync(
     { repositoryRoot: subject.repositoryRoot, activationId: subject.activationId, attemptId: subject.attemptId },
     publishNow,
   );

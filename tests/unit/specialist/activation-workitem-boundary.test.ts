@@ -64,81 +64,81 @@ const req = (overrides: Partial<DispatchRequest> = {}): DispatchRequest => ({
 });
 
 describe('releaseInlineClaim ownership guard (SPECIALISTS-53)', () => {
-  it('releases a claim this activation took, as its recorded holder', () => {
+  it('releases a claim this activation took, as its recorded holder', async () => {
     const released: Array<{ issueId: string; holder: string }> = [];
     const boundary = createWorkItemBoundary(stubPorts({ id: 9, holder: 'holder-a', activationId: 'act-1' }, released));
-    expect(boundary.releaseInlineClaim?.('X', { activationId: 'act-1' })).toBe(true);
+    expect(await boundary.releaseInlineClaim?.('X', { activationId: 'act-1' })).toBe(true);
     // As the RECORDED holder, read from the claim, not from the caller.
     expect(released).toEqual([{ issueId: 'iss_X', holder: 'holder-a' }]);
   });
 
-  it('refuses to release a claim another activation now holds', () => {
+  it('refuses to release a claim another activation now holds', async () => {
     // The reason this guard exists: releasing "as the recorded holder" would otherwise release
     // whatever is live. If anything re-claimed between creation and refusal - a TTL edge, a
     // coordinator racing on created_ref - that holder is someone else, and releasing as them
     // destroys a claim that is not ours.
     const released: Array<{ issueId: string; holder: string }> = [];
     const boundary = createWorkItemBoundary(stubPorts({ id: 9, holder: 'holder-b', activationId: 'act-OTHER' }, released));
-    expect(boundary.releaseInlineClaim?.('X', { activationId: 'act-1' })).toBe(false);
+    expect(await boundary.releaseInlineClaim?.('X', { activationId: 'act-1' })).toBe(false);
     expect(released).toEqual([]);
   });
 
-  it('reports false when there is no live claim', () => {
+  it('reports false when there is no live claim', async () => {
     const released: Array<{ issueId: string; holder: string }> = [];
     const boundary = createWorkItemBoundary(stubPorts(null, released));
-    expect(boundary.releaseInlineClaim?.('X', { activationId: 'act-1' })).toBe(false);
+    expect(await boundary.releaseInlineClaim?.('X', { activationId: 'act-1' })).toBe(false);
     expect(released).toEqual([]);
   });
 });
 
 describe('createWorkItemBoundary bind claim-ownership refusal', () => {
-  it('delegates the caller claimId when no active claim exists', () => {
+  it('delegates the caller claimId when no active claim exists', async () => {
     const boundary = createWorkItemBoundary(stubPorts(null));
-    const binding = boundary.bind(req({ claimId: 42 }));
+    const binding = await boundary.bind(req({ claimId: 42 }));
     expect(binding.claimId).toBe(42);
   });
 
-  it('binds the live claim when neither side carries an activation', () => {
+  it('binds the live claim when neither side carries an activation', async () => {
     const boundary = createWorkItemBoundary(stubPorts({ id: 9, holder: 'holder-a', activationId: null }));
-    const binding = boundary.bind(req({ activationId: null }));
+    const binding = await boundary.bind(req({ activationId: null }));
     expect(binding.claimId).toBe(9);
   });
 
-  it('refuses a fabricated activation against an unbound claim', () => {
+  it('refuses a fabricated activation against an unbound claim', async () => {
     const boundary = createWorkItemBoundary(stubPorts({ id: 9, holder: 'holder-a', activationId: null }));
-    expect(() => boundary.bind(req())).toThrow(/does not match/);
+    await expect(boundary.bind(req())).rejects.toThrow(/does not match/);
   });
 
-  it('refuses a supplied claimId that is not the live claim', () => {
+  it('refuses a supplied claimId that is not the live claim', async () => {
     const boundary = createWorkItemBoundary(stubPorts({ id: 9, holder: 'holder-a', activationId: null }));
-    expect(() => boundary.bind(req({ activationId: null, claimId: 42 }))).toThrow(/not the active claim/);
+    await expect(boundary.bind(req({ activationId: null, claimId: 42 }))).rejects.toThrow(/not the active claim/);
   });
 
-  it('accepts a supplied claimId that matches the live claim', () => {
+  it('accepts a supplied claimId that matches the live claim', async () => {
     const boundary = createWorkItemBoundary(stubPorts({ id: 9, holder: 'holder-a', activationId: null }));
-    const binding = boundary.bind(req({ activationId: null, claimId: 9 }));
+    const binding = await boundary.bind(req({ activationId: null, claimId: 9 }));
     expect(binding.claimId).toBe(9);
   });
 
-  it('binds the live claim when holder and activation both match', () => {
+  it('binds the live claim when holder and activation both match', async () => {
     const boundary = createWorkItemBoundary(stubPorts({ id: 9, holder: 'holder-a', activationId: 'act-1' }));
-    const binding = boundary.bind(req());
+    const binding = await boundary.bind(req());
     expect(binding.claimId).toBe(9);
   });
 
-  it('refuses a different holder inheriting the active claim (A-claim/B-dispatch)', () => {
+  it('refuses a different holder inheriting the active claim (A-claim/B-dispatch)', async () => {
     const boundary = createWorkItemBoundary(stubPorts({ id: 9, holder: 'holder-a', activationId: null }));
-    expect(() => boundary.bind(req({ holder: 'holder-b', activationId: 'act-2' }))).toThrow(/claimed by 'holder-a'/);
+    await expect(boundary.bind(req({ holder: 'holder-b', activationId: 'act-2' }))).rejects.toThrow(/claimed by 'holder-a'/);
   });
 
-  it('refuses a mismatched activation against a bound claim', () => {
+  it('refuses a mismatched activation against a bound claim', async () => {
     const boundary = createWorkItemBoundary(stubPorts({ id: 9, holder: 'holder-a', activationId: 'act-1' }));
-    expect(() => boundary.bind(req({ activationId: 'act-2' }))).toThrow(/does not match/);
+    await expect(boundary.bind(req({ activationId: 'act-2' }))).rejects.toThrow(/does not match/);
   });
 
-  it('refuses omitting activationId when the claim carries one', () => {
+  it('refuses omitting activationId when the claim carries one', async () => {
     const boundary = createWorkItemBoundary(stubPorts({ id: 9, holder: 'holder-a', activationId: 'act-1' }));
-    expect(() => boundary.bind(req({ activationId: null }))).toThrow(/does not match/);
+    await expect(boundary.bind(req({ activationId: null }))).rejects.toThrow(/does not match/);
   });
 });
 
@@ -148,18 +148,18 @@ describe('createWorkItemBoundary inline validation', () => {
     ['PROBLEM', 'P.', '', 'SUCCESS', 'S.', '', 'SCOPE', 'Sc.', '', 'NON_GOALS', 'N.',
       '', 'CONSTRAINTS', 'C.', '', 'VALIDATION', 'V.', '', 'OUTPUT', 'O.', '', extra].join('\n');
 
-  it('creates through the ports and returns the human ref', () => {
-    const out = boundary.inlineCreate(contract(), { holder: 'h', activationId: 'a' });
+  it('creates through the ports and returns the human ref', async () => {
+    const out = await boundary.inlineCreate(contract(), { holder: 'h', activationId: 'a' });
     expect(out.claimId).toBe(7);
     expect(out.issueId).toBe('iss_new');
   });
 
-  it('refuses contracts with missing sections before anything is created', () => {
-    expect(() => boundary.inlineCreate('PROBLEM\nOnly this.')).toThrow(/missing or empty/);
+  it('refuses contracts with missing sections before anything is created', async () => {
+    await expect(boundary.inlineCreate('PROBLEM\nOnly this.')).rejects.toThrow(/missing or empty/);
   });
 
-  it('refuses contracts without a SCRUTINY level', () => {
-    expect(() => boundary.inlineCreate(contract(''))).toThrow(/SCRUTINY/);
+  it('refuses contracts without a SCRUTINY level', async () => {
+    await expect(boundary.inlineCreate(contract(''))).rejects.toThrow(/SCRUTINY/);
   });
 });
 
@@ -421,37 +421,37 @@ describe('settlement reconciliation reads (SPECIALISTS-54)', () => {
     });
   }
 
-  it('finds an existing result through the ENVELOPE attempt id, which is where the producer keeps it', () => {
+  it('finds an existing result through the ENVELOPE attempt id, which is where the producer keeps it', async () => {
     const boundary = boundaryWith([
       { id: 'jrn_1', activationId: 'act-1', executionContext: { specialist: { attemptId: 'att-1:1' } } },
     ]);
-    expect(boundary.findResultEntry!('X', { activationId: 'act-1', attemptId: 'att-1:1' }))
+    expect(await boundary.findResultEntry!('X', { activationId: 'act-1', attemptId: 'att-1:1' }))
       .toEqual({ status: 'found', value: { entryId: 'jrn_1' } });
   });
 
-  it('distinguishes attempts of one activation', () => {
+  it('distinguishes attempts of one activation', async () => {
     const boundary = boundaryWith([
       { id: 'jrn_1', activationId: 'act-1', executionContext: { specialist: { attemptId: 'att-1:1' } } },
     ]);
-    expect(boundary.findResultEntry!('X', { activationId: 'act-1', attemptId: 'att-1:2' }))
+    expect(await boundary.findResultEntry!('X', { activationId: 'act-1', attemptId: 'att-1:2' }))
       .toEqual({ status: 'absent' });
   });
 
-  it('answers UNAVAILABLE rather than absent when an entry cannot be attributed to an attempt', () => {
+  it('answers UNAVAILABLE rather than absent when an entry cannot be attributed to an attempt', async () => {
     // The exact producer shape that broke the old matcher: a result entry with no attempt column.
     // "Absent" here would license a second append for an activation that already has a result.
     const boundary = boundaryWith([{ id: 'jrn_1', activationId: 'act-1' }]);
-    const lookup = boundary.findResultEntry!('X', { activationId: 'act-1', attemptId: 'att-1:1' });
+    const lookup = await boundary.findResultEntry!('X', { activationId: 'act-1', attemptId: 'att-1:1' });
     expect(lookup.status).toBe('unavailable');
   });
 
-  it('answers absent only when nothing exists for the activation at all', () => {
+  it('answers absent only when nothing exists for the activation at all', async () => {
     const boundary = boundaryWith([{ id: 'jrn_1', activationId: 'other-activation' }]);
-    expect(boundary.findResultEntry!('X', { activationId: 'act-1', attemptId: 'att-1:1' }))
+    expect(await boundary.findResultEntry!('X', { activationId: 'act-1', attemptId: 'att-1:1' }))
       .toEqual({ status: 'absent' });
   });
 
-  it('answers unavailable when the journal service cannot list at all', () => {
+  it('answers unavailable when the journal service cannot list at all', async () => {
     const boundary = createWorkItemBoundary({
       issues: {
         resolveRef: (ref: string) => ({ id: `iss_${ref}`, humanRef: ref }),
@@ -481,14 +481,14 @@ describe('settlement reconciliation reads (SPECIALISTS-54)', () => {
         attachArtifact: () => ({ receiptId: 'rcp_new', kind: 'artifact', value: 'v' }),
       } as never,
     });
-    expect(boundary.findResultEntry!('X', { activationId: 'act-1', attemptId: 'att-1:1' }).status).toBe('unavailable');
-    expect(boundary.findReceiptForBinding!('X', 'exb_1').status).toBe('unavailable');
+    expect((await boundary.findResultEntry!('X', { activationId: 'act-1', attemptId: 'att-1:1' })).status).toBe('unavailable');
+    expect((await boundary.findReceiptForBinding!('X', 'exb_1')).status).toBe('unavailable');
   });
 
-  it('finds a receipt already allocated over the binding', () => {
+  it('finds a receipt already allocated over the binding', async () => {
     const boundary = boundaryWith([], [{ id: 'rcp_1', executionBindingId: 'exb_1' }]);
-    expect(boundary.findReceiptForBinding!('X', 'exb_1')).toEqual({ status: 'found', value: { receiptId: 'rcp_1' } });
-    expect(boundary.findReceiptForBinding!('X', 'exb_other')).toEqual({ status: 'absent' });
+    expect(await boundary.findReceiptForBinding!('X', 'exb_1')).toEqual({ status: 'found', value: { receiptId: 'rcp_1' } });
+    expect(await boundary.findReceiptForBinding!('X', 'exb_other')).toEqual({ status: 'absent' });
   });
 });
 
@@ -567,12 +567,12 @@ describe('global modules prefix enumeration', () => {
 });
 
 describe('createWorkItemBoundary resolvedContext', () => {
-  it('fails closed when the Substrate port exposes no getResolvedContext', () => {
+  it('fails closed when the Substrate port exposes no getResolvedContext', async () => {
     const boundary = createWorkItemBoundary(stubPorts(null));
-    expect(() => boundary.resolvedContext!('X')).toThrow(/no getResolvedContext/);
+    await expect(boundary.resolvedContext!('X')).rejects.toThrow(/no getResolvedContext/);
   });
 
-  it('maps resolved entries to their source human ref and own/inherited rule', () => {
+  it('maps resolved entries to their source human ref and own/inherited rule', async () => {
     const ports = stubPorts(null);
     (ports.issues as unknown as Record<string, unknown>).getResolvedContext = () => ({
       hash: 'ctx-hash',
@@ -581,7 +581,7 @@ describe('createWorkItemBoundary resolvedContext', () => {
         { key: 'parent', value: 'b', sourceIssueId: 'iss_P', sourceRevision: 4, resolutionRule: 'inherited' },
       ],
     });
-    const context = createWorkItemBoundary(ports).resolvedContext!('X');
+    const context = await createWorkItemBoundary(ports).resolvedContext!('X');
     expect(context).toEqual({
       hash: 'ctx-hash',
       entries: [

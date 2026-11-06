@@ -278,7 +278,7 @@ describe('host: parent_ref creates a child of the parent (XT-108)', () => {
 
     expect(ports.createdInputs).toHaveLength(1);
     expect(ports.createdInputs[0]).toMatchObject({ parentId: 'iss_theme1', kind: 'research' });
-    const childId = ports.boundary.view(handle.issueRef).issueId;
+    const childId = (await ports.boundary.view(handle.issueRef)).issueId;
     expect(ports.issues.getParent(childId)).toMatchObject({ id: 'iss_theme1', humanRef: 'THEME-1' });
   });
 
@@ -329,7 +329,7 @@ describe('host: parent_ref creates a child of the parent (XT-108)', () => {
 
     expect(handle.issueRef).toBeDefined();
     expect(ports.createdInputs).toHaveLength(1);
-    expect(ports.issues.getParent(ports.boundary.view(handle.issueRef).issueId)).toMatchObject({ id: 'iss_theme1' });
+    expect(ports.issues.getParent((await ports.boundary.view(handle.issueRef)).issueId)).toMatchObject({ id: 'iss_theme1' });
   });
 
   it('parent_ref with issue_ref is refused as conflicting', async () => {
@@ -471,7 +471,7 @@ describe('host: creation evidence journal note (XT-108)', () => {
     });
 
     expect(ports.notes).toHaveLength(1);
-    expect(ports.notes[0].issueId).toBe(ports.boundary.view(handle.issueRef).issueId);
+    expect(ports.notes[0].issueId).toBe((await ports.boundary.view(handle.issueRef)).issueId);
     expect(ports.notes[0].input).toMatchObject({ kind: 'note' });
     const summary = String((ports.notes[0].input as { semantic: { summary: string } }).semantic.summary);
     for (const token of [

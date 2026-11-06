@@ -586,7 +586,7 @@ describe('S1 §54 republish — a degraded publication is recovered exactly once
     };
     reconcile(workItems.boundary);
 
-    const outcomes = republishPendingSettlements({
+    const outcomes = await republishPendingSettlements({
       boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1',
     });
     expect(outcomes).toEqual([{ activationId: handle.activationId, attemptId: handle.attemptId, outcome: 'published' }]);
@@ -607,8 +607,8 @@ describe('S1 §54 republish — a degraded publication is recovered exactly once
     await (await startResearch(host)).result;
     expect(workItems.journal).toHaveLength(1);
 
-    const first = republishPendingSettlements({ boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1' });
-    const second = republishPendingSettlements({ boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1' });
+    const first = await republishPendingSettlements({ boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1' });
+    const second = await republishPendingSettlements({ boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1' });
     expect(first).toEqual([]);
     expect(second).toEqual([]);
     expect(workItems.journal).toHaveLength(1);
@@ -624,7 +624,7 @@ describe('S1 §54 republish — a degraded publication is recovered exactly once
     // The append had in fact landed; only the store link was lost.
     workItems.boundary.findResultEntry = () => ({ status: 'found', value: { entryId: 'jent_pre_existing' } });
     workItems.boundary.findReceiptForBinding = () => ({ status: 'found', value: { receiptId: 'wr_s1_1' } });
-    const outcomes = republishPendingSettlements({
+    const outcomes = await republishPendingSettlements({
       boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1',
     });
     expect(outcomes[0]?.outcome).toBe('published');
@@ -650,7 +650,7 @@ describe('S1 §54 republish — a degraded publication is recovered exactly once
       workItems.journal.push(entry);
       return { entryId: entry.entryId, sequence: entry.sequence };
     };
-    const outcomes = republishPendingSettlements({
+    const outcomes = await republishPendingSettlements({
       boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1',
     });
     expect(outcomes[0]?.outcome).toBe('published');
@@ -668,7 +668,7 @@ describe('S1 §54 republish — a degraded publication is recovered exactly once
     store.save(degraded);
 
     // No reconciliation reads at all: a republish cannot prove it is the first, so it must not run.
-    const outcomes = republishPendingSettlements({
+    const outcomes = await republishPendingSettlements({
       boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1',
     });
     expect(outcomes[0]?.outcome).toBe('pending');
@@ -694,7 +694,7 @@ describe('S1 §54 republish — a degraded publication is recovered exactly once
 
     workItems.boundary.findResultEntry = () => ({ status: 'absent' });
     workItems.boundary.findReceiptForBinding = () => ({ status: 'unavailable', reason: 'provenance service exposes no receipt listing' });
-    const outcomes = republishPendingSettlements({
+    const outcomes = await republishPendingSettlements({
       boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1',
     });
     expect(outcomes[0]?.outcome).toBe('pending');
@@ -716,7 +716,7 @@ describe('S1 §54 republish — a degraded publication is recovered exactly once
 
     workItems.boundary.findResultEntry = () => ({ status: 'found', value: { entryId: 'jent_orphan' } });
     workItems.boundary.findReceiptForBinding = () => ({ status: 'absent' });
-    const outcomes = republishPendingSettlements({
+    const outcomes = await republishPendingSettlements({
       boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1',
     });
     expect(outcomes[0]?.outcome).toBe('refused');
@@ -758,7 +758,7 @@ describe('S1 §54 republish — a degraded publication is recovered exactly once
     expect(failed.status).toBe('failed');
     expect(failed.publication?.state).toBeUndefined();
 
-    const outcomes = republishPendingSettlements({
+    const outcomes = await republishPendingSettlements({
       boundary: workItems.boundary, store, participantId: 'p', repositoryRoot: '/tmp/s1',
     });
     expect(outcomes).toEqual([]);

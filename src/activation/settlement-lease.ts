@@ -114,11 +114,53 @@ export type ExclusionOutcome<T> =
  * Every other `uncertain` reason — an unverifiable host, a start-ticks mismatch, an
  * unreadable record — is left alone, exactly as the workspace lease requires.
  */
-export function withSettlementExclusion<T>(
+/**
+ * The same contract for a body that awaits (SPECIALISTS-4398).
+ *
+ * The port became asynchronous so the host can publish against a remote store, and awaiting
+ * inside the exclusion is only safe if two properties hold. Both are checked, not assumed:
+ *
+ * - **In-process serialisation still holds.** The old form could not interleave two calls in
+ *   one process because `fn` never yielded; an awaiting body can. The lease covers this
+ *   because `acquire` takes a holder id unique per acquisition (`randomUUID`), so a second
+ *   concurrent call for the same (activation, attempt) is a DIFFERENT holder and is refused as
+ *   contended while the first is live. The holder pid is this process and its `/proc` start
+ *   ticks still match, so the lease reads HELD, not uncertain — refused, not reclaimed. A test
+ *   runs two concurrent calls and asserts one publication.
+ * - **No TTL to outlive.** The workspace lease is liveness-based (`/proc` start ticks), not
+ *   expiry-based: there is no deadline in the record that a body crossing ssh could exceed. A
+ *   holder that dies mid-body is the reclaimable case the republish pass already handles.
+ *
+ * The failure path is unchanged and deliberate: the body's throw propagates after `release()`
+ * in the `finally`, the settlement record stays `pending`, and `republishPendingSettlements`
+ * retries it — reconciling by reading first, never by re-sending a mutation that may have
+ * been applied. That is why a `timeout` or `connection_lost` inside the body is safe here even
+ * though a mutation over the wire is never retried automatically.
+ */
+export async function withSettlementExclusionAsync<T>(
   subject: SettlementExclusionSubject,
-  fn: () => T,
+  fn: () => Promise<T>,
   opts: { reclaimStale?: boolean; probe?: LeaseProcessProbe } = {},
-): ExclusionOutcome<T> {
+): Promise<ExclusionOutcome<T>> {
+  const taken = takeExclusion(subject, opts);
+  if (!taken.ok) return taken;
+  try {
+    return { ok: true, value: await fn() };
+  } finally {
+    taken.release();
+  }
+}
+
+/**
+ * Acquire the exclusion, and hand back the release to run in a `finally`.
+ *
+ * Shared by both forms so the take/reclaim/release rules live in one place; the only
+ * difference between them is whether the body is awaited.
+ */
+function takeExclusion(
+  subject: SettlementExclusionSubject,
+  opts: { reclaimStale?: boolean; probe?: LeaseProcessProbe },
+): { ok: true; release: () => void } | (ExclusionOutcome<never> & { ok: false }) {
   const workspace = exclusionWorkspace(subject);
   // One publication attempt in one process. Unique per acquisition so `acquire`'s
   // same-activation resume branch can never admit a second racer for this settlement.
@@ -151,17 +193,18 @@ export function withSettlementExclusion<T>(
     return { ok: false, contended: failure.contended, reason: failure.reason };
   }
 
-  try {
-    return { ok: true, value: fn() };
-  } finally {
-    try {
-      release(workspace, holderId, probe);
-    } catch {
-      // A release that refuses leaves the record for the next pass to reclaim. Publication
-      // has already happened at this point; turning its teardown into a failure would report
-      // a settled activation as unsettled.
-    }
-  }
+  return {
+    ok: true,
+    release: () => {
+      try {
+        release(workspace, holderId, probe);
+      } catch {
+        // A release that refuses leaves the record for the next pass to reclaim. Publication
+        // has already happened at this point; turning its teardown into a failure would report
+        // a settled activation as unsettled.
+      }
+    },
+  };
 }
 
 /**

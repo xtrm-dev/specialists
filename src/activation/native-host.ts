@@ -1400,7 +1400,7 @@ export class NativeActivationHost {
       if (parentRef) {
         let parentView: WorkItemView;
         try {
-          parentView = workItems.view(parentRef);
+          parentView = await workItems.view(parentRef);
         } catch (error) {
           return reject('parent_unresolvable', {
             note: `parent_ref '${parentRef}' resolves to no Substrate issue: ${error instanceof Error ? error.message : String(error)}`,
@@ -1421,7 +1421,7 @@ export class NativeActivationHost {
       const title = explicitTitle ?? defaultInlineTitle(request.specialist, inlineContract);
       const kind = kindParam || defaultKindForOutputType(execution.output_type);
       try {
-        const created = workItems.inlineCreate(inlineContract, {
+        const created = await workItems.inlineCreate(inlineContract, {
           title,
           kind,
           ...(parentId ? { parentId } : {}),
@@ -1444,7 +1444,7 @@ export class NativeActivationHost {
         // it came from an ad hoc dispatch. Degrades like the rest of the boundary —
         // a surface inert without Substrate never fails the dispatch.
         try {
-          workItems.journal(created.ref, 'note', {
+          await workItems.journal(created.ref, 'note', {
             participantId,
             activationId,
             summary:
@@ -1482,7 +1482,7 @@ export class NativeActivationHost {
 
     let view: WorkItemView;
     try {
-      view = workItems.view(issueRef);
+      view = await workItems.view(issueRef);
     } catch (error) {
       return reject('issue_unresolvable', {
         note: error instanceof Error ? error.message : String(error),
@@ -1508,9 +1508,9 @@ export class NativeActivationHost {
     // unattested, blocked, deferred, terminal) is refused here, before a model
     // turn is spent guessing at the scope it does not carry. Scope-expanding
     // requests refuse the same way (§39.1: requestedScope may only narrow).
-    let dispatchCheck: ReturnType<SpecialistWorkItemBoundary['check']>;
+    let dispatchCheck: Awaited<ReturnType<SpecialistWorkItemBoundary['check']>>;
     try {
-      dispatchCheck = workItems.check({
+      dispatchCheck = await workItems.check({
         ref: issueRef,
         specialist: request.specialist,
         holder: participantId,
@@ -1524,7 +1524,7 @@ export class NativeActivationHost {
       // The first view is only for resolution/error reporting. Re-read the
       // admitted revision after the gate so prompt and StepContract cannot use
       // a pre-gate "latest" if an edit raced the read-only check.
-      view = workItems.view(issueRef);
+      view = await workItems.view(issueRef);
       if (view.revision !== dispatchCheck.revision || view.contractHash !== dispatchCheck.contractHash) {
         return reject('issue_revision_diverged', {
           note: 'issue changed between resolution and the read-only dispatch check; retry against the new revision',
@@ -1849,19 +1849,19 @@ export class NativeActivationHost {
 
     // §11: lineage comes from Substrate parent_child edges, not a Beads
     // dependency walk, and obeys the same inheritance rules as the store.
-    const epicAncestors = workItems.epicAncestors(issueRef, request.epicContextDepth ?? 0);
+    const epicAncestors = await workItems.epicAncestors(issueRef, request.epicContextDepth ?? 0);
 
     // Dependency context for completed blockers, from the SAME Substrate edge graph and the
     // SAME boundary that supplies epicAncestors — never a second traversal. Without this a
     // child never sees the contracts that unblocked it (SPECIALISTS-22).
-    const completedBlockers = workItems.completedBlockers(issueRef, 1);
+    const completedBlockers = await workItems.completedBlockers(issueRef, 1);
 
     // The Issue's resolved contextRefs (own + inherited), Substrate's revisioned channel for
     // stage context. Rendered as evidence under the contract; the hash is checked against the
     // ExecutionBinding below so the prompt shows exactly the context the binding records.
     let resolvedContext: ResolvedContextView | null = null;
     try {
-      resolvedContext = workItems.resolvedContext?.(issueRef) ?? null;
+      resolvedContext = (await workItems.resolvedContext?.(issueRef)) ?? null;
     } catch (error) {
       return reject('context_unresolvable', {
         note: error instanceof Error ? error.message : String(error),
@@ -1962,14 +1962,12 @@ export class NativeActivationHost {
       outputType,
       outputContractSchema,
       beadContextText: rendered.beadContextText ?? '',
-      readBeadForMemory: (id) => {
-        try {
-          const v = workItems.view(id);
-          return { title: v.title, description: contractToMarkdown(v.contract) };
-        } catch {
-          return null;
-        }
-      },
+      // The work-item port became async (SPECIALISTS-4398), and this hook feeds a
+      // synchronous prompt builder that uses the title only for a best-effort
+      // GitNexus symbol pre-query. Returning null keeps the prompt build synchronous
+      // and costs a hint, never correctness; the bd-memory text it once carried is
+      // retired anyway. Widening the prompt builder to async is a separate change.
+      readBeadForMemory: () => null,
     });
 
     // Admission AFTER prompt rendering (unitAI-1pqtl.2 ordering): the effective contract is
@@ -2201,9 +2199,9 @@ export class NativeActivationHost {
     // attempt/workspace (§9). A concurrent contract edit between the
     // read-only check above and this binding refuses here — the divergence
     // check is inside the substrate dispatch gate, never re-derived.
-    let binding: ReturnType<SpecialistWorkItemBoundary['bind']>;
+    let binding: Awaited<ReturnType<SpecialistWorkItemBoundary['bind']>>;
     try {
-      binding = workItems.bind({
+      binding = await workItems.bind({
         ref: issueRef,
         specialist: request.specialist,
         holder: participantId,
@@ -2378,7 +2376,7 @@ export class NativeActivationHost {
       const boundary = await this.resolveWorkItems();
       const pending = this.settlements.listPendingPublication?.() ?? [];
       if (pending.length === 0) return;
-      const outcomes = republishPendingSettlements({
+      const outcomes = await republishPendingSettlements({
         boundary,
         store: this.settlements,
         participantId: 'specialist::settlement-republisher',
@@ -2393,12 +2391,12 @@ export class NativeActivationHost {
           payload,
         }),
       });
-      const unresolved = outcomes.filter((outcome) => outcome.outcome !== 'published');
+      const unresolved = outcomes.filter((outcome: { outcome: string }) => outcome.outcome !== 'published');
       if (unresolved.length > 0) {
         // Named, not counted: an operator has to be able to find the records.
         process.stderr.write(
           `[specialists] ${unresolved.length} settlement(s) still unpublished after republish: `
-            + `${unresolved.map((o) => `${o.activationId}/${o.attemptId}=${o.outcome}`).join(', ')}\n`,
+            + `${unresolved.map((o: { activationId: string; attemptId: string; outcome: string }) => `${o.activationId}/${o.attemptId}=${o.outcome}`).join(', ')}\n`,
         );
       }
     } catch (error) {
@@ -2831,7 +2829,7 @@ export class NativeActivationHost {
         fallbackUsed: false,
         completedAt: this.now(),
       };
-      this.publishTerminalSettlement(snapshot, thrownResult, record, emit);
+      await this.publishTerminalSettlement(snapshot, thrownResult, record, emit);
       return thrownResult;
     }
     // Deliberately no dispose(): a settled Specialist remains alive and resumable.
@@ -2849,13 +2847,13 @@ export class NativeActivationHost {
    * (SPECIALISTS-120 F2), the wake captures once — so this tail starts at
    * stopReason inspection.
    */
-  private settleTurnTail(
+  private async settleTurnTail(
     snapshot: ActivationSnapshot,
     session: PiAgentSessionLike,
     emit: (name: string, payload?: Record<string, unknown>) => void,
     record: ActivationRecord,
     opts: { notifyWake: boolean },
-  ): ActivationResult {
+  ): Promise<ActivationResult> {
     // A settled session is NOT a successful one. pi records a failed turn as an
     // assistant message with stopReason 'error' (or 'aborted') and an errorMessage —
     // provider 429s, auth failures and aborts all land here — while `waitForIdle`
@@ -2889,7 +2887,7 @@ export class NativeActivationHost {
         fallbackUsed: false,
         completedAt: this.now(),
       };
-      this.publishTerminalSettlement(snapshot, failedResult, record, emit);
+      await this.publishTerminalSettlement(snapshot, failedResult, record, emit);
       if (opts.notifyWake) this.notifyWakeSettlement(failedResult);
       return failedResult;
     }
@@ -2948,7 +2946,7 @@ export class NativeActivationHost {
       fallbackUsed: false,
       completedAt: this.now(),
     };
-    this.publishTerminalSettlement(snapshot, completedResult, record, emit);
+    await this.publishTerminalSettlement(snapshot, completedResult, record, emit);
     if (opts.notifyWake) this.notifyWakeSettlement(completedResult);
     return completedResult;
   }
@@ -3023,12 +3021,12 @@ export class NativeActivationHost {
    * guards the call, because settlement evidence must never alter the result
    * the activation reports.
    */
-  private publishTerminalSettlement(
+  private async publishTerminalSettlement(
     snapshot: ActivationSnapshot,
     result: ActivationResult,
     record: ActivationRecord,
     emit: (name: string, payload?: Record<string, unknown>) => void,
-  ): void {
+  ): Promise<void> {
     // A framed terminal supersedes any pending wake dirt and closes the framed
     // window: the settle was driven by runToSettled, not by an unframed wake, so a
     // later redelivered settle finalises nothing (SPECIALISTS-4322).
@@ -3050,7 +3048,7 @@ export class NativeActivationHost {
         ...(snapshot.workspace.branch ? { branch: snapshot.workspace.branch } : {}),
         ...(record.bindingBaseCommit ? { bindingBaseCommit: record.bindingBaseCommit } : {}),
       };
-      publishSettlement({
+      await publishSettlement({
         boundary: record.workItems,
         store: this.settlements,
         subject,
