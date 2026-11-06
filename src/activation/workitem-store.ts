@@ -1128,6 +1128,13 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
   );
   let db: DatabaseSync;
   try {
+    // XTRM-693 guard, adopted here (SPECIALISTS-4398): with `substrate.remote` set the store
+    // lives on another machine, so opening the canonical local file would answer from a store
+    // the operator did not choose. Substrate refuses that and names the remote and the path;
+    // we call its guard rather than re-deriving the rule. A Substrate without the export
+    // predates the guard, so the call is skipped rather than failing the install check.
+    const guard = (storeMod as Record<string, unknown>)['assertStoreIsChosen'];
+    if (typeof guard === 'function') (guard as (dbPath: string, env: NodeJS.ProcessEnv) => void)(dbPath, env);
     db = openSubstrateDb(dbPath);
     runner.migrate(db);
   } catch (error) {
