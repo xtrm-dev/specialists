@@ -184,10 +184,10 @@ export declare const specialistDispatchSchema: z.ZodObject<{
     kind?: "research" | "task" | "decision" | "bug" | "followup" | undefined;
     title?: string | undefined;
     issue_ref?: string | undefined;
+    contract?: string | undefined;
     requested_by?: string | undefined;
     model_override?: string | undefined;
     thinking_override?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined;
-    contract?: string | undefined;
     parent_ref?: string | undefined;
     epic_context_depth?: number | undefined;
     coordinator_session_id?: string | undefined;
@@ -198,10 +198,10 @@ export declare const specialistDispatchSchema: z.ZodObject<{
     kind?: "research" | "task" | "decision" | "bug" | "followup" | undefined;
     title?: string | undefined;
     issue_ref?: string | undefined;
+    contract?: string | undefined;
     requested_by?: string | undefined;
     model_override?: string | undefined;
     thinking_override?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined;
-    contract?: string | undefined;
     parent_ref?: string | undefined;
     epic_context_depth?: number | undefined;
     coordinator_session_id?: string | undefined;
@@ -232,10 +232,10 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         kind?: "research" | "task" | "decision" | "bug" | "followup" | undefined;
         title?: string | undefined;
         issue_ref?: string | undefined;
+        contract?: string | undefined;
         requested_by?: string | undefined;
         model_override?: string | undefined;
         thinking_override?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined;
-        contract?: string | undefined;
         parent_ref?: string | undefined;
         epic_context_depth?: number | undefined;
         coordinator_session_id?: string | undefined;
@@ -246,10 +246,10 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         kind?: "research" | "task" | "decision" | "bug" | "followup" | undefined;
         title?: string | undefined;
         issue_ref?: string | undefined;
+        contract?: string | undefined;
         requested_by?: string | undefined;
         model_override?: string | undefined;
         thinking_override?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined;
-        contract?: string | undefined;
         parent_ref?: string | undefined;
         epic_context_depth?: number | undefined;
         coordinator_session_id?: string | undefined;

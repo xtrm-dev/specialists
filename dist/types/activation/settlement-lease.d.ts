@@ -48,8 +48,31 @@ export type ExclusionOutcome<T> = {
  * Every other `uncertain` reason — an unverifiable host, a start-ticks mismatch, an
  * unreadable record — is left alone, exactly as the workspace lease requires.
  */
-export declare function withSettlementExclusion<T>(subject: SettlementExclusionSubject, fn: () => T, opts?: {
+/**
+ * The same contract for a body that awaits (SPECIALISTS-4398).
+ *
+ * The port became asynchronous so the host can publish against a remote store, and awaiting
+ * inside the exclusion is only safe if two properties hold. Both are checked, not assumed:
+ *
+ * - **In-process serialisation still holds.** The old form could not interleave two calls in
+ *   one process because `fn` never yielded; an awaiting body can. The lease covers this
+ *   because `acquire` takes a holder id unique per acquisition (`randomUUID`), so a second
+ *   concurrent call for the same (activation, attempt) is a DIFFERENT holder and is refused as
+ *   contended while the first is live. The holder pid is this process and its `/proc` start
+ *   ticks still match, so the lease reads HELD, not uncertain — refused, not reclaimed. A test
+ *   runs two concurrent calls and asserts one publication.
+ * - **No TTL to outlive.** The workspace lease is liveness-based (`/proc` start ticks), not
+ *   expiry-based: there is no deadline in the record that a body crossing ssh could exceed. A
+ *   holder that dies mid-body is the reclaimable case the republish pass already handles.
+ *
+ * The failure path is unchanged and deliberate: the body's throw propagates after `release()`
+ * in the `finally`, the settlement record stays `pending`, and `republishPendingSettlements`
+ * retries it — reconciling by reading first, never by re-sending a mutation that may have
+ * been applied. That is why a `timeout` or `connection_lost` inside the body is safe here even
+ * though a mutation over the wire is never retried automatically.
+ */
+export declare function withSettlementExclusionAsync<T>(subject: SettlementExclusionSubject, fn: () => Promise<T>, opts?: {
     reclaimStale?: boolean;
     probe?: LeaseProcessProbe;
-}): ExclusionOutcome<T>;
+}): Promise<ExclusionOutcome<T>>;
 //# sourceMappingURL=settlement-lease.d.ts.map

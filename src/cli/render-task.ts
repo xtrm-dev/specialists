@@ -148,14 +148,14 @@ async function resolveWorkForRender(
 
   const boundary = workItemsOverride ?? await openBoundaryIfAvailable();
   if (boundary) {
-    let view: ReturnType<SpecialistWorkItemBoundary['view']> | null = null;
-    let blockers: ReturnType<SpecialistWorkItemBoundary['completedBlockers']> = [];
+    let view: Awaited<ReturnType<SpecialistWorkItemBoundary['view']>> | null = null;
+    let blockers: Awaited<ReturnType<SpecialistWorkItemBoundary['completedBlockers']>> = [];
     try {
-      view = boundary.view(ref);
+      view = await boundary.view(ref);
       // The boundary serves depths 1|2 only; clamp the user-facing depth into
       // its domain instead of silently dropping blocker context at depth 3+.
       blockers = contextDepth > 0
-        ? boundary.completedBlockers(ref, Math.min(contextDepth, 2))
+        ? await boundary.completedBlockers(ref, Math.min(contextDepth, 2))
         : [];
     } catch {
       // Not a Substrate ref (or unreadable) — fall through to the truthful failure below.
@@ -164,7 +164,7 @@ async function resolveWorkForRender(
     if (view) {
       let contextRefsSection = '';
       try {
-        contextRefsSection = renderContextRefsSection(boundary.resolvedContext?.(view.ref) ?? null);
+        contextRefsSection = renderContextRefsSection((await boundary.resolvedContext?.(view.ref)) ?? null);
       } catch (error) {
         fail(
           'context_unresolvable',

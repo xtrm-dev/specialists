@@ -252,29 +252,29 @@ export interface SettlementArtifactView {
  * path in this module.
  */
 export interface SpecialistWorkItemBoundary {
-    view(ref: string): WorkItemView;
-    epicAncestors(ref: string, depth: number): EpicAncestor[];
+    view(ref: string): Promise<WorkItemView>;
+    epicAncestors(ref: string, depth: number): Promise<EpicAncestor[]>;
     /**
      * Completed `blocks`-edge sources, up to `depth` hops, as dependency context for the
      * turn-1 prompt. The Substrate edge graph through this boundary is the ONE traversal —
      * the host never queries the store or walks edges itself (SPECIALISTS-22).
      */
-    completedBlockers(ref: string, depth: number): EpicAncestor[];
+    completedBlockers(ref: string, depth: number): Promise<EpicAncestor[]>;
     /**
      * The Issue's resolved contextRefs (own + inherited from parents) for the turn-1 prompt.
      * Optional so fakes keep compiling. Throws when Substrate refuses the context
      * (journal/memory authority, parent cycle) or exposes no context reader: fail closed.
      */
-    resolvedContext?(ref: string): ResolvedContextView | null;
-    check(req: DispatchRequest): CheckResult;
-    bind(req: DispatchRequest): ExecutionBindingView;
+    resolvedContext?(ref: string): Promise<ResolvedContextView | null>;
+    check(req: DispatchRequest): Promise<CheckResult>;
+    bind(req: DispatchRequest): Promise<ExecutionBindingView>;
     inlineCreate(contract: string, opts?: {
         title?: string;
         holder?: string;
         activationId?: string;
         parentId?: string;
         kind?: string;
-    }): InlineIssueResult;
+    }): Promise<InlineIssueResult>;
     /**
      * Release the claim an inline contract took, so a refused inline dispatch leaves an issue that is
      * immediately re-dispatchable rather than one locked by an activation that never ran
@@ -284,7 +284,7 @@ export interface SpecialistWorkItemBoundary {
      */
     releaseInlineClaim?(ref: string, opts?: {
         activationId?: string;
-    }): boolean;
+    }): Promise<boolean>;
     /**
      * Append a journal entry on an issue. `summary` carries the ad hoc dispatch
      * evidence note (XT-108: surface, specialist, requested_by, parent_ref, kind,
@@ -295,7 +295,7 @@ export interface SpecialistWorkItemBoundary {
         participantId?: string;
         activationId?: string;
         summary?: string;
-    }): void;
+    }): Promise<void>;
     /**
      * S1 settlement surface (ADR §§38–39). Optional so existing fakes keep
      * compiling; the host degrades to store-only publication when absent.
@@ -305,12 +305,12 @@ export interface SpecialistWorkItemBoundary {
      * links a non-commit artifact (the runtime result ref) to the receipt.
      * Commits are never attached here — zero-commit results publish identically.
      */
-    appendResult?(ref: string, input: SettlementResultInput): {
+    appendResult?(ref: string, input: SettlementResultInput): Promise<{
         entryId: string;
         sequence: number;
-    };
-    allocateReceipt?(bindingId: string): WorkReceiptView;
-    attachArtifact?(receiptId: string, kind: string, value: string): SettlementArtifactView;
+    }>;
+    allocateReceipt?(bindingId: string): Promise<WorkReceiptView>;
+    attachArtifact?(receiptId: string, kind: string, value: string): Promise<SettlementArtifactView>;
     /**
      * Reconciliation reads (SPECIALISTS-54). A republish has to prove it is the FIRST publication
      * of (activation, attempt) before it writes anything, because neither the receipt nor the
@@ -324,13 +324,13 @@ export interface SpecialistWorkItemBoundary {
     findResultEntry?(ref: string, key: {
         activationId: string;
         attemptId: string;
-    }): SettlementLookup<{
+    }): Promise<SettlementLookup<{
         entryId: string;
-    }>;
+    }>>;
     /** The receipt already allocated over a binding, if any. One receipt per binding is the rule. */
-    findReceiptForBinding?(ref: string, bindingId: string): SettlementLookup<{
+    findReceiptForBinding?(ref: string, bindingId: string): Promise<SettlementLookup<{
         receiptId: string;
-    }>;
+    }>>;
 }
 /**
  * The answer to "did this already land?".
@@ -355,11 +355,11 @@ export interface ActiveClaimView {
 }
 /** Structural port over the producer's issue service. Implemented by fakes in public tests. */
 export interface IssueServicePort {
-    resolveRef(ref: string): {
+    resolveRef(ref: string): Promise<{
         id: string;
         humanRef: string;
-    };
-    getActiveClaim(issueId: string): ActiveClaimView | null;
+    }>;
+    getActiveClaim(issueId: string): Promise<ActiveClaimView | null>;
     /**
      * Release a live claim (SPECIALISTS-53). Optional because this port is structural and several
      * public-test doubles predate it; a double that omits it has no claim to release. The real
@@ -367,30 +367,30 @@ export interface IssueServicePort {
      */
     releaseClaim?(issueId: string, holder: string, opts?: {
         activationId?: string;
-    }): {
+    }): Promise<{
         id: number;
-    } | null;
-    getParent(childId: string): {
+    } | null>;
+    getParent(childId: string): Promise<{
         id: string;
         humanRef: string;
         title: string;
         currentRevision: number;
-    } | null;
+    } | null>;
     /**
      * Every ACTIVE `blocks` edge whose target is `childId`, resolved to its sources. Optional
      * so an existing in-memory fake keeps compiling; absent means "no blocker information",
      * never "no blockers".
      */
-    getBlockers?(childId: string): BlockerIssue[];
-    getRevision(issueId: string, revision: number): {
+    getBlockers?(childId: string): Promise<BlockerIssue[]>;
+    getRevision(issueId: string, revision: number): Promise<{
         contract: unknown;
-    };
+    }>;
     /**
      * The Issue's revisioned contextRefs, inherited root -> leaf with source provenance and the
      * hash the ExecutionBinding records (substrate issue-service `getResolvedContext`). Optional so
      * existing fakes keep compiling; absent means "no context information".
      */
-    getResolvedContext?(issueId: string): {
+    getResolvedContext?(issueId: string): Promise<{
         entries: Array<{
             key: string;
             value: unknown;
@@ -399,12 +399,12 @@ export interface IssueServicePort {
             resolutionRule: string;
         }>;
         hash: string;
-    };
+    }>;
     resolveProject(opts: {
         gitRoot: string;
-    }): {
+    }): Promise<{
         projectId: string;
-    };
+    }>;
     createIssue(input: {
         projectId: string;
         title: string;
@@ -414,24 +414,24 @@ export interface IssueServicePort {
         authoredBy: string;
         /** Parent machine id, checked for existence with the link written atomically (never setParent). */
         parentId?: string;
-    }): {
+    }): Promise<{
         id: string;
-    };
+    }>;
     claimReady(issueId: string, holder: string, attestation: {
         outcome: string;
         policy: string;
         attestedBy: string;
     }, opts?: {
         activationId?: string;
-    }): {
+    }): Promise<{
         claim: {
             id: number;
         };
-    };
+    }>;
 }
 /** Structural port over the producer's issue store (read + journal). */
 export interface IssueStorePort {
-    get(ref: string): {
+    get(ref: string): Promise<{
         issue: {
             humanRef: string;
             id: string;
@@ -444,23 +444,23 @@ export interface IssueStorePort {
         readinessState: string;
         dispatchable: boolean;
         reasons: string[];
-    };
+    }>;
     addJournal(ref: string, kind: string, opts?: {
         participantId?: string;
         activationId?: string;
-    }): void;
+    }): Promise<void>;
 }
 /** Structural port over the producer's dispatch gate (check + bind mutation). */
 export interface DispatchGatePort {
-    check(issues: unknown, req: DispatchRequest): {
+    check(issues: unknown, req: DispatchRequest): Promise<{
         issueId: string;
         revision: number;
         contractHash: string;
         report: unknown;
-    };
-    dispatch(issues: unknown, provenance: unknown, req: DispatchRequest): {
+    }>;
+    dispatch(issues: unknown, provenance: unknown, req: DispatchRequest): Promise<{
         binding: ExecutionBindingView;
-    };
+    }>;
 }
 /** Structural port over the producer's journal service (S1 result publication). */
 export interface JournalServicePort {
@@ -480,15 +480,15 @@ export interface JournalServicePort {
         participantId?: string;
         activationId?: string;
         sessionId?: string;
-    }): {
+    }): Promise<{
         id: string;
         sequence: number;
-    };
+    }>;
     /** Existing entries, for the settlement reconciliation read (SPECIALISTS-54). */
     listEntries?(issueId: string, opts?: {
         kind?: string;
         limit?: number;
-    }): Array<{
+    }): Promise<Array<{
         id: string;
         kind?: string;
         activationId?: string | null;
@@ -504,27 +504,27 @@ export interface JournalServicePort {
                 attemptId?: string | null;
             } | null;
         } | null;
-    }>;
+    }>>;
 }
 /** Structural port over the producer's provenance service (S1 receipt publication). */
 export interface ProvenanceServicePort {
-    allocateReceipt(bindingId: string): {
+    allocateReceipt(bindingId: string): Promise<{
         id: string;
         executionBindingId: string;
         issueId: string;
         issueRevision: number;
         contractHash: string;
-    };
-    attachArtifact(receiptId: string, kind: string, value: string): {
+    }>;
+    attachArtifact(receiptId: string, kind: string, value: string): Promise<{
         receiptId?: string;
         kind?: string;
         value?: string;
-    };
+    }>;
     /** Receipts already allocated for an issue, for the reconciliation read (SPECIALISTS-54). */
-    listReceipts?(issueId: string): Array<{
+    listReceipts?(issueId: string): Promise<Array<{
         id: string;
         executionBindingId: string;
-    }>;
+    }>>;
 }
 /** The injected ports `createWorkItemBoundary` programs against. */
 export interface WorkItemPorts {
@@ -596,6 +596,31 @@ export declare function findMissingSubstrateIssueMethods(substrateDir: string): 
  * Returns null when neither exists.
  */
 export declare function resolveSubstrateModule(substrateDir: string, rel: string): string | null;
+/** The store this process will use, decided before anything is opened. */
+export type WorkItemStoreSelection = {
+    kind: 'local';
+    dbPath: string;
+} | {
+    kind: 'remote';
+    remote: string;
+};
+/**
+ * Which store this process must use (SPECIALISTS-4398, XTRM-693).
+ *
+ * Delegates the rule to Substrate: an explicit local file wins, then a configured remote, then the
+ * canonical local store. Only the REMOTE signal is taken from that selector; the local path keeps
+ * `resolveWorkItemDbPath`, which also honours the legacy `XTRM_STATE_DB` that Substrate's own
+ * selector does not read, so a local deployment behaves exactly as before.
+ *
+ * `dbPath` is the caller stating "a local file, deliberately" — the same precedence Substrate
+ * gives `SUBSTRATE_DB` — which is why callers that already decided local pass it and callers that
+ * have not do not.
+ */
+export declare function selectWorkItemStore(env?: NodeJS.ProcessEnv, opts?: {
+    dbPath?: string;
+    substrateDir?: string;
+    resolveInstalled?: () => string | null;
+}): Promise<WorkItemStoreSelection>;
 /**
  * Open the canonical work store and build the boundary over the REAL producer
  * services, dynamic-imported at runtime from an explicit checkout.

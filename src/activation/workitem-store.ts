@@ -43,6 +43,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { resolveGlobalNodeModulesDirs } from '../pi/session.js';
 import { extractSections, scrutinyLevel, validateContractText } from './contract-sections.js';
 import { resolveAuthorityDbPath } from './authority-store.js';
+import { createRemoteWorkItemPorts, type RemoteProjectTarget, type RemoteWorkItemService } from './workitem-remote.js';
 
 const require = createRequire(import.meta.url);
 
@@ -412,23 +413,23 @@ export interface SettlementArtifactView {
  * path in this module.
  */
 export interface SpecialistWorkItemBoundary {
-  view(ref: string): WorkItemView;
-  epicAncestors(ref: string, depth: number): EpicAncestor[];
+  view(ref: string): Promise<WorkItemView>;
+  epicAncestors(ref: string, depth: number): Promise<EpicAncestor[]>;
   /**
    * Completed `blocks`-edge sources, up to `depth` hops, as dependency context for the
    * turn-1 prompt. The Substrate edge graph through this boundary is the ONE traversal —
    * the host never queries the store or walks edges itself (SPECIALISTS-22).
    */
-  completedBlockers(ref: string, depth: number): EpicAncestor[];
+  completedBlockers(ref: string, depth: number): Promise<EpicAncestor[]>;
   /**
    * The Issue's resolved contextRefs (own + inherited from parents) for the turn-1 prompt.
    * Optional so fakes keep compiling. Throws when Substrate refuses the context
    * (journal/memory authority, parent cycle) or exposes no context reader: fail closed.
    */
-  resolvedContext?(ref: string): ResolvedContextView | null;
-  check(req: DispatchRequest): CheckResult;
-  bind(req: DispatchRequest): ExecutionBindingView;
-  inlineCreate(contract: string, opts?: { title?: string; holder?: string; activationId?: string; parentId?: string; kind?: string }): InlineIssueResult;
+  resolvedContext?(ref: string): Promise<ResolvedContextView | null>;
+  check(req: DispatchRequest): Promise<CheckResult>;
+  bind(req: DispatchRequest): Promise<ExecutionBindingView>;
+  inlineCreate(contract: string, opts?: { title?: string; holder?: string; activationId?: string; parentId?: string; kind?: string }): Promise<InlineIssueResult>;
   /**
    * Release the claim an inline contract took, so a refused inline dispatch leaves an issue that is
    * immediately re-dispatchable rather than one locked by an activation that never ran
@@ -436,14 +437,14 @@ export interface SpecialistWorkItemBoundary {
    * Optional for the same reason as the port method: the boundary is structural and test doubles
    * predate it.
    */
-  releaseInlineClaim?(ref: string, opts?: { activationId?: string }): boolean;
+  releaseInlineClaim?(ref: string, opts?: { activationId?: string }): Promise<boolean>;
   /**
    * Append a journal entry on an issue. `summary` carries the ad hoc dispatch
    * evidence note (XT-108: surface, specialist, requested_by, parent_ref, kind,
    * title-source) as a `note` semantic summary; without it this is the plain
    * store journal write it always was. Never a provenance receipt, never a new store.
    */
-  journal(ref: string, kind: string, opts?: { participantId?: string; activationId?: string; summary?: string }): void;
+  journal(ref: string, kind: string, opts?: { participantId?: string; activationId?: string; summary?: string }): Promise<void>;
   /**
    * S1 settlement surface (ADR §§38–39). Optional so existing fakes keep
    * compiling; the host degrades to store-only publication when absent.
@@ -453,9 +454,9 @@ export interface SpecialistWorkItemBoundary {
    * links a non-commit artifact (the runtime result ref) to the receipt.
    * Commits are never attached here — zero-commit results publish identically.
    */
-  appendResult?(ref: string, input: SettlementResultInput): { entryId: string; sequence: number };
-  allocateReceipt?(bindingId: string): WorkReceiptView;
-  attachArtifact?(receiptId: string, kind: string, value: string): SettlementArtifactView;
+  appendResult?(ref: string, input: SettlementResultInput): Promise<{ entryId: string; sequence: number }>;
+  allocateReceipt?(bindingId: string): Promise<WorkReceiptView>;
+  attachArtifact?(receiptId: string, kind: string, value: string): Promise<SettlementArtifactView>;
   /**
    * Reconciliation reads (SPECIALISTS-54). A republish has to prove it is the FIRST publication
    * of (activation, attempt) before it writes anything, because neither the receipt nor the
@@ -466,9 +467,9 @@ export interface SpecialistWorkItemBoundary {
    * distinguish a proven absence from an unanswerable question, and defaults to the safe-looking
    * "absent". Optional for the same reason as the writers: a boundary without them defers.
    */
-  findResultEntry?(ref: string, key: { activationId: string; attemptId: string }): SettlementLookup<{ entryId: string }>;
+  findResultEntry?(ref: string, key: { activationId: string; attemptId: string }): Promise<SettlementLookup<{ entryId: string }>>;
   /** The receipt already allocated over a binding, if any. One receipt per binding is the rule. */
-  findReceiptForBinding?(ref: string, bindingId: string): SettlementLookup<{ receiptId: string }>;
+  findReceiptForBinding?(ref: string, bindingId: string): Promise<SettlementLookup<{ receiptId: string }>>;
 }
 
 /** The attempt an entry belongs to, read from the envelope first and the fake-only flat field second. */
@@ -496,32 +497,32 @@ export interface ActiveClaimView {
 
 /** Structural port over the producer's issue service. Implemented by fakes in public tests. */
 export interface IssueServicePort {
-  resolveRef(ref: string): { id: string; humanRef: string };
-  getActiveClaim(issueId: string): ActiveClaimView | null;
+  resolveRef(ref: string): Promise<{ id: string; humanRef: string }>;
+  getActiveClaim(issueId: string): Promise<ActiveClaimView | null>;
   /**
    * Release a live claim (SPECIALISTS-53). Optional because this port is structural and several
    * public-test doubles predate it; a double that omits it has no claim to release. The real
    * service implements it (substrate issue-service `releaseClaim`).
    */
-  releaseClaim?(issueId: string, holder: string, opts?: { activationId?: string }): { id: number } | null;
-  getParent(childId: string): { id: string; humanRef: string; title: string; currentRevision: number } | null;
+  releaseClaim?(issueId: string, holder: string, opts?: { activationId?: string }): Promise<{ id: number } | null>;
+  getParent(childId: string): Promise<{ id: string; humanRef: string; title: string; currentRevision: number } | null>;
   /**
    * Every ACTIVE `blocks` edge whose target is `childId`, resolved to its sources. Optional
    * so an existing in-memory fake keeps compiling; absent means "no blocker information",
    * never "no blockers".
    */
-  getBlockers?(childId: string): BlockerIssue[];
-  getRevision(issueId: string, revision: number): { contract: unknown };
+  getBlockers?(childId: string): Promise<BlockerIssue[]>;
+  getRevision(issueId: string, revision: number): Promise<{ contract: unknown }>;
   /**
    * The Issue's revisioned contextRefs, inherited root -> leaf with source provenance and the
    * hash the ExecutionBinding records (substrate issue-service `getResolvedContext`). Optional so
    * existing fakes keep compiling; absent means "no context information".
    */
-  getResolvedContext?(issueId: string): {
+  getResolvedContext?(issueId: string): Promise<{
     entries: Array<{ key: string; value: unknown; sourceIssueId: string; sourceRevision: number; resolutionRule: string }>;
     hash: string;
-  };
-  resolveProject(opts: { gitRoot: string }): { projectId: string };
+  }>;
+  resolveProject(opts: { gitRoot: string }): Promise<{ projectId: string }>;
   createIssue(input: {
     projectId: string;
     title: string;
@@ -531,31 +532,31 @@ export interface IssueServicePort {
     authoredBy: string;
     /** Parent machine id, checked for existence with the link written atomically (never setParent). */
     parentId?: string;
-  }): { id: string };
+  }): Promise<{ id: string }>;
   claimReady(
     issueId: string,
     holder: string,
     attestation: { outcome: string; policy: string; attestedBy: string },
     opts?: { activationId?: string },
-  ): { claim: { id: number } };
+  ): Promise<{ claim: { id: number } }>;
 }
 
 /** Structural port over the producer's issue store (read + journal). */
 export interface IssueStorePort {
-  get(ref: string): {
+  get(ref: string): Promise<{
     issue: { humanRef: string; id: string; currentRevision: number; currentContractHash: string; title: string; lifecycleState: string };
     contract: unknown;
     readinessState: string;
     dispatchable: boolean;
     reasons: string[];
-  };
-  addJournal(ref: string, kind: string, opts?: { participantId?: string; activationId?: string }): void;
+  }>;
+  addJournal(ref: string, kind: string, opts?: { participantId?: string; activationId?: string }): Promise<void>;
 }
 
 /** Structural port over the producer's dispatch gate (check + bind mutation). */
 export interface DispatchGatePort {
-  check(issues: unknown, req: DispatchRequest): { issueId: string; revision: number; contractHash: string; report: unknown };
-  dispatch(issues: unknown, provenance: unknown, req: DispatchRequest): { binding: ExecutionBindingView };
+  check(issues: unknown, req: DispatchRequest): Promise<{ issueId: string; revision: number; contractHash: string; report: unknown }>;
+  dispatch(issues: unknown, provenance: unknown, req: DispatchRequest): Promise<{ binding: ExecutionBindingView }>;
 }
 
 /** Structural port over the producer's journal service (S1 result publication). */
@@ -570,9 +571,9 @@ export interface JournalServicePort {
     participantId?: string;
     activationId?: string;
     sessionId?: string;
-  }): { id: string; sequence: number };
+  }): Promise<{ id: string; sequence: number }>;
   /** Existing entries, for the settlement reconciliation read (SPECIALISTS-54). */
-  listEntries?(issueId: string, opts?: { kind?: string; limit?: number }): Array<{
+  listEntries?(issueId: string, opts?: { kind?: string; limit?: number }): Promise<Array<{
     id: string;
     kind?: string;
     activationId?: string | null;
@@ -584,15 +585,15 @@ export interface JournalServicePort {
      */
     attemptId?: string | null;
     executionContext?: { specialist?: { attemptId?: string | null } | null } | null;
-  }>;
+  }>>;
 }
 
 /** Structural port over the producer's provenance service (S1 receipt publication). */
 export interface ProvenanceServicePort {
-  allocateReceipt(bindingId: string): { id: string; executionBindingId: string; issueId: string; issueRevision: number; contractHash: string };
-  attachArtifact(receiptId: string, kind: string, value: string): { receiptId?: string; kind?: string; value?: string };
+  allocateReceipt(bindingId: string): Promise<{ id: string; executionBindingId: string; issueId: string; issueRevision: number; contractHash: string }>;
+  attachArtifact(receiptId: string, kind: string, value: string): Promise<{ receiptId?: string; kind?: string; value?: string }>;
   /** Receipts already allocated for an issue, for the reconciliation read (SPECIALISTS-54). */
-  listReceipts?(issueId: string): Array<{ id: string; executionBindingId: string }>;
+  listReceipts?(issueId: string): Promise<Array<{ id: string; executionBindingId: string }>>;
 }
 
 /** The injected ports `createWorkItemBoundary` programs against. */
@@ -620,8 +621,8 @@ export interface WorkItemPorts {
 export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItemBoundary {
   const { issues, provenance, store, gate, journalService, provenanceService } = ports;
 
-  const viewOf = (ref: string): WorkItemView => {
-    const v = store.get(ref);
+  const viewOf = async (ref: string): Promise<WorkItemView> => {
+    const v = await store.get(ref);
     return {
       ref: v.issue.humanRef,
       issueId: v.issue.id,
@@ -637,21 +638,21 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
   };
 
   return {
-    view(ref: string): WorkItemView {
+    async view(ref: string): Promise<WorkItemView> {
       return viewOf(ref);
     },
 
-    epicAncestors(ref: string, depth: number): EpicAncestor[] {
+    async epicAncestors(ref: string, depth: number): Promise<EpicAncestor[]> {
       if (depth !== 1 && depth !== 2) return [];
       const ancestors: EpicAncestor[] = [];
       const seen = new Set<string>();
-      let childId = issues.resolveRef(ref).id;
+      let childId = (await issues.resolveRef(ref)).id;
       for (let i = 0; i < depth; i += 1) {
-        const parent = issues.getParent(childId);
+        const parent = await issues.getParent(childId);
         if (!parent) break;
         if (seen.has(parent.id)) break; // fail-closed: never loop on a corrupt cycle
         seen.add(parent.id);
-        const rev = issues.getRevision(parent.id, parent.currentRevision);
+        const rev = await issues.getRevision(parent.id, parent.currentRevision);
         ancestors.push({
           ref: parent.humanRef,
           title: parent.title,
@@ -664,48 +665,48 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
       return ancestors;
     },
 
-    resolvedContext(ref: string): ResolvedContextView | null {
+    async resolvedContext(ref: string): Promise<ResolvedContextView | null> {
       // Fail closed: Substrate binds the Issue's resolved context hash on every dispatch, so a
       // store that cannot read that context cannot prove the prompt matches the binding.
       if (!issues.getResolvedContext) {
         throw new Error('Substrate exposes no getResolvedContext: the bound context cannot be read or verified');
       }
-      const resolved = issues.getResolvedContext(issues.resolveRef(ref).id);
-      const humanRefOf = (issueId: string): string => {
+      const resolved = await issues.getResolvedContext((await issues.resolveRef(ref)).id);
+      const humanRefOf = async (issueId: string): Promise<string> => {
         try {
-          return issues.resolveRef(issueId).humanRef;
+          return (await issues.resolveRef(issueId)).humanRef;
         } catch {
           return issueId;
         }
       };
       return {
         hash: resolved.hash,
-        entries: resolved.entries.map((entry) => ({
+        entries: await Promise.all(resolved.entries.map(async (entry) => ({
           key: entry.key,
           value: entry.value,
-          sourceRef: humanRefOf(entry.sourceIssueId),
+          sourceRef: await humanRefOf(entry.sourceIssueId),
           sourceRevision: entry.sourceRevision,
           inherited: entry.resolutionRule === 'inherited',
-        })),
+        }))),
       };
     },
 
-    completedBlockers(ref: string, depth: number): EpicAncestor[] {
+    async completedBlockers(ref: string, depth: number): Promise<EpicAncestor[]> {
       if (depth !== 1 && depth !== 2) return [];
       if (!issues.getBlockers) return [];
       const collected: EpicAncestor[] = [];
       const seen = new Set<string>();
-      let frontier = [issues.resolveRef(ref).id];
+      let frontier = [(await issues.resolveRef(ref)).id];
       for (let hop = 0; hop < depth && frontier.length > 0; hop += 1) {
         const next: string[] = [];
         for (const id of frontier) {
-          for (const blocker of issues.getBlockers(id)) {
+          for (const blocker of await issues.getBlockers(id)) {
             if (seen.has(blocker.id)) continue; // fail-closed: never loop on a corrupt cycle
             seen.add(blocker.id);
             // Only SATISFIED blockers are dependency context. An unsatisfied blocker is a
             // reason the dispatch would have been refused, not context for the child.
             if (!SATISFIED_BLOCKER_STATES.has(blocker.lifecycleState)) continue;
-            const rev = issues.getRevision(blocker.id, blocker.currentRevision);
+            const rev = await issues.getRevision(blocker.id, blocker.currentRevision);
             collected.push({
               ref: blocker.humanRef,
               title: blocker.title,
@@ -721,16 +722,16 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
       return collected;
     },
 
-    check(req: DispatchRequest): CheckResult {
+    async check(req: DispatchRequest): Promise<CheckResult> {
       // checkDispatch is the fail-closed pre-activation gate: draft/unready/
       // blocked/terminal/scope-expansion refuse before any mutation exists.
-      const check = gate.check(issues, req);
+      const check = await gate.check(issues, req);
       return { issueId: check.issueId, revision: check.revision, contractHash: check.contractHash, report: check.report };
     },
 
-    bind(req: DispatchRequest): ExecutionBindingView {
-      const issueId = issues.resolveRef(req.ref).id;
-      const active = issues.getActiveClaim(issueId);
+    async bind(req: DispatchRequest): Promise<ExecutionBindingView> {
+      const issueId = (await issues.resolveRef(req.ref)).id;
+      const active = await issues.getActiveClaim(issueId);
       if (active) {
         // Defense in depth (xtrm-6qu.7.2): never inherit a foreign or
         // cross-activation claim. The producer gate must pin same-holder
@@ -767,11 +768,11 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
       // revision/hash regardless, and a concurrent edit between check and bind
       // is refused by the gate's divergence check, never re-derived here.
       const claimId = active?.id ?? req.claimId ?? undefined;
-      const out = gate.dispatch(issues, provenance, { ...req, claimId });
+      const out = await gate.dispatch(issues, provenance, { ...req, claimId });
       return out.binding;
     },
 
-    inlineCreate(contract: string, opts: { title?: string; holder?: string; activationId?: string; parentId?: string; kind?: string } = {}): InlineIssueResult {
+    async inlineCreate(contract: string, opts: { title?: string; holder?: string; activationId?: string; parentId?: string; kind?: string } = {}): Promise<InlineIssueResult> {
       // §10: structural validation BEFORE any Issue exists, so a refused
       // dispatch leaves the board unchanged. The shared contract-text gate is
       // the canonical reader; failures land here, never inside a worker prompt.
@@ -807,8 +808,8 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
       // The dispatcher holds the created issue: the coordinator (or adapter)
       // that supplied the contract owns it until the activation settles.
       const holder = opts.holder ?? 'adapter::specialists';
-      const { projectId } = issues.resolveProject({ gitRoot: process.cwd() });
-      const issue = issues.createIssue({
+      const { projectId } = await issues.resolveProject({ gitRoot: process.cwd() });
+      const issue = await issues.createIssue({
         projectId,
         title: opts.title ?? (firstLine ?? 'Specialist dispatch contract').slice(0, 72),
         kind,
@@ -822,7 +823,7 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
       });
       // claimReady attests + claims in one transaction (§10: readiness
       // attestation then claim, atomically, before the ExecutionBinding).
-      const { claim } = issues.claimReady(
+      const { claim } = await issues.claimReady(
         issue.id,
         holder,
         { outcome: 'ready', policy: 'default', attestedBy: holder },
@@ -830,11 +831,11 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
       );
       // The machine id remains available separately, while dispatch returns the
       // human locator that IssueService.resolveRef accepts across all frontends.
-      return { ref: issues.resolveRef(issue.id).humanRef, issueId: issue.id, claimId: claim.id };
+      return { ref: (await issues.resolveRef(issue.id)).humanRef, issueId: issue.id, claimId: claim.id };
     },
-    releaseInlineClaim(ref: string, opts: { activationId?: string } = {}): boolean {
-      const issueId = issues.resolveRef(ref).id;
-      const active = issues.getActiveClaim(issueId);
+    async releaseInlineClaim(ref: string, opts: { activationId?: string } = {}): Promise<boolean> {
+      const issueId = (await issues.resolveRef(ref)).id;
+      const active = await issues.getActiveClaim(issueId);
       if (!active || !issues.releaseClaim) return false;
       // Release only a claim THIS activation took. Releasing as the recorded holder is what makes a
       // release possible at all, and it is also what makes it dangerous: if anything re-claimed
@@ -844,7 +845,7 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
       if (opts.activationId && active.activationId !== opts.activationId) return false;
       // Still released AS THE RECORDED HOLDER, read from the claim rather than from the caller:
       // only the recorded holder and activation may release.
-      const released = issues.releaseClaim(
+      const released = await issues.releaseClaim(
         issueId,
         active.holder,
         active.activationId ? { activationId: active.activationId } : {},
@@ -852,15 +853,15 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
       return released !== null;
     },
 
-    journal(ref: string, kind: string, opts: { participantId?: string; activationId?: string; summary?: string } = {}): void {
+    async journal(ref: string, kind: string, opts: { participantId?: string; activationId?: string; summary?: string } = {}): Promise<void> {
       // Evidence with content cannot ride the store write: the producer's addJournal
       // forwards kind/identity only, never a body. A summary routes through the journal
       // service as a `note` semantic summary instead — the same append path the journal
       // tool uses — and falls back to the plain store write when no journal service is
       // wired (fakes, NULL boundary) so the call never fails a dispatch.
       if (opts.summary !== undefined && journalService) {
-        const issueId = issues.resolveRef(ref).id;
-        journalService.appendEntry(issueId, {
+        const issueId = (await issues.resolveRef(ref)).id;
+        await journalService.appendEntry(issueId, {
           kind,
           semantic: { summary: opts.summary },
           ...(opts.participantId ? { participantId: opts.participantId } : {}),
@@ -869,15 +870,15 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
         return;
       }
       const { summary: _evidence, ...storeOpts } = opts;
-      store.addJournal(ref, kind, storeOpts);
+      await store.addJournal(ref, kind, storeOpts);
     },
 
     ...((journalService || provenanceService)
       ? {
-          appendResult(ref: string, input: SettlementResultInput): { entryId: string; sequence: number } {
+          async appendResult(ref: string, input: SettlementResultInput): Promise<{ entryId: string; sequence: number }> {
             if (!journalService) throw new Error('settlement unavailable: no journal service on this boundary');
-            const issueId = issues.resolveRef(ref).id;
-            const entry = journalService.appendEntry(issueId, {
+            const issueId = (await issues.resolveRef(ref)).id;
+            const entry = await journalService.appendEntry(issueId, {
               kind: 'result',
               result: input.result,
               executionContext: input.executionContext ?? null,
@@ -888,9 +889,9 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
             });
             return { entryId: entry.id, sequence: entry.sequence };
           },
-          allocateReceipt(bindingId: string): WorkReceiptView {
+          async allocateReceipt(bindingId: string): Promise<WorkReceiptView> {
             if (!provenanceService) throw new Error('settlement unavailable: no provenance service on this boundary');
-            const receipt = provenanceService.allocateReceipt(bindingId);
+            const receipt = await provenanceService.allocateReceipt(bindingId);
             return {
               id: receipt.id,
               executionBindingId: receipt.executionBindingId,
@@ -899,9 +900,9 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
               contractHash: receipt.contractHash,
             };
           },
-          attachArtifact(receiptId: string, kind: string, value: string): SettlementArtifactView {
+          async attachArtifact(receiptId: string, kind: string, value: string): Promise<SettlementArtifactView> {
             if (!provenanceService) throw new Error('settlement unavailable: no provenance service on this boundary');
-            const attached = provenanceService.attachArtifact(receiptId, kind, value);
+            const attached = await provenanceService.attachArtifact(receiptId, kind, value);
             return {
               receiptId: attached.receiptId ?? receiptId,
               kind: attached.kind ?? kind,
@@ -912,12 +913,12 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
           // `unavailable`, never `absent`: a missing method, a service that is not wired, and a
           // query that throws are all "cannot prove", and treating any of them as "nothing
           // there" is what would mint a duplicate receipt.
-          findResultEntry(ref: string, key: { activationId: string; attemptId: string }): SettlementLookup<{ entryId: string }> {
+          async findResultEntry(ref: string, key: { activationId: string; attemptId: string }): Promise<SettlementLookup<{ entryId: string }>> {
             if (!journalService?.listEntries) {
               return { status: 'unavailable', reason: 'journal service exposes no entry listing' };
             }
             try {
-              const entries = journalService.listEntries(issues.resolveRef(ref).id, { kind: 'result' });
+              const entries = await journalService.listEntries((await issues.resolveRef(ref)).id, { kind: 'result' });
               const forActivation = entries.filter((entry) => entry.activationId === key.activationId);
               // The attempt lives in the X1 envelope, NOT as a flat column: `issue_journal` has no
               // attempt_id (substrate src/domain/journal.ts:193-211). Matching on a flat
@@ -940,12 +941,12 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
               return { status: 'unavailable', reason: error instanceof Error ? error.message : String(error) };
             }
           },
-          findReceiptForBinding(ref: string, bindingId: string): SettlementLookup<{ receiptId: string }> {
+          async findReceiptForBinding(ref: string, bindingId: string): Promise<SettlementLookup<{ receiptId: string }>> {
             if (!provenanceService?.listReceipts) {
               return { status: 'unavailable', reason: 'provenance service exposes no receipt listing' };
             }
             try {
-              const rows = provenanceService.listReceipts(issues.resolveRef(ref).id);
+              const rows = await provenanceService.listReceipts((await issues.resolveRef(ref)).id);
               const match = rows.find((receipt) => receipt.executionBindingId === bindingId);
               return match ? { status: 'found', value: { receiptId: match.id } } : { status: 'absent' };
             } catch (error) {
@@ -1046,6 +1047,118 @@ export function resolveSubstrateModule(substrateDir: string, rel: string): strin
 }
 
 /**
+ * The two members of Substrate's service client this build relies on. Structural: the module is
+ * loaded at runtime, so the type states only what is called, never a static producer import.
+ */
+interface SubstrateServiceClientModule {
+  localOrRemote(env: NodeJS.ProcessEnv): { kind: 'local'; dbPath: string } | { kind: 'remote'; remote: string; host: string };
+  openService(opts: { env?: NodeJS.ProcessEnv }): {
+    service: RemoteWorkItemService;
+    endpoint:
+      | { kind: 'local'; dbPath: string }
+      | { kind: 'remote'; remote: string; host: string; config: { checkouts: Record<string, { root: string }> } };
+  };
+}
+
+/** A Substrate module this build can use, or null when the install does not carry it. */
+async function loadOptionalSubstrateModule(substrateDir: string, rel: string): Promise<Record<string, any> | null> {
+  const modulePath = resolveSubstrateModule(substrateDir, rel);
+  if (!modulePath) return null;
+  try {
+    return (await import(pathToFileURL(modulePath).href)) as Record<string, any>;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The verified PC checkout → server checkout mapping for the host's own repository.
+ *
+ * Derived here, once, because `issue.resolveProject` takes a `gitRoot` and matches it against the
+ * links of the store it RUNS ON: over the transport that store is the other machine, where a PC
+ * path is not evidence even when both machines use the same layout. Reading the mapping the same
+ * way `openService` did (repository key → `checkouts[<host> <key>]`) keeps the two in step.
+ *
+ * Absent discovery, an absent module, or an unverified mapping all answer `undefined`: reads keep
+ * working, and inline creation refuses and names `sb remote setup` rather than guessing a project.
+ */
+async function remoteProjectTarget(
+  substrateDir: string,
+  endpoint: { host: string; config: { checkouts: Record<string, { root: string }> } },
+): Promise<RemoteProjectTarget | undefined> {
+  const discovery = await loadOptionalSubstrateModule(substrateDir, 'src/domain/repository-discovery.ts');
+  const config = await loadOptionalSubstrateModule(substrateDir, 'src/remote/config.ts');
+  const discoverRepository = discovery?.['discoverRepository'];
+  const mappingKey = config?.['mappingKey'];
+  if (typeof discoverRepository !== 'function' || typeof mappingKey !== 'function') return undefined;
+  let found: { gitRoot?: string | null; identity?: { repositoryKey?: string } | null } | null = null;
+  try {
+    found = (discoverRepository as () => typeof found)();
+  } catch {
+    found = null;
+  }
+  const localRoot = found?.gitRoot ?? null;
+  const repositoryKey = found?.identity?.repositoryKey ?? null;
+  if (localRoot === null || repositoryKey === null) return undefined;
+  const mapped = endpoint.config.checkouts[(mappingKey as (host: string, key: string) => string)(endpoint.host, repositoryKey)];
+  return { localRoot, repositoryKey, serverRoot: mapped?.root ?? null };
+}
+
+/**
+ * Load Substrate's service client, or answer null for a Substrate that predates it.
+ *
+ * A module that is ABSENT is the older install this build still supports: without the selector
+ * there was no remote feature, so the local path is the only behaviour it ever had. A module that
+ * is PRESENT and fails to load is a broken install and must not be read as "no remote" — that is
+ * precisely the silent fallback to a store the operator did not choose (SPECIALISTS-4398).
+ */
+async function loadServiceClientModule(substrateDir: string): Promise<SubstrateServiceClientModule | null> {
+  const modulePath = resolveSubstrateModule(substrateDir, 'src/service/client.ts');
+  if (!modulePath) return null;
+  let mod: Record<string, unknown>;
+  try {
+    mod = (await import(pathToFileURL(modulePath).href)) as Record<string, unknown>;
+  } catch (error) {
+    throw new Error(
+      `work_item_store_unavailable: cannot load the Substrate service client at ${modulePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (typeof mod['localOrRemote'] !== 'function' || typeof mod['openService'] !== 'function') return null;
+  return mod as unknown as SubstrateServiceClientModule;
+}
+
+/** The store this process will use, decided before anything is opened. */
+export type WorkItemStoreSelection =
+  | { kind: 'local'; dbPath: string }
+  | { kind: 'remote'; remote: string };
+
+/**
+ * Which store this process must use (SPECIALISTS-4398, XTRM-693).
+ *
+ * Delegates the rule to Substrate: an explicit local file wins, then a configured remote, then the
+ * canonical local store. Only the REMOTE signal is taken from that selector; the local path keeps
+ * `resolveWorkItemDbPath`, which also honours the legacy `XTRM_STATE_DB` that Substrate's own
+ * selector does not read, so a local deployment behaves exactly as before.
+ *
+ * `dbPath` is the caller stating "a local file, deliberately" — the same precedence Substrate
+ * gives `SUBSTRATE_DB` — which is why callers that already decided local pass it and callers that
+ * have not do not.
+ */
+export async function selectWorkItemStore(
+  env: NodeJS.ProcessEnv = process.env,
+  opts: { dbPath?: string; substrateDir?: string; resolveInstalled?: () => string | null } = {},
+): Promise<WorkItemStoreSelection> {
+  if (opts.dbPath !== undefined) return { kind: 'local', dbPath: opts.dbPath };
+  const local: WorkItemStoreSelection = { kind: 'local', dbPath: resolveWorkItemDbPath(env) };
+  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? '', opts.resolveInstalled);
+  if (!substrateDir) return local;
+  const client = await loadServiceClientModule(substrateDir);
+  if (!client) return local;
+  const selection = client.localOrRemote(env);
+  return selection.kind === 'remote' ? { kind: 'remote', remote: selection.remote } : local;
+}
+
+/**
  * Open the canonical work store and build the boundary over the REAL producer
  * services, dynamic-imported at runtime from an explicit checkout.
  *
@@ -1103,6 +1216,38 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
       );
     }
   };
+  // Which store this process uses is decided BEFORE one is opened (SPECIALISTS-4398, XTRM-693).
+  // A configured remote is reached through Substrate's typed service and the local sqlite file is
+  // never opened on that path, so there is no store to fall back to when the server cannot answer.
+  const selection = await selectWorkItemStore(env, {
+    dbPath: opts.dbPath,
+    substrateDir,
+    ...(opts.resolveInstalled ? { resolveInstalled: opts.resolveInstalled } : {}),
+  });
+  if (selection.kind === 'remote') {
+    const client = await loadServiceClientModule(substrateDir);
+    // selectWorkItemStore answers `remote` only through this module, so its absence here is a
+    // broken install, not a state to interpret.
+    if (!client) {
+      throw new Error(
+        `work_item_store_unavailable: substrate.remote is ${selection.remote} but ${substrateDir} has no usable service client`,
+      );
+    }
+    const opened = client.openService({ env });
+    if (opened.endpoint.kind !== 'remote') {
+      throw new Error(
+        `work_item_store_unavailable: substrate.remote is configured but the service client chose the local store at ${opened.endpoint.dbPath}`,
+      );
+    }
+    const project = await remoteProjectTarget(substrateDir, opened.endpoint);
+    return createWorkItemBoundary(
+      createRemoteWorkItemPorts(opened.service, {
+        remote: opened.endpoint.remote,
+        ...(project === undefined ? {} : { project }),
+      }),
+    );
+  }
+
   const [runner, issueSvcMod, journalMod, provMod, storeMod, gateMod] = await Promise.all(
     SUBSTRATE_REQUIRED_MODULES.map((rel) => load(rel)),
   );
@@ -1115,7 +1260,7 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
       throw new Error(`work_item_store_unavailable: Substrate module is missing export ${name}`);
     }
   }
-  const dbPath = opts.dbPath ?? resolveWorkItemDbPath(env);
+  const dbPath = selection.dbPath;
   // SPECIALISTS-59: opening the store and running migrations is the point at which the lookup
   // depends on the HOST rather than on the package. Anything thrown here (an unopenable store, a
   // migration that refuses, a missing HOME/.xtrm directory) is normalized into the same refusal
@@ -1128,6 +1273,13 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
   );
   let db: DatabaseSync;
   try {
+    // XTRM-693 guard, adopted here (SPECIALISTS-4398): with `substrate.remote` set the store
+    // lives on another machine, so opening the canonical local file would answer from a store
+    // the operator did not choose. Substrate refuses that and names the remote and the path;
+    // we call its guard rather than re-deriving the rule. A Substrate without the export
+    // predates the guard, so the call is skipped rather than failing the install check.
+    const guard = (storeMod as Record<string, unknown>)['assertStoreIsChosen'];
+    if (typeof guard === 'function') (guard as (dbPath: string, env: NodeJS.ProcessEnv) => void)(dbPath, env);
     db = openSubstrateDb(dbPath);
     runner.migrate(db);
   } catch (error) {
@@ -1166,7 +1318,7 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
   }
   // The blocker traversal lives here, over the producer's own edge list, so the boundary
   // stays the single consumer surface and no host queries the store directly.
-  issueService.getBlockers = (childId: string): BlockerIssue[] =>
+  issueService.getBlockers = async (childId: string): Promise<BlockerIssue[]> =>
     issueService
       .listActiveEdges()
       .filter((edge) => edge.active && edge.kind === 'blocks' && edge.toIssue === childId)
@@ -1185,25 +1337,34 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
     issues,
     provenance,
     store,
+    // The ports are async so the remote adapter can satisfy the same shape; the local
+    // producer is synchronous and is wrapped here rather than forking the boundary.
     gate: {
-      check: (i, r) => gateMod.checkDispatch(i, r),
-      dispatch: (i, p, r) => gateMod.dispatchToSpecialist(i, p, r),
+      check: async (i, r) => gateMod.checkDispatch(i, r),
+      dispatch: async (i, p, r) => gateMod.dispatchToSpecialist(i, p, r),
     },
     // S1 settlement surface over the same live services: the Journal result
     // publication and WorkReceipt allocation the host performs automatically
     // at settlement. Structural ports only — no static producer import.
-    journalService: journalSvc as unknown as JournalServicePort,
-    provenanceService: provenance as unknown as ProvenanceServicePort,
+    journalService: {
+      appendEntry: async (issueId, input) => journalSvc.appendEntry(issueId, input),
+      listEntries: async (issueId, listOpts) => journalSvc.listEntries(issueId, listOpts),
+    },
+    provenanceService: {
+      allocateReceipt: async (bindingId) => provenance.allocateReceipt(bindingId),
+      attachArtifact: async (receiptId, kind, value) => provenance.attachArtifact(receiptId, kind, value),
+      listReceipts: async (issueId) => provenance.listReceipts(issueId),
+    },
   });
 }
 
 /** Used where work is genuinely not available (unit tests); every call refuses. */
 export const NULL_WORK_ITEMS: SpecialistWorkItemBoundary = {
-  view: () => { throw new Error('no work-item store: test double'); },
-  epicAncestors: () => [],
-  completedBlockers: () => [],
-  check: () => { throw new Error('no work-item store: test double'); },
-  bind: () => { throw new Error('no work-item store: test double'); },
-  inlineCreate: () => { throw new Error('no work-item store: test double'); },
-  journal: () => {},
+  view: async () => { throw new Error('no work-item store: test double'); },
+  epicAncestors: async () => [],
+  completedBlockers: async () => [],
+  check: async () => { throw new Error('no work-item store: test double'); },
+  bind: async () => { throw new Error('no work-item store: test double'); },
+  inlineCreate: async () => { throw new Error('no work-item store: test double'); },
+  journal: async () => {},
 };

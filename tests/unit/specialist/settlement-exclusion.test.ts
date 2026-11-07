@@ -53,7 +53,7 @@ import {
 } from '../../../src/activation/settlement-store.js';
 import {
   exclusionWorkspace,
-  withSettlementExclusion,
+  withSettlementExclusionAsync,
 } from '../../../src/activation/settlement-lease.js';
 import { acquire, leasePath, type LeaseProcessProbe } from '../../../src/activation/workspace-lease.js';
 import type {
@@ -163,16 +163,18 @@ function pendingRecord(): SettlementRecord {
 }
 
 describe('settlement publication is exactly-once across processes (SPECIALISTS-66)', () => {
-  it('D2: a republish pass landing inside the publication window publishes nothing twice', () => {
+  it('D2: a republish pass landing inside the publication window publishes nothing twice', async () => {
     const root = tempRoot();
     const store = createMemorySettlementStore();
     const { boundary, receipts, entries, hooks } = countingBoundary();
-    let reentrant: { outcome: string } | undefined;
+    let reentrantPromise: Promise<{ outcome: string }> | undefined;
 
     // The D2 window precisely: the record is already stored (so it is in the backlog) and the
     // append has NOT happened yet, so reconciliation would read absent and license a write.
+    // The re-entrant call is STARTED here but not awaited: the exclusion is taken synchronously
+    // before the body's first await, so it must be refused at this instant, not deduped later.
     hooks.onAllocate = () => {
-      reentrant = republishSettlement({
+      reentrantPromise = republishSettlement({
         boundary,
         store,
         record: store.get(ACTIVATION, ATTEMPT) ?? pendingRecord(),
@@ -181,7 +183,7 @@ describe('settlement publication is exactly-once across processes (SPECIALISTS-6
       });
     };
 
-    const result = publishSettlement({
+    const result = await publishSettlement({
       boundary,
       store,
       subject: subject(root),
@@ -190,6 +192,7 @@ describe('settlement publication is exactly-once across processes (SPECIALISTS-6
       validation: { valid: true },
     });
 
+    const reentrant = await reentrantPromise;
     expect(receipts).toHaveLength(1);
     expect(entries).toHaveLength(1);
     expect(result.publicationState).toBe('published');
@@ -197,16 +200,17 @@ describe('settlement publication is exactly-once across processes (SPECIALISTS-6
     expect(reentrant?.outcome).toBe('pending');
   });
 
-  it('D1: two republish passes over one record yield one receipt and one Journal result', () => {
+  it('D1: two republish passes over one record yield one receipt and one Journal result', async () => {
     const root = tempRoot();
     const store = createMemorySettlementStore();
     const { boundary, receipts, entries, hooks } = countingBoundary();
     store.save(pendingRecord());
-    let second: { outcome: string } | undefined;
+    let secondPromise: Promise<{ outcome: string }> | undefined;
 
-    // A second process drains the same backlog while the first is mid-publication.
+    // A second process drains the same backlog while the first is mid-publication. Started, not
+    // awaited: the lease decision happens synchronously at the call.
     hooks.onAllocate = () => {
-      second = republishSettlement({
+      secondPromise = republishSettlement({
         boundary,
         store,
         record: pendingRecord(),
@@ -215,7 +219,7 @@ describe('settlement publication is exactly-once across processes (SPECIALISTS-6
       });
     };
 
-    const first = republishSettlement({
+    const first = await republishSettlement({
       boundary,
       store,
       record: pendingRecord(),
@@ -223,22 +227,23 @@ describe('settlement publication is exactly-once across processes (SPECIALISTS-6
       repositoryRoot: root,
     });
 
+    const second = await secondPromise;
     expect(first.outcome).toBe('published');
     expect(second?.outcome).toBe('pending');
     expect(receipts).toHaveLength(1);
     expect(entries).toHaveLength(1);
   });
 
-  it('contention never alters the activation result: the settlement is still stored', () => {
+  it('contention never alters the activation result: the settlement is still stored', async () => {
     const root = tempRoot();
     const store = createMemorySettlementStore();
     const { boundary, hooks } = countingBoundary();
     // Hold the exclusion for the whole publication by re-entering and never releasing is not
     // possible; instead contend at the only place that matters — a concurrent publish of the
     // same (activation, attempt) while the first holds it.
-    let contended: ReturnType<typeof publishSettlement> | undefined;
+    let contendedPromise: ReturnType<typeof publishSettlement> | undefined;
     hooks.onAllocate = () => {
-      contended = publishSettlement({
+      contendedPromise = publishSettlement({
         boundary,
         store,
         subject: subject(root),
@@ -248,7 +253,7 @@ describe('settlement publication is exactly-once across processes (SPECIALISTS-6
       });
     };
 
-    const winner = publishSettlement({
+    const winner = await publishSettlement({
       boundary,
       store,
       subject: subject(root),
@@ -257,6 +262,7 @@ describe('settlement publication is exactly-once across processes (SPECIALISTS-6
       validation: { valid: true },
     });
 
+    const contended = await contendedPromise;
     expect(winner.publicationState).toBe('published');
     expect(contended?.publicationState).toBe('pending');
     // Best-effort by contract (ADR §38): the loser degraded, it did not fail or throw, and the
@@ -265,18 +271,18 @@ describe('settlement publication is exactly-once across processes (SPECIALISTS-6
     expect(contended?.degraded).toContain('held elsewhere');
   });
 
-  it('the exclusion is per (activation, attempt), not per worktree', () => {
+  it('the exclusion is per (activation, attempt), not per worktree', async () => {
     const root = tempRoot();
     const store = createMemorySettlementStore();
     const { boundary, receipts, hooks } = countingBoundary();
-    let other: ReturnType<typeof publishSettlement> | undefined;
+    let otherPromise: ReturnType<typeof publishSettlement> | undefined;
 
     // A DIFFERENT activation in the same repository root must not be blocked by this one. A
     // workspace-keyed exclusion would refuse it — that is the coupling the synthetic key avoids,
     // and a read-only activation takes no workspace lease yet still publishes.
     hooks.onAllocate = () => {
-      if (other) return;
-      other = publishSettlement({
+      if (otherPromise) return;
+      otherPromise = publishSettlement({
         boundary,
         store,
         subject: { ...subject(root), activationId: 'act:unrelated', attemptId: 'att:unrelated:1' },
@@ -286,7 +292,7 @@ describe('settlement publication is exactly-once across processes (SPECIALISTS-6
       });
     };
 
-    publishSettlement({
+    await publishSettlement({
       boundary,
       store,
       subject: subject(root),
@@ -295,6 +301,7 @@ describe('settlement publication is exactly-once across processes (SPECIALISTS-6
       validation: { valid: true },
     });
 
+    const other = await otherPromise;
     expect(other?.publicationState).toBe('published');
     expect(receipts).toHaveLength(2);
   });
@@ -303,9 +310,9 @@ describe('settlement publication is exactly-once across processes (SPECIALISTS-6
 describe('the two refusal lifetimes are distinct (SPECIALISTS-66 R5)', () => {
   const surfaceless = {} as unknown as SpecialistWorkItemBoundary;
 
-  function refusedByRuntime(root: string): InMemorySettlementStore {
+  async function refusedByRuntime(root: string): Promise<InMemorySettlementStore> {
     const store = createMemorySettlementStore();
-    publishSettlement({
+    await publishSettlement({
       boundary: surfaceless,
       store,
       subject: subject(root),
@@ -316,9 +323,9 @@ describe('the two refusal lifetimes are distinct (SPECIALISTS-66 R5)', () => {
     return store;
   }
 
-  it('a runtime-scoped refusal is republished once a capable runtime runs the pass', () => {
+  it('a runtime-scoped refusal is republished once a capable runtime runs the pass', async () => {
     const root = tempRoot();
-    const store = refusedByRuntime(root);
+    const store = await refusedByRuntime(root);
     const stored = store.get(ACTIVATION, ATTEMPT);
     expect(publicationStateOf(stored as SettlementRecord)).toBe('refused');
     expect(stored?.publication?.refusal).toBe('runtime_lacks_settlement_surface');
@@ -327,7 +334,7 @@ describe('the two refusal lifetimes are distinct (SPECIALISTS-66 R5)', () => {
     expect(store.listRuntimeRefused()).toHaveLength(1);
 
     const { boundary, receipts, entries } = countingBoundary();
-    const outcomes = republishPendingSettlements({
+    const outcomes = await republishPendingSettlements({
       boundary,
       store,
       participantId: 'specialist::republisher',
@@ -340,10 +347,10 @@ describe('the two refusal lifetimes are distinct (SPECIALISTS-66 R5)', () => {
     expect(publicationStateOf(store.get(ACTIVATION, ATTEMPT) as SettlementRecord)).toBe('published');
   });
 
-  it('a runtime-scoped refusal stays refused while the runtime is still incapable', () => {
+  it('a runtime-scoped refusal stays refused while the runtime is still incapable', async () => {
     const root = tempRoot();
-    const store = refusedByRuntime(root);
-    const outcomes = republishPendingSettlements({
+    const store = await refusedByRuntime(root);
+    const outcomes = await republishPendingSettlements({
       boundary: surfaceless,
       store,
       participantId: 'specialist::republisher',
@@ -353,7 +360,7 @@ describe('the two refusal lifetimes are distinct (SPECIALISTS-66 R5)', () => {
     expect(store.listRuntimeRefused()).toHaveLength(1);
   });
 
-  it('an unreconstructable receipt is terminal and no upgrade revives it', () => {
+  it('an unreconstructable receipt is terminal and no upgrade revives it', async () => {
     const root = tempRoot();
     const store = createMemorySettlementStore();
     store.save(pendingRecord());
@@ -368,7 +375,7 @@ describe('the two refusal lifetimes are distinct (SPECIALISTS-66 R5)', () => {
       findReceiptForBinding: () => ({ status: 'absent' }) as const,
     } as unknown as SpecialistWorkItemBoundary;
 
-    const outcome = republishSettlement({
+    const outcome = await republishSettlement({
       boundary,
       store,
       record: pendingRecord(),
@@ -410,20 +417,20 @@ describe('reclaiming a dead holder is itself exclusive (SPECIALISTS-66 review)',
     return path;
   }
 
-  it('a holder whose process is provably gone is reclaimed and publication proceeds', () => {
+  it('a holder whose process is provably gone is reclaimed and publication proceeds', async () => {
     const root = tempRoot();
     writeStaleLease(root);
     let ran = false;
-    const outcome = withSettlementExclusion(
+    const outcome = await withSettlementExclusionAsync(
       { repositoryRoot: root, activationId: ACTIVATION, attemptId: ATTEMPT },
-      () => { ran = true; return 'published'; },
+      async () => { ran = true; return 'published'; },
       { reclaimStale: true, probe },
     );
     expect(outcome.ok).toBe(true);
     expect(ran).toBe(true);
   });
 
-  it('a second reclaimer cannot enter the read-then-destroy section, so it destroys nothing', () => {
+  it('a second reclaimer cannot enter the read-then-destroy section, so it destroys nothing', async () => {
     const root = tempRoot();
     const stalePath = writeStaleLease(root);
     const workspace = exclusionWorkspace({
@@ -443,9 +450,9 @@ describe('reclaiming a dead holder is itself exclusive (SPECIALISTS-66 review)',
     );
 
     let ran = false;
-    const outcome = withSettlementExclusion(
+    const outcome = await withSettlementExclusionAsync(
       { repositoryRoot: root, activationId: ACTIVATION, attemptId: ATTEMPT },
-      () => { ran = true; return 'published'; },
+      async () => { ran = true; return 'published'; },
       { reclaimStale: true, probe },
     );
 
