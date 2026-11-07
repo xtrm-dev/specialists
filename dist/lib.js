@@ -21024,6 +21024,100 @@ function resolveAuthorityDbPath(env = process.env) {
 }
 var NULL_AUTHORITY_WRITER = { record: () => {}, remove: () => {} };
 
+// src/activation/workitem-remote.ts
+function transportFailure(remote, error) {
+  const coded = error;
+  const code = typeof coded?.code === "string" ? coded.code : null;
+  const message = error instanceof Error ? error.message : String(error);
+  if (code === null)
+    return error instanceof Error ? error : new Error(message);
+  const wrapped = new Error(`substrate remote ${remote} call failed: ${code}: ${message}`);
+  wrapped.code = code;
+  return wrapped;
+}
+function createRemoteWorkItemPorts(service, opts) {
+  const remote = opts.remote;
+  const call = async (op, args) => {
+    try {
+      return await service.call(op, args);
+    } catch (error) {
+      throw transportFailure(remote, error);
+    }
+  };
+  const issues = {
+    resolveRef: (ref) => call("issue.resolveRef", { ref }),
+    getActiveClaim: (issueId) => call("issue.getActiveClaim", { issueId }),
+    releaseClaim: (issueId, holder, claimOpts) => call("issue.releaseClaim", {
+      issueId,
+      holder,
+      ...claimOpts?.activationId !== undefined ? { activationId: claimOpts.activationId } : {}
+    }),
+    getParent: (childId) => call("issue.getParent", { issueId: childId }),
+    getRevision: (issueId, revision) => call("issue.getRevision", { issueId, revision }),
+    getResolvedContext: (issueId) => call("issue.getResolvedContext", { issueId }),
+    resolveProject: async (projectOpts) => {
+      const project = opts.project;
+      if (project === undefined || project.serverRoot === null) {
+        throw new Error(`substrate remote ${remote}: no verified server checkout for ${project?.repositoryKey ?? projectOpts.gitRoot}; ` + `run \`sb remote setup ${remote}\` on this machine so the checkout maps to a server checkout`);
+      }
+      const inside = projectOpts.gitRoot === project.localRoot || projectOpts.gitRoot.startsWith(`${project.localRoot}/`);
+      if (!inside) {
+        throw new Error(`substrate remote ${remote}: ${projectOpts.gitRoot} is outside ${project.localRoot}, the checkout this connection was opened for`);
+      }
+      return call("issue.resolveProject", { gitRoot: project.serverRoot });
+    },
+    createIssue: (input) => call("issue.create", { input }),
+    claimReady: (issueId, holder, attestation, claimOpts) => call("issue.claimReady", {
+      issueId,
+      holder,
+      attestation,
+      ...claimOpts?.activationId !== undefined ? { activationId: claimOpts.activationId } : {}
+    })
+  };
+  const store = {
+    get: (ref) => call("store.get", { ref }),
+    addJournal: async (ref, kind, journalOpts) => {
+      await call("store.addJournal", {
+        ref,
+        kind,
+        ...journalOpts?.participantId !== undefined ? { participantId: journalOpts.participantId } : {},
+        ...journalOpts?.activationId !== undefined ? { activationId: journalOpts.activationId } : {}
+      });
+    }
+  };
+  const gate = {
+    check: (_issues, req) => call("gate.check", {
+      request: req
+    }),
+    dispatch: (_issues, _provenance, req) => call("gate.dispatch", { request: req })
+  };
+  const journalService = {
+    appendEntry: (issueId, input) => call("journal.appendEntry", { issueId, input }),
+    listEntries: (issueId, listOpts) => call("journal.listEntries", {
+      issueId,
+      ...listOpts?.kind !== undefined ? { kind: listOpts.kind } : {},
+      ...listOpts?.limit !== undefined ? { limit: listOpts.limit } : {}
+    })
+  };
+  const provenanceService = {
+    allocateReceipt: (bindingId) => call("provenance.allocateReceipt", { bindingId }),
+    attachArtifact: (receiptId, kind, value) => call("provenance.attachArtifact", {
+      receiptId,
+      kind,
+      value
+    }),
+    listReceipts: (issueId) => call("provenance.listReceipts", { issueId })
+  };
+  return {
+    issues,
+    provenance: null,
+    store,
+    gate,
+    journalService,
+    provenanceService
+  };
+}
+
 // src/activation/workitem-store.ts
 var require3 = createRequire3(import.meta.url);
 var SUBSTRATE_PACKAGE = "@jaggerxtrm/substrate";
@@ -21115,8 +21209,8 @@ function attemptOfEntry(entry) {
 }
 function createWorkItemBoundary(ports) {
   const { issues, provenance, store, gate, journalService, provenanceService } = ports;
-  const viewOf = (ref) => {
-    const v = store.get(ref);
+  const viewOf = async (ref) => {
+    const v = await store.get(ref);
     return {
       ref: v.issue.humanRef,
       issueId: v.issue.id,
@@ -21131,23 +21225,23 @@ function createWorkItemBoundary(ports) {
     };
   };
   return {
-    view(ref) {
+    async view(ref) {
       return viewOf(ref);
     },
-    epicAncestors(ref, depth) {
+    async epicAncestors(ref, depth) {
       if (depth !== 1 && depth !== 2)
         return [];
       const ancestors = [];
       const seen = new Set;
-      let childId = issues.resolveRef(ref).id;
+      let childId = (await issues.resolveRef(ref)).id;
       for (let i = 0;i < depth; i += 1) {
-        const parent = issues.getParent(childId);
+        const parent = await issues.getParent(childId);
         if (!parent)
           break;
         if (seen.has(parent.id))
           break;
         seen.add(parent.id);
-        const rev = issues.getRevision(parent.id, parent.currentRevision);
+        const rev = await issues.getRevision(parent.id, parent.currentRevision);
         ancestors.push({
           ref: parent.humanRef,
           title: parent.title,
@@ -21157,47 +21251,47 @@ function createWorkItemBoundary(ports) {
       }
       return ancestors;
     },
-    resolvedContext(ref) {
+    async resolvedContext(ref) {
       if (!issues.getResolvedContext) {
         throw new Error("Substrate exposes no getResolvedContext: the bound context cannot be read or verified");
       }
-      const resolved = issues.getResolvedContext(issues.resolveRef(ref).id);
-      const humanRefOf = (issueId) => {
+      const resolved = await issues.getResolvedContext((await issues.resolveRef(ref)).id);
+      const humanRefOf = async (issueId) => {
         try {
-          return issues.resolveRef(issueId).humanRef;
+          return (await issues.resolveRef(issueId)).humanRef;
         } catch {
           return issueId;
         }
       };
       return {
         hash: resolved.hash,
-        entries: resolved.entries.map((entry) => ({
+        entries: await Promise.all(resolved.entries.map(async (entry) => ({
           key: entry.key,
           value: entry.value,
-          sourceRef: humanRefOf(entry.sourceIssueId),
+          sourceRef: await humanRefOf(entry.sourceIssueId),
           sourceRevision: entry.sourceRevision,
           inherited: entry.resolutionRule === "inherited"
-        }))
+        })))
       };
     },
-    completedBlockers(ref, depth) {
+    async completedBlockers(ref, depth) {
       if (depth !== 1 && depth !== 2)
         return [];
       if (!issues.getBlockers)
         return [];
       const collected = [];
       const seen = new Set;
-      let frontier = [issues.resolveRef(ref).id];
+      let frontier = [(await issues.resolveRef(ref)).id];
       for (let hop = 0;hop < depth && frontier.length > 0; hop += 1) {
         const next = [];
         for (const id of frontier) {
-          for (const blocker of issues.getBlockers(id)) {
+          for (const blocker of await issues.getBlockers(id)) {
             if (seen.has(blocker.id))
               continue;
             seen.add(blocker.id);
             if (!SATISFIED_BLOCKER_STATES.has(blocker.lifecycleState))
               continue;
-            const rev = issues.getRevision(blocker.id, blocker.currentRevision);
+            const rev = await issues.getRevision(blocker.id, blocker.currentRevision);
             collected.push({
               ref: blocker.humanRef,
               title: blocker.title,
@@ -21210,13 +21304,13 @@ function createWorkItemBoundary(ports) {
       }
       return collected;
     },
-    check(req) {
-      const check = gate.check(issues, req);
+    async check(req) {
+      const check = await gate.check(issues, req);
       return { issueId: check.issueId, revision: check.revision, contractHash: check.contractHash, report: check.report };
     },
-    bind(req) {
-      const issueId = issues.resolveRef(req.ref).id;
-      const active = issues.getActiveClaim(issueId);
+    async bind(req) {
+      const issueId = (await issues.resolveRef(req.ref)).id;
+      const active = await issues.getActiveClaim(issueId);
       if (active) {
         if (active.holder !== req.holder) {
           throw new Error(`dispatch refused: issue is claimed by '${active.holder}' — holder '${req.holder}' must claim first`);
@@ -21231,10 +21325,10 @@ function createWorkItemBoundary(ports) {
         }
       }
       const claimId = active?.id ?? req.claimId ?? undefined;
-      const out = gate.dispatch(issues, provenance, { ...req, claimId });
+      const out = await gate.dispatch(issues, provenance, { ...req, claimId });
       return out.binding;
     },
-    inlineCreate(contract, opts = {}) {
+    async inlineCreate(contract, opts = {}) {
       const validation = validateContractText(contract);
       if (!validation.ok) {
         throw new Error(`${validation.reason}: ${validation.missing.join(", ")}`);
@@ -21258,8 +21352,8 @@ function createWorkItemBoundary(ports) {
         throw new Error(`inline contract kind '${kind}' is not creatable — an ad hoc dispatch creates one of ${INLINE_ISSUE_KINDS.join(", ")}, never epic`);
       }
       const holder = opts.holder ?? "adapter::specialists";
-      const { projectId } = issues.resolveProject({ gitRoot: process.cwd() });
-      const issue = issues.createIssue({
+      const { projectId } = await issues.resolveProject({ gitRoot: process.cwd() });
+      const issue = await issues.createIssue({
         projectId,
         title: opts.title ?? (firstLine ?? "Specialist dispatch contract").slice(0, 72),
         kind,
@@ -21268,23 +21362,23 @@ function createWorkItemBoundary(ports) {
         authoredBy: holder,
         ...opts.parentId ? { parentId: opts.parentId } : {}
       });
-      const { claim } = issues.claimReady(issue.id, holder, { outcome: "ready", policy: "default", attestedBy: holder }, { activationId: opts.activationId });
-      return { ref: issues.resolveRef(issue.id).humanRef, issueId: issue.id, claimId: claim.id };
+      const { claim } = await issues.claimReady(issue.id, holder, { outcome: "ready", policy: "default", attestedBy: holder }, { activationId: opts.activationId });
+      return { ref: (await issues.resolveRef(issue.id)).humanRef, issueId: issue.id, claimId: claim.id };
     },
-    releaseInlineClaim(ref, opts = {}) {
-      const issueId = issues.resolveRef(ref).id;
-      const active = issues.getActiveClaim(issueId);
+    async releaseInlineClaim(ref, opts = {}) {
+      const issueId = (await issues.resolveRef(ref)).id;
+      const active = await issues.getActiveClaim(issueId);
       if (!active || !issues.releaseClaim)
         return false;
       if (opts.activationId && active.activationId !== opts.activationId)
         return false;
-      const released = issues.releaseClaim(issueId, active.holder, active.activationId ? { activationId: active.activationId } : {});
+      const released = await issues.releaseClaim(issueId, active.holder, active.activationId ? { activationId: active.activationId } : {});
       return released !== null;
     },
-    journal(ref, kind, opts = {}) {
+    async journal(ref, kind, opts = {}) {
       if (opts.summary !== undefined && journalService) {
-        const issueId = issues.resolveRef(ref).id;
-        journalService.appendEntry(issueId, {
+        const issueId = (await issues.resolveRef(ref)).id;
+        await journalService.appendEntry(issueId, {
           kind,
           semantic: { summary: opts.summary },
           ...opts.participantId ? { participantId: opts.participantId } : {},
@@ -21293,14 +21387,14 @@ function createWorkItemBoundary(ports) {
         return;
       }
       const { summary: _evidence, ...storeOpts } = opts;
-      store.addJournal(ref, kind, storeOpts);
+      await store.addJournal(ref, kind, storeOpts);
     },
     ...journalService || provenanceService ? {
-      appendResult(ref, input) {
+      async appendResult(ref, input) {
         if (!journalService)
           throw new Error("settlement unavailable: no journal service on this boundary");
-        const issueId = issues.resolveRef(ref).id;
-        const entry = journalService.appendEntry(issueId, {
+        const issueId = (await issues.resolveRef(ref)).id;
+        const entry = await journalService.appendEntry(issueId, {
           kind: "result",
           result: input.result,
           executionContext: input.executionContext ?? null,
@@ -21311,10 +21405,10 @@ function createWorkItemBoundary(ports) {
         });
         return { entryId: entry.id, sequence: entry.sequence };
       },
-      allocateReceipt(bindingId) {
+      async allocateReceipt(bindingId) {
         if (!provenanceService)
           throw new Error("settlement unavailable: no provenance service on this boundary");
-        const receipt = provenanceService.allocateReceipt(bindingId);
+        const receipt = await provenanceService.allocateReceipt(bindingId);
         return {
           id: receipt.id,
           executionBindingId: receipt.executionBindingId,
@@ -21323,22 +21417,22 @@ function createWorkItemBoundary(ports) {
           contractHash: receipt.contractHash
         };
       },
-      attachArtifact(receiptId, kind, value) {
+      async attachArtifact(receiptId, kind, value) {
         if (!provenanceService)
           throw new Error("settlement unavailable: no provenance service on this boundary");
-        const attached = provenanceService.attachArtifact(receiptId, kind, value);
+        const attached = await provenanceService.attachArtifact(receiptId, kind, value);
         return {
           receiptId: attached.receiptId ?? receiptId,
           kind: attached.kind ?? kind,
           value: attached.value ?? value
         };
       },
-      findResultEntry(ref, key) {
+      async findResultEntry(ref, key) {
         if (!journalService?.listEntries) {
           return { status: "unavailable", reason: "journal service exposes no entry listing" };
         }
         try {
-          const entries = journalService.listEntries(issues.resolveRef(ref).id, { kind: "result" });
+          const entries = await journalService.listEntries((await issues.resolveRef(ref)).id, { kind: "result" });
           const forActivation = entries.filter((entry) => entry.activationId === key.activationId);
           const match = forActivation.find((entry) => attemptOfEntry(entry) === key.attemptId);
           if (match)
@@ -21355,12 +21449,12 @@ function createWorkItemBoundary(ports) {
           return { status: "unavailable", reason: error instanceof Error ? error.message : String(error) };
         }
       },
-      findReceiptForBinding(ref, bindingId) {
+      async findReceiptForBinding(ref, bindingId) {
         if (!provenanceService?.listReceipts) {
           return { status: "unavailable", reason: "provenance service exposes no receipt listing" };
         }
         try {
-          const rows = provenanceService.listReceipts(issues.resolveRef(ref).id);
+          const rows = await provenanceService.listReceipts((await issues.resolveRef(ref)).id);
           const match = rows.find((receipt) => receipt.executionBindingId === bindingId);
           return match ? { status: "found", value: { receiptId: match.id } } : { status: "absent" };
         } catch (error) {
@@ -21397,6 +21491,63 @@ function resolveSubstrateModule(substrateDir, rel) {
   const built = join15(substrateDir, "dist", rel.replace(/\.ts$/, ".js"));
   return existsSync16(built) ? built : null;
 }
+async function loadOptionalSubstrateModule(substrateDir, rel) {
+  const modulePath = resolveSubstrateModule(substrateDir, rel);
+  if (!modulePath)
+    return null;
+  try {
+    return await import(pathToFileURL(modulePath).href);
+  } catch {
+    return null;
+  }
+}
+async function remoteProjectTarget(substrateDir, endpoint) {
+  const discovery = await loadOptionalSubstrateModule(substrateDir, "src/domain/repository-discovery.ts");
+  const config = await loadOptionalSubstrateModule(substrateDir, "src/remote/config.ts");
+  const discoverRepository = discovery?.["discoverRepository"];
+  const mappingKey = config?.["mappingKey"];
+  if (typeof discoverRepository !== "function" || typeof mappingKey !== "function")
+    return;
+  let found = null;
+  try {
+    found = discoverRepository();
+  } catch {
+    found = null;
+  }
+  const localRoot = found?.gitRoot ?? null;
+  const repositoryKey = found?.identity?.repositoryKey ?? null;
+  if (localRoot === null || repositoryKey === null)
+    return;
+  const mapped = endpoint.config.checkouts[mappingKey(endpoint.host, repositoryKey)];
+  return { localRoot, repositoryKey, serverRoot: mapped?.root ?? null };
+}
+async function loadServiceClientModule(substrateDir) {
+  const modulePath = resolveSubstrateModule(substrateDir, "src/service/client.ts");
+  if (!modulePath)
+    return null;
+  let mod;
+  try {
+    mod = await import(pathToFileURL(modulePath).href);
+  } catch (error) {
+    throw new Error(`work_item_store_unavailable: cannot load the Substrate service client at ${modulePath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (typeof mod["localOrRemote"] !== "function" || typeof mod["openService"] !== "function")
+    return null;
+  return mod;
+}
+async function selectWorkItemStore(env = process.env, opts = {}) {
+  if (opts.dbPath !== undefined)
+    return { kind: "local", dbPath: opts.dbPath };
+  const local = { kind: "local", dbPath: resolveWorkItemDbPath(env) };
+  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "", opts.resolveInstalled);
+  if (!substrateDir)
+    return local;
+  const client = await loadServiceClientModule(substrateDir);
+  if (!client)
+    return local;
+  const selection = client.localOrRemote(env);
+  return selection.kind === "remote" ? { kind: "remote", remote: selection.remote } : local;
+}
 async function openWorkItemBoundary(opts = {}) {
   const env = opts.env ?? process.env;
   const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "", opts.resolveInstalled);
@@ -21424,6 +21575,26 @@ async function openWorkItemBoundary(opts = {}) {
       throw new Error(`work_item_store_unavailable: cannot load Substrate module ${rel}: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
+  const selection = await selectWorkItemStore(env, {
+    dbPath: opts.dbPath,
+    substrateDir,
+    ...opts.resolveInstalled ? { resolveInstalled: opts.resolveInstalled } : {}
+  });
+  if (selection.kind === "remote") {
+    const client = await loadServiceClientModule(substrateDir);
+    if (!client) {
+      throw new Error(`work_item_store_unavailable: substrate.remote is ${selection.remote} but ${substrateDir} has no usable service client`);
+    }
+    const opened = client.openService({ env });
+    if (opened.endpoint.kind !== "remote") {
+      throw new Error(`work_item_store_unavailable: substrate.remote is configured but the service client chose the local store at ${opened.endpoint.dbPath}`);
+    }
+    const project = await remoteProjectTarget(substrateDir, opened.endpoint);
+    return createWorkItemBoundary(createRemoteWorkItemPorts(opened.service, {
+      remote: opened.endpoint.remote,
+      ...project === undefined ? {} : { project }
+    }));
+  }
   const [runner, issueSvcMod, journalMod, provMod, storeMod, gateMod] = await Promise.all(SUBSTRATE_REQUIRED_MODULES.map((rel) => load(rel)));
   for (const [mod, name] of [
     [runner, "migrate"],
@@ -21438,10 +21609,13 @@ async function openWorkItemBoundary(opts = {}) {
       throw new Error(`work_item_store_unavailable: Substrate module is missing export ${name}`);
     }
   }
-  const dbPath = opts.dbPath ?? resolveWorkItemDbPath(env);
+  const dbPath = selection.dbPath;
   const storeRefusal = (error) => new Error(`work_item_store_unavailable: cannot open the Substrate store at ${dbPath} (set SUBSTRATE_DB or XTRM_STATE_DB to a writable database path, or install ${SUBSTRATE_PACKAGE}): ${error instanceof Error ? error.message : String(error)}`);
   let db;
   try {
+    const guard = storeMod["assertStoreIsChosen"];
+    if (typeof guard === "function")
+      guard(dbPath, env);
     db = openSubstrateDb(dbPath);
     runner.migrate(db);
   } catch (error) {
@@ -21463,7 +21637,7 @@ async function openWorkItemBoundary(opts = {}) {
   if (missingIssueMethods.length > 0) {
     throw new Error(`work_item_store_unavailable: ${SUBSTRATE_PACKAGE} at ${substrateDir} does not implement ${missingIssueMethods.map((method) => `IssueService.${method}`).join(", ")}, which native dispatch needs to read and verify the Issue context (npm install -g @jaggerxtrm/substrate)`);
   }
-  issueService.getBlockers = (childId) => issueService.listActiveEdges().filter((edge) => edge.active && edge.kind === "blocks" && edge.toIssue === childId).map((edge) => {
+  issueService.getBlockers = async (childId) => issueService.listActiveEdges().filter((edge) => edge.active && edge.kind === "blocks" && edge.toIssue === childId).map((edge) => {
     const issue = issueService.getIssue(edge.fromIssue);
     return {
       id: issue.id,
@@ -21479,29 +21653,36 @@ async function openWorkItemBoundary(opts = {}) {
     provenance,
     store,
     gate: {
-      check: (i, r) => gateMod.checkDispatch(i, r),
-      dispatch: (i, p, r) => gateMod.dispatchToSpecialist(i, p, r)
+      check: async (i, r) => gateMod.checkDispatch(i, r),
+      dispatch: async (i, p, r) => gateMod.dispatchToSpecialist(i, p, r)
     },
-    journalService: journalSvc,
-    provenanceService: provenance
+    journalService: {
+      appendEntry: async (issueId, input) => journalSvc.appendEntry(issueId, input),
+      listEntries: async (issueId, listOpts) => journalSvc.listEntries(issueId, listOpts)
+    },
+    provenanceService: {
+      allocateReceipt: async (bindingId) => provenance.allocateReceipt(bindingId),
+      attachArtifact: async (receiptId, kind, value) => provenance.attachArtifact(receiptId, kind, value),
+      listReceipts: async (issueId) => provenance.listReceipts(issueId)
+    }
   });
 }
 var NULL_WORK_ITEMS = {
-  view: () => {
+  view: async () => {
     throw new Error("no work-item store: test double");
   },
-  epicAncestors: () => [],
-  completedBlockers: () => [],
-  check: () => {
+  epicAncestors: async () => [],
+  completedBlockers: async () => [],
+  check: async () => {
     throw new Error("no work-item store: test double");
   },
-  bind: () => {
+  bind: async () => {
     throw new Error("no work-item store: test double");
   },
-  inlineCreate: () => {
+  inlineCreate: async () => {
     throw new Error("no work-item store: test double");
   },
-  journal: () => {}
+  journal: async () => {}
 };
 
 // src/activation/step-contract.ts
@@ -23353,7 +23534,17 @@ function exclusionWorkspace(subject) {
     worktreePath: `settlement:${subject.activationId}:${subject.attemptId}`
   };
 }
-function withSettlementExclusion(subject, fn, opts = {}) {
+async function withSettlementExclusionAsync(subject, fn, opts = {}) {
+  const taken = takeExclusion(subject, opts);
+  if (!taken.ok)
+    return taken;
+  try {
+    return { ok: true, value: await fn() };
+  } finally {
+    taken.release();
+  }
+}
+function takeExclusion(subject, opts) {
   const workspace = exclusionWorkspace(subject);
   const holderId = `settlement-publication:${process.pid}:${randomUUID3()}`;
   const probe = opts.probe ?? procLeaseProbe();
@@ -23377,13 +23568,14 @@ function withSettlementExclusion(subject, fn, opts = {}) {
   if (failure !== undefined) {
     return { ok: false, contended: failure.contended, reason: failure.reason };
   }
-  try {
-    return { ok: true, value: fn() };
-  } finally {
-    try {
-      release(workspace, holderId, probe);
-    } catch {}
-  }
+  return {
+    ok: true,
+    release: () => {
+      try {
+        release(workspace, holderId, probe);
+      } catch {}
+    }
+  };
 }
 function reclaimIfHolderGone(subject, workspace, probe) {
   const mutex = {
@@ -23515,7 +23707,7 @@ function buildSettlementExecutionContext(opts) {
   ctx.timestamp = opts.now ?? Date.now();
   return ctx;
 }
-function republishSettlement(opts) {
+async function republishSettlement(opts) {
   const { boundary, store, record: record2 } = opts;
   const now = opts.now ?? Date.now();
   const emit2 = opts.emit ?? (() => {});
@@ -23542,13 +23734,13 @@ function republishSettlement(opts) {
     });
     return { outcome: "pending", note: reason };
   };
-  const reconcileAndPublish = () => {
+  const reconcileAndPublish = async () => {
     let journalEntryId = record2.journalEntryId;
     if (!journalEntryId) {
       if (!boundary.findResultEntry) {
         return defer("work boundary exposes no Journal reconciliation, so a republish cannot prove it is the first");
       }
-      const lookup = boundary.findResultEntry(record2.issueRef, {
+      const lookup = await boundary.findResultEntry(record2.issueRef, {
         activationId: record2.activationId,
         attemptId: record2.attemptId
       });
@@ -23563,7 +23755,7 @@ function republishSettlement(opts) {
       if (!boundary.findReceiptForBinding) {
         return defer("work boundary exposes no receipt reconciliation, so a republish cannot prove it is the first");
       }
-      const lookup = boundary.findReceiptForBinding(record2.issueRef, record2.executionBindingId);
+      const lookup = await boundary.findReceiptForBinding(record2.issueRef, record2.executionBindingId);
       if (lookup.status === "unavailable") {
         return defer(`receipt reconciliation unavailable: ${lookup.reason}`);
       }
@@ -23591,14 +23783,14 @@ function republishSettlement(opts) {
     try {
       const storedRef = store.save(record2);
       if (!receiptId) {
-        const receipt = allocateReceipt(record2.executionBindingId);
+        const receipt = await allocateReceipt(record2.executionBindingId);
         receiptId = receipt.id;
         emit2("settlement_receipt_allocated", { receipt: receipt.id, republish: true });
       }
       let artifactValue = record2.artifactRef ?? storedRef;
       if (boundary.attachArtifact && !record2.artifactRef) {
         try {
-          artifactValue = boundary.attachArtifact(receiptId, "artifact", storedRef).value;
+          artifactValue = (await boundary.attachArtifact(receiptId, "artifact", storedRef)).value ?? artifactValue;
           emit2("settlement_artifact_attached", { receipt: receiptId, kind: "artifact", republish: true });
         } catch (error) {
           emit2("settlement_degraded", {
@@ -23606,7 +23798,7 @@ function republishSettlement(opts) {
           });
         }
       }
-      const entry = appendResult(record2.issueRef, {
+      const entry = await appendResult(record2.issueRef, {
         result: buildBoundedResult({
           output: record2.output,
           valid: record2.validation.valid,
@@ -23650,11 +23842,11 @@ function republishSettlement(opts) {
       return { outcome: "pending", note, ...receiptId ? { receiptId } : {} };
     }
   };
-  const guarded = withSettlementExclusion({ repositoryRoot: opts.repositoryRoot, activationId: record2.activationId, attemptId: record2.attemptId }, reconcileAndPublish, { reclaimStale: true });
+  const guarded = await withSettlementExclusionAsync({ repositoryRoot: opts.repositoryRoot, activationId: record2.activationId, attemptId: record2.attemptId }, reconcileAndPublish, { reclaimStale: true });
   return guarded.ok ? guarded.value : defer(guarded.reason);
 }
 var REPUBLISH_PASS_LIMIT = 50;
-function republishPendingSettlements(opts) {
+async function republishPendingSettlements(opts) {
   const emit2 = opts.emit ?? (() => {});
   const limit = Math.max(1, opts.limit ?? REPUBLISH_PASS_LIMIT);
   const revivable = opts.boundary.appendResult && opts.boundary.allocateReceipt ? opts.store.listRuntimeRefused?.() ?? [] : [];
@@ -23662,7 +23854,7 @@ function republishPendingSettlements(opts) {
   const outcomes = [];
   for (const record2 of pending) {
     try {
-      const result = republishSettlement({
+      const result = await republishSettlement({
         boundary: opts.boundary,
         store: opts.store,
         record: record2,
@@ -23685,7 +23877,7 @@ function republishPendingSettlements(opts) {
   }
   return outcomes;
 }
-function publishSettlement(opts) {
+async function publishSettlement(opts) {
   const { boundary, store, subject } = opts;
   const now = opts.now ?? Date.now();
   const emit2 = opts.emit ?? (() => {});
@@ -23736,17 +23928,17 @@ function publishSettlement(opts) {
   }
   const allocateReceipt = boundary.allocateReceipt;
   const appendResult = boundary.appendResult;
-  const publishNow = () => {
+  const publishNow = async () => {
     let allocatedReceiptId;
     let allocatedArtifactRef;
     try {
-      const receipt = allocateReceipt(subject.executionBindingId);
+      const receipt = await allocateReceipt(subject.executionBindingId);
       allocatedReceiptId = receipt.id;
       emit2("settlement_receipt_allocated", { receipt: receipt.id });
       let artifactValue = storedRef;
       try {
         if (boundary.attachArtifact) {
-          const attached = boundary.attachArtifact(receipt.id, "artifact", storedRef);
+          const attached = await boundary.attachArtifact(receipt.id, "artifact", storedRef);
           artifactValue = attached.value;
           allocatedArtifactRef = artifactValue;
           emit2("settlement_artifact_attached", { receipt: receipt.id, kind: "artifact" });
@@ -23764,7 +23956,7 @@ function publishSettlement(opts) {
         receiptRefs: [receipt.id],
         provenanceRefs: [subject.executionBindingId, receipt.id]
       });
-      const entry = appendResult(subject.issueRef, {
+      const entry = await appendResult(subject.issueRef, {
         result,
         executionContext,
         refs: [
@@ -23803,7 +23995,7 @@ function publishSettlement(opts) {
       return { storedRef, degraded: note, publicationState: "pending" };
     }
   };
-  const guarded = withSettlementExclusion({ repositoryRoot: subject.repositoryRoot, activationId: subject.activationId, attemptId: subject.attemptId }, publishNow);
+  const guarded = await withSettlementExclusionAsync({ repositoryRoot: subject.repositoryRoot, activationId: subject.activationId, attemptId: subject.attemptId }, publishNow);
   if (!guarded.ok) {
     saveState(store, record2, "pending", guarded.reason);
     emit2("settlement_degraded", { note: guarded.reason, contended: true });
@@ -24361,7 +24553,7 @@ class NativeActivationHost {
       if (parentRef) {
         let parentView;
         try {
-          parentView = workItems.view(parentRef);
+          parentView = await workItems.view(parentRef);
         } catch (error) {
           return reject("parent_unresolvable", {
             note: `parent_ref '${parentRef}' resolves to no Substrate issue: ${error instanceof Error ? error.message : String(error)}`
@@ -24379,7 +24571,7 @@ class NativeActivationHost {
       const title = explicitTitle ?? defaultInlineTitle(request.specialist, inlineContract);
       const kind = kindParam || defaultKindForOutputType(execution.output_type);
       try {
-        const created = workItems.inlineCreate(inlineContract, {
+        const created = await workItems.inlineCreate(inlineContract, {
           title,
           kind,
           ...parentId ? { parentId } : {},
@@ -24394,7 +24586,7 @@ class NativeActivationHost {
           } catch {}
         };
         try {
-          workItems.journal(created.ref, "note", {
+          await workItems.journal(created.ref, "note", {
             participantId,
             activationId,
             summary: "ad-hoc dispatch evidence: " + `surface=${request.surface ?? "unknown"} ` + `specialist=${request.specialist} ` + `requested_by=${request.requestedByParticipantId} ` + `parent_ref=${parentRef || "none"} ` + `issue_kind=${kind} title=${titleSource}`
@@ -24422,7 +24614,7 @@ class NativeActivationHost {
     }
     let view;
     try {
-      view = workItems.view(issueRef);
+      view = await workItems.view(issueRef);
     } catch (error) {
       return reject("issue_unresolvable", {
         note: error instanceof Error ? error.message : String(error)
@@ -24442,14 +24634,14 @@ class NativeActivationHost {
     }
     let dispatchCheck;
     try {
-      dispatchCheck = workItems.check({
+      dispatchCheck = await workItems.check({
         ref: issueRef,
         specialist: request.specialist,
         holder: participantId,
         activationId,
         workspace: workspace.worktreePath
       });
-      view = workItems.view(issueRef);
+      view = await workItems.view(issueRef);
       if (view.revision !== dispatchCheck.revision || view.contractHash !== dispatchCheck.contractHash) {
         return reject("issue_revision_diverged", {
           note: "issue changed between resolution and the read-only dispatch check; retry against the new revision"
@@ -24648,11 +24840,11 @@ class NativeActivationHost {
       validation: stepContract.validation?.length ?? 0,
       source_issue_revision: stepContract.provenance.sourceIssueRevision ?? null
     });
-    const epicAncestors = workItems.epicAncestors(issueRef, request.epicContextDepth ?? 0);
-    const completedBlockers = workItems.completedBlockers(issueRef, 1);
+    const epicAncestors = await workItems.epicAncestors(issueRef, request.epicContextDepth ?? 0);
+    const completedBlockers = await workItems.completedBlockers(issueRef, 1);
     let resolvedContext = null;
     try {
-      resolvedContext = workItems.resolvedContext?.(issueRef) ?? null;
+      resolvedContext = await workItems.resolvedContext?.(issueRef) ?? null;
     } catch (error) {
       return reject("context_unresolvable", {
         note: error instanceof Error ? error.message : String(error)
@@ -24714,14 +24906,7 @@ class NativeActivationHost {
       outputType,
       outputContractSchema,
       beadContextText: rendered.beadContextText ?? "",
-      readBeadForMemory: (id) => {
-        try {
-          const v = workItems.view(id);
-          return { title: v.title, description: contractToMarkdown(v.contract) };
-        } catch {
-          return null;
-        }
-      }
+      readBeadForMemory: () => null
     });
     try {
       this.admission(specialist, tier, effectiveToolContract);
@@ -24841,7 +25026,7 @@ class NativeActivationHost {
     const session = await createVerifiedSession(modelCheck.model);
     let binding;
     try {
-      binding = workItems.bind({
+      binding = await workItems.bind({
         ref: issueRef,
         specialist: request.specialist,
         holder: participantId,
@@ -24950,11 +25135,11 @@ class NativeActivationHost {
       return this.workItemsInjected;
     if (this.workItemsDefault)
       return this.workItemsDefault;
-    const dbPath = resolveWorkItemDbPath();
-    if (!existsSync21(dbPath)) {
-      throw new Error(`no Substrate work store at ${dbPath} (set SUBSTRATE_DB (or the legacy XTRM_STATE_DB) or initialize it via xt init / sb)`);
+    const selection = await selectWorkItemStore();
+    if (selection.kind === "local" && !existsSync21(selection.dbPath)) {
+      throw new Error(`no Substrate work store at ${selection.dbPath} (set SUBSTRATE_DB (or the legacy XTRM_STATE_DB) or initialize it via xt init / sb)`);
     }
-    this.workItemsDefault = await openWorkItemBoundary({ dbPath });
+    this.workItemsDefault = await openWorkItemBoundary(selection.kind === "local" ? { dbPath: selection.dbPath } : {});
     return this.workItemsDefault;
   }
   async republishOncePerProcess() {
@@ -24966,7 +25151,7 @@ class NativeActivationHost {
       const pending = this.settlements.listPendingPublication?.() ?? [];
       if (pending.length === 0)
         return;
-      const outcomes = republishPendingSettlements({
+      const outcomes = await republishPendingSettlements({
         boundary,
         store: this.settlements,
         participantId: "specialist::settlement-republisher",
@@ -25274,11 +25459,11 @@ class NativeActivationHost {
         fallbackUsed: false,
         completedAt: this.now()
       };
-      this.publishTerminalSettlement(snapshot, thrownResult, record2, emit2);
+      await this.publishTerminalSettlement(snapshot, thrownResult, record2, emit2);
       return thrownResult;
     }
   }
-  settleTurnTail(snapshot, session, emit2, record2, opts) {
+  async settleTurnTail(snapshot, session, emit2, record2, opts) {
     const last = lastAssistantMessage(session.messages);
     if (last && (last.stopReason === "error" || last.stopReason === "aborted")) {
       const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
@@ -25307,7 +25492,7 @@ class NativeActivationHost {
         fallbackUsed: false,
         completedAt: this.now()
       };
-      this.publishTerminalSettlement(snapshot, failedResult, record2, emit2);
+      await this.publishTerminalSettlement(snapshot, failedResult, record2, emit2);
       if (opts.notifyWake)
         this.notifyWakeSettlement(failedResult);
       return failedResult;
@@ -25348,7 +25533,7 @@ class NativeActivationHost {
       fallbackUsed: false,
       completedAt: this.now()
     };
-    this.publishTerminalSettlement(snapshot, completedResult, record2, emit2);
+    await this.publishTerminalSettlement(snapshot, completedResult, record2, emit2);
     if (opts.notifyWake)
       this.notifyWakeSettlement(completedResult);
     return completedResult;
@@ -25372,7 +25557,7 @@ class NativeActivationHost {
       notify(result);
     } catch {}
   }
-  publishTerminalSettlement(snapshot, result, record2, emit2) {
+  async publishTerminalSettlement(snapshot, result, record2, emit2) {
     this.wakeDirty.delete(snapshot.activationId);
     this.framedTurns.delete(snapshot.activationId);
     try {
@@ -25391,7 +25576,7 @@ class NativeActivationHost {
         ...snapshot.workspace.branch ? { branch: snapshot.workspace.branch } : {},
         ...record2.bindingBaseCommit ? { bindingBaseCommit: record2.bindingBaseCommit } : {}
       };
-      publishSettlement({
+      await publishSettlement({
         boundary: record2.workItems,
         store: this.settlements,
         subject,
@@ -27725,6 +27910,7 @@ export {
   createBeadFromContract,
   createObservabilitySqliteClient,
   createObservabilitySqliteClientAtPath,
+  createRemoteWorkItemPorts,
   createSpecialistFeedTool,
   createSpecialistLeaseReconcileTool,
   createWorkItemBoundary,
@@ -27758,6 +27944,7 @@ export {
   resolveRuntimeToolContract,
   resolveWorkItemDbPath,
   runScriptSpecialist as runScript,
+  selectWorkItemStore,
   shortBuildId,
   specialistFeedLimitDescription,
   specialistFeedSchema,

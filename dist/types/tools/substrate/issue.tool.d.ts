@@ -17,8 +17,8 @@ export declare const substrateIssueSchema: z.ZodObject<{
     issue_id?: string | undefined;
     title?: string | undefined;
     idempotency_key?: string | undefined;
-    prefix?: string | undefined;
     contract?: Record<string, unknown> | undefined;
+    prefix?: string | undefined;
     project_id?: string | undefined;
     git_root?: string | undefined;
 }, {
@@ -28,8 +28,8 @@ export declare const substrateIssueSchema: z.ZodObject<{
     issue_id?: string | undefined;
     title?: string | undefined;
     idempotency_key?: string | undefined;
-    prefix?: string | undefined;
     contract?: Record<string, unknown> | undefined;
+    prefix?: string | undefined;
     project_id?: string | undefined;
     git_root?: string | undefined;
 }>;

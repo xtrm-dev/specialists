@@ -143,12 +143,12 @@ export declare function republishSettlement(opts: {
     env?: Record<string, string | undefined>;
     now?: number;
     emit?: (name: string, payload?: Record<string, unknown>) => void;
-}): {
+}): Promise<{
     outcome: 'published' | 'pending' | 'refused';
     journalEntryId?: string;
     receiptId?: string;
     note?: string;
-};
+}>;
 /**
  * Republish the whole pending settlement backlog, oldest first.
  *
@@ -168,11 +168,11 @@ export declare function republishPendingSettlements(opts: {
     emit?: (name: string, payload?: Record<string, unknown>) => void;
     /** Records this pass may attempt. Defaults to REPUBLISH_PASS_LIMIT. */
     limit?: number;
-}): Array<{
+}): Promise<Array<{
     activationId: string;
     attemptId: string;
     outcome: 'published' | 'pending' | 'refused' | 'error';
-}>;
+}>>;
 export interface PublishSettlementResult {
     /** Runtime storage ref. Always present: even a degraded publication stores. */
     storedRef: string;
@@ -216,5 +216,5 @@ export declare function publishSettlement(opts: {
     env?: Record<string, string | undefined>;
     now?: number;
     emit?: (name: string, payload?: Record<string, unknown>) => void;
-}): PublishSettlementResult;
+}): Promise<PublishSettlementResult>;
 //# sourceMappingURL=settlement-publication.d.ts.map
