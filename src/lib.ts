@@ -52,8 +52,8 @@ export {
   selectWorkItemStore,
   NULL_WORK_ITEMS,
 } from './activation/workitem-store.js';
-export { createRemoteWorkItemPorts } from './activation/workitem-remote.js';
-export type { RemoteWorkItemService } from './activation/workitem-remote.js';
+export { createRemoteWorkItemPorts, createReopeningService, isDroppedLink } from './activation/workitem-remote.js';
+export type { RemoteWorkItemService, RemoteProjectTarget } from './activation/workitem-remote.js';
 export type {
   SpecialistWorkItemBoundary,
   WorkItemView,

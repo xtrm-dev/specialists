@@ -8,6 +8,24 @@ export interface RemoteWorkItemService {
     call<T = unknown>(op: string, args?: Record<string, unknown>): Promise<T>;
     close(): Promise<void>;
 }
+/** Whether this failure means the connection is gone rather than the request refused. */
+export declare function isDroppedLink(error: unknown): boolean;
+/**
+ * Keep one connection, and replace it on the call AFTER the one that lost it.
+ *
+ * A host process lives for hours, so a single dropped link must not end its usefulness: the host
+ * opens this service at store creation and would otherwise answer every later dispatch with
+ * `connection_lost` until restart. Failing closed is correct; failing closed forever is not.
+ *
+ * The failed call is NOT retried — the protocol has no idempotency key, so a replayed mutation
+ * could run twice. Instead the loss is recorded and the next call closes the dead child and opens
+ * a fresh one before it runs. Nothing is leaked: the previous service's `close()` runs before the
+ * new one is opened, and a `close()` on an ssh child that already exited is a no-op.
+ *
+ * One reopen is shared: concurrent callers that arrive after the same drop wait on the same
+ * promise, so a burst of work after a network blip opens one connection, not one per call.
+ */
+export declare function createReopeningService(first: RemoteWorkItemService, reopen: () => Promise<RemoteWorkItemService>): RemoteWorkItemService;
 /**
  * The PC checkout → server checkout mapping `sb remote setup` verified, held for the one
  * operation that needs it.

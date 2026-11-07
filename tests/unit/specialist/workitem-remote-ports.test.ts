@@ -27,7 +27,11 @@ import {
   type IssueServicePort,
   type WorkItemPorts,
 } from '../../../src/activation/workitem-store.js';
-import { createRemoteWorkItemPorts, type RemoteWorkItemService } from '../../../src/activation/workitem-remote.js';
+import {
+  createRemoteWorkItemPorts,
+  createReopeningService,
+  type RemoteWorkItemService,
+} from '../../../src/activation/workitem-remote.js';
 
 const SUBSTRATE_DIR = (process.env['XTRM_SUBSTRATE_DIR'] ?? '').trim();
 const substrateSuite = SUBSTRATE_DIR ? describe : describe.skip;
@@ -334,3 +338,101 @@ describe('the wire mapping', () => {
     });
   });
 });
+
+/** A failure shaped like Substrate's ServiceCallError: the code is a field, the message is prose. */
+function codedError(code: string): Error & { code: string; name: string } {
+  const error = new Error(`ssh: none: the service connection ended (exit 255) [${code}]`) as Error & {
+    code: string;
+    name: string;
+  };
+  error.code = code;
+  error.name = 'ServiceCallError';
+  return error;
+}
+
+/** A service whose link can be dropped on demand, counting its own closes so a leak is visible. */
+function droppableService(behaviour: 'drop-first-call' | 'refuse-first-call' | 'answer'): RemoteWorkItemService & {
+  calls: string[];
+  closes: number;
+} {
+  let remaining = 1;
+  const link = {
+    calls: [] as string[],
+    closes: 0,
+    call: (async <T>(op: string): Promise<T> => {
+      link.calls.push(op);
+      if (remaining > 0) {
+        remaining -= 1;
+        if (behaviour === 'drop-first-call') throw codedError('connection_lost');
+        if (behaviour === 'refuse-first-call') throw codedError('bad_request');
+      }
+      return { ok: op } as T;
+    }) as RemoteWorkItemService['call'],
+    close: async (): Promise<void> => {
+      link.closes += 1;
+    },
+  };
+  return link;
+}
+
+describe('a dropped link recovers on the next call', () => {
+  it('refuses once, then reopens on a fresh link without retrying the failed call', async () => {
+    const dead = droppableService('drop-first-call');
+    const fresh = droppableService('answer');
+    const opened: Array<ReturnType<typeof droppableService>> = [];
+    const service = createReopeningService(dead, async () => {
+      opened.push(fresh);
+      return fresh;
+    });
+
+    // The failed call is one attempt: the host renders its refusal, and nothing was retried.
+    await expect(service.call('issue.resolveRef', { ref: 'X' })).rejects.toThrow(/connection_lost/);
+    expect(dead.calls).toEqual(['issue.resolveRef']);
+    // Reopening belongs to the NEXT call, not to this one.
+    expect(opened).toHaveLength(0);
+
+    // The next dispatch in the same host gets a link that works.
+    await expect(service.call('issue.resolveRef', { ref: 'X' })).resolves.toEqual({ ok: 'issue.resolveRef' });
+    expect(opened).toHaveLength(1);
+    expect(fresh.calls).toEqual(['issue.resolveRef']);
+    expect(dead.calls).toEqual(['issue.resolveRef']);
+    // The dead ssh child is closed before the new one is opened: no second process is left behind.
+    expect(dead.closes).toBe(1);
+  });
+
+  it('does not reopen when the far side refused the call', async () => {
+    const live = droppableService('refuse-first-call');
+    let opened = 0;
+    const service = createReopeningService(live, async () => {
+      opened += 1;
+      return droppableService('answer');
+    });
+
+    await expect(service.call('store.addJournal', { ref: 'X' })).rejects.toThrow(/bad_request/);
+    await expect(service.call('store.addJournal', { ref: 'X' })).resolves.toEqual({ ok: 'store.addJournal' });
+    expect(opened).toBe(0);
+    expect(live.closes).toBe(0);
+    expect(live.calls).toEqual(['store.addJournal', 'store.addJournal']);
+  });
+
+  it('shares one reopen across concurrent callers that arrive after the same drop', async () => {
+    const dead = droppableService('drop-first-call');
+    const fresh = droppableService('answer');
+    let opened = 0;
+    const service = createReopeningService(dead, async () => {
+      opened += 1;
+      return fresh;
+    });
+
+    await expect(service.call('issue.getRevision', { issueId: 'iss_1', revision: 1 })).rejects.toThrow(/connection_lost/);
+    const results = await Promise.all([
+      service.call('issue.resolveRef', { ref: 'A' }),
+      service.call('issue.resolveRef', { ref: 'B' }),
+    ]);
+    expect(results).toHaveLength(2);
+    expect(opened).toBe(1);
+    expect(dead.closes).toBe(1);
+    expect(fresh.calls).toEqual(['issue.resolveRef', 'issue.resolveRef']);
+  });
+});
+
