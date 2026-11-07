@@ -74,6 +74,24 @@ function transportFailure(remote: string, error: unknown): Error {
 }
 
 /**
+ * The PC checkout → server checkout mapping `sb remote setup` verified, held for the one
+ * operation that needs it.
+ *
+ * Substrate's `issue.resolveProject` takes a `gitRoot` and matches it against the links of the
+ * store it runs on. Over this transport the store is on the other machine, so a PC path is not
+ * evidence there even when both machines happen to use the same layout: the verified mapping is.
+ * The server checkout root travels instead, and a checkout with no verified mapping refuses
+ * rather than guessing.
+ */
+export interface RemoteProjectTarget {
+  /** Local git common root the mapping was derived from. */
+  localRoot: string;
+  repositoryKey: string;
+  /** Server checkout root verified for that repository, or null when setup recorded none. */
+  serverRoot: string | null;
+}
+
+/**
  * Build the work-item ports over a live service connection to the store-owning
  * machine.
  *
@@ -83,7 +101,7 @@ function transportFailure(remote: string, error: unknown): Error {
  */
 export function createRemoteWorkItemPorts(
   service: RemoteWorkItemService,
-  opts: { remote: string },
+  opts: { remote: string; project?: RemoteProjectTarget },
 ): WorkItemPorts {
   const remote = opts.remote;
   const call = async <T>(op: string, args?: Record<string, unknown>): Promise<T> => {
@@ -118,8 +136,25 @@ export function createRemoteWorkItemPorts(
         entries: Array<{ key: string; value: unknown; sourceIssueId: string; sourceRevision: number; resolutionRule: string }>;
         hash: string;
       }>('issue.getResolvedContext', { issueId }),
-    resolveProject: (projectOpts) =>
-      call<{ projectId: string }>('issue.resolveProject', { gitRoot: projectOpts.gitRoot }),
+    resolveProject: async (projectOpts) => {
+      const project = opts.project;
+      if (project === undefined || project.serverRoot === null) {
+        throw new Error(
+          `substrate remote ${remote}: no verified server checkout for ${project?.repositoryKey ?? projectOpts.gitRoot}; ` +
+            `run \`sb remote setup ${remote}\` on this machine so the checkout maps to a server checkout`,
+        );
+      }
+      // The connection, and therefore this mapping, belongs to the checkout the host runs in.
+      // A caller resolving some other checkout would get this project and never notice.
+      const inside =
+        projectOpts.gitRoot === project.localRoot || projectOpts.gitRoot.startsWith(`${project.localRoot}/`);
+      if (!inside) {
+        throw new Error(
+          `substrate remote ${remote}: ${projectOpts.gitRoot} is outside ${project.localRoot}, the checkout this connection was opened for`,
+        );
+      }
+      return call<{ projectId: string }>('issue.resolveProject', { gitRoot: project.serverRoot });
+    },
     createIssue: (input) => call<{ id: string }>('issue.create', { input }),
     claimReady: (issueId, holder, attestation, claimOpts) =>
       call<{ claim: { id: number } }>('issue.claimReady', {

@@ -43,7 +43,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { resolveGlobalNodeModulesDirs } from '../pi/session.js';
 import { extractSections, scrutinyLevel, validateContractText } from './contract-sections.js';
 import { resolveAuthorityDbPath } from './authority-store.js';
-import { createRemoteWorkItemPorts, type RemoteWorkItemService } from './workitem-remote.js';
+import { createRemoteWorkItemPorts, type RemoteProjectTarget, type RemoteWorkItemService } from './workitem-remote.js';
 
 const require = createRequire(import.meta.url);
 
@@ -1054,8 +1054,54 @@ interface SubstrateServiceClientModule {
   localOrRemote(env: NodeJS.ProcessEnv): { kind: 'local'; dbPath: string } | { kind: 'remote'; remote: string; host: string };
   openService(opts: { env?: NodeJS.ProcessEnv }): {
     service: RemoteWorkItemService;
-    endpoint: { kind: 'local'; dbPath: string } | { kind: 'remote'; remote: string; host: string };
+    endpoint:
+      | { kind: 'local'; dbPath: string }
+      | { kind: 'remote'; remote: string; host: string; config: { checkouts: Record<string, { root: string }> } };
   };
+}
+
+/** A Substrate module this build can use, or null when the install does not carry it. */
+async function loadOptionalSubstrateModule(substrateDir: string, rel: string): Promise<Record<string, any> | null> {
+  const modulePath = resolveSubstrateModule(substrateDir, rel);
+  if (!modulePath) return null;
+  try {
+    return (await import(pathToFileURL(modulePath).href)) as Record<string, any>;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The verified PC checkout → server checkout mapping for the host's own repository.
+ *
+ * Derived here, once, because `issue.resolveProject` takes a `gitRoot` and matches it against the
+ * links of the store it RUNS ON: over the transport that store is the other machine, where a PC
+ * path is not evidence even when both machines use the same layout. Reading the mapping the same
+ * way `openService` did (repository key → `checkouts[<host> <key>]`) keeps the two in step.
+ *
+ * Absent discovery, an absent module, or an unverified mapping all answer `undefined`: reads keep
+ * working, and inline creation refuses and names `sb remote setup` rather than guessing a project.
+ */
+async function remoteProjectTarget(
+  substrateDir: string,
+  endpoint: { host: string; config: { checkouts: Record<string, { root: string }> } },
+): Promise<RemoteProjectTarget | undefined> {
+  const discovery = await loadOptionalSubstrateModule(substrateDir, 'src/domain/repository-discovery.ts');
+  const config = await loadOptionalSubstrateModule(substrateDir, 'src/remote/config.ts');
+  const discoverRepository = discovery?.['discoverRepository'];
+  const mappingKey = config?.['mappingKey'];
+  if (typeof discoverRepository !== 'function' || typeof mappingKey !== 'function') return undefined;
+  let found: { gitRoot?: string | null; identity?: { repositoryKey?: string } | null } | null = null;
+  try {
+    found = (discoverRepository as () => typeof found)();
+  } catch {
+    found = null;
+  }
+  const localRoot = found?.gitRoot ?? null;
+  const repositoryKey = found?.identity?.repositoryKey ?? null;
+  if (localRoot === null || repositoryKey === null) return undefined;
+  const mapped = endpoint.config.checkouts[(mappingKey as (host: string, key: string) => string)(endpoint.host, repositoryKey)];
+  return { localRoot, repositoryKey, serverRoot: mapped?.root ?? null };
 }
 
 /**
@@ -1193,7 +1239,13 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
         `work_item_store_unavailable: substrate.remote is configured but the service client chose the local store at ${opened.endpoint.dbPath}`,
       );
     }
-    return createWorkItemBoundary(createRemoteWorkItemPorts(opened.service, { remote: opened.endpoint.remote }));
+    const project = await remoteProjectTarget(substrateDir, opened.endpoint);
+    return createWorkItemBoundary(
+      createRemoteWorkItemPorts(opened.service, {
+        remote: opened.endpoint.remote,
+        ...(project === undefined ? {} : { project }),
+      }),
+    );
   }
 
   const [runner, issueSvcMod, journalMod, provMod, storeMod, gateMod] = await Promise.all(

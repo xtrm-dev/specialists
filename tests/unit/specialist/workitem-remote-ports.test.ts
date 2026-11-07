@@ -220,6 +220,32 @@ describe('completedBlockers over the wire', () => {
   });
 });
 
+describe('resolving the project on the store-owning machine', () => {
+  it('refuses inline creation when setup recorded no server checkout for this repository', async () => {
+    const service = fakeService(() => {
+      throw new Error('no call may reach the wire');
+    });
+    const ports = createRemoteWorkItemPorts(service, {
+      remote: 'ssh:server',
+      project: { localRoot: '/home/pc/core', repositoryKey: 'github.com/xtrm-dev/core', serverRoot: null },
+    });
+    await expect(ports.issues.resolveProject({ gitRoot: '/home/pc/core' })).rejects.toThrow(/sb remote setup ssh:server/);
+    expect(service.calls).toEqual([]);
+  });
+
+  it('refuses a checkout the connection was not opened for', async () => {
+    const service = fakeService(() => {
+      throw new Error('no call may reach the wire');
+    });
+    const ports = createRemoteWorkItemPorts(service, {
+      remote: 'ssh:server',
+      project: { localRoot: '/home/pc/core', repositoryKey: 'github.com/xtrm-dev/core', serverRoot: '/srv/core' },
+    });
+    await expect(ports.issues.resolveProject({ gitRoot: '/home/pc/other' })).rejects.toThrow(/outside \/home\/pc\/core/);
+    expect(service.calls).toEqual([]);
+  });
+});
+
 describe('the wire mapping', () => {
   it('uses the operation names and argument names the producer registers', async () => {
     const service = fakeService((op) => {
@@ -245,7 +271,10 @@ describe('the wire mapping', () => {
         default: throw new Error(`unexpected ${op}`);
       }
     });
-    const ports = createRemoteWorkItemPorts(service, { remote: 'ssh:server' });
+    const ports = createRemoteWorkItemPorts(service, {
+      remote: 'ssh:server',
+      project: { localRoot: '/home/pc/core', repositoryKey: 'github.com/xtrm-dev/core', serverRoot: '/srv/core' },
+    });
     const req = { ref: 'X', specialist: 's', holder: 'h' } as never;
 
     await ports.issues.resolveRef('X');
@@ -254,7 +283,7 @@ describe('the wire mapping', () => {
     await ports.issues.getParent('iss_1');
     await ports.issues.getRevision('iss_1', 1);
     await ports.issues.getResolvedContext('iss_1');
-    await ports.issues.resolveProject({ gitRoot: '/repo' });
+    await ports.issues.resolveProject({ gitRoot: '/home/pc/core/.xtrm/worktrees/w1' });
     await ports.issues.createIssue({ projectId: 'prj_1', title: 't', kind: 'task', contract: {}, scrutiny: 'LOW', authoredBy: 'h' });
     await ports.issues.claimReady('iss_1', 'h', { outcome: 'ready', policy: 'default', attestedBy: 'h' }, { activationId: 'act_1' });
     await ports.store.get('X');
@@ -290,6 +319,11 @@ describe('the wire mapping', () => {
     expect(service.calls.find((entry) => entry.op === 'issue.getRevision')?.args).toEqual({
       issueId: 'iss_1',
       revision: 1,
+    });
+    // The gitRoot that travels is the VERIFIED server checkout, not the PC path: the store matches
+    // links of its own machine, and two identical-looking layouts are not evidence.
+    expect(service.calls.find((entry) => entry.op === 'issue.resolveProject')?.args).toEqual({
+      gitRoot: '/srv/core',
     });
     expect(service.calls.find((entry) => entry.op === 'gate.check')?.args).toEqual({ request: req });
     expect(service.calls.find((entry) => entry.op === 'store.addJournal')?.args).toEqual({
