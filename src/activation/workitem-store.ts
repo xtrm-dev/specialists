@@ -43,7 +43,12 @@ import type { DatabaseSync } from 'node:sqlite';
 import { resolveGlobalNodeModulesDirs } from '../pi/session.js';
 import { extractSections, scrutinyLevel, validateContractText } from './contract-sections.js';
 import { resolveAuthorityDbPath } from './authority-store.js';
-import { createRemoteWorkItemPorts, type RemoteProjectTarget, type RemoteWorkItemService } from './workitem-remote.js';
+import {
+  createRemoteWorkItemPorts,
+  createReopeningService,
+  type RemoteProjectTarget,
+  type RemoteWorkItemService,
+} from './workitem-remote.js';
 
 const require = createRequire(import.meta.url);
 
@@ -1240,9 +1245,24 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
       );
     }
     const project = await remoteProjectTarget(substrateDir, opened.endpoint);
+    // The host keeps this boundary for the life of the process, so one dropped ssh link must not
+    // strand every later dispatch (SPECIALISTS-4398 review). The adapter records the loss and the
+    // NEXT call opens a fresh link — the failed call is never retried, so a mutation still runs at
+    // most once. The project mapping is read here, when the connection is opened; a later
+    // `sb remote setup` change takes effect on the next host start.
+    const remote = opened.endpoint.remote;
+    const service = createReopeningService(opened.service, async () => {
+      const again = client.openService({ env });
+      if (again.endpoint.kind !== 'remote') {
+        throw new Error(
+          `work_item_store_unavailable: substrate.remote is configured but the reopened service chose the local store at ${again.endpoint.dbPath}`,
+        );
+      }
+      return again.service;
+    });
     return createWorkItemBoundary(
-      createRemoteWorkItemPorts(opened.service, {
-        remote: opened.endpoint.remote,
+      createRemoteWorkItemPorts(service, {
+        remote,
         ...(project === undefined ? {} : { project }),
       }),
     );

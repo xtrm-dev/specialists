@@ -23702,6 +23702,49 @@ function transportFailure(remote, error) {
   wrapped.code = code;
   return wrapped;
 }
+function isDroppedLink(error) {
+  const code = error?.code;
+  return typeof code === "string" && DROPPED_LINK_CODES.has(code);
+}
+function createReopeningService(first, reopen) {
+  let current = first;
+  let stale = false;
+  let pending = null;
+  const ensure = async () => {
+    if (!stale)
+      return current;
+    if (pending === null) {
+      pending = (async () => {
+        const previous = current;
+        try {
+          await previous.close();
+        } catch {}
+        const next = await reopen();
+        current = next;
+        stale = false;
+        return next;
+      })().finally(() => {
+        pending = null;
+      });
+    }
+    return pending;
+  };
+  return {
+    async call(op, args) {
+      const service = await ensure();
+      try {
+        return await service.call(op, args);
+      } catch (error) {
+        if (isDroppedLink(error))
+          stale = true;
+        throw error;
+      }
+    },
+    async close() {
+      await current.close();
+    }
+  };
+}
 function createRemoteWorkItemPorts(service, opts) {
   const remote = opts.remote;
   const call = async (op, args) => {
@@ -23784,6 +23827,10 @@ function createRemoteWorkItemPorts(service, opts) {
     provenanceService
   };
 }
+var DROPPED_LINK_CODES;
+var init_workitem_remote = __esm(() => {
+  DROPPED_LINK_CODES = new Set(["connection_lost", "timeout"]);
+});
 
 // src/activation/workitem-store.ts
 import { existsSync as existsSync18 } from "fs";
@@ -24259,8 +24306,16 @@ async function openWorkItemBoundary(opts = {}) {
       throw new Error(`work_item_store_unavailable: substrate.remote is configured but the service client chose the local store at ${opened.endpoint.dbPath}`);
     }
     const project = await remoteProjectTarget(substrateDir, opened.endpoint);
-    return createWorkItemBoundary(createRemoteWorkItemPorts(opened.service, {
-      remote: opened.endpoint.remote,
+    const remote = opened.endpoint.remote;
+    const service = createReopeningService(opened.service, async () => {
+      const again = client.openService({ env });
+      if (again.endpoint.kind !== "remote") {
+        throw new Error(`work_item_store_unavailable: substrate.remote is configured but the reopened service chose the local store at ${again.endpoint.dbPath}`);
+      }
+      return again.service;
+    });
+    return createWorkItemBoundary(createRemoteWorkItemPorts(service, {
+      remote,
       ...project === undefined ? {} : { project }
     }));
   }
@@ -24341,6 +24396,7 @@ var init_workitem_store = __esm(() => {
   init_session();
   init_contract_sections();
   init_authority_store();
+  init_workitem_remote();
   require4 = createRequire4(import.meta.url);
   SATISFIED_BLOCKER_STATES = new Set(["done", "archived"]);
   INLINE_PARENT_TERMINAL_STATES = new Set(["done", "cancelled", "archived"]);
@@ -100678,6 +100734,7 @@ var init_lib = __esm(() => {
   init_runner();
   init_native_host();
   init_workitem_store();
+  init_workitem_remote();
   init_contract_sections();
   init_types3();
   init_activation_tool();

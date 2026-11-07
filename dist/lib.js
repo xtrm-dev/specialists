@@ -21035,6 +21035,50 @@ function transportFailure(remote, error) {
   wrapped.code = code;
   return wrapped;
 }
+var DROPPED_LINK_CODES = new Set(["connection_lost", "timeout"]);
+function isDroppedLink(error) {
+  const code = error?.code;
+  return typeof code === "string" && DROPPED_LINK_CODES.has(code);
+}
+function createReopeningService(first, reopen) {
+  let current = first;
+  let stale = false;
+  let pending = null;
+  const ensure = async () => {
+    if (!stale)
+      return current;
+    if (pending === null) {
+      pending = (async () => {
+        const previous = current;
+        try {
+          await previous.close();
+        } catch {}
+        const next = await reopen();
+        current = next;
+        stale = false;
+        return next;
+      })().finally(() => {
+        pending = null;
+      });
+    }
+    return pending;
+  };
+  return {
+    async call(op, args) {
+      const service = await ensure();
+      try {
+        return await service.call(op, args);
+      } catch (error) {
+        if (isDroppedLink(error))
+          stale = true;
+        throw error;
+      }
+    },
+    async close() {
+      await current.close();
+    }
+  };
+}
 function createRemoteWorkItemPorts(service, opts) {
   const remote = opts.remote;
   const call = async (op, args) => {
@@ -21590,8 +21634,16 @@ async function openWorkItemBoundary(opts = {}) {
       throw new Error(`work_item_store_unavailable: substrate.remote is configured but the service client chose the local store at ${opened.endpoint.dbPath}`);
     }
     const project = await remoteProjectTarget(substrateDir, opened.endpoint);
-    return createWorkItemBoundary(createRemoteWorkItemPorts(opened.service, {
-      remote: opened.endpoint.remote,
+    const remote = opened.endpoint.remote;
+    const service = createReopeningService(opened.service, async () => {
+      const again = client.openService({ env });
+      if (again.endpoint.kind !== "remote") {
+        throw new Error(`work_item_store_unavailable: substrate.remote is configured but the reopened service chose the local store at ${again.endpoint.dbPath}`);
+      }
+      return again.service;
+    });
+    return createWorkItemBoundary(createRemoteWorkItemPorts(service, {
+      remote,
       ...project === undefined ? {} : { project }
     }));
   }
@@ -27911,6 +27963,7 @@ export {
   createObservabilitySqliteClient,
   createObservabilitySqliteClientAtPath,
   createRemoteWorkItemPorts,
+  createReopeningService,
   createSpecialistFeedTool,
   createSpecialistLeaseReconcileTool,
   createWorkItemBoundary,
@@ -27926,6 +27979,7 @@ export {
   hashFileBytes,
   inspect as inspectWorkspaceLease,
   isBuildStale,
+  isDroppedLink,
   isWorkspaceWriteTool,
   leaseScopeFor,
   openSubstrateDb,
