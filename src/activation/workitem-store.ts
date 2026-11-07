@@ -43,6 +43,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { resolveGlobalNodeModulesDirs } from '../pi/session.js';
 import { extractSections, scrutinyLevel, validateContractText } from './contract-sections.js';
 import { resolveAuthorityDbPath } from './authority-store.js';
+import { createRemoteWorkItemPorts, type RemoteWorkItemService } from './workitem-remote.js';
 
 const require = createRequire(import.meta.url);
 
@@ -554,8 +555,8 @@ export interface IssueStorePort {
 
 /** Structural port over the producer's dispatch gate (check + bind mutation). */
 export interface DispatchGatePort {
-  check(issues: unknown, req: DispatchRequest): { issueId: string; revision: number; contractHash: string; report: unknown };
-  dispatch(issues: unknown, provenance: unknown, req: DispatchRequest): { binding: ExecutionBindingView };
+  check(issues: unknown, req: DispatchRequest): Promise<{ issueId: string; revision: number; contractHash: string; report: unknown }>;
+  dispatch(issues: unknown, provenance: unknown, req: DispatchRequest): Promise<{ binding: ExecutionBindingView }>;
 }
 
 /** Structural port over the producer's journal service (S1 result publication). */
@@ -570,9 +571,9 @@ export interface JournalServicePort {
     participantId?: string;
     activationId?: string;
     sessionId?: string;
-  }): { id: string; sequence: number };
+  }): Promise<{ id: string; sequence: number }>;
   /** Existing entries, for the settlement reconciliation read (SPECIALISTS-54). */
-  listEntries?(issueId: string, opts?: { kind?: string; limit?: number }): Array<{
+  listEntries?(issueId: string, opts?: { kind?: string; limit?: number }): Promise<Array<{
     id: string;
     kind?: string;
     activationId?: string | null;
@@ -584,15 +585,15 @@ export interface JournalServicePort {
      */
     attemptId?: string | null;
     executionContext?: { specialist?: { attemptId?: string | null } | null } | null;
-  }>;
+  }>>;
 }
 
 /** Structural port over the producer's provenance service (S1 receipt publication). */
 export interface ProvenanceServicePort {
-  allocateReceipt(bindingId: string): { id: string; executionBindingId: string; issueId: string; issueRevision: number; contractHash: string };
-  attachArtifact(receiptId: string, kind: string, value: string): { receiptId?: string; kind?: string; value?: string };
+  allocateReceipt(bindingId: string): Promise<{ id: string; executionBindingId: string; issueId: string; issueRevision: number; contractHash: string }>;
+  attachArtifact(receiptId: string, kind: string, value: string): Promise<{ receiptId?: string; kind?: string; value?: string }>;
   /** Receipts already allocated for an issue, for the reconciliation read (SPECIALISTS-54). */
-  listReceipts?(issueId: string): Array<{ id: string; executionBindingId: string }>;
+  listReceipts?(issueId: string): Promise<Array<{ id: string; executionBindingId: string }>>;
 }
 
 /** The injected ports `createWorkItemBoundary` programs against. */
@@ -724,7 +725,7 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
     async check(req: DispatchRequest): Promise<CheckResult> {
       // checkDispatch is the fail-closed pre-activation gate: draft/unready/
       // blocked/terminal/scope-expansion refuse before any mutation exists.
-      const check = gate.check(issues, req);
+      const check = await gate.check(issues, req);
       return { issueId: check.issueId, revision: check.revision, contractHash: check.contractHash, report: check.report };
     },
 
@@ -767,7 +768,7 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
       // revision/hash regardless, and a concurrent edit between check and bind
       // is refused by the gate's divergence check, never re-derived here.
       const claimId = active?.id ?? req.claimId ?? undefined;
-      const out = gate.dispatch(issues, provenance, { ...req, claimId });
+      const out = await gate.dispatch(issues, provenance, { ...req, claimId });
       return out.binding;
     },
 
@@ -860,7 +861,7 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
       // wired (fakes, NULL boundary) so the call never fails a dispatch.
       if (opts.summary !== undefined && journalService) {
         const issueId = (await issues.resolveRef(ref)).id;
-        journalService.appendEntry(issueId, {
+        await journalService.appendEntry(issueId, {
           kind,
           semantic: { summary: opts.summary },
           ...(opts.participantId ? { participantId: opts.participantId } : {}),
@@ -877,7 +878,7 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
           async appendResult(ref: string, input: SettlementResultInput): Promise<{ entryId: string; sequence: number }> {
             if (!journalService) throw new Error('settlement unavailable: no journal service on this boundary');
             const issueId = (await issues.resolveRef(ref)).id;
-            const entry = journalService.appendEntry(issueId, {
+            const entry = await journalService.appendEntry(issueId, {
               kind: 'result',
               result: input.result,
               executionContext: input.executionContext ?? null,
@@ -890,7 +891,7 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
           },
           async allocateReceipt(bindingId: string): Promise<WorkReceiptView> {
             if (!provenanceService) throw new Error('settlement unavailable: no provenance service on this boundary');
-            const receipt = provenanceService.allocateReceipt(bindingId);
+            const receipt = await provenanceService.allocateReceipt(bindingId);
             return {
               id: receipt.id,
               executionBindingId: receipt.executionBindingId,
@@ -901,7 +902,7 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
           },
           async attachArtifact(receiptId: string, kind: string, value: string): Promise<SettlementArtifactView> {
             if (!provenanceService) throw new Error('settlement unavailable: no provenance service on this boundary');
-            const attached = provenanceService.attachArtifact(receiptId, kind, value);
+            const attached = await provenanceService.attachArtifact(receiptId, kind, value);
             return {
               receiptId: attached.receiptId ?? receiptId,
               kind: attached.kind ?? kind,
@@ -917,7 +918,7 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
               return { status: 'unavailable', reason: 'journal service exposes no entry listing' };
             }
             try {
-              const entries = journalService.listEntries((await issues.resolveRef(ref)).id, { kind: 'result' });
+              const entries = await journalService.listEntries((await issues.resolveRef(ref)).id, { kind: 'result' });
               const forActivation = entries.filter((entry) => entry.activationId === key.activationId);
               // The attempt lives in the X1 envelope, NOT as a flat column: `issue_journal` has no
               // attempt_id (substrate src/domain/journal.ts:193-211). Matching on a flat
@@ -945,7 +946,7 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
               return { status: 'unavailable', reason: 'provenance service exposes no receipt listing' };
             }
             try {
-              const rows = provenanceService.listReceipts((await issues.resolveRef(ref)).id);
+              const rows = await provenanceService.listReceipts((await issues.resolveRef(ref)).id);
               const match = rows.find((receipt) => receipt.executionBindingId === bindingId);
               return match ? { status: 'found', value: { receiptId: match.id } } : { status: 'absent' };
             } catch (error) {
@@ -1046,6 +1047,72 @@ export function resolveSubstrateModule(substrateDir: string, rel: string): strin
 }
 
 /**
+ * The two members of Substrate's service client this build relies on. Structural: the module is
+ * loaded at runtime, so the type states only what is called, never a static producer import.
+ */
+interface SubstrateServiceClientModule {
+  localOrRemote(env: NodeJS.ProcessEnv): { kind: 'local'; dbPath: string } | { kind: 'remote'; remote: string; host: string };
+  openService(opts: { env?: NodeJS.ProcessEnv }): {
+    service: RemoteWorkItemService;
+    endpoint: { kind: 'local'; dbPath: string } | { kind: 'remote'; remote: string; host: string };
+  };
+}
+
+/**
+ * Load Substrate's service client, or answer null for a Substrate that predates it.
+ *
+ * A module that is ABSENT is the older install this build still supports: without the selector
+ * there was no remote feature, so the local path is the only behaviour it ever had. A module that
+ * is PRESENT and fails to load is a broken install and must not be read as "no remote" — that is
+ * precisely the silent fallback to a store the operator did not choose (SPECIALISTS-4398).
+ */
+async function loadServiceClientModule(substrateDir: string): Promise<SubstrateServiceClientModule | null> {
+  const modulePath = resolveSubstrateModule(substrateDir, 'src/service/client.ts');
+  if (!modulePath) return null;
+  let mod: Record<string, unknown>;
+  try {
+    mod = (await import(pathToFileURL(modulePath).href)) as Record<string, unknown>;
+  } catch (error) {
+    throw new Error(
+      `work_item_store_unavailable: cannot load the Substrate service client at ${modulePath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (typeof mod['localOrRemote'] !== 'function' || typeof mod['openService'] !== 'function') return null;
+  return mod as unknown as SubstrateServiceClientModule;
+}
+
+/** The store this process will use, decided before anything is opened. */
+export type WorkItemStoreSelection =
+  | { kind: 'local'; dbPath: string }
+  | { kind: 'remote'; remote: string };
+
+/**
+ * Which store this process must use (SPECIALISTS-4398, XTRM-693).
+ *
+ * Delegates the rule to Substrate: an explicit local file wins, then a configured remote, then the
+ * canonical local store. Only the REMOTE signal is taken from that selector; the local path keeps
+ * `resolveWorkItemDbPath`, which also honours the legacy `XTRM_STATE_DB` that Substrate's own
+ * selector does not read, so a local deployment behaves exactly as before.
+ *
+ * `dbPath` is the caller stating "a local file, deliberately" — the same precedence Substrate
+ * gives `SUBSTRATE_DB` — which is why callers that already decided local pass it and callers that
+ * have not do not.
+ */
+export async function selectWorkItemStore(
+  env: NodeJS.ProcessEnv = process.env,
+  opts: { dbPath?: string; substrateDir?: string; resolveInstalled?: () => string | null } = {},
+): Promise<WorkItemStoreSelection> {
+  if (opts.dbPath !== undefined) return { kind: 'local', dbPath: opts.dbPath };
+  const local: WorkItemStoreSelection = { kind: 'local', dbPath: resolveWorkItemDbPath(env) };
+  const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? '', opts.resolveInstalled);
+  if (!substrateDir) return local;
+  const client = await loadServiceClientModule(substrateDir);
+  if (!client) return local;
+  const selection = client.localOrRemote(env);
+  return selection.kind === 'remote' ? { kind: 'remote', remote: selection.remote } : local;
+}
+
+/**
  * Open the canonical work store and build the boundary over the REAL producer
  * services, dynamic-imported at runtime from an explicit checkout.
  *
@@ -1103,6 +1170,32 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
       );
     }
   };
+  // Which store this process uses is decided BEFORE one is opened (SPECIALISTS-4398, XTRM-693).
+  // A configured remote is reached through Substrate's typed service and the local sqlite file is
+  // never opened on that path, so there is no store to fall back to when the server cannot answer.
+  const selection = await selectWorkItemStore(env, {
+    dbPath: opts.dbPath,
+    substrateDir,
+    ...(opts.resolveInstalled ? { resolveInstalled: opts.resolveInstalled } : {}),
+  });
+  if (selection.kind === 'remote') {
+    const client = await loadServiceClientModule(substrateDir);
+    // selectWorkItemStore answers `remote` only through this module, so its absence here is a
+    // broken install, not a state to interpret.
+    if (!client) {
+      throw new Error(
+        `work_item_store_unavailable: substrate.remote is ${selection.remote} but ${substrateDir} has no usable service client`,
+      );
+    }
+    const opened = client.openService({ env });
+    if (opened.endpoint.kind !== 'remote') {
+      throw new Error(
+        `work_item_store_unavailable: substrate.remote is configured but the service client chose the local store at ${opened.endpoint.dbPath}`,
+      );
+    }
+    return createWorkItemBoundary(createRemoteWorkItemPorts(opened.service, { remote: opened.endpoint.remote }));
+  }
+
   const [runner, issueSvcMod, journalMod, provMod, storeMod, gateMod] = await Promise.all(
     SUBSTRATE_REQUIRED_MODULES.map((rel) => load(rel)),
   );
@@ -1115,7 +1208,7 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
       throw new Error(`work_item_store_unavailable: Substrate module is missing export ${name}`);
     }
   }
-  const dbPath = opts.dbPath ?? resolveWorkItemDbPath(env);
+  const dbPath = selection.dbPath;
   // SPECIALISTS-59: opening the store and running migrations is the point at which the lookup
   // depends on the HOST rather than on the package. Anything thrown here (an unopenable store, a
   // migration that refuses, a missing HOME/.xtrm directory) is normalized into the same refusal
@@ -1192,15 +1285,24 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
     issues,
     provenance,
     store,
+    // The ports are async so the remote adapter can satisfy the same shape; the local
+    // producer is synchronous and is wrapped here rather than forking the boundary.
     gate: {
-      check: (i, r) => gateMod.checkDispatch(i, r),
-      dispatch: (i, p, r) => gateMod.dispatchToSpecialist(i, p, r),
+      check: async (i, r) => gateMod.checkDispatch(i, r),
+      dispatch: async (i, p, r) => gateMod.dispatchToSpecialist(i, p, r),
     },
     // S1 settlement surface over the same live services: the Journal result
     // publication and WorkReceipt allocation the host performs automatically
     // at settlement. Structural ports only — no static producer import.
-    journalService: journalSvc as unknown as JournalServicePort,
-    provenanceService: provenance as unknown as ProvenanceServicePort,
+    journalService: {
+      appendEntry: async (issueId, input) => journalSvc.appendEntry(issueId, input),
+      listEntries: async (issueId, listOpts) => journalSvc.listEntries(issueId, listOpts),
+    },
+    provenanceService: {
+      allocateReceipt: async (bindingId) => provenance.allocateReceipt(bindingId),
+      attachArtifact: async (receiptId, kind, value) => provenance.attachArtifact(receiptId, kind, value),
+      listReceipts: async (issueId) => provenance.listReceipts(issueId),
+    },
   });
 }
 

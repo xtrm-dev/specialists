@@ -74,7 +74,7 @@ import {
   INLINE_ISSUE_KINDS,
   INLINE_PARENT_TERMINAL_STATES,
   openWorkItemBoundary,
-  resolveWorkItemDbPath,
+  selectWorkItemStore,
   type EpicAncestor,
   type ResolvedContextView,
   type SpecialistWorkItemBoundary,
@@ -2345,15 +2345,21 @@ export class NativeActivationHost {
   private async resolveWorkItems(): Promise<SpecialistWorkItemBoundary> {
     if (this.workItemsInjected) return this.workItemsInjected;
     if (this.workItemsDefault) return this.workItemsDefault;
-    const dbPath = resolveWorkItemDbPath();
-    if (!existsSync(dbPath)) {
+    // The store is chosen before any file is opened (SPECIALISTS-4398): a configured
+    // remote must not be pre-empted by a local-file existence check, which is how the
+    // host used to answer "run sb init" about a store the operator never chose.
+    const selection = await selectWorkItemStore();
+    if (selection.kind === 'local' && !existsSync(selection.dbPath)) {
       throw new Error(
-        `no Substrate work store at ${dbPath} (set SUBSTRATE_DB (or the legacy XTRM_STATE_DB) or initialize it via xt init / sb)`,
+        `no Substrate work store at ${selection.dbPath} (set SUBSTRATE_DB (or the legacy XTRM_STATE_DB) or initialize it via xt init / sb)`,
       );
     }
     // Runtime dynamic import from XTRM_SUBSTRATE_DIR; absent package refuses
     // fail-closed with work_item_store_unavailable — never a second authority.
-    this.workItemsDefault = await openWorkItemBoundary({ dbPath });
+    // Only the local path names a file; the remote path is reached by the opener itself.
+    this.workItemsDefault = await openWorkItemBoundary(
+      selection.kind === 'local' ? { dbPath: selection.dbPath } : {},
+    );
     return this.workItemsDefault;
   }
 

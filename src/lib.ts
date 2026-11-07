@@ -49,8 +49,11 @@ export {
   openWorkItemBoundary,
   openSubstrateDb,
   resolveWorkItemDbPath,
+  selectWorkItemStore,
   NULL_WORK_ITEMS,
 } from './activation/workitem-store.js';
+export { createRemoteWorkItemPorts } from './activation/workitem-remote.js';
+export type { RemoteWorkItemService } from './activation/workitem-remote.js';
 export type {
   SpecialistWorkItemBoundary,
   WorkItemView,
@@ -66,6 +69,7 @@ export type {
   DispatchGatePort,
   ActiveClaimView,
   OpenWorkItemsOptions,
+  WorkItemStoreSelection,
 } from './activation/workitem-store.js';
 
 export { validateContractText } from './activation/contract-sections.js';
