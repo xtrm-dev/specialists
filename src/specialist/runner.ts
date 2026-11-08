@@ -10,6 +10,7 @@ import {
   resolveRuntimeToolContract,
   type PiSessionOptions,
 } from '../pi/session.js';
+import { resolveAgentIdentityEnv, specialistHolderName } from '../pi/identity-env.js';
 import type { SessionMetricEvent, SessionRunMetrics } from './session-metrics-contract.js';
 import type { SpecialistLoader } from './loader.js';
 import type { HookEmitter } from './hooks.js';
@@ -1402,6 +1403,21 @@ export class SpecialistRunner {
       const resolvedNodeId = options.variables?.SPECIALISTS_NODE_ID ?? options.variables?.node_id;
       if (resolvedNodeId) envVars.SPECIALISTS_NODE_ID = resolvedNodeId;
       if (options.variables?.SPECIALISTS_JOB_ID) envVars.SPECIALISTS_JOB_ID = options.variables.SPECIALISTS_JOB_ID;
+
+      // CORE-2525/2528: the launched Specialist acts as its own agent. The holder
+      // names it on every commit and Journal entry; the specialist name lets the
+      // xt CLI resolve the role (and therefore the GitHub App) without this repo
+      // duplicating the role map. Never blocks: without a usable xt the child
+      // still carries the holder and the name.
+      Object.assign(envVars, resolveAgentIdentityEnv({
+        holder: specialistHolderName(
+          options.specialistName ?? metadata.name,
+          options.variables?.SPECIALISTS_JOB_ID ?? options.reusedFromJobId,
+        ),
+        roleName: options.specialistName ?? metadata.name,
+        cwd: options.workingDirectory,
+        env: process.env,
+      }));
 
       for (let modelIndex = 0; modelIndex < modelChain.length; modelIndex++) {
         currentModel = modelChain[modelIndex];

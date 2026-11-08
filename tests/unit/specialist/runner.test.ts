@@ -168,6 +168,29 @@ describe('SpecialistRunner', () => {
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
 
+  it('launches the session with its own agent identity env (CORE-2525/2528)', async () => {
+    const sessionFactory = vi.fn().mockResolvedValue(mockSession);
+    const runner = new SpecialistRunner({
+      loader: makeLoader(),
+      hooks: new HookEmitter({ tracePath: '/tmp/test-hooks-trace.jsonl' }),
+      circuitBreaker: new CircuitBreaker(),
+      sessionFactory,
+    });
+
+    await runner.run({
+      name: 'test-spec',
+      prompt: 'analyze this',
+      variables: { SPECIALISTS_JOB_ID: 'abc12345-6789-4def' },
+    });
+
+    const env = sessionFactory.mock.calls[0]?.[0]?.env ?? {};
+    // The holder is stable per job; the specialist name lets xt resolve the role.
+    expect(env).toMatchObject({
+      SUBSTRATE_HOLDER: 'sp-test-spec-abc12345',
+      XTRM_ROLE: 'test-spec',
+    });
+  });
+
   it('calls pi session lifecycle in order', async () => {
     const sessionFactory = vi.fn().mockResolvedValue(mockSession);
     const runner = new SpecialistRunner({

@@ -74,6 +74,7 @@ import {
   claudeBridgeRouteEnabled,
 } from '../pi/claude-bridge.js';
 import { getPermissionGuardExtensionPath, resolvePermissionGuardForSpawn } from '../pi/permission-guard-extension.js';
+import { resolveAgentIdentityEnv, specialistHolderName } from '../pi/identity-env.js';
 import { formatResolvedToolContract, withDiscoveredExtensionTools, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 import { resolveModelChain } from '../specialist/model-chain.js';
 import { extractPurposeExcerpt, extractSections } from './contract-sections.js';
@@ -2169,6 +2170,16 @@ export class NativeActivationHost {
     if (nativeGuard && curatedExtensions.all.includes(nativeGuard.path)) {
       Object.assign(process.env, nativeGuard.tierEnv);
     }
+    // CORE-2525/2528: in-process there is no child env, so this activation's own
+    // agent identity rides process.env like the guard tier above. Every activation
+    // overwrites it before its first turn; two native activations running at the
+    // same moment share it, which the spawned path does not (that one is exact).
+    Object.assign(process.env, resolveAgentIdentityEnv({
+      holder: specialistHolderName(specialist.specialist.metadata.name, activationId),
+      roleName: specialist.specialist.metadata.name,
+      cwd: workspace.worktreePath,
+      env: process.env,
+    }));
     const resourceLoader = createActivationResourceLoader(sdk, {
       cwd: workspace.worktreePath,
       skillPaths: specialist.specialist.skills?.paths ?? [],
