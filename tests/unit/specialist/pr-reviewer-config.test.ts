@@ -78,10 +78,19 @@ describe('pr-reviewer package specialist', () => {
     const system = (await loadPrReviewer()).specialist.prompt.system ?? '';
 
     expect(system).toContain('This exact command must exit 0, and a body that fails it is fixed and re-linted, never posted');
-    expect(system).toContain("^- Verdict: (PASS|PARTIAL|FAIL)$");
-    expect(system).toContain("! grep -Eq '/home/|/Users/|/root/'");
     expect(system).toContain('Do NOT write any hidden marker');
     expect(system).not.toContain('mmd-review');
+  });
+
+  it('loads the pr-reviewer-only rule set and leaves the shared one to the job reviewer', async () => {
+    const pr = await loadPrReviewer();
+    expect(pr.specialist.mandatory_rules?.template_sets).toContain('pr-reviewer-verdict-format');
+    const shared = readFileSync('config/mandatory-rules/pr-reviewer-verdict-format.md', 'utf8');
+    expect(shared).toContain('pr-reviewer');
+    // The shared rule the job reviewer also loads must not carry PR-only text.
+    const sharedReviewer = readFileSync('config/mandatory-rules/reviewer-verdict-format.md', 'utf8');
+    expect(sharedReviewer).not.toContain('gh pr review');
+    expect(sharedReviewer).not.toContain('PR Review Verdict');
   });
 
   it('executes the lint command from the prompt: a good body passes, a self-written header or a second verdict fails', async () => {
@@ -111,6 +120,14 @@ describe('pr-reviewer package specialist', () => {
       expect(run('marker.md', `${header}\n<!-- agent=me run=x -->\n\n## PR Review Verdict\n- Verdict: PASS\n`).status).not.toBe(0);
       // An absolute host path fails.
       expect(run('path.md', `${good}- see /home/someone/file.ts\n`).status).not.toBe(0);
+      // The size cap fails on its own: drop the cap clause and this body passes.
+      expect(run('big.md', `${good}${'x'.repeat(60000)}\n`).status).not.toBe(0);
+      // The section clause fails on its own: drop the grep and this body passes.
+      expect(run('no-section.md', `${header}\n\n- Verdict: PARTIAL\n`).status).not.toBe(0);
+      // Parity with the shim: a verdict line must start at column 0, so an
+      // indented one fails the lint instead of reaching the shim and being
+      // refused there.
+      expect(run('indented.md', `${header}\n\n## PR Review Verdict\n  - Verdict: PARTIAL\n`).status).not.toBe(0);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
