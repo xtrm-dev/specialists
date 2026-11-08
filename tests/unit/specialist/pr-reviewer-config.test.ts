@@ -31,17 +31,20 @@ describe('pr-reviewer package specialist', () => {
     const spec = await loadPrReviewer();
     const system = spec.specialist.prompt.system ?? '';
 
-    expect(spec.specialist.metadata.version).toBe('1.3.2');
+    expect(spec.specialist.metadata.version).toBe('1.4.0');
     expect(system).toContain('If only `BashBackground`, `Monitor` and `BackgroundStop` are exposed, there are no delegate, attested-run or fusion tools');
   });
 
-  it('posts exactly one identified PR comment and never approves, merges or edits', async () => {
+  it('posts exactly one formal review pinned to the head, and never merges or edits', async () => {
     const system = (await loadPrReviewer()).specialist.prompt.system ?? '';
 
-    expect(system).toContain('gh pr comment <pr>');
-    expect(system).toContain('Review by pr-reviewer specialist (<model>) at head <sha12>');
-    expect(system).toContain('Post one comment per reviewed head.');
-    expect(system).toContain('Never run `gh pr review`, `gh pr merge`, `gh pr close` or `gh pr edit`.');
+    expect(system).toContain('gh pr review <pr> --repo <owner/repo> --comment --body-file');
+    expect(system).toContain('sets `commit_id` to the reviewed head');
+    expect(system).toContain('Review by <role> (<model>) at head <sha12>');
+    expect(system).toContain('One review per reviewed head');
+    expect(system).toContain('`gh pr review` is your only GitHub write');
+    expect(system).not.toContain('Post one comment per reviewed head.');
+    expect(system).not.toContain('Never run `gh pr review`');
   });
 
   it('emits one verdict format with the PASS, PARTIAL or FAIL enum', async () => {
@@ -70,12 +73,19 @@ describe('pr-reviewer package specialist', () => {
     expect(system).toContain('mutation runs keep `(ulimit -v 2000000; timeout 120 ...)`, one mutant at a time');
   });
 
-  it('lints the comment body mechanically before posting', async () => {
+  it('lints the findings body mechanically before posting and leaves the header to the shim', async () => {
     const system = (await loadPrReviewer()).specialist.prompt.system ?? '';
 
     expect(system).toContain('This exact command must exit 0, and a body that fails it is fixed and re-linted, never posted');
-    expect(system).toContain("<!-- mmd-review reviewer=pr-reviewer head=[0-9a-f]{12} -->");
     expect(system).toContain("^- Verdict: (PASS|PARTIAL|FAIL)$");
     expect(system).toContain("! grep -Eq '/home/|/Users/|/root/'");
+    expect(system).toContain('do NOT write the header line or the marker yourself');
+    expect(system).not.toContain('mmd-review');
+  });
+
+  it('refuses to post outside the reviewer role instead of working around the shim', async () => {
+    const system = (await loadPrReviewer()).specialist.prompt.system ?? '';
+    expect(system).toContain('the launch sets `XTRM_ROLE=reviewer`');
+    expect(system).toContain('do not work around it with `gh api` or `gh pr comment`');
   });
 });
