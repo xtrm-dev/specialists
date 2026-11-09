@@ -2570,6 +2570,55 @@ function chainHost(opts: {
     }
   });
 
+  it('admits a bridged DISPATCH-TIME fallback (an unavailable primary) provisionally', async () => {
+    // The other walk: the gate refuses the primary itself, so the chain skips forward before any
+    // session exists. That admission must go through the same provisional funnel.
+    const bridge = withBridgeEntry();
+    const restore = withOperatorSwitch(true);
+    try {
+      const record: { createArgs?: Record<string, unknown> } = {};
+      const session = fakeSession({ record: {} });
+      let bridgeLooks = 0;
+      const sdk = {
+        ...makeSdk(record, session),
+        resolveModelScopeWithDiagnostics: (patterns: string[]) => {
+          const pattern = patterns[0];
+          if (pattern === 'bogus/missing-model') {
+            return { scopedModels: [], diagnostics: [{ type: 'warning', code: 'no-match', message: `No models match pattern "${pattern}"`, pattern }] };
+          }
+          bridgeLooks += 1;
+          if (bridgeLooks === 1) {
+            return { scopedModels: [], diagnostics: [{ type: 'warning', code: 'no-match', message: `No models match pattern "${pattern}"`, pattern }] };
+          }
+          return { scopedModels: [{ model: { id: 'claude-opus-5-5', provider: 'claude-bridge' } }], diagnostics: [] };
+        },
+      } as unknown as PiSdk;
+      const spec = readOnlySpec({
+        model: 'bogus/missing-model',
+        fallback_models: ['claude-bridge/claude-opus-5-5'],
+        claude_bridge: true,
+      });
+      const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
+            loader: loaderFor(spec),
+        workItems: fakeWorkItems(),
+        forensics: collectingSink(),
+        loadSdk: async () => sdk,
+        cwd: hostWorkspace(),
+      });
+
+      const handle = await start(host);
+      const result = await handle.result;
+
+      expect(result.status).toBe('completed');
+      expect(record.createArgs?.model).toEqual(expect.objectContaining({ provider: 'claude-bridge' }));
+      expect(session.setModelCalls).toHaveLength(1);
+    } finally {
+      restore();
+      bridge.restore();
+    }
+  });
+
   it('admits a bridged RETRY model_override provisionally (review survivor b)', async () => {
     const bridge = withBridgeEntry();
     const restore = withOperatorSwitch(true);
