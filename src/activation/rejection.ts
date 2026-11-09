@@ -56,6 +56,7 @@ export const DISPATCH_REFUSAL_REASONS = [
   'invalid_thinking_override',
   'no_model_configured',
   'model_unavailable',
+  'claude_bridge_unavailable',
   'extension_tool_shadowed',
   'extension_discovery_failed',
   'context_unresolvable',
@@ -86,6 +87,8 @@ export type DispatchRefusalReason = (typeof DISPATCH_REFUSAL_REASONS)[number];
 export const FIX_BY_REASON: Record<DispatchRefusalReason, string> = {
   unknown_specialist:
     'Check specialist_list for the exact Specialist name and re-dispatch with a known name.',
+  claude_bridge_unavailable:
+    'The definition enables the Claude Code route but the pi-claude-bridge extension was not found. Install it where pi resolves global packages (or set SPECIALISTS_CLAUDE_BRIDGE_PATH to an absolute entry), or clear execution.claude_bridge and re-dispatch. The operator must also enable the route in ~/.config/specialists/user.json.',
   work_item_store_unavailable:
     'The Substrate work boundary could not be opened. Install or upgrade the Substrate package, or set SUBSTRATE_DB (fallback XTRM_STATE_DB) to a writable state file, then re-dispatch.',
   parent_ref_and_ref:

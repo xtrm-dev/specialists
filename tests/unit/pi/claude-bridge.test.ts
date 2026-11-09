@@ -1,19 +1,29 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative as relativePath } from 'node:path';
+import { readFileSync } from 'node:fs';
 import {
   CLAUDE_BRIDGE_PATH_ENV,
   CLAUDE_BRIDGE_PROVIDER,
   claudeBridgeEnabled,
   claudeBridgeExtensionProviders,
+  claudeBridgeRouteEnabled,
+  claudeBridgeSessionOption,
+  operatorClaudeBridgeEnabled,
 } from '../../../src/pi/claude-bridge.js';
+import {
+  buildSpecialistOverrideTemplate,
+  CLAUDE_BRIDGE_SWITCH_KEY,
+  validateGlobalUserConfig,
+} from '../../../src/specialist/global-config.js';
+import { SpecialistLoader } from '../../../src/specialist/loader.js';
 import {
   resolveClaudeBridgeExtensionPath,
   resolveClaudeBridgePackageEntry,
   resolveCuratedExtensionPaths,
 } from '../../../src/pi/session.js';
-import { ExecutionSchema, OVERRIDE_ALLOWED_EXECUTION_FIELDS } from '../../../src/specialist/schema.js';
+import { ExecutionSchema } from '../../../src/specialist/schema.js';
 
 /**
  * The opt-in Claude Code route (SPECIALISTS-4405). Two properties matter more than the plumbing:
@@ -39,9 +49,9 @@ describe('claudeBridgeEnabled / claudeBridgeExtensionProviders', () => {
     expect(claudeBridgeEnabled({ claude_bridge: 'true' })).toBe(false);
   });
 
-  it('names the provider only when the flag is on', () => {
-    expect(claudeBridgeExtensionProviders({})).toEqual([]);
-    expect(claudeBridgeExtensionProviders({ claude_bridge: true })).toEqual([CLAUDE_BRIDGE_PROVIDER]);
+  it('names the provider only when the RESOLVED route is on', () => {
+    expect(claudeBridgeExtensionProviders(false)).toEqual([]);
+    expect(claudeBridgeExtensionProviders(true)).toEqual([CLAUDE_BRIDGE_PROVIDER]);
   });
 });
 
@@ -122,7 +132,115 @@ describe('execution.claude_bridge definition field', () => {
     expect(ExecutionSchema.parse({ ...base, claude_bridge: true }).claude_bridge).toBe(true);
   });
 
-  it('is override-allowed so the operator enables it in their own layer, never in a shipped definition', () => {
-    expect(OVERRIDE_ALLOWED_EXECUTION_FIELDS).toContain('claude_bridge');
+  it('is reproducible from a repository layer, which is exactly why the operator switch exists', async () => {
+    // Measured, not asserted from a list: a repo can write the definition flag into its own
+    // `.specialists/user` layer, and the loader honours it. Finding 1 of the #526 review is that
+    // this must NOT be enough to load the route — see claudeBridgeRouteEnabled below.
+    const project = tempDir();
+    mkdirSync(join(project, '.specialists', 'user'), { recursive: true });
+    writeFileSync(
+      join(project, '.specialists', 'user', 'explorer.specialist.json'),
+      JSON.stringify({ specialist: { execution: { claude_bridge: true } } }),
+    );
+    // homeDir deliberately points elsewhere: the repo layer alone must carry the flag.
+    const loader = new SpecialistLoader({ projectDir: project, homeDir: tempDir() });
+    const spec = await loader.get('explorer');
+    expect(spec.specialist.execution.claude_bridge).toBe(true);
+    // The definition says yes; the machine has not. The route stays OFF.
+    expect(claudeBridgeRouteEnabled(spec.specialist.execution, () => false)).toBe(false);
+  });
+});
+
+/**
+ * The operator half of the route switch (review finding 1). A repository can write the definition
+ * flag; it cannot write `~/.config/specialists/user.json`. Both halves are required, and every
+ * degraded input is OFF — an unreadable or malformed switch must never enable a billing surface.
+ */
+describe('operatorClaudeBridgeEnabled', () => {
+  function withUserConfig(contents: string | null) {
+    const dir = tempDir();
+    const file = join(dir, 'user.json');
+    if (contents !== null) writeFileSync(file, contents);
+    return { path: file, exists: contents !== null, source: 'config-home' as const };
+  }
+
+  it('is true only for the exact shape', () => {
+    expect(operatorClaudeBridgeEnabled(withUserConfig(JSON.stringify({ [CLAUDE_BRIDGE_SWITCH_KEY]: { enabled: true } })))).toBe(true);
+    expect(operatorClaudeBridgeEnabled(withUserConfig(JSON.stringify({ [CLAUDE_BRIDGE_SWITCH_KEY]: { enabled: false } })))).toBe(false);
+    expect(operatorClaudeBridgeEnabled(withUserConfig(JSON.stringify({ [CLAUDE_BRIDGE_SWITCH_KEY]: { enabled: 'true' } })))).toBe(false);
+    expect(operatorClaudeBridgeEnabled(withUserConfig(JSON.stringify({ [CLAUDE_BRIDGE_SWITCH_KEY]: true })))).toBe(false);
+    expect(operatorClaudeBridgeEnabled(withUserConfig(JSON.stringify({})))).toBe(false);
+  });
+
+  it('fails closed when the file is absent, unreadable or malformed', () => {
+    expect(operatorClaudeBridgeEnabled(withUserConfig(null))).toBe(false);
+    expect(operatorClaudeBridgeEnabled(withUserConfig('{not json'))).toBe(false);
+    expect(operatorClaudeBridgeEnabled(
+      { path: '/nonexistent/user.json', exists: true, source: 'config-home' },
+    )).toBe(false);
+    expect(operatorClaudeBridgeEnabled(withUserConfig('[]'))).toBe(false);
+  });
+
+  it('requires both halves, and the definition alone never enables the route', () => {
+    expect(claudeBridgeRouteEnabled({ claude_bridge: true }, () => false)).toBe(false);
+    expect(claudeBridgeRouteEnabled({}, () => true)).toBe(false);
+    expect(claudeBridgeRouteEnabled({ claude_bridge: true }, () => true)).toBe(true);
+  });
+});
+
+describe('the switch key in the global user config', () => {
+  it('is reserved: it does not invalidate the Specialist overrides next to it', () => {
+    const valid = validateGlobalUserConfig(JSON.stringify({
+      [CLAUDE_BRIDGE_SWITCH_KEY]: { enabled: true },
+      explorer: buildSpecialistOverrideTemplate(),
+    }));
+    expect(valid).toEqual({ valid: true, errors: [] });
+  });
+
+  it('reports a malformed switch instead of silently ignoring it', () => {
+    const invalid = validateGlobalUserConfig(JSON.stringify({
+      [CLAUDE_BRIDGE_SWITCH_KEY]: { enabled: 'yes' },
+    }));
+    expect(invalid.valid).toBe(false);
+    expect(invalid.errors[0]?.path).toBe(CLAUDE_BRIDGE_SWITCH_KEY);
+  });
+});
+
+describe('path hygiene (review finding 6)', () => {
+  it('rejects a relative override instead of resolving it against the dispatch cwd', () => {
+    const dir = tempDir();
+    writeFileSync(join(dir, 'index.js'), 'export default () => {};\n');
+    const relative = relativePath(process.cwd(), join(dir, 'index.js'));
+    expect(resolveClaudeBridgeExtensionPath({ [CLAUDE_BRIDGE_PATH_ENV]: relative })).toBeUndefined();
+  });
+
+  it('rejects a manifest entry that escapes the package directory', () => {
+    const pkg = tempDir();
+    const outside = join(pkg, '..', 'evil.js');
+    writeFileSync(outside, 'export default () => {};\n');
+    writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'pi-claude-bridge', main: '../evil.js' }));
+    expect(resolveClaudeBridgePackageEntry(pkg, path => existsSync(path))).toBeUndefined();
+    // An absolute env override is operator-owned and stays accepted: this rule is about the
+    // package manifest, not about an operator naming an entry explicitly.
+    expect(resolveClaudeBridgeExtensionPath({ [CLAUDE_BRIDGE_PATH_ENV]: outside })).toBe(outside);
+  });
+});
+
+describe('legacy call-site wiring', () => {
+  it('builds the session option from the definition alone, leaving the operator check to start()', () => {
+    expect(claudeBridgeSessionOption({})).toEqual({});
+    expect(claudeBridgeSessionOption({ claude_bridge: false })).toEqual({});
+    expect(claudeBridgeSessionOption({ claude_bridge: true })).toEqual({ claudeBridge: true });
+  });
+
+  it('is used by both legacy call sites, so the runner and the script-runner cannot drift', () => {
+    // A wiring assertion, not a behavioural one: executing either legacy runner needs a live pi
+    // process. The behaviour of the fragment itself is covered above, and the operator half is
+    // covered at `PiAgentSession.start` in claude-bridge-legacy-path.test.ts.
+    for (const file of ['src/specialist/runner.ts', 'src/specialist/script-runner.ts']) {
+      const source = readFileSync(join(process.cwd(), file), 'utf-8');
+      expect(source).toContain('claudeBridgeSessionOption(');
+      expect(source).not.toContain("execution.claude_bridge === true ? { claudeBridge: true }");
+    }
   });
 });

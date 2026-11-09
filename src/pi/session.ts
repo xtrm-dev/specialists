@@ -42,7 +42,7 @@ import { getReadLineNumbersExtensionPath } from './read-line-numbers-extension.j
 import { getExtensionToolPolicyExtensionPath, NATIVE_TOOLS_ENV_KEY, REQUIRED_EXTENSION_TOOLS_ENV_KEY } from './extension-tool-policy-extension.js';
 import { getPermissionGuardExtensionPath, isPermissionGuardEnabled, resolvePermissionGuardForSpawn, shouldGrantGuardedBash } from './permission-guard-extension.js';
 import { resolvePiExtensionsPythonKernelPath } from './python-kernel-extension.js';
-import { CLAUDE_BRIDGE_PACKAGE, CLAUDE_BRIDGE_PATH_ENV } from './claude-bridge.js';
+import { CLAUDE_BRIDGE_PACKAGE, CLAUDE_BRIDGE_PATH_ENV, operatorClaudeBridgeEnabled } from './claude-bridge.js';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -898,7 +898,11 @@ export function resolveClaudeBridgeExtensionPath(
   exists: (path: string) => boolean = existsSync,
 ): string | undefined {
   const override = env[CLAUDE_BRIDGE_PATH_ENV]?.trim();
-  if (override) return exists(override) ? override : undefined;
+  if (override) {
+    // Absolute only: a relative value would resolve against whatever cwd the dispatch happens to
+    // run in, and the extension entry must not be a function of the workspace.
+    return isAbsolute(override) && exists(override) ? override : undefined;
+  }
 
   const packageDir = resolveGlobalPackageDir(CLAUDE_BRIDGE_PACKAGE);
   if (!packageDir) return undefined;
@@ -920,8 +924,12 @@ export function resolveClaudeBridgePackageEntry(
   } catch {
     declared = undefined;
   }
+  // A manifest entry is joined, so `main: "../../evil.js"` would otherwise point outside the
+  // package and load arbitrary code as a pi extension. Refuse anything that escapes.
+  const root = `${resolve(packageDir)}${sep}`;
+  const declaredEntry = declared ? resolve(packageDir, declared) : undefined;
   const candidates = [
-    ...(declared ? [join(packageDir, declared)] : []),
+    ...(declaredEntry && declaredEntry.startsWith(root) ? [declaredEntry] : []),
     join(packageDir, 'src', 'index.ts'),
     join(packageDir, 'dist', 'index.js'),
     join(packageDir, 'index.js'),
@@ -1381,12 +1389,17 @@ export class PiAgentSession {
     // Selectively re-enable useful Pi extensions if installed. The set is resolved by the
     // shared helper the native host also uses (SPECIALISTS-6), so the two runtimes cannot
     // drift on which extensions a Specialist gets.
+    // SPECIALISTS-4405: the definition flag is the per-Specialist selector, never the whole
+    // permission. The operator half lives in the global user config, outside every repository, so
+    // a repo-supplied definition cannot load this route on its own. Checked HERE as well as in the
+    // host so the legacy argv path cannot disagree with the native one.
+    const claudeBridgeActive = this.options.claudeBridge === true && operatorClaudeBridgeEnabled();
     const curatedExtensions = resolveCuratedExtensionPaths({
       permissionLevel: this.options.permissionLevel,
       resolvedToolContract,
-      claudeBridge: this.options.claudeBridge === true,
+      claudeBridge: claudeBridgeActive,
     });
-    if (this.options.claudeBridge === true && !curatedExtensions.claudeBridgePath) {
+    if (claudeBridgeActive && !curatedExtensions.claudeBridgePath) {
       throw new Error(
         'claude_bridge_unavailable: execution.claude_bridge is enabled but the pi-claude-bridge ' +
           `extension was not found (expected the global package "${CLAUDE_BRIDGE_PACKAGE}" or ` +

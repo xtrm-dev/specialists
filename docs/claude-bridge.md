@@ -15,30 +15,43 @@ they do on a built-in provider — Pi executes the tools, not Claude Code.
 
 ## Enabling it
 
-The flag is per definition and OFF everywhere by default:
+Two independent switches must both be on. The definition selects the route for one Specialist; the
+operator grants it for the machine. **The definition flag alone is never enough**, because a
+repository can write the definition layer — a repo-shipped `.specialists/user/<name>.json`, a
+repo-defined specialist name that becomes the merge base, or a repo layer that is a symlink into
+the home layer. Nothing inside a repository can write the operator switch.
 
-```json
-{ "specialist": { "execution": { "claude_bridge": true, "model": "claude-bridge/claude-sonnet-5-5" } } }
-```
+1. Operator, once per machine — `~/.config/specialists/user.json` (or `$XDG_CONFIG_HOME`):
 
-Set it in your own layer, never in a shipped definition:
+   ```json
+   { "claude_bridge": { "enabled": true } }
+   ```
 
-```bash
-sb specialist override <name> execution.claude_bridge=true    # or edit .specialists/user/<name>.json
-```
+2. Definition, per Specialist (in your own layer, never in a shipped definition):
+
+   ```json
+   { "specialist": { "execution": { "claude_bridge": true, "model": "claude-bridge/claude-sonnet-5-5" } } }
+   ```
+
+   ```bash
+   sb specialist override <name> execution.claude_bridge=true
+   ```
 
 Requirements:
 
 1. the `pi-claude-bridge` package installed where Pi resolves global packages, or
-   `SPECIALISTS_CLAUDE_BRIDGE_PATH=/abs/path/to/entry` for a source checkout;
+   `SPECIALISTS_CLAUDE_BRIDGE_PATH=/abs/path/to/entry` for a source checkout (absolute only);
 2. Claude Code logged in as the operator (`claude auth login`; `claude auth status` to check) — the
    agent never logs in and never reads credentials;
 3. a model whose provider is `claude-bridge`. Do not use `anthropic/...` for this route: that is
    Pi's own API-key provider and does not go through Claude Code.
 
-Flag off: the extension is not loaded, the gate refuses `claude-bridge/...` with `no model matches`,
-and the package need not be installed at all. Flag on with the package missing: the dispatch is
-refused with `claude_bridge_unavailable` rather than quietly running on another provider.
+Either switch off: the extension is not loaded and the gate refuses `claude-bridge/...` with
+`no model matches`, so the package need not be installed at all and a repo-selected flag changes
+nothing. Both on with the package missing: the dispatch is refused with
+`claude_bridge_unavailable` rather than quietly running on another provider. Both on, but the
+extension fails to register its provider on the live session: the session is disposed and the
+dispatch is refused with `model_unavailable`.
 
 ## Limits
 

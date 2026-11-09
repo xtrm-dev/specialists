@@ -68,8 +68,8 @@ import {
 } from '../pi/session.js';
 import {
   CLAUDE_BRIDGE_PROVIDER,
-  claudeBridgeEnabled,
   claudeBridgeExtensionProviders,
+  claudeBridgeRouteEnabled,
 } from '../pi/claude-bridge.js';
 import { getPermissionGuardExtensionPath, resolvePermissionGuardForSpawn } from '../pi/permission-guard-extension.js';
 import { formatResolvedToolContract, withDiscoveredExtensionTools, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
@@ -1681,7 +1681,10 @@ export class NativeActivationHost {
     // requirement of the opt-in — a Specialist that asked for the bridge and silently ran on a
     // built-in provider would report a run nobody can attribute. Checked BEFORE the gate so the
     // refusal names the missing install rather than reporting the model as unavailable.
-    const claudeBridge = claudeBridgeEnabled(execution);
+    // BOTH halves: the definition selects the route, the operator enables it on this machine.
+    // A repository can write the definition layer but cannot write the global user config, which
+    // is why the flag alone must never load the bridge (SPECIALISTS-4405 review finding 1).
+    const claudeBridge = claudeBridgeRouteEnabled(execution);
     const claudeBridgePath = claudeBridge ? resolveClaudeBridgeExtensionPath() : undefined;
     if (claudeBridge && !claudeBridgePath) {
       return reject('claude_bridge_unavailable', {
@@ -1693,7 +1696,7 @@ export class NativeActivationHost {
     }
     // The gate cannot resolve a provider that only exists once the session binds its extensions,
     // so it is told which providers to admit provisionally (and the host verifies them below).
-    gateExtensionProviders.set(modelRuntime, claudeBridgeExtensionProviders(execution));
+    gateExtensionProviders.set(modelRuntime, claudeBridgeExtensionProviders(claudeBridge));
     let modelIndex = 0;
     let modelCheck = await checkModelForRuntime(sdk, modelRuntime, modelChain[0] ?? '');
     while ((!modelCheck.ok || !modelCheck.model) && modelIndex < modelChain.length - 1) {
@@ -2291,8 +2294,29 @@ export class NativeActivationHost {
         }
         // Install the REAL model: the gate's placeholder carried the provider id but not the
         // bridge's own context window, token limits or cost, and this session now runs on it.
+        //
+        // Fail closed when the SDK cannot do it at all: an optional-call no-op would leave the
+        // session on the placeholder descriptor and report a run on a model with invented limits.
+        const installModel = created.session.setModel;
+        if (typeof installModel !== 'function') {
+          created.session.dispose();
+          const detail = {
+            requestedModel: provisionalPattern,
+            note:
+              `this pi SDK session has no setModel, so "${provisionalPattern}" cannot be installed; ` +
+              'a provisionally admitted model is never run on the gate placeholder',
+          };
+          if (options.viaFallback) {
+            throw new DispatchRejectedError('model_unavailable', {
+              specialist: request.specialist,
+              issueRef: request.issueRef,
+              ...detail,
+            });
+          }
+          return reject('model_unavailable', detail);
+        }
         try {
-          await created.session.setModel?.(resolvedModel);
+          await installModel.call(created.session, resolvedModel);
         } catch (error) {
           created.session.dispose();
           const detail = {
@@ -2309,6 +2333,31 @@ export class NativeActivationHost {
             });
           }
           return reject('model_unavailable', detail);
+        }
+        // pi 1.4.0's setModel recomputes the thinking level from the operator's per-model or
+        // global default (`_getThinkingLevelForModelSwitch`) instead of keeping the level this
+        // host passed at creation. Re-apply the specialist's level, or a bridged run silently
+        // runs at the operator's default thinking depth.
+        if (thinkingLevel) {
+          try {
+            created.session.setThinkingLevel?.(thinkingLevel as Parameters<NonNullable<PiAgentSessionLike['setThinkingLevel']>>[0]);
+          } catch (error) {
+            created.session.dispose();
+            const detail = {
+              requestedModel: provisionalPattern,
+              note: `installed "${provisionalPattern}" but could not re-apply thinking level "${thinkingLevel}": ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            };
+            if (options.viaFallback) {
+              throw new DispatchRejectedError('model_unavailable', {
+                specialist: request.specialist,
+                issueRef: request.issueRef,
+                ...detail,
+              });
+            }
+            return reject('model_unavailable', detail);
+          }
         }
       }
       return created.session;
@@ -3438,10 +3487,11 @@ export class NativeActivationHost {
       // SPECIALISTS-4405: the override must be able to name a bridged model too. The flag is a
       // property of the definition, so it is read from the definition rather than guessed.
       const retrySpecialist = await this.loader.get(record.snapshot.specialist).catch(() => undefined);
-      gateExtensionProviders.set(
-        retryRuntime,
-        claudeBridgeExtensionProviders(retrySpecialist?.specialist?.execution),
-      );
+      // The same two halves as dispatch: the definition selects, the operator grants.
+      const retryBridge = retrySpecialist
+        ? claudeBridgeRouteEnabled(retrySpecialist.specialist.execution)
+        : false;
+      gateExtensionProviders.set(retryRuntime, claudeBridgeExtensionProviders(retryBridge));
       const check = await checkModelForRuntime(sdk, retryRuntime, overrideName);
       if (!check.ok || !check.model) {
         throw new DispatchRejectedError('model_unavailable', {

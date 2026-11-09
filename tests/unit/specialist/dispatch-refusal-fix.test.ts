@@ -25,14 +25,16 @@ function mcpRefusalFor(reason: DispatchRefusalReason) {
 }
 
 describe('dispatch refusal reasons carry a corrective fix (SPECIALISTS-4341)', () => {
-  it('lists exactly the 37 wire reasons on master 2a450f5b8', () => {
-    expect(DISPATCH_REFUSAL_REASONS).toHaveLength(37);
+  it('lists exactly the 38 wire reasons on master 2a450f5b8 plus the Claude Code route', () => {
+    // 37 on master; SPECIALISTS-4405 adds `claude_bridge_unavailable`.
+    expect(DISPATCH_REFUSAL_REASONS).toHaveLength(38);
     // Written by reason name, not derived by counting call sites.
     expect([...DISPATCH_REFUSAL_REASONS]).toContain('unknown_specialist');
     expect([...DISPATCH_REFUSAL_REASONS]).toContain('workspace_isolation_unavailable');
     expect([...DISPATCH_REFUSAL_REASONS]).toContain('unknown_activation');
     expect([...DISPATCH_REFUSAL_REASONS]).toContain('not_resumable');
     expect([...DISPATCH_REFUSAL_REASONS]).toContain('not_steerable');
+    expect([...DISPATCH_REFUSAL_REASONS]).toContain('claude_bridge_unavailable');
     expect([...DISPATCH_REFUSAL_REASONS]).not.toContain('workspace_lease_unavailable');
   });
 
