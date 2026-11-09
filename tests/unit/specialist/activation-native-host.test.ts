@@ -79,7 +79,7 @@ interface FakeSessionOptions { record: { createArgs?: Record<string, unknown> } 
  * would have to be weakened to pass, which would delete what they check.
  */
 function fakeSession(opts: FakeSessionOptions & { assistantText?: string; stopReason?: string; errorMessage?: string; holdOpen?: boolean }): PiAgentSessionLike & {
-  disposed: boolean; prompts: string[]; emit: (e: PiAgentSessionEvent) => void;
+  disposed: boolean; prompts: string[]; setModelCalls: Array<Record<string, unknown>>; emit: (e: PiAgentSessionEvent) => void;
 } {
   const listeners: Array<(e: PiAgentSessionEvent) => void> = [];
   const messages: unknown[] = [];
@@ -89,6 +89,7 @@ function fakeSession(opts: FakeSessionOptions & { assistantText?: string; stopRe
     isIdle: true,
     disposed: false,
     prompts: [] as string[],
+    setModelCalls: [] as Array<Record<string, unknown>>,
     activeTools: ['read', 'grep'],
     async prompt(text: string) {
       session.prompts.push(text);
@@ -112,6 +113,7 @@ function fakeSession(opts: FakeSessionOptions & { assistantText?: string; stopRe
     getActiveToolNames: () => session.activeTools,
     setActiveToolsByName(names: string[]) { session.activeTools = names; },
     async waitForIdle() {},
+    async setModel(model: Record<string, unknown>) { session.setModelCalls.push(model); },
     emit: (e: PiAgentSessionEvent) => listeners.forEach(l => l(e)),
   };
   return session as unknown as ReturnType<typeof fakeSession>;
@@ -2193,6 +2195,94 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
     expect(host.inspect(handle.activationId)?.attemptId).toBe(handle.attemptId);
     expect(host.inspect(handle.activationId)?.state).toBe('failed');
     expect(session.prompts).toHaveLength(1);
+  });
+
+  it('refuses a bridged model with today\'s message when the route is not enabled (SPECIALISTS-4405)', async () => {
+    const { host } = chainHost({
+      executionExtra: { model: 'claude-bridge/claude-opus-5-5' },
+      sessions: [scriptSession([{ text: 'never runs' }])],
+      unavailable: ['claude-bridge/claude-opus-5-5'],
+    });
+
+    const refusal = await start(host).catch((caught: unknown) => caught);
+
+    expect((refusal as DispatchRejectedError).reason).toBe('model_unavailable');
+  });
+
+  it('refuses with claude_bridge_unavailable when the flag is on and the extension is missing (SPECIALISTS-4405)', async () => {
+    const previous = process.env.SPECIALISTS_CLAUDE_BRIDGE_PATH;
+    // A stale path is the deterministic form of "installed nowhere": the host must refuse, not
+    // fall back to a built-in provider the definition did not ask for.
+    process.env.SPECIALISTS_CLAUDE_BRIDGE_PATH = '/nonexistent/pi-claude-bridge/src/index.ts';
+    try {
+      const { host } = chainHost({
+        executionExtra: { model: 'claude-bridge/claude-opus-5-5', claude_bridge: true },
+        sessions: [scriptSession([{ text: 'never runs' }])],
+        unavailable: ['claude-bridge/claude-opus-5-5'],
+      });
+
+      const refusal = await start(host).catch((caught: unknown) => caught);
+
+      expect((refusal as DispatchRejectedError).reason).toBe('claude_bridge_unavailable');
+    } finally {
+      if (previous === undefined) delete process.env.SPECIALISTS_CLAUDE_BRIDGE_PATH;
+      else process.env.SPECIALISTS_CLAUDE_BRIDGE_PATH = previous;
+    }
+  });
+
+  it('admits a bridged model provisionally and installs the resolved model before the first turn (SPECIALISTS-4405)', async () => {
+    const bridgeDir = mkdtempSync(join(tmpdir(), 'bridge-fixture-'));
+    const bridgeEntry = join(bridgeDir, 'index.js');
+    writeFileSync(bridgeEntry, 'export default () => {};\n');
+    const previous = process.env.SPECIALISTS_CLAUDE_BRIDGE_PATH;
+    process.env.SPECIALISTS_CLAUDE_BRIDGE_PATH = bridgeEntry;
+    try {
+      const record: { createArgs?: Record<string, unknown> } = {};
+      const session = fakeSession({ record: {} });
+      // Two phases, like the real thing: the gate's runtime cannot see the provider (no-match),
+      // and once the session binds its extensions the same pattern resolves.
+      let resolutions = 0;
+      const sdk = {
+        ...makeSdk(record, session),
+        resolveModelScopeWithDiagnostics: () => {
+          resolutions += 1;
+          if (resolutions === 1) {
+            return {
+              scopedModels: [],
+              diagnostics: [{ type: 'warning', code: 'no-match', message: 'No models match pattern "claude-bridge/claude-opus-5-5"' }],
+            };
+          }
+          return {
+            scopedModels: [{ model: { id: 'claude-opus-5-5', provider: 'claude-bridge', api: 'claude-bridge' } }],
+            diagnostics: [],
+          };
+        },
+      } as unknown as PiSdk;
+      const spec = readOnlySpec({ model: 'claude-bridge/claude-opus-5-5', claude_bridge: true });
+      const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
+            loader: loaderFor(spec),
+        workItems: fakeWorkItems(),
+        forensics: collectingSink(),
+        loadSdk: async () => sdk,
+        cwd: hostWorkspace(),
+      });
+
+      const handle = await start(host);
+      const result = await handle.result;
+
+      expect(result.status).toBe('completed');
+      // The host's own runtime is what the session was given, so extension registration lands
+      // somewhere the host can verify against.
+      expect(record.createArgs?.modelRuntime).toBeDefined();
+      expect(session.setModelCalls).toHaveLength(1);
+      expect((session.setModelCalls[0] as { provider?: string }).provider).toBe('claude-bridge');
+      expect(resolutions).toBe(2);
+    } finally {
+      if (previous === undefined) delete process.env.SPECIALISTS_CLAUDE_BRIDGE_PATH;
+      else process.env.SPECIALISTS_CLAUDE_BRIDGE_PATH = previous;
+      rmSync(bridgeDir, { recursive: true, force: true });
+    }
   });
 
   it('holds a failed writer lease across the retry — no orphan, no contention with itself', async () => {

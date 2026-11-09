@@ -1149,6 +1149,8 @@ async function runSingleAttempt(
       stallTimeoutMs: spec.specialist.execution.stall_timeout_ms ?? timeoutMs,
       ...(extensionSelection.excludeExtensions.length > 0 ? { excludeExtensions: extensionSelection.excludeExtensions } : {}),
       ...(extensionSelection.extensionSources.length > 0 ? { extensionSources: extensionSelection.extensionSources } : {}),
+      // SPECIALISTS-4405: the legacy spawn loads the same curated set as the native host.
+      ...(spec.specialist.execution.claude_bridge === true ? { claudeBridge: true } : {}),
       ...(extensionSelection.offline === false ? { offline: false } : {}),
       resolvedToolContract,
       onToken: (delta) => {

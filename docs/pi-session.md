@@ -183,3 +183,10 @@ Both live at `~/.pi/agent/extensions/`. Run `specialists status` to see which ex
 
 - [pi-rpc-boundary.md](pi-rpc-boundary.md) — RPC ownership boundary and lifecycle adaptation notes
 - [background-jobs.md](background-jobs.md) — Background job monitoring
+
+## The Claude Code route (opt-in)
+
+A definition may set `execution.claude_bridge: true` to run its Claude models through the Claude
+Code CLI and the Agent SDK on the operator's subscription login, instead of an API-key provider.
+The flag is off by default, requires `pi-claude-bridge` to be installed, and is not for fleet-scale
+or unattended bulk runs. See [claude-bridge.md](./claude-bridge.md).

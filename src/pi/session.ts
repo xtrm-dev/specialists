@@ -42,6 +42,7 @@ import { getReadLineNumbersExtensionPath } from './read-line-numbers-extension.j
 import { getExtensionToolPolicyExtensionPath, NATIVE_TOOLS_ENV_KEY, REQUIRED_EXTENSION_TOOLS_ENV_KEY } from './extension-tool-policy-extension.js';
 import { getPermissionGuardExtensionPath, isPermissionGuardEnabled, resolvePermissionGuardForSpawn, shouldGrantGuardedBash } from './permission-guard-extension.js';
 import { resolvePiExtensionsPythonKernelPath } from './python-kernel-extension.js';
+import { CLAUDE_BRIDGE_PACKAGE, CLAUDE_BRIDGE_PATH_ENV } from './claude-bridge.js';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -107,6 +108,12 @@ export interface PiSessionOptions {
   extensionSources?: readonly string[];
   /** Controls whether Pi starts with `--offline`. Defaults true. */
   offline?: boolean;
+  /**
+   * `execution.claude_bridge` (SPECIALISTS-4405). Loads the Claude Code bridge into this session
+   * as well as the native one, so the two runtimes cannot disagree about the route; a missing
+   * install throws rather than running without the provider the definition asked for.
+   */
+  claudeBridge?: boolean;
   /** Absolute path boundary for write-side tools; undefined disables enforcement */
   worktreeBoundary?: string;
   /** Permission level from specialist YAML — controls which pi tools are enabled */
@@ -674,6 +681,12 @@ export interface CuratedExtensionResolution {
   /** Every curated path, in the legacy argv order. Only paths that exist are included. */
   all: string[];
   /**
+   * The Claude Code bridge entry, when the definition opted in AND the package is installed
+   * (SPECIALISTS-4405). `undefined` with the flag on means "not installed": the host refuses with
+   * `claude_bridge_unavailable` rather than running a Specialist without the provider it asked for.
+   */
+  claudeBridgePath?: string;
+  /**
    * The subset that takes part in same-identity de-duplication against a definition's own
    * `execution.extensions` sources. Preserved verbatim from the pre-extraction code
    * (unitAI-il2io): the managed python-kernel copy and the gitnexus npm copy are the two a
@@ -686,8 +699,16 @@ export interface CuratedExtensionResolution {
 export function resolveCuratedExtensionPaths(options: {
   permissionLevel?: string;
   resolvedToolContract?: ResolvedToolContract;
+  /**
+   * `execution.claude_bridge` (SPECIALISTS-4405). OFF unless the definition says otherwise: the
+   * route spends the operator's Claude subscription quota and needs the operator's own login, so
+   * nothing about it may be ambient.
+   */
+  claudeBridge?: boolean;
 }): CuratedExtensionResolution {
   const all: string[] = [];
+  const claudeBridgePath = options.claudeBridge ? resolveClaudeBridgeExtensionPath() : undefined;
+  if (claudeBridgePath) all.push(claudeBridgePath);
   const piExtDir = join(homedir(), '.pi', 'agent', 'extensions');
   const permLevel = (options.permissionLevel ?? '').toUpperCase();
   if (permLevel !== 'READ_ONLY') {
@@ -735,6 +756,7 @@ export function resolveCuratedExtensionPaths(options: {
   }
   return {
     all,
+    ...(claudeBridgePath ? { claudeBridgePath } : {}),
     dedupeAgainstDynamic: [
       ...(pyKernelPath ? [pyKernelPath] : []),
       ...(gitnexusContract?.status === 'available' && gitnexusContract.packagePath ? [gitnexusContract.packagePath] : []),
@@ -860,6 +882,68 @@ export function resolveGlobalPackageDir(packageName: string, deps: GlobalNodeMod
   return resolveGlobalNodeModulesDirs(deps)
     .map(root => join(root, packageName))
     .find(dir => exists(join(dir, 'package.json')));
+}
+
+/**
+ * Resolve the Claude Code bridge extension entry (SPECIALISTS-4405), or `undefined` when it is not
+ * installed. A directory with a `package.json` is resolved through its own entry field, then
+ * through the layouts Pi itself loads: the bridge ships neither `main` nor `exports`, so
+ * `src/index.ts` is its normal entry rather than a fallback nobody hits.
+ *
+ * `SPECIALISTS_CLAUDE_BRIDGE_PATH` names an entry directly (a source checkout, a non-global
+ * install, or a test fixture).
+ */
+export function resolveClaudeBridgeExtensionPath(
+  env: NodeJS.ProcessEnv = process.env,
+  exists: (path: string) => boolean = existsSync,
+): string | undefined {
+  const override = env[CLAUDE_BRIDGE_PATH_ENV]?.trim();
+  if (override) return exists(override) ? override : undefined;
+
+  const packageDir = resolveGlobalPackageDir(CLAUDE_BRIDGE_PACKAGE);
+  if (!packageDir) return undefined;
+  return resolveClaudeBridgePackageEntry(packageDir, exists) ?? packageDir;
+}
+
+export function resolveClaudeBridgePackageEntry(
+  packageDir: string,
+  exists: (path: string) => boolean,
+): string | undefined {
+  let declared: string | undefined;
+  try {
+    const manifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf-8')) as {
+      main?: unknown;
+      exports?: unknown;
+    };
+    declared = exportedExtensionEntry(manifest.exports)
+      ?? (typeof manifest.main === 'string' ? manifest.main : undefined);
+  } catch {
+    declared = undefined;
+  }
+  const candidates = [
+    ...(declared ? [join(packageDir, declared)] : []),
+    join(packageDir, 'src', 'index.ts'),
+    join(packageDir, 'dist', 'index.js'),
+    join(packageDir, 'index.js'),
+    join(packageDir, 'index.ts'),
+  ];
+  return candidates.find(candidate => exists(candidate));
+}
+
+/** `exports` may be a string, or a map with `.` (and `import`/`default`/`node` conditions). */
+function exportedExtensionEntry(exportsField: unknown): string | undefined {
+  if (typeof exportsField === 'string') return exportsField;
+  if (!exportsField || typeof exportsField !== 'object') return undefined;
+  const root = (exportsField as Record<string, unknown>)['.'];
+  if (typeof root === 'string') return root;
+  if (root && typeof root === 'object') {
+    const conditions = root as Record<string, unknown>;
+    for (const key of ['import', 'default', 'node']) {
+      const value = conditions[key];
+      if (typeof value === 'string') return value;
+    }
+  }
+  return undefined;
 }
 
 /** `~/.nvm/versions/node/<version>/lib/node_modules`, newest version first. */
@@ -1300,7 +1384,15 @@ export class PiAgentSession {
     const curatedExtensions = resolveCuratedExtensionPaths({
       permissionLevel: this.options.permissionLevel,
       resolvedToolContract,
+      claudeBridge: this.options.claudeBridge === true,
     });
+    if (this.options.claudeBridge === true && !curatedExtensions.claudeBridgePath) {
+      throw new Error(
+        'claude_bridge_unavailable: execution.claude_bridge is enabled but the pi-claude-bridge ' +
+          `extension was not found (expected the global package "${CLAUDE_BRIDGE_PACKAGE}" or ` +
+          `${CLAUDE_BRIDGE_PATH_ENV}); install it or clear the flag`,
+      );
+    }
     for (const extensionPath of curatedExtensions.all) {
       args.push('-e', extensionPath);
     }
