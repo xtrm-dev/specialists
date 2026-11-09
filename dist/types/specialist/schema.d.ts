@@ -2,6 +2,172 @@ import * as z from 'zod';
 import type { ManifestPolicyTier } from './manifest-resolver.js';
 export declare const KebabCase: z.ZodString;
 export declare const ExtensionToggleSchema: z.ZodBoolean;
+export declare const ExecutionSchema: z.ZodObject<{
+    mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
+    model: z.ZodNullable<z.ZodString>;
+    surface_models: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    fallback_model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    fallback_models: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString, "many">>>;
+    timeout_ms: z.ZodDefault<z.ZodNumber>;
+    stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
+    max_retries: z.ZodDefault<z.ZodNumber>;
+    interactive: z.ZodDefault<z.ZodBoolean>;
+    stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
+    prompt_limit_bytes: z.ZodOptional<z.ZodNumber>;
+    response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
+    /** Semantic output archetype used for structured output contracts and schema extensions. */
+    output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
+    /** Controls which pi tools are available to the agent.
+     *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
+     *  LOW       : + bash                       (inspect/run, no file edits)
+     *  MEDIUM    : + edit                       (can edit existing files)
+     *  HIGH      : + write                      (full access — create new files)
+     */
+    permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
+    /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
+    requires_worktree: z.ZodDefault<z.ZodBoolean>;
+    /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+     *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+     *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+     *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+     *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+     *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+    lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+     *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+     *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+     *  operator's per-specialist permission for a route that spends subscription quota, and it must
+     *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+     *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+     *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+     *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+     *  selection alone never enables the route. */
+    claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    bare: z.ZodDefault<z.ZodBoolean>;
+    /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
+    thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
+    auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
+    /** Optional per-session extension toggles. `false` disables legacy gitnexus injection.
+     *  Arbitrary source-string keys with value `true` are passed to Pi as repeated `-e <source>` pairs.
+     *  `serena` is DEPRECATED (K4 Serena retirement, unitAI-e67up.8): accepted for
+     *  backward compatibility but ignored — Specialists no longer injects pi-serena-tools. */
+    extensions: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodBoolean>>;
+    /** Script-surface required JSON keys, independent of `response_format`.
+     *  `sp script` and other `runScriptSpecialist` callers fail closed with
+     *  `error_type: 'invalid_json'` when a key is missing. `sp run` is inert: its
+     *  `SpecialistRunner.run` path does not read this field. */
+    expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+}, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+    mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
+    model: z.ZodNullable<z.ZodString>;
+    surface_models: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    fallback_model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    fallback_models: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString, "many">>>;
+    timeout_ms: z.ZodDefault<z.ZodNumber>;
+    stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
+    max_retries: z.ZodDefault<z.ZodNumber>;
+    interactive: z.ZodDefault<z.ZodBoolean>;
+    stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
+    prompt_limit_bytes: z.ZodOptional<z.ZodNumber>;
+    response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
+    /** Semantic output archetype used for structured output contracts and schema extensions. */
+    output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
+    /** Controls which pi tools are available to the agent.
+     *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
+     *  LOW       : + bash                       (inspect/run, no file edits)
+     *  MEDIUM    : + edit                       (can edit existing files)
+     *  HIGH      : + write                      (full access — create new files)
+     */
+    permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
+    /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
+    requires_worktree: z.ZodDefault<z.ZodBoolean>;
+    /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+     *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+     *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+     *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+     *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+     *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+    lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+     *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+     *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+     *  operator's per-specialist permission for a route that spends subscription quota, and it must
+     *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+     *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+     *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+     *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+     *  selection alone never enables the route. */
+    claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    bare: z.ZodDefault<z.ZodBoolean>;
+    /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
+    thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
+    auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
+    /** Optional per-session extension toggles. `false` disables legacy gitnexus injection.
+     *  Arbitrary source-string keys with value `true` are passed to Pi as repeated `-e <source>` pairs.
+     *  `serena` is DEPRECATED (K4 Serena retirement, unitAI-e67up.8): accepted for
+     *  backward compatibility but ignored — Specialists no longer injects pi-serena-tools. */
+    extensions: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodBoolean>>;
+    /** Script-surface required JSON keys, independent of `response_format`.
+     *  `sp script` and other `runScriptSpecialist` callers fail closed with
+     *  `error_type: 'invalid_json'` when a key is missing. `sp run` is inert: its
+     *  `SpecialistRunner.run` path does not read this field. */
+    expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+}, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+    mode: z.ZodDefault<z.ZodEnum<["tool", "skill", "auto"]>>;
+    model: z.ZodNullable<z.ZodString>;
+    surface_models: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    fallback_model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    fallback_models: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString, "many">>>;
+    timeout_ms: z.ZodDefault<z.ZodNumber>;
+    stall_timeout_ms: z.ZodOptional<z.ZodNumber>;
+    max_retries: z.ZodDefault<z.ZodNumber>;
+    interactive: z.ZodDefault<z.ZodBoolean>;
+    stdout_limit_bytes: z.ZodOptional<z.ZodNumber>;
+    prompt_limit_bytes: z.ZodOptional<z.ZodNumber>;
+    response_format: z.ZodDefault<z.ZodEnum<["text", "json", "markdown"]>>;
+    /** Semantic output archetype used for structured output contracts and schema extensions. */
+    output_type: z.ZodDefault<z.ZodEnum<["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]>>;
+    /** Controls which pi tools are available to the agent.
+     *  READ_ONLY : read, grep, find, ls        (+ bwrap-sandboxed bash unless opted out; no writes)
+     *  LOW       : + bash                       (inspect/run, no file edits)
+     *  MEDIUM    : + edit                       (can edit existing files)
+     *  HIGH      : + write                      (full access — create new files)
+     */
+    permission_required: z.ZodDefault<z.ZodEnum<["READ_ONLY", "LOW", "MEDIUM", "HIGH"]>>;
+    /** Whether specialist requires worktree isolation. Set false for workflow specialists that write shared state (.xtrm/memory.md) and should commit directly to master. */
+    requires_worktree: z.ZodDefault<z.ZodBoolean>;
+    /** Lease waiver: provision an isolated per-Issue worktree and acquire its lease despite a
+     *  read tier, so self-sampling observers (watchers, durable monitors) can run bash without
+     *  contending with writers. Explicit per-specialist trust grant: the lease still cannot tell
+     *  read-only bash from mutating bash, so a waived activation's bash is unconstrained in its
+     *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
+     *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
+    lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+     *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+     *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+     *  operator's per-specialist permission for a route that spends subscription quota, and it must
+     *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+     *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+     *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+     *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+     *  selection alone never enables the route. */
+    claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    bare: z.ZodDefault<z.ZodBoolean>;
+    /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
+    thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
+    auto_commit: z.ZodDefault<z.ZodEnum<["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]>>;
+    /** Optional per-session extension toggles. `false` disables legacy gitnexus injection.
+     *  Arbitrary source-string keys with value `true` are passed to Pi as repeated `-e <source>` pairs.
+     *  `serena` is DEPRECATED (K4 Serena retirement, unitAI-e67up.8): accepted for
+     *  backward compatibility but ignored — Specialists no longer injects pi-serena-tools. */
+    extensions: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodBoolean>>;
+    /** Script-surface required JSON keys, independent of `response_format`.
+     *  `sp script` and other `runScriptSpecialist` callers fail closed with
+     *  `error_type: 'invalid_json'` when a key is missing. `sp run` is inert: its
+     *  `SpecialistRunner.run` path does not read this field. */
+    expected_output_keys: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+}, z.ZodTypeAny, "passthrough">>;
 export declare const SpecialistSchema: z.ZodObject<{
     specialist: z.ZodObject<{
         metadata: z.ZodObject<{
@@ -57,6 +223,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -102,6 +278,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -147,6 +333,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -464,6 +660,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -509,6 +715,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -554,6 +770,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -871,6 +1097,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -916,6 +1152,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -961,6 +1207,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -1280,6 +1536,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -1325,6 +1591,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -1370,6 +1646,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -1687,6 +1973,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -1732,6 +2028,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -1777,6 +2083,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -2094,6 +2410,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -2139,6 +2465,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -2184,6 +2520,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -2503,6 +2849,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -2548,6 +2904,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -2593,6 +2959,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -2910,6 +3286,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -2955,6 +3341,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -3000,6 +3396,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -3317,6 +3723,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -3362,6 +3778,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -3407,6 +3833,16 @@ export declare const SpecialistSchema: z.ZodObject<{
              *  OWN worktree (never the shared checkout). Deliberately NOT in the override allowlists:
              *  full user-scope specs carry it, sparse overrides cannot waive a shipped specialist. */
             lease_waiver: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+            /** Opt-in Claude Code route (SPECIALISTS-4405): serve this specialist's Claude models through
+             *  pi-claude-bridge, i.e. the Claude Code CLI and the Claude Agent SDK on the operator's own
+             *  subscription login. OFF by default and absent from every shipped definition: the flag is the
+             *  operator's per-specialist permission for a route that spends subscription quota, and it must
+             *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
+             *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+             *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+             *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+             *  selection alone never enables the route. */
+            claude_bridge: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
             bare: z.ZodDefault<z.ZodBoolean>;
             /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
             thinking_level: z.ZodOptional<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
@@ -3682,7 +4118,7 @@ export type ScriptEntry = {
     label?: string;
 };
 /** Flat execution sub-fields an override layer may set. */
-export declare const OVERRIDE_ALLOWED_EXECUTION_FIELDS: readonly ["model", "fallback_model", "fallback_models", "timeout_ms", "stall_timeout_ms", "interactive", "thinking_level", "lease_waiver", "max_retries", "prompt_limit_bytes", "stdout_limit_bytes"];
+export declare const OVERRIDE_ALLOWED_EXECUTION_FIELDS: readonly ["model", "fallback_model", "fallback_models", "timeout_ms", "stall_timeout_ms", "interactive", "thinking_level", "lease_waiver", "claude_bridge", "max_retries", "prompt_limit_bytes", "stdout_limit_bytes"];
 /** Nested execution leaf paths an override layer may set. Relative to `specialist.execution`.
  *  `extensions.serena` stays allowlisted so legacy overrides keep validating; the
  *  runtime ignores it (Serena retired, unitAI-e67up.8). */
