@@ -22,8 +22,41 @@
 
 import type { PiSdk, PiModelRuntimeLike, PiModelScopeResult } from './pi-sdk.js';
 
+/** The model fields the host and pi's session creation actually read. */
+export interface PiModelDescriptor {
+  id?: string;
+  provider?: string;
+  api?: string;
+  name?: string;
+  [key: string]: unknown;
+}
+
+export interface ModelGateOptions {
+  /**
+   * Provider ids that an extension loaded INTO THE SESSION supplies, which this gate's own
+   * `ModelRuntime` therefore cannot see (SPECIALISTS-4405).
+   *
+   * Pi registers an extension's provider on the runtime the session binds to, and that binding
+   * happens when the session is created — after this gate runs. So a provider served by an
+   * extension always resolves `no-match` here, even when it is about to be available. Naming it
+   * explicitly turns that into a PROVISIONAL admission the host must verify on the live session,
+   * instead of a rejection that would make the route unusable.
+   *
+   * Empty by default: a bridged model is refused exactly as before unless the caller opted in.
+   */
+  extensionProviders?: readonly string[];
+}
+
 export interface ModelGateResult {
   ok: boolean;
+  /**
+   * Admitted on an extension provider this runtime cannot resolve (`extensionProviders`).
+   *
+   * `model` is then a PLACEHOLDER descriptor, not a resolved pi model: the host must resolve the
+   * real one against the session's runtime after creation and replace it, and must refuse the
+   * activation when that resolution fails. Never treat a provisional result as "the model exists".
+   */
+  provisional?: boolean;
   /**
    * The resolved pi `Model` object.
    *
@@ -32,7 +65,7 @@ export interface ModelGateResult {
    * for undefined", because the provider never resolves. The gate already holds the real
    * object, so it hands it over rather than making the host re-resolve it.
    */
-  model?: { id?: string; provider?: string };
+  model?: PiModelDescriptor;
   /** Provider-qualified id actually resolved, when available. Diagnostics/telemetry only. */
   resolvedModel?: string;
   provider?: string;
@@ -67,6 +100,7 @@ export async function validateModelAvailable(
   sdk: PiSdk,
   modelRuntime: PiModelRuntimeLike,
   requested: string,
+  options: ModelGateOptions = {},
 ): Promise<ModelGateResult> {
   let scope: PiModelScopeResult;
   try {
@@ -86,6 +120,20 @@ export async function validateModelAvailable(
   // fabricated-custom-model case that `resolveCliModel` would wave through.
   const noMatch = diagnostics.find(d => d.code === 'no-match');
   if (noMatch) {
+    // Half one, extension carve-out: the provider may arrive when the session binds its
+    // extensions (SPECIALISTS-4405). Admission is provisional and the host verifies it on the
+    // live session before the first turn; anything else still fails exactly as before.
+    const extensionProvider = requested.includes('/') ? requested.slice(0, requested.indexOf('/')) : undefined;
+    if (extensionProvider && (options.extensionProviders ?? []).includes(extensionProvider)) {
+      return {
+        ok: true,
+        provisional: true,
+        provider: extensionProvider,
+        model: provisionalModelDescriptor(requested, extensionProvider),
+        resolvedModel: requested,
+        diagnostics,
+      };
+    }
     return {
       ok: false,
       reason: noMatch.message || `no model matches "${requested}"`,
@@ -120,5 +168,29 @@ export async function validateModelAvailable(
     resolvedModel: first.id ? `${provider}/${first.id}`.replace(`${provider}/${provider}/`, `${provider}/`) : requested,
     provider,
     diagnostics,
+  };
+}
+
+/**
+ * A model descriptor for a provider that is not registered yet.
+ *
+ * `api` is the provider id: `registerProvider(providerId, config)` serves models whose `api` equals
+ * the id it was registered under, and the bridge registers `claude-bridge` that way. The remaining
+ * metadata is a placeholder — the host replaces this whole object with the resolved model before
+ * the first turn, so only `api` and `provider` have to be right here.
+ */
+function provisionalModelDescriptor(requested: string, provider: string): PiModelDescriptor {
+  const id = requested.slice(provider.length + 1);
+  return {
+    id,
+    provider,
+    api: provider,
+    name: `${provider}/${id}`,
+    baseUrl: provider,
+    reasoning: false,
+    input: ['text'],
+    contextWindow: 200_000,
+    maxTokens: 8_192,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   };
 }

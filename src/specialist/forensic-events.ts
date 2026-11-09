@@ -856,7 +856,7 @@ function familyForTimelineType(type: string): string {
   if (type === 'review_verdict_pass' || type === 'review_verdict_partial' || type === 'review_verdict_fail' || type === 'review_verdict_waived') return 'review';
   if (type === 'chain_ready_for_review' || type === 'chain_finalized') return 'chain';
   if (type === 'worktree_merged') return 'worktree';
-  if (type === 'stale_warning') return 'process_health';
+  if (type === 'stale_warning' || type === 'thinking_level_unavailable') return 'process_health';
   // SPECIALISTS-101: settlement evidence keeps its own family so the 10 names stay distinct.
   // Additive: no existing type matched this prefix before (mapper dropped them), so no
   // existing row changes family.
@@ -902,6 +902,7 @@ function eventNameForTimelineEvent(event: { type: string; [key: string]: unknown
   if (event.type === 'chain_finalized') return 'chain.finalized';
   if (event.type === 'worktree_merged') return 'worktree.merged';
   if (event.type === 'stale_warning') return 'process_health.stale_detected';
+  if (event.type === 'thinking_level_unavailable') return 'process_health.thinking_level_unavailable';
   // SPECIALISTS-101 carrier: settlement_* keep their own event_name (identity mapping).
   // Additive: these types never reached the writer before (mapper returned null).
   if (typeof event.type === 'string' && event.type.startsWith('settlement_')) return event.type;
@@ -927,7 +928,7 @@ function severityForTimelineEvent(event: { type: string; [key: string]: unknown 
   if (event.type === 'error' || event.type === 'extension_error' || event.type === 'auto_commit_failed' || event.type === 'command_failed') return 'error';
   if (event.type === 'mcp' && (event.is_error || mcpEventNameForTimelineEvent(event).endsWith('.failed') || mcpEventNameForTimelineEvent(event) === 'mcp.auth.failed')) return 'error';
   if (event.type === 'mcp' && mcpEventNameForTimelineEvent(event) === 'mcp.rate_limited') return 'warn';
-  if (event.type === 'stale_warning' || event.type === 'control_signal') return 'warn';
+  if (event.type === 'stale_warning' || event.type === 'control_signal' || event.type === 'thinking_level_unavailable') return 'warn';
   if (event.type === 'run_complete' && event.status === 'ERROR') return 'error';
   if (event.type === 'tool' && event.is_error) return 'error';
   // SPECIALISTS-101: settlement failures are errors, degradations/deferrals/refusals warn, success info.

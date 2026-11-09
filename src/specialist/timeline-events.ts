@@ -356,6 +356,19 @@ export interface TimelineEventStaleWarning extends TimelineEventBase {
   tool?: string;
 }
 
+/**
+ * A requested thinking level could not be re-applied after a model switch
+ * (SPECIALISTS-4405). Cosmetic, not route-fatal: the run continues at the SDK's default depth,
+ * and this row is how the operator learns that the Specialist did not run at the level it asked
+ * for. Recorded instead of dropped, because a silently different reasoning depth is exactly the
+ * kind of difference that makes a run unreproducible.
+ */
+export interface TimelineEventThinkingLevelUnavailable extends TimelineEventBase {
+  type: 'thinking_level_unavailable';
+  requested_level: string;
+  note: string;
+}
+
 export interface TimelineEventTokenUsage extends TimelineEventBase {
   type: 'token_usage';
   token_usage: TimelineTokenUsage;
@@ -568,6 +581,7 @@ export type TimelineEvent =
   | TimelineEventStatusChange
   | TimelineEventRunComplete
   | TimelineEventStaleWarning
+  | TimelineEventThinkingLevelUnavailable
   | TimelineEventTokenUsage
   | TimelineEventSessionStats
   | TimelineEventSessionStatsError

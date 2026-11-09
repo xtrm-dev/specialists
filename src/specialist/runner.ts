@@ -108,6 +108,7 @@ import {
 } from './payload-measure.js';
 
 import { execSync, spawnSync } from 'node:child_process';
+import { claudeBridgeSessionOption } from '../pi/claude-bridge.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { homedir } from 'node:os';
@@ -1428,6 +1429,8 @@ export class SpecialistRunner {
           worktreeBoundary: options.worktreeBoundary,
           ...(excludeExtensions.length > 0 ? { excludeExtensions } : {}),
           ...(extensionSelection.extensionSources.length > 0 ? { extensionSources: extensionSelection.extensionSources } : {}),
+          // SPECIALISTS-4405: the legacy spawn loads the same curated set as the native host.
+          ...claudeBridgeSessionOption(execution),
           ...(extensionSelection.offline === false ? { offline: false } : {}),
           ...(Object.keys(envVars).length > 0 ? { env: envVars } : {}),
           onToken:     (delta) => onProgress?.(delta),

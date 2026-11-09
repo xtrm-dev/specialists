@@ -463,6 +463,8 @@ export function formatEventInline(event: TimelineEvent): string | null {
     }
     case 'stale_warning':
       return yellow(`[warning] ${event.reason}: ${Math.round(event.silence_ms / 1000)}s silent`);
+    case 'thinking_level_unavailable':
+      return yellow(`[warning] thinking level "${event.requested_level}" not applied: ${event.note}`);
     case 'control_signal':
       return dim(`[control] ${event.action}`);
     case 'error':

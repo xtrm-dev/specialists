@@ -575,6 +575,18 @@ export function mapNativeLifecycleEvent(
         ...(tool !== undefined ? { tool } : {}),
       }), t);
     }
+    // SPECIALISTS-4405: the thinking level could not be re-applied after a model switch. Not
+    // route-fatal, but the run then uses the SDK default depth, so it is recorded as a warning
+    // rather than dropped with the unknown names below.
+    case 'thinking_level_unavailable': {
+      const payload = record(event.payload);
+      return at({
+        t,
+        type: 'thinking_level_unavailable' as const,
+        requested_level: stringField(payload?.requested_level) ?? 'unknown',
+        note: stringField(payload?.note) ?? 'thinking level could not be re-applied',
+      }, t);
+    }
     default:
       // Runtime safety is unchanged: an unknown name still drops without crashing the writer.
       // Totality is a TEST-time obligation enforced by native-mapper-totality.test.ts.

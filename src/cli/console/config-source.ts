@@ -11,6 +11,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolveCanonicalAssetDir } from '../../specialist/canonical-asset-resolver.js';
 import { z } from 'zod';
 import {
+  CLAUDE_BRIDGE_SWITCH_KEY,
   getGlobalSpecialistOverrideLeafPaths,
   getGlobalUserConfigPath,
   GlobalSpecialistOverrideSchema,
@@ -164,7 +165,9 @@ function collectSpecialists(
   const knownNames = safeListNames(loader);
   let userKeys: string[] = [];
   if (isRecord(parsedConfig)) {
-    userKeys = Object.keys(parsedConfig).filter((k) => !k.startsWith('_'));
+    // Reserved machine-level keys are not Specialists: the Claude Code route switch lives in the
+    // same file and must never render as a row (SPECIALISTS-4405).
+    userKeys = Object.keys(parsedConfig).filter((k) => !k.startsWith('_') && k !== CLAUDE_BRIDGE_SWITCH_KEY);
   }
   const allNames = Array.from(new Set([...knownNames, ...userKeys])).sort();
 

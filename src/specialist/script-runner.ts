@@ -27,6 +27,7 @@ import type { ScriptEntry, Specialist } from './schema.js';
 import type { SupervisorStatus } from './supervisor.js';
 import { formatResolvedToolContract, type ResolvedToolContract } from './resolved-tool-contract.js';
 import { renderTemplate } from './templateEngine.js';
+import { claudeBridgeSessionOption } from '../pi/claude-bridge.js';
 import {
   createFinishReasonEvent,
   createMetaEvent,
@@ -1149,6 +1150,8 @@ async function runSingleAttempt(
       stallTimeoutMs: spec.specialist.execution.stall_timeout_ms ?? timeoutMs,
       ...(extensionSelection.excludeExtensions.length > 0 ? { excludeExtensions: extensionSelection.excludeExtensions } : {}),
       ...(extensionSelection.extensionSources.length > 0 ? { extensionSources: extensionSelection.extensionSources } : {}),
+      // SPECIALISTS-4405: the legacy spawn loads the same curated set as the native host.
+      ...claudeBridgeSessionOption(spec.specialist.execution),
       ...(extensionSelection.offline === false ? { offline: false } : {}),
       resolvedToolContract,
       onToken: (delta) => {

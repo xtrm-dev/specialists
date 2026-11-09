@@ -128,6 +128,20 @@ const OverrideMandatoryRulesSchema = z.object({
   template_sets: z.array(KebabCase).nullable(),
 }).strict();
 
+/**
+ * Reserved top-level key in `~/.config/specialists/user.json` for switches that apply to the
+ * operator's machine rather than to one Specialist (SPECIALISTS-4405).
+ *
+ * It is NOT a specialist name: the record schema below filters it out before validation, exactly
+ * like the `_` metadata keys, or a single switch would invalidate every override in the file.
+ */
+export const CLAUDE_BRIDGE_SWITCH_KEY = 'claude_bridge';
+
+/** The operator half of the Claude Code route switch. Both this and the definition flag must be on. */
+export const ClaudeBridgeSwitchSchema = z.object({
+  enabled: z.boolean().default(false),
+}).strict();
+
 export const GlobalSpecialistOverrideSchema = z.object({
   execution: OverrideExecutionSchema,
   prompt: OverridePromptSchema.optional(),
@@ -159,7 +173,7 @@ export const GlobalUserConfigSchema = z.preprocess(
   value => {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) return value;
     return Object.fromEntries(
-      Object.entries(value).filter(([key]) => !key.startsWith('_')),
+      Object.entries(value).filter(([key]) => !key.startsWith('_') && key !== CLAUDE_BRIDGE_SWITCH_KEY),
     );
   },
   z.record(z.string(), GlobalSpecialistOverrideSchema),
@@ -404,12 +418,24 @@ export function validateGlobalUserConfig(
     };
   }
 
-  const result = GlobalUserConfigSchema.safeParse(raw);
-  if (result.success) {
-    return { valid: true, errors: [] };
+  const switchErrors: Array<{ path: string; message: string }> = [];
+  if (raw && typeof raw === 'object' && !Array.isArray(raw) && CLAUDE_BRIDGE_SWITCH_KEY in raw) {
+    const parsedSwitch = ClaudeBridgeSwitchSchema.safeParse((raw as Record<string, unknown>)[CLAUDE_BRIDGE_SWITCH_KEY]);
+    if (!parsedSwitch.success) {
+      switchErrors.push({
+        path: CLAUDE_BRIDGE_SWITCH_KEY,
+        message: parsedSwitch.error.issues.map(issue => issue.message).join('; ') || 'invalid switch',
+      });
+    }
   }
 
-  const errors = result.error.issues.flatMap(issue => {
+  const result = GlobalUserConfigSchema.safeParse(raw);
+  if (result.success && switchErrors.length === 0) {
+    return { valid: true, errors: [] };
+  }
+  if (result.success) return { valid: false, errors: switchErrors };
+
+  const recordErrors = result.error.issues.flatMap(issue => {
     const basePath = issue.path.map(p => (typeof p === 'number' ? `[${p}]` : p)).join('.');
     if (issue.code !== 'unrecognized_keys') {
       return [{ path: basePath, message: issue.message }];
@@ -419,7 +445,9 @@ export function validateGlobalUserConfig(
       message: issue.message,
     }));
   });
-  return { valid: false, errors };
+  // The switch error must survive alongside record errors: dropping it would report the file as
+  // broken for one reason and hide the other.
+  return { valid: false, errors: [...switchErrors, ...recordErrors] };
 }
 
 /**

@@ -78,6 +78,70 @@ describe('validateModelAvailable', () => {
     expect(result.resolvedModel).toBe('anthropic/good-model');
   });
 
+  it('admits a bridged model PROVISIONALLY for an opted-in extension provider (SPECIALISTS-4405)', async () => {
+    // The bridge registers its provider when the session binds, after this gate runs, so the
+    // pattern can never resolve here. Admission is provisional and the host verifies it on the
+    // live session before the first turn.
+    const sdk = sdkReturning({
+      scopedModels: [],
+      diagnostics: [{ type: 'warning', code: 'no-match', message: 'No models match pattern "claude-bridge/claude-opus-5-5"', pattern: 'claude-bridge/claude-opus-5-5' }],
+    });
+
+    const result = await validateModelAvailable(sdk, runtime(false), 'claude-bridge/claude-opus-5-5', {
+      extensionProviders: ['claude-bridge'],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.provisional).toBe(true);
+    expect(result.provider).toBe('claude-bridge');
+    expect(result.model?.api).toBe('claude-bridge');
+    expect(result.model?.provider).toBe('claude-bridge');
+    expect(result.model?.id).toBe('claude-opus-5-5');
+  });
+
+  it('refuses a bridged model when no extension provider was opted in — today\'s behaviour', async () => {
+    const sdk = sdkReturning({
+      scopedModels: [],
+      diagnostics: [{ type: 'warning', code: 'no-match', message: 'No models match pattern "claude-bridge/claude-opus-5-5"', pattern: 'claude-bridge/claude-opus-5-5' }],
+    });
+
+    const result = await validateModelAvailable(sdk, runtime(false), 'claude-bridge/claude-opus-5-5');
+
+    expect(result.ok).toBe(false);
+    expect(result.provisional).toBeUndefined();
+    expect(result.reason).toContain('No models match');
+  });
+
+  it('does not extend the carve-out to a provider that was not named', async () => {
+    const sdk = sdkReturning({
+      scopedModels: [],
+      diagnostics: [{ type: 'warning', code: 'no-match', message: 'No models match pattern "other/x"', pattern: 'other/x' }],
+    });
+
+    const result = await validateModelAvailable(sdk, runtime(false), 'other/x', {
+      extensionProviders: ['claude-bridge'],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.provisional).toBeUndefined();
+  });
+
+  it('does not let the carve-out bypass the auth half for a provider that DOES resolve', async () => {
+    // A registered-but-unauthed provider must still be refused: the carve-out covers the
+    // no-match case only, which is exactly the provider that is not there yet.
+    const sdk = sdkReturning({
+      scopedModels: [{ model: { id: 'claude-opus-5-5', provider: 'claude-bridge' } }],
+      diagnostics: NO_DIAGNOSTICS,
+    });
+
+    const result = await validateModelAvailable(sdk, runtime(false), 'claude-bridge/claude-opus-5-5', {
+      extensionProviders: ['claude-bridge'],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('no configured auth');
+  });
+
   it('rejects rather than throwing when model resolution itself fails', async () => {
     const sdk: PiSdk = {
       createAgentSession: async () => { throw new Error('not used'); },
