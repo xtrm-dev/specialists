@@ -2570,6 +2570,134 @@ function chainHost(opts: {
     }
   });
 
+  it('does NOT put the bridge in additionalExtensionPaths when either half is off (review S7)', async () => {
+    const bridge = withBridgeEntry();
+    const loaders: FakeResourceLoader[] = [];
+    class RecordingLoader extends FakeResourceLoader {
+      constructor(options: Record<string, unknown>) {
+        super(options);
+        loaders.push(this);
+      }
+    }
+    const runHost = async (executionExtra: Record<string, unknown>) => {
+      const record: { createArgs?: Record<string, unknown> } = {};
+      const session = fakeSession({ record: {} });
+      const sdk = { ...makeSdk(record, session), DefaultResourceLoader: RecordingLoader } as unknown as PiSdk;
+      const host = new NativeActivationHost({
+        provisionWriterWorkspace: workspaceIdentityFor,
+        loader: loaderFor(readOnlySpec(executionExtra)),
+        workItems: fakeWorkItems(),
+        forensics: collectingSink(),
+        loadSdk: async () => sdk,
+        cwd: hostWorkspace(),
+      });
+      await (await host.start({
+        specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+      }).catch((caught: unknown) => caught)) as unknown;
+      return loaders.map(loader => (loader.options.additionalExtensionPaths as string[] | undefined) ?? []).flat();
+    };
+
+    try {
+      // Both halves on: the entry is there (the control that makes the negatives meaningful).
+      let restore = withOperatorSwitch(true);
+      try {
+        const paths = await runHost({ claude_bridge: true, model: 'claude-bridge/claude-opus-5-5' });
+        expect(paths).toContain(bridge.entry);
+      } finally { restore(); }
+      loaders.length = 0;
+
+      // Operator half off, definition on: not loaded.
+      restore = withOperatorSwitch(false);
+      try {
+        const paths = await runHost({ claude_bridge: true, model: 'claude-bridge/claude-opus-5-5' });
+        expect(paths ?? []).not.toContain(bridge.entry);
+      } finally { restore(); }
+      loaders.length = 0;
+
+      // Definition half off, operator on: not loaded.
+      restore = withOperatorSwitch(true);
+      try {
+        const paths = await runHost({ model: 'primaryprov/primary-model' });
+        expect(paths ?? []).not.toContain(bridge.entry);
+      } finally { restore(); }
+    } finally {
+      bridge.restore();
+    }
+  });
+
+  it('refuses a bridged RETRY model_override when the OPERATOR switch is off (review S2b)', async () => {
+    const bridge = withBridgeEntry();
+    const restore = withOperatorSwitch(false);
+    try {
+      const created: unknown[] = [];
+      const sdk = provisionalChainSdk(created, [scriptSession([{ throw: new Error('permanent boom') }])]);
+      const spec = readOnlySpec({ model: 'primaryprov/primary-model', claude_bridge: true });
+      const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
+            loader: loaderFor(spec),
+        workItems: fakeWorkItems(),
+        forensics: collectingSink(),
+        loadSdk: async () => sdk,
+        cwd: hostWorkspace(),
+      });
+
+      const handle = await start(host);
+      expect((await handle.result).status).toBe('failed');
+
+      const refusal = await host.retry(handle.activationId, { modelOverride: 'claude-bridge/claude-opus-5-5' })
+        .catch((caught: unknown) => caught) as DispatchRejectedError;
+
+      expect(refusal.reason).toBe('model_unavailable');
+      expect(String(refusal.detail?.note)).toContain('No models match');
+      // Still failed and retryable: a refused override never half-advances the attempt.
+      expect(host.inspect(handle.activationId)?.state).toBe('failed');
+      expect(created).toHaveLength(1);
+    } finally {
+      restore();
+      bridge.restore();
+    }
+  });
+
+  it('reports an unapplied thinking level instead of skipping it silently (review finding 6)', async () => {
+    const bridge = withBridgeEntry();
+    const restore = withOperatorSwitch(true);
+    try {
+      const record: { createArgs?: Record<string, unknown> } = {};
+      const session = fakeSession({ record: {} });
+      session.setThinkingLevel = undefined;
+      let resolutions = 0;
+      const sdk = {
+        ...makeSdk(record, session),
+        resolveModelScopeWithDiagnostics: () => {
+          resolutions += 1;
+          if (resolutions === 1) {
+            return { scopedModels: [], diagnostics: [{ type: 'warning', code: 'no-match', message: 'No models match pattern "claude-bridge/claude-opus-5-5"' }] };
+          }
+          return { scopedModels: [{ model: { id: 'claude-opus-5-5', provider: 'claude-bridge' } }], diagnostics: [] };
+        },
+      } as unknown as PiSdk;
+      const sink = collectingSink();
+      const spec = readOnlySpec({ model: 'claude-bridge/claude-opus-5-5', claude_bridge: true, thinking_level: 'high' });
+      const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
+            loader: loaderFor(spec),
+        workItems: fakeWorkItems(),
+        forensics: sink,
+        loadSdk: async () => sdk,
+        cwd: hostWorkspace(),
+      });
+
+      const handle = await start(host);
+      expect((await handle.result).status).toBe('completed');
+      expect(sink.names).toContain('thinking_level_unavailable');
+      const event = sink.events.find(e => e.name === 'thinking_level_unavailable');
+      expect((event?.payload as Record<string, unknown> | undefined)?.requested_level).toBe('high');
+    } finally {
+      restore();
+      bridge.restore();
+    }
+  });
+
   it('admits a bridged DISPATCH-TIME fallback (an unavailable primary) provisionally', async () => {
     // The other walk: the gate refuses the primary itself, so the chain skips forward before any
     // session exists. That admission must go through the same provisional funnel.

@@ -210,6 +210,23 @@ describe('readGlobalConfigSnapshot — file-existence + parse handling', () => {
     expect(beads?.isOverride).toBe(false);
   });
 
+  it('does not list the reserved Claude Code switch as a Specialist row (SPECIALISTS-4405)', () => {
+    mkdirSync(join(tmp, 'specialists'), { recursive: true });
+    writeFileSync(
+      join(tmp, 'specialists', 'user.json'),
+      JSON.stringify({
+        claude_bridge: { enabled: true },
+        executor: { execution: { model: 'anthropic/claude-sonnet-4-6' } },
+      }),
+      'utf-8',
+    );
+    const snap = readGlobalConfigSnapshot();
+    expect(snap.specialists.map(s => s.name)).not.toContain('claude_bridge');
+    expect(snap.specialists.map(s => s.name)).toContain('executor');
+    // The switch is valid input, so it must not be reported as a schema error of its own.
+    expect((snap.validationErrors ?? []).some(error => error.path.startsWith('claude_bridge'))).toBe(false);
+  });
+
   it('displayPath emits a string (HOME→~ when overlapping the real home)', () => {
     mkdirSync(join(tmp, 'specialists'), { recursive: true });
     writeFileSync(join(tmp, 'specialists', 'user.json'), '{}', 'utf-8');

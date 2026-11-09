@@ -2339,24 +2339,35 @@ export class NativeActivationHost {
         // host passed at creation. Re-apply the specialist's level, or a bridged run silently
         // runs at the operator's default thinking depth.
         if (thinkingLevel) {
-          try {
-            created.session.setThinkingLevel?.(thinkingLevel as Parameters<NonNullable<PiAgentSessionLike['setThinkingLevel']>>[0]);
-          } catch (error) {
-            created.session.dispose();
-            const detail = {
-              requestedModel: provisionalPattern,
-              note: `installed "${provisionalPattern}" but could not re-apply thinking level "${thinkingLevel}": ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-            };
-            if (options.viaFallback) {
-              throw new DispatchRejectedError('model_unavailable', {
-                specialist: request.specialist,
-                issueRef: request.issueRef,
-                ...detail,
-              });
+          const applyThinking = created.session.setThinkingLevel;
+          if (typeof applyThinking !== 'function') {
+            // Visible rather than silent: the model is installed and the run continues, but at the
+            // SDK's default thinking depth. A missing setModel is refused; a missing thinking
+            // re-apply is cosmetic, so it is reported instead of failing the dispatch.
+            emit('thinking_level_unavailable', {
+              requested_level: thinkingLevel,
+              note: 'this pi SDK session has no setThinkingLevel; the run continues at the default thinking level',
+            });
+          } else {
+            try {
+              applyThinking.call(created.session, thinkingLevel as Parameters<NonNullable<PiAgentSessionLike['setThinkingLevel']>>[0]);
+            } catch (error) {
+              created.session.dispose();
+              const detail = {
+                requestedModel: provisionalPattern,
+                note: `installed "${provisionalPattern}" but could not re-apply thinking level "${thinkingLevel}": ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              };
+              if (options.viaFallback) {
+                throw new DispatchRejectedError('model_unavailable', {
+                  specialist: request.specialist,
+                  issueRef: request.issueRef,
+                  ...detail,
+                });
+              }
+              return reject('model_unavailable', detail);
             }
-            return reject('model_unavailable', detail);
           }
         }
       }

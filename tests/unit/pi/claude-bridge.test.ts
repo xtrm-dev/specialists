@@ -181,6 +181,23 @@ describe('operatorClaudeBridgeEnabled', () => {
     expect(operatorClaudeBridgeEnabled(withUserConfig('[]'))).toBe(false);
   });
 
+  it('agrees with the validator about unknown keys: invalid input never enables the route', () => {
+    const contents = JSON.stringify({ [CLAUDE_BRIDGE_SWITCH_KEY]: { enabled: true, foo: 1 } });
+    const location = withUserConfig(contents);
+    expect(validateGlobalUserConfig(contents).valid).toBe(false);
+    expect(operatorClaudeBridgeEnabled(location)).toBe(false);
+  });
+
+  it('keeps the switch error when the rest of the file is also invalid', () => {
+    const result = validateGlobalUserConfig(JSON.stringify({
+      [CLAUDE_BRIDGE_SWITCH_KEY]: { enabled: 'yes' },
+      explorer: { execution: { model: 'not-a-number' } },
+    }));
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(error => error.path === CLAUDE_BRIDGE_SWITCH_KEY)).toBe(true);
+    expect(result.errors.length).toBeGreaterThan(1);
+  });
+
   it('requires both halves, and the definition alone never enables the route', () => {
     expect(claudeBridgeRouteEnabled({ claude_bridge: true }, () => false)).toBe(false);
     expect(claudeBridgeRouteEnabled({}, () => true)).toBe(false);

@@ -435,7 +435,7 @@ export function validateGlobalUserConfig(
   }
   if (result.success) return { valid: false, errors: switchErrors };
 
-  const errors = result.error.issues.flatMap(issue => {
+  const recordErrors = result.error.issues.flatMap(issue => {
     const basePath = issue.path.map(p => (typeof p === 'number' ? `[${p}]` : p)).join('.');
     if (issue.code !== 'unrecognized_keys') {
       return [{ path: basePath, message: issue.message }];
@@ -445,7 +445,9 @@ export function validateGlobalUserConfig(
       message: issue.message,
     }));
   });
-  return { valid: false, errors };
+  // The switch error must survive alongside record errors: dropping it would report the file as
+  // broken for one reason and hide the other.
+  return { valid: false, errors: [...switchErrors, ...recordErrors] };
 }
 
 /**

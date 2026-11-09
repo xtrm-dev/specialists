@@ -188,5 +188,16 @@ Both live at `~/.pi/agent/extensions/`. Run `specialists status` to see which ex
 
 A definition may set `execution.claude_bridge: true` to run its Claude models through the Claude
 Code CLI and the Agent SDK on the operator's subscription login, instead of an API-key provider.
-The flag is off by default, requires `pi-claude-bridge` to be installed, and is not for fleet-scale
-or unattended bulk runs. See [claude-bridge.md](./claude-bridge.md).
+
+Two switches must both be on: the definition field (the per-Specialist selector) **and** the
+operator switch, which lives outside every repository:
+
+```json
+// ~/.config/specialists/user.json  (or $XDG_CONFIG_HOME/specialists/user.json)
+{ "claude_bridge": { "enabled": true } }
+```
+
+The flag is off by default, requires `pi-claude-bridge` to be installed where Pi resolves global
+packages (or an absolute `SPECIALISTS_CLAUDE_BRIDGE_PATH`), and is not for fleet-scale or
+unattended bulk runs. With either switch off, no part of the route is loaded and a
+`claude-bridge/...` model is refused exactly as it is today. See [claude-bridge.md](./claude-bridge.md).

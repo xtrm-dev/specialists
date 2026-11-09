@@ -17,6 +17,7 @@
  */
 import { readFileSync } from 'node:fs';
 import {
+  ClaudeBridgeSwitchSchema,
   CLAUDE_BRIDGE_SWITCH_KEY,
   getGlobalUserConfigPath,
   type GlobalUserConfigPath,
@@ -67,8 +68,10 @@ export function operatorClaudeBridgeEnabled(
     const raw: unknown = JSON.parse(readFile(location.path));
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
     const entry = (raw as Record<string, unknown>)[CLAUDE_BRIDGE_SWITCH_KEY];
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
-    return (entry as { enabled?: unknown }).enabled === true;
+    // Same strict schema the validator reports on: an extra key is invalid input, and invalid
+    // input never enables a billing surface. The reader and the validator must not disagree.
+    const parsed = ClaudeBridgeSwitchSchema.safeParse(entry);
+    return parsed.success && parsed.data.enabled === true;
   } catch {
     return false;
   }

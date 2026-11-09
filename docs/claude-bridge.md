@@ -53,6 +53,16 @@ nothing. Both on with the package missing: the dispatch is refused with
 extension fails to register its provider on the live session: the session is disposed and the
 dispatch is refused with `model_unavailable`.
 
+### The trust boundary (stated, not enforced)
+
+The switch is exactly as trustworthy as the environment of the process that reads it: `HOME` and
+`XDG_CONFIG_HOME` decide **which** `user.json` is read. A process whose `XDG_CONFIG_HOME` points
+into a repository would read that repository's file, and a repository cannot set the environment of
+the operator's own process — so this is still not a repository-controlled route. It becomes one only
+if the operator, a wrapper script or a service unit hands a checkout control of those variables. Do
+not start the host with `HOME`/`XDG_CONFIG_HOME` inherited from untrusted content, and treat the
+switch as an operator consent record, not as a sandbox boundary.
+
 ## Limits
 
 - **One operator, one login.** The route exists for the operator's own machine and their own

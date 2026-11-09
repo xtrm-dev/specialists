@@ -52,8 +52,10 @@ export const ExecutionSchema = z.object({
    *  subscription login. OFF by default and absent from every shipped definition: the flag is the
    *  operator's per-specialist permission for a route that spends subscription quota, and it must
    *  stay removable in one place. With it off, no part of the route is loaded and the bridge need
-   *  not be installed. Deliberately override-ALLOWED: the operator enables it in their own
-   *  `.specialists/user` layer rather than by editing a shipped definition. */
+   *  not be installed. This field is only the SELECTOR: the route also needs the operator switch in
+   *  the global user config (`~/.config/specialists/user.json`), which no repository can write.
+   *  Override-ALLOWED so a per-Specialist selection can live in the operator's own layer, but a
+   *  selection alone never enables the route. */
   claude_bridge: z.boolean().optional().default(false),
   bare: z.boolean().default(false),
   /** Pass --thinking <level> to pi. Models that don't support thinking ignore this. */
