@@ -22,6 +22,22 @@ export interface GlobalUserConfigPath {
  * fallback surfaced only when config-home is absent but legacy exists.
  */
 export declare function getGlobalUserConfigPath(): GlobalUserConfigPath;
+/**
+ * Reserved top-level key in `~/.config/specialists/user.json` for switches that apply to the
+ * operator's machine rather than to one Specialist (SPECIALISTS-4405).
+ *
+ * It is NOT a specialist name: the record schema below filters it out before validation, exactly
+ * like the `_` metadata keys, or a single switch would invalidate every override in the file.
+ */
+export declare const CLAUDE_BRIDGE_SWITCH_KEY = "claude_bridge";
+/** The operator half of the Claude Code route switch. Both this and the definition flag must be on. */
+export declare const ClaudeBridgeSwitchSchema: z.ZodObject<{
+    enabled: z.ZodDefault<z.ZodBoolean>;
+}, "strict", z.ZodTypeAny, {
+    enabled: boolean;
+}, {
+    enabled?: boolean | undefined;
+}>;
 export declare const GlobalSpecialistOverrideSchema: z.ZodObject<{
     execution: z.ZodObject<{
         model: z.ZodNullable<z.ZodString>;

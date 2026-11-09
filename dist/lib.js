@@ -6950,15 +6950,15 @@ import {
   accessSync,
   closeSync,
   constants,
-  existsSync as existsSync12,
+  existsSync as existsSync13,
   fstatSync,
   lstatSync as lstatSync2,
   openSync,
-  readFileSync as readFileSync6,
+  readFileSync as readFileSync8,
   realpathSync as realpathSync2
 } from "node:fs";
-import { homedir as homedir3 } from "node:os";
-import { isAbsolute as isAbsolute2, join as join9, relative, resolve as resolve10 } from "node:path";
+import { homedir as homedir4 } from "node:os";
+import { isAbsolute as isAbsolute2, join as join10, relative, resolve as resolve10 } from "node:path";
 
 // src/pi/session.ts
 import { createHash } from "node:crypto";
@@ -7144,321 +7144,20 @@ function resolvePiExtensionsPythonKernelPath() {
 }
 var SK_PACKAGE_DIR = join5("@jaggerxtrm", "pi-service-knowledge");
 
-// src/pi/session.ts
-import { spawn, execFileSync } from "node:child_process";
-import { existsSync as existsSync6, lstatSync, mkdirSync as mkdirSync2, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { isAbsolute, resolve as resolve5, sep, join as join6, dirname as dirname6 } from "node:path";
+// src/pi/claude-bridge.ts
+import { readFileSync as readFileSync2 } from "node:fs";
 
-// src/pi/backendMap.ts
-var BACKEND_MAP = {
-  gemini: "google-gemini-cli",
-  google: "google-gemini-cli",
-  claude: "anthropic",
-  anthropic: "anthropic",
-  openai: "openai",
-  qwen: "openai",
-  openrouter: "openrouter",
-  groq: "groq"
-};
-function mapSpecialistBackend(model) {
-  const provider = BACKEND_MAP[model.toLowerCase()];
-  if (!provider) {
-    return model.toLowerCase();
-  }
-  return provider;
-}
-function getProviderArgs(model) {
-  const m = model.toLowerCase();
-  if (m === "qwen") {
-    return ["--api-key", process.env.DASHSCOPE_API_KEY ?? process.env.OPENAI_API_KEY ?? ""];
-  }
-  return [];
-}
-
-// src/specialist/canonical-asset-resolver.ts
-import { existsSync as existsSync5 } from "node:fs";
-import { fileURLToPath as fileURLToPath5 } from "node:url";
-function resolveCanonicalAssetDir(relativePath) {
-  const configPath = `config/${relativePath}`;
-  let resolved = fileURLToPath5(new URL(`../${configPath}`, import.meta.url));
-  if (existsSync5(resolved))
-    return resolved;
-  resolved = fileURLToPath5(new URL(`../../${configPath}`, import.meta.url));
-  if (existsSync5(resolved))
-    return resolved;
-  return null;
-}
-
-// src/specialist/manifest-resolver.ts
-var GITNEXUS_HARD_DENY_TOOLS = new Set(["grep", "find", "ls"]);
-var GITNEXUS_BASE_TIER = "READ_ONLY";
-function uniqueOrdered(values) {
-  const seen = new Set;
-  const ordered = [];
-  for (const value of values) {
-    if (seen.has(value))
-      continue;
-    seen.add(value);
-    ordered.push(value);
-  }
-  return ordered;
-}
-function getCatalog(catalogs, name) {
-  return catalogs.find((catalog) => catalog.catalog === name);
-}
-function mergeTierPolicy(input) {
-  const catalogPolicy = input.catalogDefaultOverrides?.[input.tier];
-  const tierPolicy = input.manifestPolicy?.permissions?.[input.tier];
-  const overridePolicy = input.specialistOverride;
-  const specialistDenied = input.specialistExclusions?.deniedNatives ?? [];
-  return {
-    denied_natives_when_extension: uniqueOrdered([
-      ...catalogPolicy?.denied_natives_when_extension ?? [],
-      ...tierPolicy?.denied_natives_when_extension ?? [],
-      ...overridePolicy?.denied_natives_when_extension ?? [],
-      ...specialistDenied
-    ]),
-    denied_natives_mode: overridePolicy?.denied_natives_mode ?? tierPolicy?.denied_natives_mode ?? catalogPolicy?.denied_natives_mode ?? "soft"
-  };
-}
-function getTierTools(catalogs, name, tier) {
-  const catalog = getCatalog(catalogs, name);
-  return catalog?.source_tiers[tier] ?? [];
-}
-function getEffectiveDeniedTools(tools) {
-  return tools.filter((tool) => tool !== "read");
-}
-function resolveEffectiveExtensionState(state) {
-  if (!state) {
-    return { status: "available", includeTools: true, canEnforceHardDeny: true };
-  }
-  if (state.enabled === false || state.health === "disabled") {
-    return { status: "disabled", includeTools: false, canEnforceHardDeny: false };
-  }
-  if (state.health === "not_installed") {
-    return { status: "not_installed", includeTools: false, canEnforceHardDeny: false };
-  }
-  if (state.health === "loaded_unhealthy") {
-    return { status: "loaded_unhealthy", includeTools: false, canEnforceHardDeny: false };
-  }
-  if (state.health === "unknown") {
-    return { status: "unknown", includeTools: false, canEnforceHardDeny: false };
-  }
-  if (state.catalogCompatible === false) {
-    return { status: "catalog_incompatible", includeTools: false, canEnforceHardDeny: false };
-  }
-  return { status: "available", includeTools: true, canEnforceHardDeny: true };
-}
-function resolveManifestTools(input) {
-  const policy = mergeTierPolicy(input);
-  const warnings = [];
-  const attribution = [];
-  const downgradeReasons = [];
-  const effectiveDenied = new Set(getEffectiveDeniedTools(policy.denied_natives_when_extension ?? []));
-  const hardDeniedTools = new Set(Array.from(effectiveDenied).filter((tool) => GITNEXUS_HARD_DENY_TOOLS.has(tool)));
-  const deniedNatives = [];
-  const nativeTools = getTierTools(input.catalogs, "native", input.tier);
-  const gitnexusBase = getTierTools(input.catalogs, "gitnexus", GITNEXUS_BASE_TIER);
-  const gitnexusExtras = input.tier === "MEDIUM" || input.tier === "HIGH" ? getTierTools(input.catalogs, "gitnexus", input.tier).filter((tool) => !gitnexusBase.includes(tool)) : [];
-  const requestedGitnexusTools = uniqueOrdered([...gitnexusBase, ...gitnexusExtras]);
-  const pythonKernelTools = getTierTools(input.catalogs, "python-kernel", input.tier);
-  const pythonKernelState = input.extensionState?.["python-kernel"];
-  const effectivePythonKernelState = resolveEffectiveExtensionState(pythonKernelState);
-  const gitnexusState = input.specialistExclusions?.disabledExtensions?.includes("gitnexus") ? { ...input.extensionState?.gitnexus, enabled: false, health: "disabled" } : input.extensionState?.gitnexus;
-  const effectiveGitnexusState = resolveEffectiveExtensionState(gitnexusState);
-  const hardDenyAllowed = policy.denied_natives_mode === "hard" && effectiveGitnexusState.canEnforceHardDeny;
-  const finalNativeTools = nativeTools.filter((tool) => {
-    if (!hardDeniedTools.has(tool))
-      return true;
-    if (!hardDenyAllowed)
-      return true;
-    deniedNatives.push(tool);
-    return false;
-  });
-  const toolsList = uniqueOrdered([
-    ...finalNativeTools,
-    ...effectiveGitnexusState.includeTools ? requestedGitnexusTools : [],
-    ...effectivePythonKernelState.includeTools ? pythonKernelTools : []
-  ]);
-  if (!effectiveGitnexusState.includeTools && requestedGitnexusTools.length > 0) {
-    warnings.push(`gitnexus tools excluded by extension state: ${effectiveGitnexusState.status}${gitnexusState?.reason ? ` (${gitnexusState.reason})` : ""}`);
-  }
-  if (!effectivePythonKernelState.includeTools && pythonKernelTools.length > 0) {
-    warnings.push(`python-kernel tools excluded by extension state: ${effectivePythonKernelState.status}${pythonKernelState?.reason ? ` (${pythonKernelState.reason})` : ""}`);
-  }
-  if ((input.specialistExclusions?.disabledExtensions ?? []).length > 0) {
-    warnings.push(`specialist exclusions: ${(input.specialistExclusions?.disabledExtensions ?? []).join(", ")}`);
-    attribution.push({ layer: "specialist_exclusion", source: "specialist.json", tools: [] });
-  }
-  attribution.push({ layer: "catalog", source: "tool catalogs", tools: uniqueOrdered([...nativeTools, ...requestedGitnexusTools, ...pythonKernelTools]) });
-  if (input.catalogDefaultOverrides?.[input.tier]) {
-    attribution.push({
-      layer: "catalog_default",
-      source: "tool catalog defaults",
-      tools: input.catalogDefaultOverrides[input.tier]?.denied_natives_when_extension ?? []
-    });
-  }
-  if (input.manifestPolicy?.permissions?.[input.tier]) {
-    attribution.push({
-      layer: "tier_policy",
-      source: "manifest policy",
-      tools: input.manifestPolicy.permissions[input.tier]?.denied_natives_when_extension ?? []
-    });
-  }
-  if (input.specialistOverride) {
-    attribution.push({
-      layer: "specialist_override",
-      source: "specialist YAML",
-      tools: input.specialistOverride.denied_natives_when_extension ?? []
-    });
-  }
-  if (!hardDenyAllowed && policy.denied_natives_mode === "hard" && hardDeniedTools.size > 0) {
-    const restoredNatives = nativeTools.filter((tool) => hardDeniedTools.has(tool));
-    const reason = effectiveGitnexusState.status;
-    warnings.push(`hard deny restored native fallback: ${reason}`);
-    downgradeReasons.push(`restored native fallback for ${restoredNatives.join(",") || "(none)"} due to ${reason}`);
-    attribution.push({ layer: "runtime_health", source: "fallback", tools: restoredNatives });
-  }
-  const preferenceSignals = policy.denied_natives_mode === "soft" && effectiveDenied.size > 0 ? [`soft deny prefers extension tools for: ${Array.from(effectiveDenied).join(",")}`] : [];
-  return {
-    tools: toolsList.join(","),
-    toolsList,
-    deniedNatives,
-    deniedNativesMode: policy.denied_natives_mode ?? "soft",
-    preferenceSignals,
-    downgradeReasons,
-    warnings,
-    attribution
-  };
-}
-
-// src/specialist/resolved-tool-contract.ts
-function uniqueOrdered2(values) {
-  const seen = new Set;
-  const ordered = [];
-  for (const value of values) {
-    if (seen.has(value))
-      continue;
-    seen.add(value);
-    ordered.push(value);
-  }
-  return ordered;
-}
-function getCatalog2(catalogs, name) {
-  return catalogs.find((catalog) => catalog.catalog === name);
-}
-function getRequestedExtensionTools(catalogs, name, tier) {
-  const catalog = getCatalog2(catalogs, name);
-  if (!catalog)
-    return [];
-  return uniqueOrdered2([
-    ...catalog.source_tiers.READ_ONLY ?? [],
-    ...catalog.source_tiers[tier] ?? []
-  ]);
-}
-function getEffectiveExtensionStatus(input, name) {
-  const state = input.specialistExclusions?.disabledExtensions?.includes(name) ? { ...input.extensionState?.[name], enabled: false, health: "disabled" } : input.extensionState?.[name];
-  return resolveEffectiveExtensionState(state).status;
-}
-function formatList(values) {
-  return values.length > 0 ? values.join(", ") : "(none)";
-}
-function buildResolvedToolContract(input) {
-  const resolver = resolveManifestTools(input);
-  const nativeCatalog = getCatalog2(input.catalogs, "native");
-  const tierNativeTools = new Set(nativeCatalog?.source_tiers[input.tier] ?? []);
-  const guardedBashGranted = input.grantGuardedBash === true && input.tier === "READ_ONLY" && resolver.toolsList.length > 0;
-  if (guardedBashGranted)
-    tierNativeTools.add("bash");
-  const nativeTools = resolver.toolsList.filter((tool) => tierNativeTools.has(tool));
-  const toolsListWithGuard = guardedBashGranted && !resolver.toolsList.includes("bash") ? [...resolver.toolsList, "bash"] : resolver.toolsList;
-  const nativeToolsWithGuard = guardedBashGranted && !nativeTools.includes("bash") ? [...nativeTools, "bash"] : nativeTools;
-  const extensionTools = toolsListWithGuard.filter((tool) => !tierNativeTools.has(tool));
-  const exposedExtensionSources = uniqueOrdered2(input.extensionSources ?? []);
-  const extensions = Object.fromEntries(input.catalogs.filter((catalog) => catalog.catalog !== "native").map((catalog) => {
-    const activeTools = resolver.toolsList.filter((tool) => getRequestedExtensionTools(input.catalogs, catalog.catalog, input.tier).includes(tool));
-    return [
-      catalog.catalog,
-      {
-        status: getEffectiveExtensionStatus(input, catalog.catalog),
-        packageName: input.extensionPackages?.[catalog.catalog]?.packageName,
-        packagePath: input.extensionPackages?.[catalog.catalog]?.packagePath,
-        activeTools
-      }
-    ];
-  }));
-  return {
-    effectiveTier: input.tier,
-    toolsFlag: toolsListWithGuard.join(","),
-    exposedExtensionSources,
-    toolsList: toolsListWithGuard,
-    nativeTools: nativeToolsWithGuard,
-    extensionTools,
-    deniedNativeTools: resolver.deniedNatives,
-    deniedNativesMode: resolver.deniedNativesMode,
-    preferenceSignals: resolver.preferenceSignals,
-    downgradeReasons: resolver.downgradeReasons,
-    warnings: resolver.warnings,
-    extensions
-  };
-}
-function withDiscoveredExtensionTools(base, discovered) {
-  const isList = Array.isArray(discovered);
-  const pinned = isList ? discovered : discovered.pinned ?? [];
-  const refusedCollisions = isList ? [] : discovered.refusedCollisions ?? [];
-  const refusedProvenance = isList ? [] : discovered.refusedProvenance ?? [];
-  if (pinned.length === 0 && refusedCollisions.length === 0 && refusedProvenance.length === 0) {
-    return base;
-  }
-  const denied = new Set(base.deniedNativeTools);
-  const already = new Set(base.toolsList);
-  const HOST_TOOLS = new Set(["ask_coordinator", "escalate_to_coordinator"]);
-  const safePinned = uniqueOrdered2(pinned).filter((name) => !denied.has(name) && !already.has(name) && !HOST_TOOLS.has(name));
-  const toolsList = uniqueOrdered2([...base.toolsList, ...safePinned]);
-  const extensionTools = uniqueOrdered2([...base.extensionTools, ...safePinned]);
-  const warnings = [
-    ...base.warnings,
-    ...uniqueOrdered2(refusedCollisions).map((name) => `refused extension tool '${name}': collides with a builtin tool name`),
-    ...uniqueOrdered2(refusedProvenance).map((name) => `refused extension tool '${name}': non-extension provenance`)
-  ];
-  return {
-    ...base,
-    toolsFlag: toolsList.join(","),
-    toolsList,
-    extensionTools,
-    warnings
-  };
-}
-function describeAdmission(admission) {
-  return admission === "discover-then-pin" ? `registered tools admitted by discover-then-pin into this session's tool allowlist` : "registered tools admitted by the tool-policy gate";
-}
-function formatResolvedToolContract(contract, admission = "tool-policy-gate") {
-  const lines = [
-    "## Resolved Tool Contract",
-    `- effective tier: ${contract.effectiveTier}`,
-    `- --tools: ${contract.toolsFlag || "(none)"}`,
-    ...contract.exposedExtensionSources.length > 0 ? [`- exposed extension sources (${describeAdmission(admission)}): ${formatList(contract.exposedExtensionSources)}`] : [],
-    `- actual native tools: ${formatList(contract.nativeTools)}`,
-    `- active extension tools: ${formatList(contract.extensionTools)}`,
-    `- denied native tools: ${formatList(contract.deniedNativeTools)}`,
-    `- deny mode: ${contract.deniedNativesMode}`,
-    "- extension state:"
-  ];
-  const extensionEntries = Object.entries(contract.extensions);
-  if (extensionEntries.length === 0) {
-    lines.push("  - (none)");
-  } else {
-    for (const [name, extension] of extensionEntries) {
-      lines.push(`  - ${name}: ${extension.status}; active tools: ${formatList(extension.activeTools)}`);
-    }
-  }
-  lines.push(`- preference signals: ${formatList(contract.preferenceSignals)}`);
-  lines.push(`- downgrade reasons: ${formatList(contract.downgradeReasons)}`);
-  lines.push(`- warnings: ${formatList(contract.warnings)}`);
-  return lines.join(`
-`);
-}
+// src/specialist/global-config.ts
+import {
+  existsSync as existsSync5,
+  mkdirSync as mkdirSync2,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
+import { dirname as dirname6, join as join6 } from "node:path";
+import { homedir } from "node:os";
 
 // node_modules/zod/v3/helpers/util.js
 var util;
@@ -11271,6 +10970,651 @@ var nullableType = ZodNullable.create;
 var preprocessType = ZodEffects.createWithPreprocess;
 var pipelineType = ZodPipeline.create;
 
+// src/specialist/schema.ts
+var KebabCase = stringType().regex(/^[a-z][a-z0-9-]*$/, "Must be kebab-case");
+var Semver = stringType().regex(/^\d+\.\d+\.\d+$/, "Must be semver (e.g. 1.0.0)");
+var MetadataSchema = objectType({
+  name: KebabCase,
+  version: Semver,
+  description: stringType(),
+  category: stringType(),
+  updated: stringType().optional(),
+  tags: arrayType(stringType()).optional()
+}).passthrough();
+var ExtensionToggleSchema = booleanType();
+var ExecutionSchema = objectType({
+  mode: enumType(["tool", "skill", "auto"]).default("auto"),
+  model: stringType().nullable(),
+  surface_models: recordType(stringType()).optional(),
+  fallback_model: stringType().nullable().optional(),
+  fallback_models: arrayType(stringType()).nullable().optional(),
+  timeout_ms: numberType().default(120000),
+  stall_timeout_ms: numberType().optional(),
+  max_retries: numberType().int().min(0).default(0),
+  interactive: booleanType().default(false),
+  stdout_limit_bytes: numberType().int().positive().optional(),
+  prompt_limit_bytes: numberType().int().positive().optional(),
+  response_format: enumType(["text", "json", "markdown"]).default("text"),
+  output_type: enumType(["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]).default("custom"),
+  permission_required: enumType(["READ_ONLY", "LOW", "MEDIUM", "HIGH"]).default("READ_ONLY"),
+  requires_worktree: booleanType().default(true),
+  lease_waiver: booleanType().optional().default(false),
+  claude_bridge: booleanType().optional().default(false),
+  bare: booleanType().default(false),
+  thinking_level: enumType(["off", "minimal", "low", "medium", "high", "xhigh"]).optional(),
+  auto_commit: enumType(["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]).default("never"),
+  extensions: recordType(stringType(), ExtensionToggleSchema).optional(),
+  expected_output_keys: arrayType(stringType()).optional()
+}).passthrough();
+var PromptSchema = objectType({
+  system: stringType().optional(),
+  system_prompt_mode: enumType(["append", "replace"]).optional(),
+  task_template: stringType(),
+  output_schema: recordType(unknownType()).optional(),
+  skill_inherit: stringType().optional()
+}).passthrough();
+var ScriptEntrySchema = objectType({
+  run: stringType(),
+  phase: enumType(["pre", "post"]),
+  inject_output: booleanType().default(false),
+  required: booleanType().optional(),
+  label: stringType().max(128).optional()
+}).passthrough();
+var SkillsSchema = objectType({
+  paths: arrayType(stringType()).optional(),
+  scripts: arrayType(ScriptEntrySchema).optional()
+}).passthrough().optional();
+var CapabilitiesSchema = objectType({
+  required_tools: arrayType(stringType()).optional(),
+  external_commands: arrayType(stringType()).optional()
+}).passthrough().optional();
+var ValidationSchema = objectType({
+  files_to_watch: arrayType(stringType()).optional(),
+  stale_threshold_days: numberType().optional()
+}).passthrough().optional();
+var MandatoryRuleSchema = objectType({
+  id: stringType(),
+  level: enumType(["error", "warn", "info"]).default("error"),
+  text: stringType(),
+  when: stringType().optional()
+}).passthrough();
+var MandatoryRulesSchema = objectType({
+  template_sets: arrayType(KebabCase).default([]),
+  disable_default_globals: booleanType().default(false),
+  inline_rules: arrayType(MandatoryRuleSchema).default([])
+}).passthrough().optional();
+var SpecialistPermissionTierSchema = objectType({
+  denied_natives_when_extension: arrayType(stringType()).optional(),
+  denied_natives_mode: enumType(["soft", "hard"]).optional()
+}).passthrough();
+var SpecialistPermissionsSchema = objectType({
+  READ_ONLY: SpecialistPermissionTierSchema.optional(),
+  LOW: SpecialistPermissionTierSchema.optional(),
+  MEDIUM: SpecialistPermissionTierSchema.optional(),
+  HIGH: SpecialistPermissionTierSchema.optional()
+}).partial();
+var StallDetectionSchema = objectType({
+  running_silence_warn_ms: numberType().optional(),
+  running_silence_error_ms: numberType().optional(),
+  waiting_stale_ms: numberType().optional(),
+  waiting_auto_close_ms: numberType().nullable().optional(),
+  tool_duration_warn_ms: numberType().optional()
+}).passthrough().optional();
+var SpecialistSchema = objectType({
+  specialist: objectType({
+    metadata: MetadataSchema,
+    execution: ExecutionSchema,
+    prompt: PromptSchema,
+    skills: SkillsSchema,
+    capabilities: CapabilitiesSchema,
+    validation: ValidationSchema,
+    stall_detection: StallDetectionSchema,
+    mandatory_rules: MandatoryRulesSchema,
+    permissions: SpecialistPermissionsSchema.optional(),
+    output_file: stringType().optional(),
+    notes_mode: enumType(["full-trail", "final-only"]).default("full-trail"),
+    beads_integration: enumType(["auto", "always", "never"]).default("auto"),
+    beads_write_notes: booleanType().default(true)
+  }).passthrough()
+}).passthrough();
+var OVERRIDE_ALLOWED_EXECUTION_FIELDS = [
+  "model",
+  "fallback_model",
+  "fallback_models",
+  "timeout_ms",
+  "stall_timeout_ms",
+  "interactive",
+  "thinking_level",
+  "lease_waiver",
+  "claude_bridge",
+  "max_retries",
+  "prompt_limit_bytes",
+  "stdout_limit_bytes"
+];
+var OVERRIDE_ALLOWED_NESTED_EXECUTION_PATHS = ["extensions"];
+var OVERRIDE_ALLOWED_STALL_DETECTION_PATHS = [
+  "waiting_auto_close_ms"
+];
+var OVERRIDE_ALLOWED_PROMPT_FIELDS = ["system_prompt_mode"];
+var OVERRIDE_ALLOWED_MANDATORY_RULES_FIELDS = ["template_sets"];
+var OVERRIDE_ALLOWED_TOP_FIELDS = ["beads_write_notes", "notes_mode", "output_file"];
+var BLOCKED_OVERRIDE_FIELDS = [
+  "execution.permission_required",
+  "execution.auto_commit",
+  "prompt.system",
+  "prompt.output_schema",
+  "skills.scripts",
+  "mandatory_rules.inline_rules",
+  "mandatory_rules.disable_default_globals",
+  "capabilities"
+];
+function formatPath(path) {
+  return path.map((p) => typeof p === "number" ? `[${p}]` : p).join(".");
+}
+function getFriendlyMessage(issue) {
+  const path = formatPath(issue.path);
+  if (issue.code === "invalid_string" && issue.validation === "regex") {
+    if (path.includes("name")) {
+      return `Invalid specialist name: must be kebab-case (lowercase letters, numbers, hyphens). Got: "${issue.path.at(-1) === "name" ? "invalid value" : "see schema"}"`;
+    }
+    if (path.includes("version")) {
+      return `Invalid version: must be semver format (e.g., "1.0.0"). Got value that doesn't match pattern.`;
+    }
+  }
+  if (issue.code === "invalid_enum_value") {
+    const allowed = issue.options.map((o) => `"${o}"`).join(", ");
+    if (path.includes("permission_required")) {
+      return `Invalid permission_required: must be one of ${allowed}. This controls which pi tools are available.`;
+    }
+    if (path.includes("mode")) {
+      return `Invalid execution.mode: must be one of ${allowed}.`;
+    }
+    if (path.includes("beads_integration")) {
+      return `Invalid beads_integration: must be one of ${allowed}.`;
+    }
+    return `Invalid value at "${path}": expected one of ${allowed}, got "${issue.received}"`;
+  }
+  if (issue.code === "invalid_type") {
+    return `Invalid type at "${path}": expected ${issue.expected}, got ${issue.received}`;
+  }
+  if (issue.code === "invalid_literal") {
+    return `Invalid value at "${path}": expected "${issue.expected}"`;
+  }
+  return issue.message;
+}
+async function validateSpecialist(jsonContent) {
+  const errors = [];
+  const warnings = [];
+  let raw;
+  try {
+    raw = JSON.parse(jsonContent);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    errors.push({
+      path: "json",
+      message: `JSON parse error: ${msg}`,
+      code: "json_parse_error"
+    });
+    return { valid: false, errors, warnings };
+  }
+  const result = SpecialistSchema.safeParse(raw);
+  if (!result.success) {
+    for (const issue of result.error.issues) {
+      errors.push({
+        path: formatPath(issue.path),
+        message: getFriendlyMessage(issue),
+        code: issue.code
+      });
+    }
+  } else {
+    const spec = result.data;
+    const declaredModel = spec.specialist.execution.model;
+    if (declaredModel && !declaredModel.includes("/")) {
+      warnings.push(`Model "${declaredModel}" doesn't include a provider prefix. Expected format: "provider/model-id" (e.g., "anthropic/claude-sonnet-4-5")`);
+    }
+  }
+  return { valid: errors.length === 0, errors, warnings };
+}
+async function parseSpecialist(jsonContent) {
+  const result = await validateSpecialist(jsonContent);
+  if (!result.valid) {
+    const errorList = result.errors.map((e) => `  • ${e.message}`).join(`
+`);
+    throw new Error(`Schema validation failed:
+${errorList}`);
+  }
+  if (result.warnings.length > 0) {
+    process.stderr.write(`[specialists] warnings:
+${result.warnings.map((w) => `  ⚠ ${w}`).join(`
+`)}
+`);
+  }
+  const raw = JSON.parse(jsonContent);
+  return SpecialistSchema.parseAsync(raw);
+}
+
+// src/specialist/global-config.ts
+var CONFIG_FILENAME = "user.json";
+var SPECIALISTS_SUBDIR = "specialists";
+function getGlobalUserConfigPath() {
+  const home = process.env.HOME?.trim() || homedir();
+  const xdgConfigHome = process.env.XDG_CONFIG_HOME?.trim();
+  if (xdgConfigHome) {
+    const xdgPath = join6(xdgConfigHome, SPECIALISTS_SUBDIR, CONFIG_FILENAME);
+    return { path: xdgPath, exists: existsSync5(xdgPath), source: "xdg" };
+  }
+  const configHomePath = join6(home, ".config", SPECIALISTS_SUBDIR, CONFIG_FILENAME);
+  if (existsSync5(configHomePath)) {
+    return { path: configHomePath, exists: true, source: "config-home" };
+  }
+  const legacyPath = join6(home, ".specialists", CONFIG_FILENAME);
+  if (existsSync5(legacyPath)) {
+    return { path: legacyPath, exists: true, source: "legacy" };
+  }
+  return { path: configHomePath, exists: false, source: "config-home" };
+}
+var OverrideExtensionsSchema = recordType(stringType(), ExtensionToggleSchema.nullable());
+var OverrideExecutionSchema = objectType({
+  model: stringType().nullable(),
+  fallback_model: stringType().nullable(),
+  fallback_models: arrayType(stringType()).nullable().optional(),
+  timeout_ms: numberType().nullable(),
+  stall_timeout_ms: numberType().nullable(),
+  interactive: booleanType().nullable().optional(),
+  thinking_level: enumType(["off", "minimal", "low", "medium", "high", "xhigh"]).nullable(),
+  max_retries: numberType().int().min(0).nullable(),
+  lease_waiver: booleanType().nullable().optional(),
+  prompt_limit_bytes: numberType().int().positive().nullable().optional(),
+  stdout_limit_bytes: numberType().int().positive().nullable().optional(),
+  extensions: OverrideExtensionsSchema.optional()
+}).strict();
+var OverridePromptSchema = objectType({
+  system_prompt_mode: enumType(["append", "replace"]).nullable()
+}).strict();
+var OverrideStallDetectionSchema = objectType({
+  waiting_auto_close_ms: numberType().nullable().optional()
+}).strict();
+var OverrideSkillsSchema = objectType({
+  paths: arrayType(stringType())
+}).strict();
+var OverrideMandatoryRulesSchema = objectType({
+  template_sets: arrayType(KebabCase).nullable()
+}).strict();
+var CLAUDE_BRIDGE_SWITCH_KEY = "claude_bridge";
+var ClaudeBridgeSwitchSchema = objectType({
+  enabled: booleanType().default(false)
+}).strict();
+var GlobalSpecialistOverrideSchema = objectType({
+  execution: OverrideExecutionSchema,
+  prompt: OverridePromptSchema.optional(),
+  stall_detection: OverrideStallDetectionSchema.optional(),
+  beads_write_notes: booleanType().nullable(),
+  notes_mode: enumType(["full-trail", "final-only"]).nullable().optional(),
+  output_file: stringType().nullable().optional(),
+  skills: OverrideSkillsSchema,
+  mandatory_rules: OverrideMandatoryRulesSchema.optional()
+}).strict();
+var GlobalUserConfigSchema = preprocessType((value) => {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    return value;
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !key.startsWith("_") && key !== CLAUDE_BRIDGE_SWITCH_KEY));
+}, recordType(stringType(), GlobalSpecialistOverrideSchema));
+var RETIRED_EXTENSION_SOURCES = new Set(["serena"]);
+var BUILTIN_EXTENSION_TOGGLES = new Set(["gitnexus"]);
+function readGlobalUserConfig(location) {
+  if (!location.exists)
+    return null;
+  const content = readFileSync(location.path, "utf-8");
+  return JSON.parse(content);
+}
+
+// src/pi/claude-bridge.ts
+var CLAUDE_BRIDGE_PROVIDER = "claude-bridge";
+var CLAUDE_BRIDGE_PACKAGE = "pi-claude-bridge";
+var CLAUDE_BRIDGE_PATH_ENV = "SPECIALISTS_CLAUDE_BRIDGE_PATH";
+function claudeBridgeEnabled(execution) {
+  return execution?.claude_bridge === true;
+}
+function operatorClaudeBridgeEnabled(location = getGlobalUserConfigPath(), readFile = (path) => readFileSync2(path, "utf-8")) {
+  if (!location.exists)
+    return false;
+  try {
+    const raw = JSON.parse(readFile(location.path));
+    if (!raw || typeof raw !== "object" || Array.isArray(raw))
+      return false;
+    const entry = raw[CLAUDE_BRIDGE_SWITCH_KEY];
+    const parsed = ClaudeBridgeSwitchSchema.safeParse(entry);
+    return parsed.success && parsed.data.enabled === true;
+  } catch {
+    return false;
+  }
+}
+function claudeBridgeRouteEnabled(execution, operatorEnabled = operatorClaudeBridgeEnabled) {
+  return claudeBridgeEnabled(execution) && operatorEnabled();
+}
+function claudeBridgeExtensionProviders(routeEnabled) {
+  return routeEnabled ? [CLAUDE_BRIDGE_PROVIDER] : [];
+}
+function claudeBridgeSessionOption(execution) {
+  return claudeBridgeEnabled(execution) ? { claudeBridge: true } : {};
+}
+
+// src/pi/session.ts
+import { spawn, execFileSync } from "node:child_process";
+import { existsSync as existsSync7, lstatSync, mkdirSync as mkdirSync3, readdirSync, readFileSync as readFileSync3, realpathSync, statSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { homedir as homedir2, tmpdir } from "node:os";
+import { isAbsolute, resolve as resolve5, sep, join as join7, dirname as dirname7 } from "node:path";
+
+// src/pi/backendMap.ts
+var BACKEND_MAP = {
+  gemini: "google-gemini-cli",
+  google: "google-gemini-cli",
+  claude: "anthropic",
+  anthropic: "anthropic",
+  openai: "openai",
+  qwen: "openai",
+  openrouter: "openrouter",
+  groq: "groq"
+};
+function mapSpecialistBackend(model) {
+  const provider = BACKEND_MAP[model.toLowerCase()];
+  if (!provider) {
+    return model.toLowerCase();
+  }
+  return provider;
+}
+function getProviderArgs(model) {
+  const m = model.toLowerCase();
+  if (m === "qwen") {
+    return ["--api-key", process.env.DASHSCOPE_API_KEY ?? process.env.OPENAI_API_KEY ?? ""];
+  }
+  return [];
+}
+
+// src/specialist/canonical-asset-resolver.ts
+import { existsSync as existsSync6 } from "node:fs";
+import { fileURLToPath as fileURLToPath5 } from "node:url";
+function resolveCanonicalAssetDir(relativePath) {
+  const configPath = `config/${relativePath}`;
+  let resolved = fileURLToPath5(new URL(`../${configPath}`, import.meta.url));
+  if (existsSync6(resolved))
+    return resolved;
+  resolved = fileURLToPath5(new URL(`../../${configPath}`, import.meta.url));
+  if (existsSync6(resolved))
+    return resolved;
+  return null;
+}
+
+// src/specialist/manifest-resolver.ts
+var GITNEXUS_HARD_DENY_TOOLS = new Set(["grep", "find", "ls"]);
+var GITNEXUS_BASE_TIER = "READ_ONLY";
+function uniqueOrdered(values) {
+  const seen = new Set;
+  const ordered = [];
+  for (const value of values) {
+    if (seen.has(value))
+      continue;
+    seen.add(value);
+    ordered.push(value);
+  }
+  return ordered;
+}
+function getCatalog(catalogs, name) {
+  return catalogs.find((catalog) => catalog.catalog === name);
+}
+function mergeTierPolicy(input) {
+  const catalogPolicy = input.catalogDefaultOverrides?.[input.tier];
+  const tierPolicy = input.manifestPolicy?.permissions?.[input.tier];
+  const overridePolicy = input.specialistOverride;
+  const specialistDenied = input.specialistExclusions?.deniedNatives ?? [];
+  return {
+    denied_natives_when_extension: uniqueOrdered([
+      ...catalogPolicy?.denied_natives_when_extension ?? [],
+      ...tierPolicy?.denied_natives_when_extension ?? [],
+      ...overridePolicy?.denied_natives_when_extension ?? [],
+      ...specialistDenied
+    ]),
+    denied_natives_mode: overridePolicy?.denied_natives_mode ?? tierPolicy?.denied_natives_mode ?? catalogPolicy?.denied_natives_mode ?? "soft"
+  };
+}
+function getTierTools(catalogs, name, tier) {
+  const catalog = getCatalog(catalogs, name);
+  return catalog?.source_tiers[tier] ?? [];
+}
+function getEffectiveDeniedTools(tools) {
+  return tools.filter((tool) => tool !== "read");
+}
+function resolveEffectiveExtensionState(state) {
+  if (!state) {
+    return { status: "available", includeTools: true, canEnforceHardDeny: true };
+  }
+  if (state.enabled === false || state.health === "disabled") {
+    return { status: "disabled", includeTools: false, canEnforceHardDeny: false };
+  }
+  if (state.health === "not_installed") {
+    return { status: "not_installed", includeTools: false, canEnforceHardDeny: false };
+  }
+  if (state.health === "loaded_unhealthy") {
+    return { status: "loaded_unhealthy", includeTools: false, canEnforceHardDeny: false };
+  }
+  if (state.health === "unknown") {
+    return { status: "unknown", includeTools: false, canEnforceHardDeny: false };
+  }
+  if (state.catalogCompatible === false) {
+    return { status: "catalog_incompatible", includeTools: false, canEnforceHardDeny: false };
+  }
+  return { status: "available", includeTools: true, canEnforceHardDeny: true };
+}
+function resolveManifestTools(input) {
+  const policy = mergeTierPolicy(input);
+  const warnings = [];
+  const attribution = [];
+  const downgradeReasons = [];
+  const effectiveDenied = new Set(getEffectiveDeniedTools(policy.denied_natives_when_extension ?? []));
+  const hardDeniedTools = new Set(Array.from(effectiveDenied).filter((tool) => GITNEXUS_HARD_DENY_TOOLS.has(tool)));
+  const deniedNatives = [];
+  const nativeTools = getTierTools(input.catalogs, "native", input.tier);
+  const gitnexusBase = getTierTools(input.catalogs, "gitnexus", GITNEXUS_BASE_TIER);
+  const gitnexusExtras = input.tier === "MEDIUM" || input.tier === "HIGH" ? getTierTools(input.catalogs, "gitnexus", input.tier).filter((tool) => !gitnexusBase.includes(tool)) : [];
+  const requestedGitnexusTools = uniqueOrdered([...gitnexusBase, ...gitnexusExtras]);
+  const pythonKernelTools = getTierTools(input.catalogs, "python-kernel", input.tier);
+  const pythonKernelState = input.extensionState?.["python-kernel"];
+  const effectivePythonKernelState = resolveEffectiveExtensionState(pythonKernelState);
+  const gitnexusState = input.specialistExclusions?.disabledExtensions?.includes("gitnexus") ? { ...input.extensionState?.gitnexus, enabled: false, health: "disabled" } : input.extensionState?.gitnexus;
+  const effectiveGitnexusState = resolveEffectiveExtensionState(gitnexusState);
+  const hardDenyAllowed = policy.denied_natives_mode === "hard" && effectiveGitnexusState.canEnforceHardDeny;
+  const finalNativeTools = nativeTools.filter((tool) => {
+    if (!hardDeniedTools.has(tool))
+      return true;
+    if (!hardDenyAllowed)
+      return true;
+    deniedNatives.push(tool);
+    return false;
+  });
+  const toolsList = uniqueOrdered([
+    ...finalNativeTools,
+    ...effectiveGitnexusState.includeTools ? requestedGitnexusTools : [],
+    ...effectivePythonKernelState.includeTools ? pythonKernelTools : []
+  ]);
+  if (!effectiveGitnexusState.includeTools && requestedGitnexusTools.length > 0) {
+    warnings.push(`gitnexus tools excluded by extension state: ${effectiveGitnexusState.status}${gitnexusState?.reason ? ` (${gitnexusState.reason})` : ""}`);
+  }
+  if (!effectivePythonKernelState.includeTools && pythonKernelTools.length > 0) {
+    warnings.push(`python-kernel tools excluded by extension state: ${effectivePythonKernelState.status}${pythonKernelState?.reason ? ` (${pythonKernelState.reason})` : ""}`);
+  }
+  if ((input.specialistExclusions?.disabledExtensions ?? []).length > 0) {
+    warnings.push(`specialist exclusions: ${(input.specialistExclusions?.disabledExtensions ?? []).join(", ")}`);
+    attribution.push({ layer: "specialist_exclusion", source: "specialist.json", tools: [] });
+  }
+  attribution.push({ layer: "catalog", source: "tool catalogs", tools: uniqueOrdered([...nativeTools, ...requestedGitnexusTools, ...pythonKernelTools]) });
+  if (input.catalogDefaultOverrides?.[input.tier]) {
+    attribution.push({
+      layer: "catalog_default",
+      source: "tool catalog defaults",
+      tools: input.catalogDefaultOverrides[input.tier]?.denied_natives_when_extension ?? []
+    });
+  }
+  if (input.manifestPolicy?.permissions?.[input.tier]) {
+    attribution.push({
+      layer: "tier_policy",
+      source: "manifest policy",
+      tools: input.manifestPolicy.permissions[input.tier]?.denied_natives_when_extension ?? []
+    });
+  }
+  if (input.specialistOverride) {
+    attribution.push({
+      layer: "specialist_override",
+      source: "specialist YAML",
+      tools: input.specialistOverride.denied_natives_when_extension ?? []
+    });
+  }
+  if (!hardDenyAllowed && policy.denied_natives_mode === "hard" && hardDeniedTools.size > 0) {
+    const restoredNatives = nativeTools.filter((tool) => hardDeniedTools.has(tool));
+    const reason = effectiveGitnexusState.status;
+    warnings.push(`hard deny restored native fallback: ${reason}`);
+    downgradeReasons.push(`restored native fallback for ${restoredNatives.join(",") || "(none)"} due to ${reason}`);
+    attribution.push({ layer: "runtime_health", source: "fallback", tools: restoredNatives });
+  }
+  const preferenceSignals = policy.denied_natives_mode === "soft" && effectiveDenied.size > 0 ? [`soft deny prefers extension tools for: ${Array.from(effectiveDenied).join(",")}`] : [];
+  return {
+    tools: toolsList.join(","),
+    toolsList,
+    deniedNatives,
+    deniedNativesMode: policy.denied_natives_mode ?? "soft",
+    preferenceSignals,
+    downgradeReasons,
+    warnings,
+    attribution
+  };
+}
+
+// src/specialist/resolved-tool-contract.ts
+function uniqueOrdered2(values) {
+  const seen = new Set;
+  const ordered = [];
+  for (const value of values) {
+    if (seen.has(value))
+      continue;
+    seen.add(value);
+    ordered.push(value);
+  }
+  return ordered;
+}
+function getCatalog2(catalogs, name) {
+  return catalogs.find((catalog) => catalog.catalog === name);
+}
+function getRequestedExtensionTools(catalogs, name, tier) {
+  const catalog = getCatalog2(catalogs, name);
+  if (!catalog)
+    return [];
+  return uniqueOrdered2([
+    ...catalog.source_tiers.READ_ONLY ?? [],
+    ...catalog.source_tiers[tier] ?? []
+  ]);
+}
+function getEffectiveExtensionStatus(input, name) {
+  const state = input.specialistExclusions?.disabledExtensions?.includes(name) ? { ...input.extensionState?.[name], enabled: false, health: "disabled" } : input.extensionState?.[name];
+  return resolveEffectiveExtensionState(state).status;
+}
+function formatList(values) {
+  return values.length > 0 ? values.join(", ") : "(none)";
+}
+function buildResolvedToolContract(input) {
+  const resolver = resolveManifestTools(input);
+  const nativeCatalog = getCatalog2(input.catalogs, "native");
+  const tierNativeTools = new Set(nativeCatalog?.source_tiers[input.tier] ?? []);
+  const guardedBashGranted = input.grantGuardedBash === true && input.tier === "READ_ONLY" && resolver.toolsList.length > 0;
+  if (guardedBashGranted)
+    tierNativeTools.add("bash");
+  const nativeTools = resolver.toolsList.filter((tool) => tierNativeTools.has(tool));
+  const toolsListWithGuard = guardedBashGranted && !resolver.toolsList.includes("bash") ? [...resolver.toolsList, "bash"] : resolver.toolsList;
+  const nativeToolsWithGuard = guardedBashGranted && !nativeTools.includes("bash") ? [...nativeTools, "bash"] : nativeTools;
+  const extensionTools = toolsListWithGuard.filter((tool) => !tierNativeTools.has(tool));
+  const exposedExtensionSources = uniqueOrdered2(input.extensionSources ?? []);
+  const extensions = Object.fromEntries(input.catalogs.filter((catalog) => catalog.catalog !== "native").map((catalog) => {
+    const activeTools = resolver.toolsList.filter((tool) => getRequestedExtensionTools(input.catalogs, catalog.catalog, input.tier).includes(tool));
+    return [
+      catalog.catalog,
+      {
+        status: getEffectiveExtensionStatus(input, catalog.catalog),
+        packageName: input.extensionPackages?.[catalog.catalog]?.packageName,
+        packagePath: input.extensionPackages?.[catalog.catalog]?.packagePath,
+        activeTools
+      }
+    ];
+  }));
+  return {
+    effectiveTier: input.tier,
+    toolsFlag: toolsListWithGuard.join(","),
+    exposedExtensionSources,
+    toolsList: toolsListWithGuard,
+    nativeTools: nativeToolsWithGuard,
+    extensionTools,
+    deniedNativeTools: resolver.deniedNatives,
+    deniedNativesMode: resolver.deniedNativesMode,
+    preferenceSignals: resolver.preferenceSignals,
+    downgradeReasons: resolver.downgradeReasons,
+    warnings: resolver.warnings,
+    extensions
+  };
+}
+function withDiscoveredExtensionTools(base, discovered) {
+  const isList = Array.isArray(discovered);
+  const pinned = isList ? discovered : discovered.pinned ?? [];
+  const refusedCollisions = isList ? [] : discovered.refusedCollisions ?? [];
+  const refusedProvenance = isList ? [] : discovered.refusedProvenance ?? [];
+  if (pinned.length === 0 && refusedCollisions.length === 0 && refusedProvenance.length === 0) {
+    return base;
+  }
+  const denied = new Set(base.deniedNativeTools);
+  const already = new Set(base.toolsList);
+  const HOST_TOOLS = new Set(["ask_coordinator", "escalate_to_coordinator"]);
+  const safePinned = uniqueOrdered2(pinned).filter((name) => !denied.has(name) && !already.has(name) && !HOST_TOOLS.has(name));
+  const toolsList = uniqueOrdered2([...base.toolsList, ...safePinned]);
+  const extensionTools = uniqueOrdered2([...base.extensionTools, ...safePinned]);
+  const warnings = [
+    ...base.warnings,
+    ...uniqueOrdered2(refusedCollisions).map((name) => `refused extension tool '${name}': collides with a builtin tool name`),
+    ...uniqueOrdered2(refusedProvenance).map((name) => `refused extension tool '${name}': non-extension provenance`)
+  ];
+  return {
+    ...base,
+    toolsFlag: toolsList.join(","),
+    toolsList,
+    extensionTools,
+    warnings
+  };
+}
+function describeAdmission(admission) {
+  return admission === "discover-then-pin" ? `registered tools admitted by discover-then-pin into this session's tool allowlist` : "registered tools admitted by the tool-policy gate";
+}
+function formatResolvedToolContract(contract, admission = "tool-policy-gate") {
+  const lines = [
+    "## Resolved Tool Contract",
+    `- effective tier: ${contract.effectiveTier}`,
+    `- --tools: ${contract.toolsFlag || "(none)"}`,
+    ...contract.exposedExtensionSources.length > 0 ? [`- exposed extension sources (${describeAdmission(admission)}): ${formatList(contract.exposedExtensionSources)}`] : [],
+    `- actual native tools: ${formatList(contract.nativeTools)}`,
+    `- active extension tools: ${formatList(contract.extensionTools)}`,
+    `- denied native tools: ${formatList(contract.deniedNativeTools)}`,
+    `- deny mode: ${contract.deniedNativesMode}`,
+    "- extension state:"
+  ];
+  const extensionEntries = Object.entries(contract.extensions);
+  if (extensionEntries.length === 0) {
+    lines.push("  - (none)");
+  } else {
+    for (const [name, extension] of extensionEntries) {
+      lines.push(`  - ${name}: ${extension.status}; active tools: ${formatList(extension.activeTools)}`);
+    }
+  }
+  lines.push(`- preference signals: ${formatList(contract.preferenceSignals)}`);
+  lines.push(`- downgrade reasons: ${formatList(contract.downgradeReasons)}`);
+  lines.push(`- warnings: ${formatList(contract.warnings)}`);
+  return lines.join(`
+`);
+}
+
 // src/specialist/tool-catalog.ts
 var TierSchema = enumType(["READ_ONLY", "LOW", "MEDIUM", "HIGH"]);
 var LayerSchema = enumType(["native", "gitnexus", "python-kernel", "service-knowledge"]);
@@ -11645,7 +11989,7 @@ function loadSharedToolCatalogIndex(cwd) {
   }
   if (overrideExists) {
     try {
-      return loadToolCatalogIndex(readFileSync(overridePath, "utf8"));
+      return loadToolCatalogIndex(readFileSync3(overridePath, "utf8"));
     } catch {
       throw new RuntimeToolCatalogResolutionError("project_catalog_invalid");
     }
@@ -11661,14 +12005,14 @@ function loadSharedToolCatalogIndex(cwd) {
   }
   const canonicalPath = resolve5(canonicalDir, "index.json");
   try {
-    return loadToolCatalogIndex(readFileSync(canonicalPath, "utf8"));
+    return loadToolCatalogIndex(readFileSync3(canonicalPath, "utf8"));
   } catch {
     throw new RuntimeToolCatalogResolutionError("canonical_catalog_invalid");
   }
 }
 function readPackageVersion(packageJsonPath) {
   try {
-    const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+    const pkg = JSON.parse(readFileSync3(packageJsonPath, "utf8"));
     return typeof pkg.version === "string" ? pkg.version : undefined;
   } catch {
     return;
@@ -11690,7 +12034,7 @@ function resolveGitnexusRuntime(options) {
       extensionState: { enabled: true, health: "not_installed", catalogCompatible: false }
     };
   }
-  const packageJsonPath = join6(packagePath, "package.json");
+  const packageJsonPath = join7(packagePath, "package.json");
   const installedVersion = readPackageVersion(packageJsonPath);
   if (!installedVersion) {
     return {
@@ -11731,10 +12075,10 @@ function resolvePiExtensionsPythonKernelRuntime(options) {
       extensionState: { enabled: true, health: "not_installed", catalogCompatible: false }
     };
   }
-  const packageJsonPath = join6(packagePath, "package.json");
+  const packageJsonPath = join7(packagePath, "package.json");
   const installedVersion = readPackageVersion(packageJsonPath);
-  const extPath = join6(packagePath, "extensions", "python-kernel", "index.ts");
-  if (!installedVersion || !existsSync6(extPath)) {
+  const extPath = join7(packagePath, "extensions", "python-kernel", "index.ts");
+  if (!installedVersion || !existsSync7(extPath)) {
     return {
       packageName,
       packagePath,
@@ -11840,8 +12184,8 @@ function canonicalizeLocalExtensionIdentity(source) {
   try {
     const stat = statSync(candidate);
     if (stat.isDirectory()) {
-      const indexCandidate = join6(candidate, "index.ts");
-      if (existsSync6(indexCandidate))
+      const indexCandidate = join7(candidate, "index.ts");
+      if (existsSync7(indexCandidate))
         candidate = indexCandidate;
     }
   } catch {
@@ -11916,24 +12260,27 @@ function resolveExecutionExtensionSelection(extensions) {
 }
 function resolveCuratedExtensionPaths(options) {
   const all = [];
-  const piExtDir = join6(homedir(), ".pi", "agent", "extensions");
+  const claudeBridgePath = options.claudeBridge ? resolveClaudeBridgeExtensionPath() : undefined;
+  if (claudeBridgePath)
+    all.push(claudeBridgePath);
+  const piExtDir = join7(homedir2(), ".pi", "agent", "extensions");
   const permLevel = (options.permissionLevel ?? "").toUpperCase();
   if (permLevel !== "READ_ONLY") {
-    const qgPath = join6(piExtDir, "quality-gates");
-    if (existsSync6(qgPath))
+    const qgPath = join7(piExtDir, "quality-gates");
+    if (existsSync7(qgPath))
       all.push(qgPath);
   }
   const pyKernelPath = resolvePiExtensionsPythonKernelPath();
   if (pyKernelPath && permLevel !== "READ_ONLY")
     all.push(pyKernelPath);
-  const cavemanPath = join6(piExtDir, "caveman");
-  if (existsSync6(cavemanPath))
+  const cavemanPath = join7(piExtDir, "caveman");
+  if (existsSync7(cavemanPath))
     all.push(cavemanPath);
-  const nvidiaNimPath = join6(homedir(), ".pi", "agent", "git", "github.com", "xRyul", "pi-nvidia-nim");
-  if (existsSync6(nvidiaNimPath))
+  const nvidiaNimPath = join7(homedir2(), ".pi", "agent", "git", "github.com", "xRyul", "pi-nvidia-nim");
+  if (existsSync7(nvidiaNimPath))
     all.push(nvidiaNimPath);
   const gitnexusContract = options.resolvedToolContract?.extensions.gitnexus;
-  if (gitnexusContract?.status === "available" && gitnexusContract.packagePath && existsSync6(gitnexusContract.packagePath)) {
+  if (gitnexusContract?.status === "available" && gitnexusContract.packagePath && existsSync7(gitnexusContract.packagePath)) {
     all.push(gitnexusContract.packagePath);
   }
   if ((options.resolvedToolContract?.nativeTools ?? []).includes("codemode")) {
@@ -11944,6 +12291,7 @@ function resolveCuratedExtensionPaths(options) {
   }
   return {
     all,
+    ...claudeBridgePath ? { claudeBridgePath } : {},
     dedupeAgainstDynamic: [
       ...pyKernelPath ? [pyKernelPath] : [],
       ...gitnexusContract?.status === "available" && gitnexusContract.packagePath ? [gitnexusContract.packagePath] : []
@@ -11967,7 +12315,7 @@ function resolvePiVersion() {
   try {
     const packageDir = resolveGlobalPackageDir("@earendil-works/pi-coding-agent");
     if (packageDir) {
-      const parsed = JSON.parse(readFileSync(join6(packageDir, "package.json"), "utf-8"));
+      const parsed = JSON.parse(readFileSync3(join7(packageDir, "package.json"), "utf-8"));
       if (typeof parsed.version === "string" && parsed.version.length > 0) {
         cachedPiVersion = parsed.version;
         return cachedPiVersion;
@@ -11978,31 +12326,78 @@ function resolvePiVersion() {
 }
 function resolveGlobalNodeModulesDirs(deps = {}) {
   const env = deps.env ?? process.env;
-  const home = deps.home ?? homedir();
+  const home = deps.home ?? homedir2();
   const execPath = deps.execPath ?? process.execPath;
-  const exists = deps.exists ?? existsSync6;
+  const exists = deps.exists ?? existsSync7;
   const readDir = deps.readDir ?? ((path) => readdirSync(path));
   const candidates = [
     env.PI_NPM_GLOBAL_DIR,
-    env.NPM_CONFIG_PREFIX ? join6(env.NPM_CONFIG_PREFIX, "lib", "node_modules") : undefined,
-    env.npm_config_prefix ? join6(env.npm_config_prefix, "lib", "node_modules") : undefined,
-    env.NVM_BIN ? join6(dirname6(env.NVM_BIN), "lib", "node_modules") : undefined,
-    join6(dirname6(dirname6(execPath)), "lib", "node_modules"),
-    env.BUN_INSTALL ? join6(env.BUN_INSTALL, "install", "global", "node_modules") : undefined,
-    join6(home, ".bun", "install", "global", "node_modules"),
-    join6(home, ".nvm/versions/node", process.version, "lib", "node_modules"),
+    env.NPM_CONFIG_PREFIX ? join7(env.NPM_CONFIG_PREFIX, "lib", "node_modules") : undefined,
+    env.npm_config_prefix ? join7(env.npm_config_prefix, "lib", "node_modules") : undefined,
+    env.NVM_BIN ? join7(dirname7(env.NVM_BIN), "lib", "node_modules") : undefined,
+    join7(dirname7(dirname7(execPath)), "lib", "node_modules"),
+    env.BUN_INSTALL ? join7(env.BUN_INSTALL, "install", "global", "node_modules") : undefined,
+    join7(home, ".bun", "install", "global", "node_modules"),
+    join7(home, ".nvm/versions/node", process.version, "lib", "node_modules"),
     ...nvmNodeModulesDirs(home, readDir)
   ].filter((candidate) => Boolean(candidate));
   return [...new Set(candidates)].filter((candidate) => exists(candidate));
 }
 function resolveGlobalPackageDir(packageName, deps = {}) {
-  const exists = deps.exists ?? existsSync6;
-  return resolveGlobalNodeModulesDirs(deps).map((root) => join6(root, packageName)).find((dir) => exists(join6(dir, "package.json")));
+  const exists = deps.exists ?? existsSync7;
+  return resolveGlobalNodeModulesDirs(deps).map((root) => join7(root, packageName)).find((dir) => exists(join7(dir, "package.json")));
+}
+function resolveClaudeBridgeExtensionPath(env = process.env, exists = existsSync7) {
+  const override = env[CLAUDE_BRIDGE_PATH_ENV]?.trim();
+  if (override) {
+    return isAbsolute(override) && exists(override) ? override : undefined;
+  }
+  const packageDir = resolveGlobalPackageDir(CLAUDE_BRIDGE_PACKAGE);
+  if (!packageDir)
+    return;
+  return resolveClaudeBridgePackageEntry(packageDir, exists) ?? packageDir;
+}
+function resolveClaudeBridgePackageEntry(packageDir, exists) {
+  let declared;
+  try {
+    const manifest = JSON.parse(readFileSync3(join7(packageDir, "package.json"), "utf-8"));
+    declared = exportedExtensionEntry(manifest.exports) ?? (typeof manifest.main === "string" ? manifest.main : undefined);
+  } catch {
+    declared = undefined;
+  }
+  const root = `${resolve5(packageDir)}${sep}`;
+  const declaredEntry = declared ? resolve5(packageDir, declared) : undefined;
+  const candidates = [
+    ...declaredEntry && declaredEntry.startsWith(root) ? [declaredEntry] : [],
+    join7(packageDir, "src", "index.ts"),
+    join7(packageDir, "dist", "index.js"),
+    join7(packageDir, "index.js"),
+    join7(packageDir, "index.ts")
+  ];
+  return candidates.find((candidate) => exists(candidate));
+}
+function exportedExtensionEntry(exportsField) {
+  if (typeof exportsField === "string")
+    return exportsField;
+  if (!exportsField || typeof exportsField !== "object")
+    return;
+  const root = exportsField["."];
+  if (typeof root === "string")
+    return root;
+  if (root && typeof root === "object") {
+    const conditions = root;
+    for (const key of ["import", "default", "node"]) {
+      const value = conditions[key];
+      if (typeof value === "string")
+        return value;
+    }
+  }
+  return;
 }
 function nvmNodeModulesDirs(home, readDir) {
-  const root = join6(home, ".nvm", "versions", "node");
+  const root = join7(home, ".nvm", "versions", "node");
   try {
-    return readDir(root).filter((version) => version.startsWith("v")).sort().reverse().map((version) => join6(root, version, "lib", "node_modules"));
+    return readDir(root).filter((version) => version.startsWith("v")).sort().reverse().map((version) => join7(root, version, "lib", "node_modules"));
   } catch {
     return [];
   }
@@ -12196,16 +12591,16 @@ var WRITE_BOUNDARY_TOOL_NAMES = new Set(["edit", "write", "multiEdit", "notebook
 var WORKTREE_BOUNDARY_ENV_KEY = "SPECIALISTS_WORKTREE_BOUNDARY";
 function getWorktreeBoundaryExtensionPath(worktreeBoundary) {
   const boundaryHash = createHash("sha256").update(resolve5(worktreeBoundary)).digest("hex").slice(0, 16);
-  const extensionsDir = join6(tmpdir(), "specialists-pi-extensions");
+  const extensionsDir = join7(tmpdir(), "specialists-pi-extensions");
   try {
-    mkdirSync2(extensionsDir, { recursive: true });
+    mkdirSync3(extensionsDir, { recursive: true });
   } catch (err) {
     process.stderr.write(`[worktree-boundary] WARN: could not create extensions directory at ${extensionsDir}: ${err.message}. ` + `Boundary enforcement will NOT apply for this session.
 `);
     return null;
   }
-  const extensionPath = join6(extensionsDir, `worktree-boundary-${boundaryHash}.mjs`);
-  if (existsSync6(extensionPath))
+  const extensionPath = join7(extensionsDir, `worktree-boundary-${boundaryHash}.mjs`);
+  if (existsSync7(extensionPath))
     return extensionPath;
   const extensionSource = `
 import { isAbsolute, resolve } from 'node:path';
@@ -12244,7 +12639,7 @@ export default function(pi) {
 }
 `.trimStart();
   try {
-    writeFileSync(extensionPath, extensionSource, "utf-8");
+    writeFileSync2(extensionPath, extensionSource, "utf-8");
   } catch (err) {
     process.stderr.write(`[worktree-boundary] WARN: could not write extension file at ${extensionPath}: ${err.message}. ` + `Boundary enforcement will NOT apply for this session.
 `);
@@ -12334,10 +12729,15 @@ class PiAgentSession {
     for (const skillPath of this.options.skillPaths ?? []) {
       args.push("--skill", skillPath);
     }
+    const claudeBridgeActive = this.options.claudeBridge === true && operatorClaudeBridgeEnabled();
     const curatedExtensions = resolveCuratedExtensionPaths({
       permissionLevel: this.options.permissionLevel,
-      resolvedToolContract
+      resolvedToolContract,
+      claudeBridge: claudeBridgeActive
     });
+    if (claudeBridgeActive && !curatedExtensions.claudeBridgePath) {
+      throw new Error("claude_bridge_unavailable: execution.claude_bridge is enabled but the pi-claude-bridge " + `extension was not found (expected the global package "${CLAUDE_BRIDGE_PACKAGE}" or ` + `${CLAUDE_BRIDGE_PATH_ENV}); install it or clear the flag`);
+    }
     for (const extensionPath of curatedExtensions.all) {
       args.push("-e", extensionPath);
     }
@@ -12972,7 +13372,7 @@ ${stderrTail}` : ""}`;
 }
 
 // src/specialist/mandatory-rules.ts
-import { existsSync as existsSync7, readFileSync as readFileSync2 } from "node:fs";
+import { existsSync as existsSync8, readFileSync as readFileSync4 } from "node:fs";
 import { createHash as createHash2 } from "node:crypto";
 import { resolve as resolve6 } from "node:path";
 class MandatoryRulesBudgetError extends Error {
@@ -13034,7 +13434,7 @@ function compileMandatoryRulesBudget(candidateSections, budgetLimit) {
   };
 }
 function readJsonFile(filePath) {
-  return JSON.parse(readFileSync2(filePath, "utf8"));
+  return JSON.parse(readFileSync4(filePath, "utf8"));
 }
 function mergeIndex(base, overlay) {
   const dedupe = (values) => values ? Array.from(new Set(values)) : undefined;
@@ -13059,10 +13459,10 @@ function loadMandatoryRulesIndex(cwd) {
   const tierPaths = [userOverlayPath, sourcePath, canonicalCopyPath, overlayPath].filter((value) => Boolean(value));
   const tiers = [];
   for (const path of tierPaths) {
-    if (existsSync7(path))
+    if (existsSync8(path))
       tiers.push(readJsonFile(path));
   }
-  if (tiers.length === 0 && packageLiveIndexPath && existsSync7(packageLiveIndexPath)) {
+  if (tiers.length === 0 && packageLiveIndexPath && existsSync8(packageLiveIndexPath)) {
     tiers.push(readJsonFile(packageLiveIndexPath));
   }
   if (tiers.length === 0) {
@@ -13168,10 +13568,10 @@ function readMandatoryRuleSet(cwd, id) {
     resolve6(cwd, `config/mandatory-rules/${id}.md`),
     ...packageCanonicalDir ? [resolve6(packageCanonicalDir, `${id}.md`)] : []
   ];
-  const filePath = candidates.find((path) => existsSync7(path));
+  const filePath = candidates.find((path) => existsSync8(path));
   if (!filePath)
     return null;
-  const content = readFileSync2(filePath, "utf8");
+  const content = readFileSync4(filePath, "utf8");
   const rules = parseMandatoryRulesFrontmatter(content, id);
   if (rules.length > 0)
     return { id, rules };
@@ -13310,9 +13710,9 @@ function dedupeModels(models) {
 }
 
 // src/specialist/observability-db.ts
-import { chmodSync, existsSync as existsSync8, mkdirSync as mkdirSync3, readFileSync as readFileSync3, writeFileSync as writeFileSync2 } from "node:fs";
+import { chmodSync, existsSync as existsSync9, mkdirSync as mkdirSync4, readFileSync as readFileSync5, writeFileSync as writeFileSync3 } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { join as join7, sep as sep2, resolve as resolvePath } from "node:path";
+import { join as join8, sep as sep2, resolve as resolvePath } from "node:path";
 var OBSERVABILITY_DB_FILENAME = "observability.db";
 var DEFAULT_DB_DIRECTORY_RELATIVE_TO_GIT_ROOT = [".specialists", "db"];
 function resolveGitRootFrom(cwd) {
@@ -13340,10 +13740,10 @@ function resolveGitRootFrom(cwd) {
 function resolveDbDirectory(gitRoot) {
   const xdgDataHome = process.env.XDG_DATA_HOME?.trim();
   if (xdgDataHome) {
-    return { directory: join7(xdgDataHome, "specialists"), source: "xdg-data-home" };
+    return { directory: join8(xdgDataHome, "specialists"), source: "xdg-data-home" };
   }
   return {
-    directory: join7(gitRoot, ...DEFAULT_DB_DIRECTORY_RELATIVE_TO_GIT_ROOT),
+    directory: join8(gitRoot, ...DEFAULT_DB_DIRECTORY_RELATIVE_TO_GIT_ROOT),
     source: "git-root"
   };
 }
@@ -13358,7 +13758,7 @@ function resolveObservabilityDbLocation(cwd = process.cwd()) {
   const gitRoot = resolveGitRootFrom(cwd);
   const resolved = resolveDbDirectory(gitRoot);
   const directory = relocateIfForbidden(resolved.directory);
-  const dbPath = join7(directory, OBSERVABILITY_DB_FILENAME);
+  const dbPath = join8(directory, OBSERVABILITY_DB_FILENAME);
   return {
     gitRoot,
     dbDirectory: directory,
@@ -13369,8 +13769,8 @@ function resolveObservabilityDbLocation(cwd = process.cwd()) {
   };
 }
 function ensureObservabilityDbFile(location) {
-  mkdirSync3(location.dbDirectory, { recursive: true });
-  const alreadyExists = existsSync8(location.dbPath);
+  mkdirSync4(location.dbDirectory, { recursive: true });
+  const alreadyExists = existsSync9(location.dbPath);
   if (alreadyExists) {
     chmodSync(location.dbPath, 420);
   }
@@ -13378,8 +13778,8 @@ function ensureObservabilityDbFile(location) {
 }
 
 // src/specialist/observability-sqlite.ts
-import { existsSync as existsSync9, mkdirSync as mkdirSync4, readFileSync as readFileSync4, statSync as statSync2 } from "node:fs";
-import { dirname as dirname7, join as join8, normalize, resolve as resolve7 } from "node:path";
+import { existsSync as existsSync10, mkdirSync as mkdirSync5, readFileSync as readFileSync6, statSync as statSync2 } from "node:fs";
+import { dirname as dirname8, join as join9, normalize, resolve as resolve7 } from "node:path";
 
 // src/specialist/forensic-events.ts
 var FORENSIC_SCHEMA_VERSION = "xtrm.forensic.v1";
@@ -13963,7 +14363,7 @@ function familyForTimelineType(type) {
     return "chain";
   if (type === "worktree_merged")
     return "worktree";
-  if (type === "stale_warning")
+  if (type === "stale_warning" || type === "thinking_level_unavailable")
     return "process_health";
   if (type.startsWith("settlement_"))
     return "settlement";
@@ -14038,6 +14438,8 @@ function eventNameForTimelineEvent(event) {
     return "worktree.merged";
   if (event.type === "stale_warning")
     return "process_health.stale_detected";
+  if (event.type === "thinking_level_unavailable")
+    return "process_health.thinking_level_unavailable";
   if (typeof event.type === "string" && event.type.startsWith("settlement_"))
     return event.type;
   return `${familyForTimelineType(event.type)}.${event.type}`;
@@ -14070,7 +14472,7 @@ function severityForTimelineEvent(event) {
     return "error";
   if (event.type === "mcp" && mcpEventNameForTimelineEvent(event) === "mcp.rate_limited")
     return "warn";
-  if (event.type === "stale_warning" || event.type === "control_signal")
+  if (event.type === "stale_warning" || event.type === "control_signal" || event.type === "thinking_level_unavailable")
     return "warn";
   if (event.type === "run_complete" && event.status === "ERROR")
     return "error";
@@ -16786,7 +17188,7 @@ class SqliteClient {
         WHERE worktree_column IS NOT NULL AND worktree_column != ''
       `).all();
       for (const row of worktreeRows) {
-        if (existsSync9(row.worktree_column))
+        if (existsSync10(row.worktree_column))
           continue;
         findings.push({
           kind: "stale-pointer",
@@ -16819,12 +17221,12 @@ function openObservabilitySqliteClient(dbPath) {
 }
 function createObservabilitySqliteClient(cwd = process.cwd()) {
   const location = resolveObservabilityDbLocation(cwd);
-  if (!existsSync9(location.dbPath))
+  if (!existsSync10(location.dbPath))
     return null;
   return openObservabilitySqliteClient(location.dbPath);
 }
 function createObservabilitySqliteClientAtPath(dbPath) {
-  mkdirSync4(dirname7(dbPath), { recursive: true });
+  mkdirSync5(dirname8(dbPath), { recursive: true });
   return openObservabilitySqliteClient(dbPath);
 }
 function migrateToV16(db) {
@@ -16851,7 +17253,7 @@ function migrateToV16(db) {
 }
 
 // src/specialist/task-prompt.ts
-import { basename, dirname as dirname8 } from "node:path";
+import { basename, dirname as dirname9 } from "node:path";
 import { createHash as createHash3 } from "node:crypto";
 
 // src/specialist/templateEngine.ts
@@ -17192,7 +17594,7 @@ function extractMustacheTokens(template) {
 function deriveSkillName(path) {
   const base = basename(path);
   if (base === "SKILL.md")
-    return basename(dirname8(path));
+    return basename(dirname9(path));
   return base.endsWith(".md") ? base.slice(0, -3) : base;
 }
 function buildSkillPrefix(specialist, surface) {
@@ -17413,7 +17815,7 @@ function isAuthError(error) {
 
 // src/specialist/system-prompt.ts
 import { execSync } from "node:child_process";
-import { existsSync as existsSync10 } from "node:fs";
+import { existsSync as existsSync11 } from "node:fs";
 import { resolve as resolve8 } from "node:path";
 
 // src/specialist/memory-retrieval.ts
@@ -17508,7 +17910,7 @@ function sanitizeBeadIdForPrompt(beadId) {
   return withoutBackticks.replace(/[^A-Za-z0-9-]/g, "");
 }
 function defaultHasGitnexusIndex(cwd) {
-  return existsSync10(resolve8(cwd, ".gitnexus/meta.json"));
+  return existsSync11(resolve8(cwd, ".gitnexus/meta.json"));
 }
 function defaultQueryGitnexusSymbol(cwd, symbol) {
   try {
@@ -17673,9 +18075,9 @@ ${summaries.join(`
 
 // src/specialist/runner.ts
 import { execSync as execSync2, spawnSync as spawnSync3 } from "node:child_process";
-import { existsSync as existsSync11, readFileSync as readFileSync5 } from "node:fs";
+import { existsSync as existsSync12, readFileSync as readFileSync7 } from "node:fs";
 import { basename as basename2, resolve as resolve9 } from "node:path";
-import { homedir as homedir2 } from "node:os";
+import { homedir as homedir3 } from "node:os";
 function sanitizeScriptName(name) {
   const cleaned = name.replace(/[\u0000-\u001f\u007f-\u009f"\\<>]/g, "").slice(0, 128);
   return /^[A-Za-z0-9:][A-Za-z0-9._:-]{0,127}$/.test(cleaned) ? cleaned : "unknown";
@@ -17810,7 +18212,7 @@ ${blocks}
 </pre_flight_context>`;
 }
 function resolvePath2(p) {
-  return p.startsWith("~/") ? resolve9(homedir2(), p.slice(2)) : resolve9(p);
+  return p.startsWith("~/") ? resolve9(homedir3(), p.slice(2)) : resolve9(p);
 }
 function commandExists(cmd) {
   const result = spawnSync3("which", [cmd], { stdio: "ignore" });
@@ -17846,7 +18248,7 @@ var SHELL_BUILTINS = new Set([
 ]);
 function validateShebang(filePath, errors) {
   try {
-    const head = readFileSync5(filePath, "utf-8").slice(0, 120);
+    const head = readFileSync7(filePath, "utf-8").slice(0, 120);
     if (!head.startsWith("#!"))
       return;
     const shebang = head.split(`
@@ -17881,7 +18283,7 @@ function validateBeforeRun(spec, permissionLevel, resolvedToolContract) {
   const warnings = [];
   for (const p of spec.specialist.skills?.paths ?? []) {
     const abs = resolvePath2(p);
-    if (!existsSync11(abs)) {
+    if (!existsSync12(abs)) {
       errors.push(`  ✗ skills.paths: skill not found: ${p}
 ` + `    resolved to: ${abs}
 ` + `    canonical global skills live in ~/.xtrm/skills/default/<skill>/`);
@@ -17894,7 +18296,7 @@ function validateBeforeRun(spec, permissionLevel, resolvedToolContract) {
     const isFilePath = run.startsWith("./") || run.startsWith("../") || run.startsWith("/") || run.startsWith("~/");
     if (isFilePath) {
       const abs = resolvePath2(run);
-      if (!existsSync11(abs)) {
+      if (!existsSync12(abs)) {
         errors.push(`  ✗ skills.scripts: script not found: ${run}`);
       } else {
         validateShebang(abs, errors);
@@ -18649,7 +19051,7 @@ function canonicalizeSkillPath(field, path, baseDir) {
       throw new Error("not a file or directory");
     accessSync(canonical, stat.isDirectory() ? constants.R_OK | constants.X_OK : constants.R_OK);
     if (stat.isDirectory()) {
-      const skillFile = join9(canonical, "SKILL.md");
+      const skillFile = join10(canonical, "SKILL.md");
       const skillStat = lstatSync2(skillFile);
       if (skillStat.isSymbolicLink() || !skillStat.isFile())
         throw new Error("invalid SKILL.md");
@@ -18729,7 +19131,7 @@ function readSkillSourceBytes(path, noFollowFlag) {
   const declaredStat = lstatSync2(path);
   if (declaredStat.isSymbolicLink())
     throw new Error("symlinked skill source");
-  const sourcePath = declaredStat.isDirectory() ? join9(path, "SKILL.md") : path;
+  const sourcePath = declaredStat.isDirectory() ? join10(path, "SKILL.md") : path;
   if (realpathSync2(sourcePath) !== sourcePath)
     throw new Error("skill file canonical path changed");
   const sourceStat = lstatSync2(sourcePath);
@@ -18740,7 +19142,7 @@ function readSkillSourceBytes(path, noFollowFlag) {
   try {
     if (!fstatSync(fd).isFile())
       throw new Error("skill source is not a regular file");
-    return readFileSync6(fd);
+    return readFileSync8(fd);
   } finally {
     closeSync(fd);
   }
@@ -19423,17 +19825,17 @@ function appendExtensionArgs(args, spec, resolvedToolContract, extensionSources 
   const readLineNumbersPath = getReadLineNumbersExtensionPath();
   if (readLineNumbersPath)
     args.push("-e", readLineNumbersPath);
-  const piExtDir = join9(homedir3(), ".pi", "agent", "extensions");
+  const piExtDir = join10(homedir4(), ".pi", "agent", "extensions");
   if (permissionLevel !== "READ_ONLY") {
-    const qualityGatesPath = join9(piExtDir, "quality-gates");
-    if (existsSync12(qualityGatesPath))
+    const qualityGatesPath = join10(piExtDir, "quality-gates");
+    if (existsSync13(qualityGatesPath))
       args.push("-e", qualityGatesPath);
   }
-  const cavemanPath = join9(piExtDir, "caveman");
-  if (existsSync12(cavemanPath))
+  const cavemanPath = join10(piExtDir, "caveman");
+  if (existsSync13(cavemanPath))
     args.push("-e", cavemanPath);
   const gitnexusContract = resolvedToolContract?.extensions.gitnexus;
-  if (gitnexusContract?.status === "available" && gitnexusContract.packagePath && existsSync12(gitnexusContract.packagePath)) {
+  if (gitnexusContract?.status === "available" && gitnexusContract.packagePath && existsSync13(gitnexusContract.packagePath)) {
     args.push("-e", gitnexusContract.packagePath);
   }
   for (const source of extensionSources) {
@@ -19462,6 +19864,7 @@ async function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assista
       stallTimeoutMs: spec.specialist.execution.stall_timeout_ms ?? timeoutMs,
       ...extensionSelection.excludeExtensions.length > 0 ? { excludeExtensions: extensionSelection.excludeExtensions } : {},
       ...extensionSelection.extensionSources.length > 0 ? { extensionSources: extensionSelection.extensionSources } : {},
+      ...claudeBridgeSessionOption(spec.specialist.execution),
       ...extensionSelection.offline === false ? { offline: false } : {},
       resolvedToolContract,
       onToken: (delta) => {
@@ -19780,310 +20183,8 @@ var $stringify = publicApi.stringify;
 var $visit = visit.visit;
 var $visitAsync = visit.visitAsync;
 
-// src/specialist/schema.ts
-var KebabCase = stringType().regex(/^[a-z][a-z0-9-]*$/, "Must be kebab-case");
-var Semver = stringType().regex(/^\d+\.\d+\.\d+$/, "Must be semver (e.g. 1.0.0)");
-var MetadataSchema = objectType({
-  name: KebabCase,
-  version: Semver,
-  description: stringType(),
-  category: stringType(),
-  updated: stringType().optional(),
-  tags: arrayType(stringType()).optional()
-}).passthrough();
-var ExtensionToggleSchema = booleanType();
-var ExecutionSchema = objectType({
-  mode: enumType(["tool", "skill", "auto"]).default("auto"),
-  model: stringType().nullable(),
-  surface_models: recordType(stringType()).optional(),
-  fallback_model: stringType().nullable().optional(),
-  fallback_models: arrayType(stringType()).nullable().optional(),
-  timeout_ms: numberType().default(120000),
-  stall_timeout_ms: numberType().optional(),
-  max_retries: numberType().int().min(0).default(0),
-  interactive: booleanType().default(false),
-  stdout_limit_bytes: numberType().int().positive().optional(),
-  prompt_limit_bytes: numberType().int().positive().optional(),
-  response_format: enumType(["text", "json", "markdown"]).default("text"),
-  output_type: enumType(["codegen", "analysis", "review", "synthesis", "orchestration", "workflow", "research", "custom"]).default("custom"),
-  permission_required: enumType(["READ_ONLY", "LOW", "MEDIUM", "HIGH"]).default("READ_ONLY"),
-  requires_worktree: booleanType().default(true),
-  lease_waiver: booleanType().optional().default(false),
-  bare: booleanType().default(false),
-  thinking_level: enumType(["off", "minimal", "low", "medium", "high", "xhigh"]).optional(),
-  auto_commit: enumType(["never", "checkpoint_on_waiting", "checkpoint_on_terminal"]).default("never"),
-  extensions: recordType(stringType(), ExtensionToggleSchema).optional(),
-  expected_output_keys: arrayType(stringType()).optional()
-}).passthrough();
-var PromptSchema = objectType({
-  system: stringType().optional(),
-  system_prompt_mode: enumType(["append", "replace"]).optional(),
-  task_template: stringType(),
-  output_schema: recordType(unknownType()).optional(),
-  skill_inherit: stringType().optional()
-}).passthrough();
-var ScriptEntrySchema = objectType({
-  run: stringType(),
-  phase: enumType(["pre", "post"]),
-  inject_output: booleanType().default(false),
-  required: booleanType().optional(),
-  label: stringType().max(128).optional()
-}).passthrough();
-var SkillsSchema = objectType({
-  paths: arrayType(stringType()).optional(),
-  scripts: arrayType(ScriptEntrySchema).optional()
-}).passthrough().optional();
-var CapabilitiesSchema = objectType({
-  required_tools: arrayType(stringType()).optional(),
-  external_commands: arrayType(stringType()).optional()
-}).passthrough().optional();
-var ValidationSchema = objectType({
-  files_to_watch: arrayType(stringType()).optional(),
-  stale_threshold_days: numberType().optional()
-}).passthrough().optional();
-var MandatoryRuleSchema = objectType({
-  id: stringType(),
-  level: enumType(["error", "warn", "info"]).default("error"),
-  text: stringType(),
-  when: stringType().optional()
-}).passthrough();
-var MandatoryRulesSchema = objectType({
-  template_sets: arrayType(KebabCase).default([]),
-  disable_default_globals: booleanType().default(false),
-  inline_rules: arrayType(MandatoryRuleSchema).default([])
-}).passthrough().optional();
-var SpecialistPermissionTierSchema = objectType({
-  denied_natives_when_extension: arrayType(stringType()).optional(),
-  denied_natives_mode: enumType(["soft", "hard"]).optional()
-}).passthrough();
-var SpecialistPermissionsSchema = objectType({
-  READ_ONLY: SpecialistPermissionTierSchema.optional(),
-  LOW: SpecialistPermissionTierSchema.optional(),
-  MEDIUM: SpecialistPermissionTierSchema.optional(),
-  HIGH: SpecialistPermissionTierSchema.optional()
-}).partial();
-var StallDetectionSchema = objectType({
-  running_silence_warn_ms: numberType().optional(),
-  running_silence_error_ms: numberType().optional(),
-  waiting_stale_ms: numberType().optional(),
-  waiting_auto_close_ms: numberType().nullable().optional(),
-  tool_duration_warn_ms: numberType().optional()
-}).passthrough().optional();
-var SpecialistSchema = objectType({
-  specialist: objectType({
-    metadata: MetadataSchema,
-    execution: ExecutionSchema,
-    prompt: PromptSchema,
-    skills: SkillsSchema,
-    capabilities: CapabilitiesSchema,
-    validation: ValidationSchema,
-    stall_detection: StallDetectionSchema,
-    mandatory_rules: MandatoryRulesSchema,
-    permissions: SpecialistPermissionsSchema.optional(),
-    output_file: stringType().optional(),
-    notes_mode: enumType(["full-trail", "final-only"]).default("full-trail"),
-    beads_integration: enumType(["auto", "always", "never"]).default("auto"),
-    beads_write_notes: booleanType().default(true)
-  }).passthrough()
-}).passthrough();
-var OVERRIDE_ALLOWED_EXECUTION_FIELDS = [
-  "model",
-  "fallback_model",
-  "fallback_models",
-  "timeout_ms",
-  "stall_timeout_ms",
-  "interactive",
-  "thinking_level",
-  "lease_waiver",
-  "max_retries",
-  "prompt_limit_bytes",
-  "stdout_limit_bytes"
-];
-var OVERRIDE_ALLOWED_NESTED_EXECUTION_PATHS = ["extensions"];
-var OVERRIDE_ALLOWED_STALL_DETECTION_PATHS = [
-  "waiting_auto_close_ms"
-];
-var OVERRIDE_ALLOWED_PROMPT_FIELDS = ["system_prompt_mode"];
-var OVERRIDE_ALLOWED_MANDATORY_RULES_FIELDS = ["template_sets"];
-var OVERRIDE_ALLOWED_TOP_FIELDS = ["beads_write_notes", "notes_mode", "output_file"];
-var BLOCKED_OVERRIDE_FIELDS = [
-  "execution.permission_required",
-  "execution.auto_commit",
-  "prompt.system",
-  "prompt.output_schema",
-  "skills.scripts",
-  "mandatory_rules.inline_rules",
-  "mandatory_rules.disable_default_globals",
-  "capabilities"
-];
-function formatPath(path) {
-  return path.map((p) => typeof p === "number" ? `[${p}]` : p).join(".");
-}
-function getFriendlyMessage(issue) {
-  const path = formatPath(issue.path);
-  if (issue.code === "invalid_string" && issue.validation === "regex") {
-    if (path.includes("name")) {
-      return `Invalid specialist name: must be kebab-case (lowercase letters, numbers, hyphens). Got: "${issue.path.at(-1) === "name" ? "invalid value" : "see schema"}"`;
-    }
-    if (path.includes("version")) {
-      return `Invalid version: must be semver format (e.g., "1.0.0"). Got value that doesn't match pattern.`;
-    }
-  }
-  if (issue.code === "invalid_enum_value") {
-    const allowed = issue.options.map((o) => `"${o}"`).join(", ");
-    if (path.includes("permission_required")) {
-      return `Invalid permission_required: must be one of ${allowed}. This controls which pi tools are available.`;
-    }
-    if (path.includes("mode")) {
-      return `Invalid execution.mode: must be one of ${allowed}.`;
-    }
-    if (path.includes("beads_integration")) {
-      return `Invalid beads_integration: must be one of ${allowed}.`;
-    }
-    return `Invalid value at "${path}": expected one of ${allowed}, got "${issue.received}"`;
-  }
-  if (issue.code === "invalid_type") {
-    return `Invalid type at "${path}": expected ${issue.expected}, got ${issue.received}`;
-  }
-  if (issue.code === "invalid_literal") {
-    return `Invalid value at "${path}": expected "${issue.expected}"`;
-  }
-  return issue.message;
-}
-async function validateSpecialist(jsonContent) {
-  const errors2 = [];
-  const warnings = [];
-  let raw;
-  try {
-    raw = JSON.parse(jsonContent);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    errors2.push({
-      path: "json",
-      message: `JSON parse error: ${msg}`,
-      code: "json_parse_error"
-    });
-    return { valid: false, errors: errors2, warnings };
-  }
-  const result = SpecialistSchema.safeParse(raw);
-  if (!result.success) {
-    for (const issue of result.error.issues) {
-      errors2.push({
-        path: formatPath(issue.path),
-        message: getFriendlyMessage(issue),
-        code: issue.code
-      });
-    }
-  } else {
-    const spec = result.data;
-    const declaredModel = spec.specialist.execution.model;
-    if (declaredModel && !declaredModel.includes("/")) {
-      warnings.push(`Model "${declaredModel}" doesn't include a provider prefix. Expected format: "provider/model-id" (e.g., "anthropic/claude-sonnet-4-5")`);
-    }
-  }
-  return { valid: errors2.length === 0, errors: errors2, warnings };
-}
-async function parseSpecialist(jsonContent) {
-  const result = await validateSpecialist(jsonContent);
-  if (!result.valid) {
-    const errorList = result.errors.map((e) => `  • ${e.message}`).join(`
-`);
-    throw new Error(`Schema validation failed:
-${errorList}`);
-  }
-  if (result.warnings.length > 0) {
-    process.stderr.write(`[specialists] warnings:
-${result.warnings.map((w) => `  ⚠ ${w}`).join(`
-`)}
-`);
-  }
-  const raw = JSON.parse(jsonContent);
-  return SpecialistSchema.parseAsync(raw);
-}
-
-// src/specialist/global-config.ts
-import {
-  existsSync as existsSync13,
-  mkdirSync as mkdirSync5,
-  readFileSync as readFileSync7,
-  renameSync,
-  rmSync,
-  writeFileSync as writeFileSync3
-} from "node:fs";
-import { dirname as dirname9, join as join10 } from "node:path";
-import { homedir as homedir4 } from "node:os";
-var CONFIG_FILENAME = "user.json";
-var SPECIALISTS_SUBDIR = "specialists";
-function getGlobalUserConfigPath() {
-  const home = process.env.HOME?.trim() || homedir4();
-  const xdgConfigHome = process.env.XDG_CONFIG_HOME?.trim();
-  if (xdgConfigHome) {
-    const xdgPath = join10(xdgConfigHome, SPECIALISTS_SUBDIR, CONFIG_FILENAME);
-    return { path: xdgPath, exists: existsSync13(xdgPath), source: "xdg" };
-  }
-  const configHomePath = join10(home, ".config", SPECIALISTS_SUBDIR, CONFIG_FILENAME);
-  if (existsSync13(configHomePath)) {
-    return { path: configHomePath, exists: true, source: "config-home" };
-  }
-  const legacyPath = join10(home, ".specialists", CONFIG_FILENAME);
-  if (existsSync13(legacyPath)) {
-    return { path: legacyPath, exists: true, source: "legacy" };
-  }
-  return { path: configHomePath, exists: false, source: "config-home" };
-}
-var OverrideExtensionsSchema = recordType(stringType(), ExtensionToggleSchema.nullable());
-var OverrideExecutionSchema = objectType({
-  model: stringType().nullable(),
-  fallback_model: stringType().nullable(),
-  fallback_models: arrayType(stringType()).nullable().optional(),
-  timeout_ms: numberType().nullable(),
-  stall_timeout_ms: numberType().nullable(),
-  interactive: booleanType().nullable().optional(),
-  thinking_level: enumType(["off", "minimal", "low", "medium", "high", "xhigh"]).nullable(),
-  max_retries: numberType().int().min(0).nullable(),
-  lease_waiver: booleanType().nullable().optional(),
-  prompt_limit_bytes: numberType().int().positive().nullable().optional(),
-  stdout_limit_bytes: numberType().int().positive().nullable().optional(),
-  extensions: OverrideExtensionsSchema.optional()
-}).strict();
-var OverridePromptSchema = objectType({
-  system_prompt_mode: enumType(["append", "replace"]).nullable()
-}).strict();
-var OverrideStallDetectionSchema = objectType({
-  waiting_auto_close_ms: numberType().nullable().optional()
-}).strict();
-var OverrideSkillsSchema = objectType({
-  paths: arrayType(stringType())
-}).strict();
-var OverrideMandatoryRulesSchema = objectType({
-  template_sets: arrayType(KebabCase).nullable()
-}).strict();
-var GlobalSpecialistOverrideSchema = objectType({
-  execution: OverrideExecutionSchema,
-  prompt: OverridePromptSchema.optional(),
-  stall_detection: OverrideStallDetectionSchema.optional(),
-  beads_write_notes: booleanType().nullable(),
-  notes_mode: enumType(["full-trail", "final-only"]).nullable().optional(),
-  output_file: stringType().nullable().optional(),
-  skills: OverrideSkillsSchema,
-  mandatory_rules: OverrideMandatoryRulesSchema.optional()
-}).strict();
-var GlobalUserConfigSchema = preprocessType((value) => {
-  if (value === null || typeof value !== "object" || Array.isArray(value))
-    return value;
-  return Object.fromEntries(Object.entries(value).filter(([key]) => !key.startsWith("_")));
-}, recordType(stringType(), GlobalSpecialistOverrideSchema));
-var RETIRED_EXTENSION_SOURCES = new Set(["serena"]);
-var BUILTIN_EXTENSION_TOGGLES = new Set(["gitnexus"]);
-function readGlobalUserConfig(location) {
-  if (!location.exists)
-    return null;
-  const content = readFileSync7(location.path, "utf-8");
-  return JSON.parse(content);
-}
-
 // src/specialist/preset-resolver.ts
-import { existsSync as existsSync14, readFileSync as readFileSync8 } from "node:fs";
+import { existsSync as existsSync14, readFileSync as readFileSync9 } from "node:fs";
 import { join as join11 } from "node:path";
 var PRESET_REFERENCE_PREFIX = "@preset/";
 var PRESET_REFERENCE_MAX_DEPTH = 4;
@@ -20173,7 +20274,7 @@ function loadPresets(options = {}) {
     if (!existsSync14(path))
       continue;
     try {
-      presetsCache = JSON.parse(readFileSync8(path, "utf-8"));
+      presetsCache = JSON.parse(readFileSync9(path, "utf-8"));
       presetsCacheBaseDir = baseDir;
       return presetsCache;
     } catch (error) {
@@ -22002,7 +22103,7 @@ function composeInteractionMessage(input, identity2) {
 }
 
 // src/activation/transport/pending-store.ts
-import { existsSync as existsSync17, mkdirSync as mkdirSync6, readdirSync as readdirSync3, readFileSync as readFileSync9, renameSync as renameSync2, unlinkSync, writeFileSync as writeFileSync4 } from "node:fs";
+import { existsSync as existsSync17, mkdirSync as mkdirSync6, readdirSync as readdirSync3, readFileSync as readFileSync10, renameSync as renameSync2, unlinkSync, writeFileSync as writeFileSync4 } from "node:fs";
 import { join as join16 } from "node:path";
 var KINDS_AWAITING_REPLY = new Set(["question", "escalation"]);
 function createsPendingAsk(kind) {
@@ -22037,7 +22138,7 @@ function readJson(path) {
   if (!existsSync17(path))
     return;
   try {
-    return JSON.parse(readFileSync9(path, "utf-8"));
+    return JSON.parse(readFileSync10(path, "utf-8"));
   } catch {
     return;
   }
@@ -22209,7 +22310,7 @@ function sleep(ms, signal) {
 import { connect, createServer } from "node:net";
 
 // src/activation/transport/roster.ts
-import { existsSync as existsSync18, readdirSync as readdirSync4, readFileSync as readFileSync10 } from "node:fs";
+import { existsSync as existsSync18, readdirSync as readdirSync4, readFileSync as readFileSync11 } from "node:fs";
 import { homedir as homedir9 } from "node:os";
 import { join as join17 } from "node:path";
 var SUPPORTED_PEER_PROTOCOL = 1;
@@ -22223,12 +22324,12 @@ function procProbe() {
     startOf(pid) {
       try {
         if (bootSeconds === undefined) {
-          const match = /^btime (\d+)$/m.exec(readFileSync10("/proc/stat", "utf-8"));
+          const match = /^btime (\d+)$/m.exec(readFileSync11("/proc/stat", "utf-8"));
           if (!match)
             return;
           bootSeconds = Number(match[1]);
         }
-        const stat2 = readFileSync10(`/proc/${pid}/stat`, "utf-8");
+        const stat2 = readFileSync11(`/proc/${pid}/stat`, "utf-8");
         const afterComm = stat2.slice(stat2.lastIndexOf(")") + 2).trim().split(/\s+/);
         const ticksSinceBoot = Number(afterComm[19]);
         if (!Number.isFinite(ticksSinceBoot))
@@ -22293,7 +22394,7 @@ function scanRoster(options = {}) {
       continue;
     let registration;
     try {
-      registration = JSON.parse(readFileSync10(join17(dir, file), "utf-8"));
+      registration = JSON.parse(readFileSync11(join17(dir, file), "utf-8"));
     } catch {
       rejected.push({ file, reason: "unparsable" });
       continue;
@@ -22496,7 +22597,7 @@ function isDeliveredStatus(status) {
 // src/activation/workspace-lease.ts
 import { execFileSync as execFileSync2, spawnSync as spawnSync4 } from "node:child_process";
 import { createHash as createHash5 } from "node:crypto";
-import { appendFileSync as appendFileSync2, existsSync as existsSync19, linkSync, mkdirSync as mkdirSync7, readFileSync as readFileSync11, realpathSync as realpathSync5, renameSync as renameSync3, rmSync as rmSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "node:fs";
+import { appendFileSync as appendFileSync2, existsSync as existsSync19, linkSync, mkdirSync as mkdirSync7, readFileSync as readFileSync12, realpathSync as realpathSync5, renameSync as renameSync3, rmSync as rmSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "node:fs";
 import { basename as basename4, dirname as dirname12, join as join18 } from "node:path";
 
 // src/activation/types.ts
@@ -22616,7 +22717,7 @@ function procLeaseProbe() {
     canVerify: () => existsSync19("/proc/self/stat"),
     startTicks(pid) {
       try {
-        const stat2 = readFileSync11(`/proc/${pid}/stat`, "utf-8");
+        const stat2 = readFileSync12(`/proc/${pid}/stat`, "utf-8");
         const afterComm = stat2.slice(stat2.lastIndexOf(")") + 2).trim().split(/\s+/);
         const ticks = Number(afterComm[19]);
         return Number.isFinite(ticks) ? ticks : undefined;
@@ -22652,7 +22753,7 @@ function inspect(workspace, probe = procLeaseProbe()) {
     return { state: "free" };
   let lease;
   try {
-    lease = JSON.parse(readFileSync11(path, "utf-8"));
+    lease = JSON.parse(readFileSync12(path, "utf-8"));
     if (typeof lease?.holder?.pid !== "number")
       throw new Error("missing holder");
   } catch {
@@ -22674,7 +22775,7 @@ function releaseHolderLease(workspace, input) {
   const path = leasePath(workspace);
   let lease;
   try {
-    lease = JSON.parse(readFileSync11(path, "utf-8"));
+    lease = JSON.parse(readFileSync12(path, "utf-8"));
   } catch {
     return { applied: false, reason: "already_free" };
   }
@@ -22711,7 +22812,7 @@ function recoverDeadHolder(workspace, input) {
   }
   let current;
   try {
-    current = JSON.parse(readFileSync11(path, "utf-8"));
+    current = JSON.parse(readFileSync12(path, "utf-8"));
   } catch {
     return { applied: false, reason: "already_free" };
   }
@@ -23378,6 +23479,15 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
         ...tool !== undefined ? { tool } : {}
       }), t);
     }
+    case "thinking_level_unavailable": {
+      const payload = record(event.payload);
+      return at({
+        t,
+        type: "thinking_level_unavailable",
+        requested_level: stringField2(payload?.requested_level) ?? "unknown",
+        note: stringField2(payload?.note) ?? "thinking level could not be re-applied"
+      }, t);
+    }
     default:
       return null;
   }
@@ -23501,7 +23611,7 @@ function mapNativeSessionEvent(event, t = Date.now(), turnIndex = 0) {
 async function createGateModelRuntime(sdk) {
   return sdk.ModelRuntime.create({ allowModelNetwork: false });
 }
-async function validateModelAvailable(sdk, modelRuntime, requested) {
+async function validateModelAvailable(sdk, modelRuntime, requested, options = {}) {
   let scope;
   try {
     scope = await sdk.resolveModelScopeWithDiagnostics([requested], modelRuntime);
@@ -23515,6 +23625,17 @@ async function validateModelAvailable(sdk, modelRuntime, requested) {
   const diagnostics = scope.diagnostics ?? [];
   const noMatch = diagnostics.find((d) => d.code === "no-match");
   if (noMatch) {
+    const extensionProvider = requested.includes("/") ? requested.slice(0, requested.indexOf("/")) : undefined;
+    if (extensionProvider && (options.extensionProviders ?? []).includes(extensionProvider)) {
+      return {
+        ok: true,
+        provisional: true,
+        provider: extensionProvider,
+        model: provisionalModelDescriptor(requested, extensionProvider),
+        resolvedModel: requested,
+        diagnostics
+      };
+    }
     return {
       ok: false,
       reason: noMatch.message || `no model matches "${requested}"`,
@@ -23544,6 +23665,21 @@ async function validateModelAvailable(sdk, modelRuntime, requested) {
     resolvedModel: first.id ? `${provider}/${first.id}`.replace(`${provider}/${provider}/`, `${provider}/`) : requested,
     provider,
     diagnostics
+  };
+}
+function provisionalModelDescriptor(requested, provider) {
+  const id = requested.slice(provider.length + 1);
+  return {
+    id,
+    provider,
+    api: provider,
+    name: `${provider}/${id}`,
+    baseUrl: provider,
+    reasoning: false,
+    input: ["text"],
+    contextWindow: 200000,
+    maxTokens: 8192,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
   };
 }
 
@@ -24073,7 +24209,7 @@ function saveState(store, record2, state, note, links = {}, refusal2) {
 }
 
 // src/activation/settlement-store.ts
-import { mkdirSync as mkdirSync8, readFileSync as readFileSync12, readdirSync as readdirSync5, writeFileSync as writeFileSync6 } from "node:fs";
+import { mkdirSync as mkdirSync8, readFileSync as readFileSync13, readdirSync as readdirSync5, writeFileSync as writeFileSync6 } from "node:fs";
 import { join as join20 } from "node:path";
 function safeSegment(id) {
   const safe = id.replace(/[^A-Za-z0-9.:_-]/g, "_");
@@ -24105,7 +24241,7 @@ function createFileSettlementStore(root) {
     },
     get(activationId, attemptId) {
       try {
-        return JSON.parse(readFileSync12(pathFor(activationId, attemptId), "utf8"));
+        return JSON.parse(readFileSync13(pathFor(activationId, attemptId), "utf8"));
       } catch {
         return;
       }
@@ -24120,7 +24256,7 @@ function createFileSettlementStore(root) {
       const out = [];
       for (const file of files.filter((f) => f.endsWith(".json")).sort()) {
         try {
-          out.push(JSON.parse(readFileSync12(join20(root, safeSegment(activationId), file), "utf8")));
+          out.push(JSON.parse(readFileSync13(join20(root, safeSegment(activationId), file), "utf8")));
         } catch {}
       }
       return out;
@@ -24156,7 +24292,7 @@ function createFileSettlementStore(root) {
     const out = [];
     for (const file of files.filter((f) => f.endsWith(".json")).sort()) {
       try {
-        out.push(JSON.parse(readFileSync12(join20(root, activation, file), "utf8")));
+        out.push(JSON.parse(readFileSync13(join20(root, activation, file), "utf8")));
       } catch {}
     }
     return out;
@@ -24432,6 +24568,17 @@ function withFleetWake(base, wake) {
       wake();
     }
   };
+}
+var gateExtensionProviders = new WeakMap;
+var provisionalModelPatterns = new WeakMap;
+function gateOptionsFor(runtime) {
+  return { extensionProviders: gateExtensionProviders.get(runtime) ?? [] };
+}
+async function checkModelForRuntime(sdk, runtime, pattern) {
+  const check = await validateModelAvailable(sdk, runtime, pattern, gateOptionsFor(runtime));
+  if (check.provisional && check.model)
+    provisionalModelPatterns.set(check.model, pattern);
+  return check;
 }
 
 class NativeActivationHost {
@@ -24748,8 +24895,16 @@ class NativeActivationHost {
     if (!requestedModel)
       return reject("no_model_configured");
     const modelRuntime = await createGateModelRuntime(sdk);
+    const claudeBridge = claudeBridgeRouteEnabled(execution);
+    const claudeBridgePath = claudeBridge ? resolveClaudeBridgeExtensionPath() : undefined;
+    if (claudeBridge && !claudeBridgePath) {
+      return reject("claude_bridge_unavailable", {
+        note: "execution.claude_bridge is enabled but the pi-claude-bridge extension was not found " + `(expected the global package "${"pi-claude-bridge"}" or ${"SPECIALISTS_CLAUDE_BRIDGE_PATH"}); ` + "install it or clear the flag"
+      });
+    }
+    gateExtensionProviders.set(modelRuntime, claudeBridgeExtensionProviders(claudeBridge));
     let modelIndex = 0;
-    let modelCheck = await validateModelAvailable(sdk, modelRuntime, modelChain[0] ?? "");
+    let modelCheck = await checkModelForRuntime(sdk, modelRuntime, modelChain[0] ?? "");
     while ((!modelCheck.ok || !modelCheck.model) && modelIndex < modelChain.length - 1) {
       const skipped = modelChain[modelIndex];
       emit2("model_fallback", {
@@ -24760,7 +24915,7 @@ class NativeActivationHost {
         note: modelCheck.reason ?? null
       });
       modelIndex += 1;
-      modelCheck = await validateModelAvailable(sdk, modelRuntime, modelChain[modelIndex] ?? "");
+      modelCheck = await checkModelForRuntime(sdk, modelRuntime, modelChain[modelIndex] ?? "");
     }
     if (!modelCheck.ok || !modelCheck.model) {
       return reject("model_unavailable", {
@@ -24771,7 +24926,8 @@ class NativeActivationHost {
     const resolvedModel = modelCheck.resolvedModel ?? modelChain[modelIndex] ?? requestedModel;
     const curatedExtensions = resolveCuratedExtensionPaths({
       permissionLevel: tier,
-      resolvedToolContract: toolContract
+      resolvedToolContract: toolContract,
+      claudeBridge
     });
     const declaredExtensions = extensionSelection.extensionSources;
     const { local: declaredLocalExtensions, skipped: skippedDeclaredSources } = resolveDeclaredExtensionSources(declaredExtensions, {
@@ -25041,6 +25197,7 @@ class NativeActivationHost {
     const baseSessionOptions = {
       customTools: [...askTools, ...guardedTools.tools],
       cwd: workspace.worktreePath,
+      ...claudeBridge ? { modelRuntime } : {},
       resourceLoader,
       model: modelCheck.model,
       ...thinkingLevel ? { thinkingLevel } : {},
@@ -25072,6 +25229,91 @@ class NativeActivationHost {
           });
         }
         return reject("tool_contract_unsatisfied", detail);
+      }
+      const provisionalPattern = provisionalModelPatterns.get(model);
+      if (provisionalPattern) {
+        let resolvedModel2;
+        try {
+          const scope = await sdk.resolveModelScopeWithDiagnostics([provisionalPattern], modelRuntime);
+          resolvedModel2 = scope.scopedModels?.[0]?.model;
+        } catch {
+          resolvedModel2 = undefined;
+        }
+        if (!resolvedModel2) {
+          created.session.dispose();
+          const detail = {
+            requestedModel: provisionalPattern,
+            note: `the "${CLAUDE_BRIDGE_PROVIDER}" provider did not register on the session runtime, so ` + `"${provisionalPattern}" does not exist; the extension is installed but did not load its provider`
+          };
+          if (options.viaFallback) {
+            throw new DispatchRejectedError("model_unavailable", {
+              specialist: request.specialist,
+              issueRef: request.issueRef,
+              ...detail
+            });
+          }
+          return reject("model_unavailable", detail);
+        }
+        const installModel = created.session.setModel;
+        if (typeof installModel !== "function") {
+          created.session.dispose();
+          const detail = {
+            requestedModel: provisionalPattern,
+            note: `this pi SDK session has no setModel, so "${provisionalPattern}" cannot be installed; ` + "a provisionally admitted model is never run on the gate placeholder"
+          };
+          if (options.viaFallback) {
+            throw new DispatchRejectedError("model_unavailable", {
+              specialist: request.specialist,
+              issueRef: request.issueRef,
+              ...detail
+            });
+          }
+          return reject("model_unavailable", detail);
+        }
+        try {
+          await installModel.call(created.session, resolvedModel2);
+        } catch (error) {
+          created.session.dispose();
+          const detail = {
+            requestedModel: provisionalPattern,
+            note: `resolved "${provisionalPattern}" but could not install it on the session: ${error instanceof Error ? error.message : String(error)}`
+          };
+          if (options.viaFallback) {
+            throw new DispatchRejectedError("model_unavailable", {
+              specialist: request.specialist,
+              issueRef: request.issueRef,
+              ...detail
+            });
+          }
+          return reject("model_unavailable", detail);
+        }
+        if (thinkingLevel) {
+          const applyThinking = created.session.setThinkingLevel;
+          if (typeof applyThinking !== "function") {
+            emit2("thinking_level_unavailable", {
+              requested_level: thinkingLevel,
+              note: "this pi SDK session has no setThinkingLevel; the run continues at the default thinking level"
+            });
+          } else {
+            try {
+              applyThinking.call(created.session, thinkingLevel);
+            } catch (error) {
+              created.session.dispose();
+              const detail = {
+                requestedModel: provisionalPattern,
+                note: `installed "${provisionalPattern}" but could not re-apply thinking level "${thinkingLevel}": ${error instanceof Error ? error.message : String(error)}`
+              };
+              if (options.viaFallback) {
+                throw new DispatchRejectedError("model_unavailable", {
+                  specialist: request.specialist,
+                  issueRef: request.issueRef,
+                  ...detail
+                });
+              }
+              return reject("model_unavailable", detail);
+            }
+          }
+        }
       }
       return created.session;
     };
@@ -25683,7 +25925,7 @@ class NativeActivationHost {
         break;
       const nextModel = ctx.modelChain[index + 1];
       const fromModel = record2.snapshot.resolvedModel;
-      const check = await validateModelAvailable(ctx.sdk, ctx.modelRuntime, nextModel);
+      const check = await checkModelForRuntime(ctx.sdk, ctx.modelRuntime, nextModel);
       if (!check.ok || !check.model) {
         ctx.emit("model_fallback", {
           from_model: fromModel,
@@ -25788,7 +26030,13 @@ class NativeActivationHost {
     let overrideResolved;
     if (overrideName) {
       const sdk = await this.loadSdk();
-      const check = await validateModelAvailable(sdk, await createGateModelRuntime(sdk), overrideName);
+      const retryRuntime = await createGateModelRuntime(sdk);
+      const retrySpecialist = await this.loader.get(record2.snapshot.specialist).catch(() => {
+        return;
+      });
+      const retryBridge = retrySpecialist ? claudeBridgeRouteEnabled(retrySpecialist.specialist.execution) : false;
+      gateExtensionProviders.set(retryRuntime, claudeBridgeExtensionProviders(retryBridge));
+      const check = await checkModelForRuntime(sdk, retryRuntime, overrideName);
       if (!check.ok || !check.model) {
         throw new DispatchRejectedError("model_unavailable", {
           activationId,
@@ -26253,11 +26501,11 @@ import { fileURLToPath as fileURLToPath6 } from "node:url";
 
 // src/activation/build-identity.ts
 import { createHash as createHash6 } from "node:crypto";
-import { readFileSync as readFileSync13 } from "node:fs";
+import { readFileSync as readFileSync14 } from "node:fs";
 var BUILD_ID_BYTES = 12;
 var UNKNOWN_BUILD_ID = "unknown";
 function hashFileBytes(path) {
-  return createHash6("sha256").update(readFileSync13(path)).digest("hex");
+  return createHash6("sha256").update(readFileSync14(path)).digest("hex");
 }
 function shortBuildId(hash) {
   return hash.slice(0, BUILD_ID_BYTES);
@@ -26305,6 +26553,7 @@ var DISPATCH_REFUSAL_REASONS = [
   "invalid_thinking_override",
   "no_model_configured",
   "model_unavailable",
+  "claude_bridge_unavailable",
   "extension_tool_shadowed",
   "extension_discovery_failed",
   "context_unresolvable",
@@ -26325,6 +26574,7 @@ var DISPATCH_REFUSAL_REASONS = [
 ];
 var FIX_BY_REASON = {
   unknown_specialist: "Check specialist_list for the exact Specialist name and re-dispatch with a known name.",
+  claude_bridge_unavailable: "The definition enables the Claude Code route but the pi-claude-bridge extension was not found. Install it where pi resolves global packages (or set SPECIALISTS_CLAUDE_BRIDGE_PATH to an absolute entry), or clear execution.claude_bridge and re-dispatch. The operator must also enable the route in ~/.config/specialists/user.json.",
   work_item_store_unavailable: "The Substrate work boundary could not be opened. Install or upgrade the Substrate package, or set SUBSTRATE_DB (fallback XTRM_STATE_DB) to a writable state file, then re-dispatch.",
   parent_ref_and_ref: "Provide exactly one work locator. parent_ref only parents an Issue created from an inline contract: re-dispatch with contract plus parent_ref, or with issue_ref alone.",
   kind_and_ref: "Provide exactly one work locator. kind only flavours an Issue created from an inline contract: re-dispatch with contract plus kind, or with issue_ref alone.",
@@ -27689,7 +27939,7 @@ async function verifyExactLineCitation(evidence, claim) {
 import { resolve as resolve12 } from "node:path";
 
 // src/activation/workspace-reconcile.ts
-import { appendFileSync as appendFileSync3, existsSync as existsSync23, mkdirSync as mkdirSync9, readdirSync as readdirSync6, readFileSync as readFileSync14, unlinkSync as unlinkSync4 } from "node:fs";
+import { appendFileSync as appendFileSync3, existsSync as existsSync23, mkdirSync as mkdirSync9, readdirSync as readdirSync6, readFileSync as readFileSync15, unlinkSync as unlinkSync4 } from "node:fs";
 import { userInfo } from "node:os";
 import { join as join22 } from "node:path";
 var PERMITTED = {
@@ -27776,7 +28026,7 @@ function readLogAt(path) {
   if (!existsSync23(path))
     return [];
   const out = [];
-  for (const line of readFileSync14(path, "utf-8").split(`
+  for (const line of readFileSync15(path, "utf-8").split(`
 `)) {
     if (!line.trim())
       continue;
@@ -27858,7 +28108,7 @@ function projectUncertainWorkspaces(scope, probe = procLeaseProbe()) {
 }
 function readLeaseFile(path) {
   try {
-    const lease = JSON.parse(readFileSync14(path, "utf-8"));
+    const lease = JSON.parse(readFileSync15(path, "utf-8"));
     return typeof lease?.holder?.pid === "number" && typeof lease.worktreePath === "string" ? lease : undefined;
   } catch {
     return;

@@ -23,6 +23,12 @@ export interface PiSessionOptions {
     extensionSources?: readonly string[];
     /** Controls whether Pi starts with `--offline`. Defaults true. */
     offline?: boolean;
+    /**
+     * `execution.claude_bridge` (SPECIALISTS-4405). Loads the Claude Code bridge into this session
+     * as well as the native one, so the two runtimes cannot disagree about the route; a missing
+     * install throws rather than running without the provider the definition asked for.
+     */
+    claudeBridge?: boolean;
     /** Absolute path boundary for write-side tools; undefined disables enforcement */
     worktreeBoundary?: string;
     /** Permission level from specialist YAML — controls which pi tools are enabled */
@@ -221,6 +227,12 @@ export interface CuratedExtensionResolution {
     /** Every curated path, in the legacy argv order. Only paths that exist are included. */
     all: string[];
     /**
+     * The Claude Code bridge entry, when the definition opted in AND the package is installed
+     * (SPECIALISTS-4405). `undefined` with the flag on means "not installed": the host refuses with
+     * `claude_bridge_unavailable` rather than running a Specialist without the provider it asked for.
+     */
+    claudeBridgePath?: string;
+    /**
      * The subset that takes part in same-identity de-duplication against a definition's own
      * `execution.extensions` sources. Preserved verbatim from the pre-extraction code
      * (unitAI-il2io): the managed python-kernel copy and the gitnexus npm copy are the two a
@@ -232,6 +244,12 @@ export interface CuratedExtensionResolution {
 export declare function resolveCuratedExtensionPaths(options: {
     permissionLevel?: string;
     resolvedToolContract?: ResolvedToolContract;
+    /**
+     * `execution.claude_bridge` (SPECIALISTS-4405). OFF unless the definition says otherwise: the
+     * route spends the operator's Claude subscription quota and needs the operator's own login, so
+     * nothing about it may be ambient.
+     */
+    claudeBridge?: boolean;
 }): CuratedExtensionResolution;
 /**
  * Resolve the Pi version actually in use for a run (SPECIALISTS-120 criterion 7).
@@ -285,6 +303,17 @@ export declare function resolveGlobalNodeModulesDir(deps?: GlobalNodeModulesDeps
  * {@link resolveGlobalNodeModulesDir}: use it for any lookup of a specific package.
  */
 export declare function resolveGlobalPackageDir(packageName: string, deps?: GlobalNodeModulesDeps): string | undefined;
+/**
+ * Resolve the Claude Code bridge extension entry (SPECIALISTS-4405), or `undefined` when it is not
+ * installed. A directory with a `package.json` is resolved through its own entry field, then
+ * through the layouts Pi itself loads: the bridge ships neither `main` nor `exports`, so
+ * `src/index.ts` is its normal entry rather than a fallback nobody hits.
+ *
+ * `SPECIALISTS_CLAUDE_BRIDGE_PATH` names an entry directly (a source checkout, a non-global
+ * install, or a test fixture).
+ */
+export declare function resolveClaudeBridgeExtensionPath(env?: NodeJS.ProcessEnv, exists?: (path: string) => boolean): string | undefined;
+export declare function resolveClaudeBridgePackageEntry(packageDir: string, exists: (path: string) => boolean): string | undefined;
 export declare function validateWriteToolPathAgainstBoundary(toolName: string, toolArgs: Record<string, unknown> | undefined, worktreeBoundary: string | undefined): string | undefined;
 export declare class PiAgentSession {
     private options;

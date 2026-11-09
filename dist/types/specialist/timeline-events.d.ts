@@ -333,6 +333,18 @@ export interface TimelineEventStaleWarning extends TimelineEventBase {
     /** Tool name, present for tool_duration reason */
     tool?: string;
 }
+/**
+ * A requested thinking level could not be re-applied after a model switch
+ * (SPECIALISTS-4405). Cosmetic, not route-fatal: the run continues at the SDK's default depth,
+ * and this row is how the operator learns that the Specialist did not run at the level it asked
+ * for. Recorded instead of dropped, because a silently different reasoning depth is exactly the
+ * kind of difference that makes a run unreproducible.
+ */
+export interface TimelineEventThinkingLevelUnavailable extends TimelineEventBase {
+    type: 'thinking_level_unavailable';
+    requested_level: string;
+    note: string;
+}
 export interface TimelineEventTokenUsage extends TimelineEventBase {
     type: 'token_usage';
     token_usage: TimelineTokenUsage;
@@ -505,7 +517,7 @@ export interface TimelineEventLegacyComplete extends TimelineEventBase {
  * Union of all timeline event types.
  * This is the canonical type for events.jsonl records.
  */
-export type TimelineEvent = TimelineEventRunStart | TimelineEventPayloadBreakdown | TimelineEventMeta | TimelineEventThinking | TimelineEventTool | TimelineEventText | TimelineEventMessage | TimelineEventTurn | TimelineEventStatusChange | TimelineEventRunComplete | TimelineEventStaleWarning | TimelineEventTokenUsage | TimelineEventSessionStats | TimelineEventSessionStatsError | TimelineEventFinishReason | TimelineEventTurnSummary | TimelineEventCompaction | TimelineEventRetry | TimelineEventModelChange | TimelineEventExtensionError | TimelineEventApiError | TimelineEventAutoCommit | TimelineEventControlSignal | TimelineEventSettlement | TimelineEventLegacyComplete;
+export type TimelineEvent = TimelineEventRunStart | TimelineEventPayloadBreakdown | TimelineEventMeta | TimelineEventThinking | TimelineEventTool | TimelineEventText | TimelineEventMessage | TimelineEventTurn | TimelineEventStatusChange | TimelineEventRunComplete | TimelineEventStaleWarning | TimelineEventThinkingLevelUnavailable | TimelineEventTokenUsage | TimelineEventSessionStats | TimelineEventSessionStatsError | TimelineEventFinishReason | TimelineEventTurnSummary | TimelineEventCompaction | TimelineEventRetry | TimelineEventModelChange | TimelineEventExtensionError | TimelineEventApiError | TimelineEventAutoCommit | TimelineEventControlSignal | TimelineEventSettlement | TimelineEventLegacyComplete;
 export declare const TIMELINE_EVENT_TYPES: {
     readonly RUN_START: "run_start";
     readonly META: "meta";

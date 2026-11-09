@@ -117,6 +117,22 @@ export interface PiAgentSessionLike {
     dispose(): void;
     subscribe(listener: (event: PiAgentSessionEvent) => void): () => void;
     getActiveToolNames(): string[];
+    /**
+     * Replace the session's model (pi ≥ 1.0 `AgentSession.setModel`).
+     *
+     * Optional because older SDK doubles do not expose it. The native host uses it only to install
+     * a model it resolved AFTER creating the session (SPECIALISTS-4405): the gate's provisional
+     * placeholder carries the right provider id but not the extension's own model metadata.
+     */
+    setModel?(model: unknown, options?: Record<string, unknown>): Promise<void>;
+    /**
+     * Current / settable thinking level (pi ≥ 1.0 `AgentSession.setThinkingLevel`).
+     *
+     * `setModel` recomputes the level from the operator's defaults on pi 1.4.0, so the host re-applies
+     * the Specialist's level through this right after installing a resolved model.
+     */
+    readonly thinkingLevel?: string;
+    setThinkingLevel?(level: string, options?: Record<string, unknown>): void;
     setActiveToolsByName(names: string[]): void;
     waitForIdle(): Promise<void>;
     /**

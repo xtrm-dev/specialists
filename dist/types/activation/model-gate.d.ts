@@ -20,8 +20,39 @@
  * rejection, and must be reported as such.
  */
 import type { PiSdk, PiModelRuntimeLike } from './pi-sdk.js';
+/** The model fields the host and pi's session creation actually read. */
+export interface PiModelDescriptor {
+    id?: string;
+    provider?: string;
+    api?: string;
+    name?: string;
+    [key: string]: unknown;
+}
+export interface ModelGateOptions {
+    /**
+     * Provider ids that an extension loaded INTO THE SESSION supplies, which this gate's own
+     * `ModelRuntime` therefore cannot see (SPECIALISTS-4405).
+     *
+     * Pi registers an extension's provider on the runtime the session binds to, and that binding
+     * happens when the session is created — after this gate runs. So a provider served by an
+     * extension always resolves `no-match` here, even when it is about to be available. Naming it
+     * explicitly turns that into a PROVISIONAL admission the host must verify on the live session,
+     * instead of a rejection that would make the route unusable.
+     *
+     * Empty by default: a bridged model is refused exactly as before unless the caller opted in.
+     */
+    extensionProviders?: readonly string[];
+}
 export interface ModelGateResult {
     ok: boolean;
+    /**
+     * Admitted on an extension provider this runtime cannot resolve (`extensionProviders`).
+     *
+     * `model` is then a PLACEHOLDER descriptor, not a resolved pi model: the host must resolve the
+     * real one against the session's runtime after creation and replace it, and must refuse the
+     * activation when that resolution fails. Never treat a provisional result as "the model exists".
+     */
+    provisional?: boolean;
     /**
      * The resolved pi `Model` object.
      *
@@ -30,10 +61,7 @@ export interface ModelGateResult {
      * for undefined", because the provider never resolves. The gate already holds the real
      * object, so it hands it over rather than making the host re-resolve it.
      */
-    model?: {
-        id?: string;
-        provider?: string;
-    };
+    model?: PiModelDescriptor;
     /** Provider-qualified id actually resolved, when available. Diagnostics/telemetry only. */
     resolvedModel?: string;
     provider?: string;
@@ -65,5 +93,5 @@ export declare function createGateModelRuntime(sdk: PiSdk): Promise<PiModelRunti
  *
  * @param requested provider-qualified model pattern, e.g. `anthropic/claude-sonnet-4-5`.
  */
-export declare function validateModelAvailable(sdk: PiSdk, modelRuntime: PiModelRuntimeLike, requested: string): Promise<ModelGateResult>;
+export declare function validateModelAvailable(sdk: PiSdk, modelRuntime: PiModelRuntimeLike, requested: string, options?: ModelGateOptions): Promise<ModelGateResult>;
 //# sourceMappingURL=model-gate.d.ts.map
