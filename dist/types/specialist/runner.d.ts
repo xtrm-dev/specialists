@@ -1,4 +1,5 @@
 import { PiAgentSession, type PiSessionOptions } from '../pi/session.js';
+import { type IdentityEnvRun } from '../pi/identity-env.js';
 import type { SessionMetricEvent, SessionRunMetrics } from './session-metrics-contract.js';
 import type { SpecialistLoader } from './loader.js';
 import type { HookEmitter } from './hooks.js';
@@ -61,6 +62,12 @@ export interface RunOptions {
      * the spawn origin resolves to specialist.job, superseding any ambient origin.
      */
     explicitParentJobId?: string;
+    /**
+     * Injected for tests: the `xt identity env --json` lookup behind the agent identity
+     * env. Defaults to the real CLI, so a test would otherwise assert whichever role map
+     * the host machine happens to have (SPECIALISTS-4423 F3).
+     */
+    identityEnvRun?: IdentityEnvRun;
 }
 export interface RunResult {
     output: string;
