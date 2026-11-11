@@ -69,6 +69,7 @@ import {
 import {
   CLAUDE_BRIDGE_PROVIDER,
   claudeBridgeExtensionProviders,
+  claudeBridgeOffSwitches,
   claudeBridgeRouteEnabled,
 } from '../pi/claude-bridge.js';
 import { getPermissionGuardExtensionPath, resolvePermissionGuardForSpawn } from '../pi/permission-guard-extension.js';
@@ -1699,6 +1700,14 @@ export class NativeActivationHost {
     gateExtensionProviders.set(modelRuntime, claudeBridgeExtensionProviders(claudeBridge));
     let modelIndex = 0;
     let modelCheck = await checkModelForRuntime(sdk, modelRuntime, modelChain[0] ?? '');
+    // A bridged primary with the route off is refused, never walked: substituting the next model
+    // would report a successful run on a provider the definition did not ask for.
+    if (!modelCheck.ok && !claudeBridge && modelChain[0]?.startsWith(`${CLAUDE_BRIDGE_PROVIDER}/`)) {
+      return reject('model_unavailable', {
+        requestedModel: modelChain[0],
+        note: `${modelCheck.reason ?? 'No models match'} (the Claude Code route is off: ${claudeBridgeOffSwitches(execution).join(' and ')} is not enabled; not falling back to another provider)`,
+      });
+    }
     while ((!modelCheck.ok || !modelCheck.model) && modelIndex < modelChain.length - 1) {
       const skipped = modelChain[modelIndex];
       emit('model_fallback', {

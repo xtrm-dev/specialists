@@ -90,6 +90,20 @@ export function claudeBridgeRouteEnabled(
 }
 
 /**
+ * Which half of the route is off, named for a refusal note. Never changes what enables the route:
+ * `claudeBridgeRouteEnabled` stays the decision, this only explains a "no".
+ */
+export function claudeBridgeOffSwitches(
+  execution: { claude_bridge?: unknown } | undefined,
+  operatorEnabled: () => boolean = operatorClaudeBridgeEnabled,
+): string[] {
+  const off: string[] = [];
+  if (!claudeBridgeEnabled(execution)) off.push('the definition flag execution.claude_bridge');
+  if (!operatorEnabled()) off.push(`the operator switch ${CLAUDE_BRIDGE_SWITCH_KEY} in ~/.config/specialists/user.json`);
+  return off;
+}
+
+/**
  * Providers the gate may treat as supplied-by-an-extension for this activation.
  *
  * Takes the RESOLVED route decision (both halves), not the definition alone: a repository-selected

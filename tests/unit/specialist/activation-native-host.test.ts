@@ -1616,6 +1616,13 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
   }
 
   
+/** A refused bridged primary ends the dispatch: no session, no hop onto the configured fallback. */
+function expectNoFallbackHop(sink: { names: string[] }, created: unknown[]): void {
+  expect(created).toHaveLength(0);
+  expect(sink.names).not.toContain('model_fallback');
+  expect(sink.names).toContain('activation_rejected');
+}
+
 /**
  * Operator half of the Claude Code route (SPECIALISTS-4405 review finding 1). A repository can write
  * the definition flag; only this file can grant the route on the machine.
@@ -2283,8 +2290,8 @@ function chainHost(opts: {
   it("refuses a bridged model with today's message when the definition does not select the route (SPECIALISTS-4405)", async () => {
     const restore = withOperatorSwitch(true);
     try {
-      const { host } = chainHost({
-        executionExtra: { model: 'claude-bridge/claude-opus-5-5' },
+      const { host, sink, created } = chainHost({
+        executionExtra: { model: 'claude-bridge/claude-opus-5-5', fallback_models: ['fallbackprov/fallback-model'] },
         sessions: [scriptSession([{ text: 'never runs' }])],
         unavailable: ['claude-bridge/claude-opus-5-5'],
       });
@@ -2295,6 +2302,8 @@ function chainHost(opts: {
       // Characterization: the operator's machine allows the route, but this definition did not ask
       // for it, so the gate keeps today's answer.
       expect(String(refusal.detail?.note)).toContain('No models match');
+      expect(String(refusal.detail?.note)).toContain('execution.claude_bridge');
+      expectNoFallbackHop(sink, created);
     } finally {
       restore();
     }
@@ -2306,8 +2315,8 @@ function chainHost(opts: {
     const bridge = withBridgeEntry();
     const restore = withOperatorSwitch(false);
     try {
-      const { host } = chainHost({
-        executionExtra: { model: 'claude-bridge/claude-opus-5-5', claude_bridge: true },
+      const { host, sink, created } = chainHost({
+        executionExtra: { model: 'claude-bridge/claude-opus-5-5', claude_bridge: true, fallback_models: ['fallbackprov/fallback-model'] },
         sessions: [scriptSession([{ text: 'never runs' }])],
         unavailable: ['claude-bridge/claude-opus-5-5'],
       });
@@ -2316,6 +2325,8 @@ function chainHost(opts: {
 
       expect(refusal.reason).toBe('model_unavailable');
       expect(String(refusal.detail?.note)).toContain('No models match');
+      expect(String(refusal.detail?.note)).toContain('user.json');
+      expectNoFallbackHop(sink, created);
     } finally {
       restore();
       bridge.restore();
