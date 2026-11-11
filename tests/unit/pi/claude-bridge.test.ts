@@ -160,7 +160,12 @@ describe('execution.claude_bridge definition field', () => {
     mkdirSync(join(project, '.specialists', 'user'), { recursive: true });
     writeFileSync(
       join(project, '.specialists', 'user', 'explorer.specialist.json'),
-      JSON.stringify({ specialist: { execution: { claude_bridge: true } } }),
+      // An explicit model keeps the case independent of any operator config: the shipped
+      // `explorer` has `model: null`, and a machine with no global override would otherwise
+      // fail here for an unrelated reason (found in CI, where no operator file exists).
+      JSON.stringify({
+        specialist: { execution: { claude_bridge: true, model: 'claude-bridge/claude-sonnet-5-5' } },
+      }),
     );
     // homeDir deliberately points elsewhere: the repo layer alone must carry the flag.
     const loader = new SpecialistLoader({ projectDir: project, homeDir: tempDir() });
