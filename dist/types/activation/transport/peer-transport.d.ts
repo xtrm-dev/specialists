@@ -116,7 +116,19 @@ export interface ReceiptSource {
     /** Resolve with the receipt naming `origMsgId`, or `undefined` if none arrives in time. */
     waitForReceipt(origMsgId: string, timeoutMs: number): Promise<ReceiptFrame | undefined>;
     close(): Promise<void>;
+    /** Diagnostic: how many receipts are currently retained. Optional for injected sources. */
+    retainedCount?(): number;
 }
+/**
+ * Receipts are retained so a fast peer's receipt can arrive before the sender asks for it, but
+ * "retained" must not mean "forever": a same-user peer could otherwise grow this process without
+ * bound (SPECIALISTS-4433 measured ~600 bytes per frame and no eviction at all). The guarantee the
+ * protocol needs is short-lived, so the store is bounded by both count and age.
+ */
+export declare const MAX_RETAINED_RECEIPTS = 512;
+export declare const RECEIPT_TTL_MS = 120000;
+/** A retained receipt is usable only inside the window the protocol needs it. */
+export declare function receiptExpired(receivedAt: number, now?: number): boolean;
 /**
  * Bind a colocated socket and collect receipts from it.
  *
