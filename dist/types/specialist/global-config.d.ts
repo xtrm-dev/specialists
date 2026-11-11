@@ -21,7 +21,62 @@ export interface GlobalUserConfigPath {
  * When unset, config-home is the write target; legacy is a read-only
  * fallback surfaced only when config-home is absent but legacy exists.
  */
+/**
+ * The Specialist names an operator layer actually holds. The reserved switch key is not a
+ * Specialist, so it must never be offered as one: `sp edit --global nope.execution.model` used to
+ * list `claude_bridge` under "Available", which reads as an editable definition named that.
+ */
+export declare function listGlobalSpecialistNames(config: Record<string, unknown>): string[];
 export declare function getGlobalUserConfigPath(): GlobalUserConfigPath;
+export declare const OverrideExecutionSchema: z.ZodObject<{
+    model: z.ZodNullable<z.ZodString>;
+    fallback_model: z.ZodNullable<z.ZodString>;
+    fallback_models: z.ZodOptional<z.ZodNullable<z.ZodArray<z.ZodString, "many">>>;
+    timeout_ms: z.ZodNullable<z.ZodNumber>;
+    stall_timeout_ms: z.ZodNullable<z.ZodNumber>;
+    interactive: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
+    thinking_level: z.ZodNullable<z.ZodEnum<["off", "minimal", "low", "medium", "high", "xhigh"]>>;
+    max_retries: z.ZodNullable<z.ZodNumber>;
+    /** Workspace-lease waiver for read-tier observers (mirrors specialist `execution.lease_waiver`). */
+    lease_waiver: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
+    /**
+     * Opt-in Claude Code route (SPECIALISTS-4405). Listed in
+     * `OVERRIDE_ALLOWED_EXECUTION_FIELDS`, so it belongs here too: a field the allowlist advertises
+     * must be settable, or the CLI rejects a route the docs say is configurable.
+     */
+    claude_bridge: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
+    prompt_limit_bytes: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    stdout_limit_bytes: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
+    extensions: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNullable<z.ZodBoolean>>>;
+}, "strict", z.ZodTypeAny, {
+    model: string | null;
+    fallback_model: string | null;
+    timeout_ms: number | null;
+    stall_timeout_ms: number | null;
+    max_retries: number | null;
+    thinking_level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | null;
+    fallback_models?: string[] | null | undefined;
+    interactive?: boolean | null | undefined;
+    stdout_limit_bytes?: number | null | undefined;
+    prompt_limit_bytes?: number | null | undefined;
+    lease_waiver?: boolean | null | undefined;
+    claude_bridge?: boolean | null | undefined;
+    extensions?: Record<string, boolean | null> | undefined;
+}, {
+    model: string | null;
+    fallback_model: string | null;
+    timeout_ms: number | null;
+    stall_timeout_ms: number | null;
+    max_retries: number | null;
+    thinking_level: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | null;
+    fallback_models?: string[] | null | undefined;
+    interactive?: boolean | null | undefined;
+    stdout_limit_bytes?: number | null | undefined;
+    prompt_limit_bytes?: number | null | undefined;
+    lease_waiver?: boolean | null | undefined;
+    claude_bridge?: boolean | null | undefined;
+    extensions?: Record<string, boolean | null> | undefined;
+}>;
 /**
  * Reserved top-level key in `~/.config/specialists/user.json` for switches that apply to the
  * operator's machine rather than to one Specialist (SPECIALISTS-4405).
@@ -50,6 +105,12 @@ export declare const GlobalSpecialistOverrideSchema: z.ZodObject<{
         max_retries: z.ZodNullable<z.ZodNumber>;
         /** Workspace-lease waiver for read-tier observers (mirrors specialist `execution.lease_waiver`). */
         lease_waiver: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
+        /**
+         * Opt-in Claude Code route (SPECIALISTS-4405). Listed in
+         * `OVERRIDE_ALLOWED_EXECUTION_FIELDS`, so it belongs here too: a field the allowlist advertises
+         * must be settable, or the CLI rejects a route the docs say is configurable.
+         */
+        claude_bridge: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
         prompt_limit_bytes: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
         stdout_limit_bytes: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
         extensions: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNullable<z.ZodBoolean>>>;
@@ -65,6 +126,7 @@ export declare const GlobalSpecialistOverrideSchema: z.ZodObject<{
         stdout_limit_bytes?: number | null | undefined;
         prompt_limit_bytes?: number | null | undefined;
         lease_waiver?: boolean | null | undefined;
+        claude_bridge?: boolean | null | undefined;
         extensions?: Record<string, boolean | null> | undefined;
     }, {
         model: string | null;
@@ -78,6 +140,7 @@ export declare const GlobalSpecialistOverrideSchema: z.ZodObject<{
         stdout_limit_bytes?: number | null | undefined;
         prompt_limit_bytes?: number | null | undefined;
         lease_waiver?: boolean | null | undefined;
+        claude_bridge?: boolean | null | undefined;
         extensions?: Record<string, boolean | null> | undefined;
     }>;
     prompt: z.ZodOptional<z.ZodObject<{
@@ -125,6 +188,7 @@ export declare const GlobalSpecialistOverrideSchema: z.ZodObject<{
         stdout_limit_bytes?: number | null | undefined;
         prompt_limit_bytes?: number | null | undefined;
         lease_waiver?: boolean | null | undefined;
+        claude_bridge?: boolean | null | undefined;
         extensions?: Record<string, boolean | null> | undefined;
     };
     skills: {
@@ -155,6 +219,7 @@ export declare const GlobalSpecialistOverrideSchema: z.ZodObject<{
         stdout_limit_bytes?: number | null | undefined;
         prompt_limit_bytes?: number | null | undefined;
         lease_waiver?: boolean | null | undefined;
+        claude_bridge?: boolean | null | undefined;
         extensions?: Record<string, boolean | null> | undefined;
     };
     skills: {
@@ -188,6 +253,12 @@ export declare const GlobalUserConfigSchema: z.ZodEffects<z.ZodRecord<z.ZodStrin
         max_retries: z.ZodNullable<z.ZodNumber>;
         /** Workspace-lease waiver for read-tier observers (mirrors specialist `execution.lease_waiver`). */
         lease_waiver: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
+        /**
+         * Opt-in Claude Code route (SPECIALISTS-4405). Listed in
+         * `OVERRIDE_ALLOWED_EXECUTION_FIELDS`, so it belongs here too: a field the allowlist advertises
+         * must be settable, or the CLI rejects a route the docs say is configurable.
+         */
+        claude_bridge: z.ZodOptional<z.ZodNullable<z.ZodBoolean>>;
         prompt_limit_bytes: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
         stdout_limit_bytes: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
         extensions: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNullable<z.ZodBoolean>>>;
@@ -203,6 +274,7 @@ export declare const GlobalUserConfigSchema: z.ZodEffects<z.ZodRecord<z.ZodStrin
         stdout_limit_bytes?: number | null | undefined;
         prompt_limit_bytes?: number | null | undefined;
         lease_waiver?: boolean | null | undefined;
+        claude_bridge?: boolean | null | undefined;
         extensions?: Record<string, boolean | null> | undefined;
     }, {
         model: string | null;
@@ -216,6 +288,7 @@ export declare const GlobalUserConfigSchema: z.ZodEffects<z.ZodRecord<z.ZodStrin
         stdout_limit_bytes?: number | null | undefined;
         prompt_limit_bytes?: number | null | undefined;
         lease_waiver?: boolean | null | undefined;
+        claude_bridge?: boolean | null | undefined;
         extensions?: Record<string, boolean | null> | undefined;
     }>;
     prompt: z.ZodOptional<z.ZodObject<{
@@ -263,6 +336,7 @@ export declare const GlobalUserConfigSchema: z.ZodEffects<z.ZodRecord<z.ZodStrin
         stdout_limit_bytes?: number | null | undefined;
         prompt_limit_bytes?: number | null | undefined;
         lease_waiver?: boolean | null | undefined;
+        claude_bridge?: boolean | null | undefined;
         extensions?: Record<string, boolean | null> | undefined;
     };
     skills: {
@@ -293,6 +367,7 @@ export declare const GlobalUserConfigSchema: z.ZodEffects<z.ZodRecord<z.ZodStrin
         stdout_limit_bytes?: number | null | undefined;
         prompt_limit_bytes?: number | null | undefined;
         lease_waiver?: boolean | null | undefined;
+        claude_bridge?: boolean | null | undefined;
         extensions?: Record<string, boolean | null> | undefined;
     };
     skills: {
@@ -323,6 +398,7 @@ export declare const GlobalUserConfigSchema: z.ZodEffects<z.ZodRecord<z.ZodStrin
         stdout_limit_bytes?: number | null | undefined;
         prompt_limit_bytes?: number | null | undefined;
         lease_waiver?: boolean | null | undefined;
+        claude_bridge?: boolean | null | undefined;
         extensions?: Record<string, boolean | null> | undefined;
     };
     skills: {

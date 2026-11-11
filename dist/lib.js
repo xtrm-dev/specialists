@@ -11224,6 +11224,7 @@ var OverrideExecutionSchema = objectType({
   thinking_level: enumType(["off", "minimal", "low", "medium", "high", "xhigh"]).nullable(),
   max_retries: numberType().int().min(0).nullable(),
   lease_waiver: booleanType().nullable().optional(),
+  claude_bridge: booleanType().nullable().optional(),
   prompt_limit_bytes: numberType().int().positive().nullable().optional(),
   stdout_limit_bytes: numberType().int().positive().nullable().optional(),
   extensions: OverrideExtensionsSchema.optional()
@@ -11305,6 +11306,21 @@ function claudeBridgeExtensionProviders(routeEnabled) {
 }
 function claudeBridgeSessionOption(execution) {
   return claudeBridgeEnabled(execution) ? { claudeBridge: true } : {};
+}
+function isBridgedModel(model) {
+  return typeof model === "string" && model.startsWith(`${CLAUDE_BRIDGE_PROVIDER}/`);
+}
+function bridgedFallbackSkipEvent(args) {
+  const { fromModel, toModel, errorClass, cause } = args;
+  return {
+    from_model: fromModel,
+    ...toModel ? { to_model: toModel, not_started_model: toModel } : {},
+    error_class: errorClass,
+    terminal: true,
+    skipped: true,
+    note: `fallback skipped: the primary "${fromModel}" is served by the Claude Code route, ` + `so the walk does not continue to another provider (cause: ${cause})`,
+    resolved_model: fromModel
+  };
 }
 
 // src/pi/session.ts
@@ -12355,32 +12371,48 @@ function resolveGlobalPackageDir(packageName, deps = {}) {
   const exists = deps.exists ?? existsSync7;
   return resolveGlobalNodeModulesDirs(deps).map((root) => join7(root, packageName)).find((dir) => exists(join7(dir, "package.json")));
 }
-function resolveClaudeBridgeExtensionPath(env = process.env, exists = existsSync7, home = homedir2()) {
+function resolverEnv(deps) {
+  return deps.env ?? process.env;
+}
+function resolverExists(deps) {
+  return deps.exists ?? existsSync7;
+}
+function resolveClaudeBridgeExtensionPath(deps = {}) {
+  const env = resolverEnv(deps);
+  const exists = resolverExists(deps);
   const override = env[CLAUDE_BRIDGE_PATH_ENV]?.trim();
   if (override) {
     return isAbsolute(override) && exists(override) ? override : undefined;
   }
-  for (const packageDir of claudeBridgePackageCandidates(env, exists, home)) {
+  for (const packageDir of claudeBridgePackageCandidates(deps)) {
     const entry = resolveClaudeBridgePackageEntry(packageDir, exists);
     if (entry)
       return entry;
   }
   return;
 }
-function claudeBridgeSearchPaths(env = process.env, home = homedir2()) {
-  return claudeBridgeCandidateDirs(env, home);
+function claudeBridgeSearchPaths(deps = {}) {
+  return claudeBridgeCandidateDirs(deps);
 }
-function claudeBridgeUnavailableNote(env = process.env, home = homedir2()) {
-  const searched = claudeBridgeSearchPaths(env, home).join(", ");
-  return "execution.claude_bridge is enabled but the pi-claude-bridge extension was not found. " + "Install it with `pi install npm:pi-claude-bridge@0.12.0` (pi writes it to <agentDir>/npm, " + `i.e. ${claudeBridgeAgentStoreDir(env, home)}), or set ${CLAUDE_BRIDGE_PATH_ENV} to an ` + `absolute entry. Searched: ${searched}`;
+function claudeBridgeUnavailableNote(deps = {}) {
+  const searched = claudeBridgeSearchPaths(deps).join(", ");
+  return "execution.claude_bridge is enabled but the pi-claude-bridge extension was not found. " + "Install it with `pi install npm:pi-claude-bridge@0.12.0` (pi writes it to <agentDir>/npm, " + `i.e. ${claudeBridgeAgentStoreDir(deps)}), or set ${CLAUDE_BRIDGE_PATH_ENV} to an ` + `absolute entry. Searched: ${searched}`;
 }
-function claudeBridgePackageCandidates(env = process.env, exists = existsSync7, home = homedir2()) {
-  return claudeBridgeCandidateDirs(env, home).filter((candidate) => isBridgePackage(candidate, exists));
+function claudeBridgePackageCandidates(deps = {}) {
+  const exists = resolverExists(deps);
+  return claudeBridgeCandidateDirs(deps).filter((candidate) => isBridgePackage(candidate, exists));
 }
-function claudeBridgeCandidateDirs(env, home) {
+function claudeBridgeCandidateDirs(deps) {
+  const env = { ...process.env, ...resolverEnv(deps) };
   const roots = [
-    claudeBridgeAgentStoreDir(env, home),
-    ...resolveGlobalNodeModulesDirs({ env: { ...process.env, ...env }, home })
+    claudeBridgeAgentStoreDir(deps),
+    ...resolveGlobalNodeModulesDirs({
+      env,
+      home: deps.home ?? homedir2(),
+      execPath: deps.execPath ?? process.execPath,
+      ...deps.exists ? { exists: deps.exists } : {},
+      ...deps.readDir ? { readDir: deps.readDir } : {}
+    })
   ];
   const candidates = [];
   for (const root of roots) {
@@ -12403,19 +12435,20 @@ function warnOnce(kind, value, message) {
 function isBridgePackage(packageDir, exists) {
   return exists(join7(packageDir, "package.json")) && resolveClaudeBridgePackageEntry(packageDir, exists) !== undefined;
 }
-function claudeBridgeAgentDirSource(env = process.env, home = homedir2()) {
-  const configured = env.PI_CODING_AGENT_DIR?.trim();
+function claudeBridgeAgentDirSource(deps = {}) {
+  const configured = resolverEnv(deps).PI_CODING_AGENT_DIR?.trim();
   if (!configured)
     return "default";
   if (configured === "~" || configured.startsWith("~/"))
     return "tilde";
   return isAbsolute(configured) ? "env" : "ignored-relative";
 }
-function claudeBridgeAgentStoreDir(env = process.env, home = homedir2()) {
-  const source = claudeBridgeAgentDirSource(env, home);
+function claudeBridgeAgentStoreDir(deps = {}) {
+  const home = deps.home ?? homedir2();
+  const source = claudeBridgeAgentDirSource(deps);
   if (source === "default")
     return join7(home, ".pi", "agent", "npm", "node_modules");
-  const configured = env.PI_CODING_AGENT_DIR.trim();
+  const configured = resolverEnv(deps).PI_CODING_AGENT_DIR.trim();
   if (source === "ignored-relative") {
     warnOnce("agent-dir", configured, "PI_CODING_AGENT_DIR is not absolute; ignoring it for the Claude Code bridge lookup");
     return join7(home, ".pi", "agent", "npm", "node_modules");
@@ -19781,7 +19814,24 @@ ${mandatoryRulesBlock}`;
       }
       attempts.push(attempt);
       const parsed = classifyAttempt(attempt);
-      if (parsed.retryable && parsed.errorType !== "auth")
+      const retryableHop = parsed.retryable && parsed.errorType !== "auth";
+      const bridgedSkip = retryableHop && isBridgedModel(model);
+      const nextCandidate = modelCandidates[modelCandidates.indexOf(model) + 1];
+      if (bridgedSkip && nextCandidate) {
+        appendTimelineEvent?.({
+          t: Date.now(),
+          type: "model_change",
+          action: "cycle_model",
+          model,
+          previous_model: model,
+          skipped: true,
+          terminal: true,
+          not_started_model: nextCandidate,
+          error_class: parsed.errorType,
+          note: `fallback skipped: the candidate "${model}" is served by the Claude Code route, ` + `so the walk does not continue to another provider`
+        });
+      }
+      if (retryableHop && !bridgedSkip)
         continue;
       const durationMs2 = Date.now() - startedAt;
       if (parsed.kind === "success") {
@@ -23453,12 +23503,18 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
         bead_id: event.beadId,
         ...event.payload ?? {}
       }), t);
-    case "model_fallback":
+    case "model_fallback": {
+      const skipped = booleanField2(event.payload?.skipped) === true;
+      const notStarted = stringField2(event.payload?.not_started_model) ?? stringField2(event.payload?.to_model);
+      const ranModel = stringField2(event.payload?.resolved_model) ?? stringField2(event.payload?.from_model);
       return at({
         t,
         type: TIMELINE_EVENT_TYPES.MODEL_CHANGE,
         action: "cycle_model",
-        ...stringField2(event.payload?.to_model) ? { model: stringField2(event.payload?.to_model) } : {},
+        ...skipped && ranModel ? { model: ranModel } : {},
+        ...!skipped && stringField2(event.payload?.to_model) ? { model: stringField2(event.payload?.to_model) } : {},
+        ...skipped ? { skipped: true } : {},
+        ...skipped && notStarted ? { not_started_model: notStarted } : {},
         ...stringField2(event.payload?.from_model) ? { previous_model: stringField2(event.payload?.from_model) } : {},
         ...stringField2(event.payload?.error_class) ? { error_class: stringField2(event.payload?.error_class) } : {},
         ...booleanField2(event.payload?.terminal) !== undefined ? { terminal: booleanField2(event.payload?.terminal) } : {},
@@ -23466,6 +23522,7 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
         ...numberField2(event.payload?.attempt_n) !== undefined ? { attempt_n: numberField2(event.payload?.attempt_n) } : {},
         ...stringField2(event.payload?.resolved_model) ? { resolved_model: stringField2(event.payload?.resolved_model) } : {}
       }, t);
+    }
     case "session_stats_captured": {
       const stats = normalizePiSessionStats(event.payload?.session_stats);
       return stats ? at(createSessionStatsEvent(stats), t) : at(createSessionStatsErrorEvent("session_stats_captured carried no usable snapshot"), t);
@@ -25997,6 +26054,15 @@ class NativeActivationHost {
         break;
       const nextModel = ctx.modelChain[index + 1];
       const fromModel = record2.snapshot.resolvedModel;
+      if (isBridgedModel(fromModel)) {
+        ctx.emit("model_fallback", bridgedFallbackSkipEvent({
+          fromModel,
+          toModel: nextModel,
+          errorClass,
+          cause: detail
+        }));
+        break;
+      }
       const check = await checkModelForRuntime(ctx.sdk, ctx.modelRuntime, nextModel);
       if (!check.ok || !check.model) {
         ctx.emit("model_fallback", {
