@@ -42685,10 +42685,28 @@ function coerceFieldValue(path, rawInput) {
       return { ok: true, value: trimmed };
   }
 }
+function safeFieldPathSegments(path) {
+  const parts = path.split(".").map((part) => part.trim());
+  if (parts.length === 0 || parts.some((part) => part.length === 0)) {
+    throw new UnsafeFieldPathError(`invalid field path "${path}": empty segment`);
+  }
+  const forbidden = parts.find((part) => FORBIDDEN_PATH_SEGMENTS.has(part));
+  if (forbidden) {
+    throw new UnsafeFieldPathError(`refusing field path "${path}": "${forbidden}" is not a field name`);
+  }
+  return parts;
+}
+function assertSafeSpecialistName(specialist) {
+  if (!specialist || FORBIDDEN_PATH_SEGMENTS.has(specialist)) {
+    throw new UnsafeFieldPathError(`refusing specialist key "${specialist}"`);
+  }
+  return specialist;
+}
 function applyFieldEdit(raw, specialist, path, value) {
   const clone = structuredClone(raw);
-  const top = clone[specialist] ?? {};
-  const parts = path.split(".");
+  const name = assertSafeSpecialistName(specialist);
+  const top = clone[name] ?? {};
+  const parts = safeFieldPathSegments(path);
   let cursor = top;
   for (let i = 0;i < parts.length - 1; i += 1) {
     const key = parts[i];
@@ -42702,7 +42720,7 @@ function applyFieldEdit(raw, specialist, path, value) {
     }
   }
   cursor[parts[parts.length - 1]] = value;
-  clone[specialist] = top;
+  clone[name] = top;
   return clone;
 }
 function writeGlobalConfigSafe(rawObj, expectedMtimeMs) {
@@ -42732,7 +42750,7 @@ function writeGlobalConfigSafe(rawObj, expectedMtimeMs) {
 function logConfigWriteError(error) {
   logError("config", "write_global_config", { errorClass: errorClassOf(error) });
 }
-var PRIMITIVE_HINT, ENUM_GLOSS;
+var PRIMITIVE_HINT, ENUM_GLOSS, FORBIDDEN_PATH_SEGMENTS, UnsafeFieldPathError;
 var init_config_source = __esm(() => {
   init_canonical_asset_resolver();
   init_global_config();
@@ -42759,6 +42777,13 @@ var init_config_source = __esm(() => {
     "execution.thinking_level": "model reasoning depth",
     "prompt.system_prompt_mode": "replace drops spec.prompt.system",
     notes_mode: "final-only skips per-turn appends"
+  };
+  FORBIDDEN_PATH_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
+  UnsafeFieldPathError = class UnsafeFieldPathError extends Error {
+    constructor(message) {
+      super(message);
+      this.name = "UnsafeFieldPathError";
+    }
   };
 });
 
@@ -62349,9 +62374,46 @@ ${result.stderr ?? ""}`;
   const missing = flags.find((flag) => !help.includes(flag));
   return missing ? "pi_flag_missing" : undefined;
 }
+function errorForWire(error) {
+  const out = { name: error.name, message: error.message };
+  const code = error.code;
+  if (typeof code === "string" || typeof code === "number")
+    out.code = code;
+  return out;
+}
+function toWireValue(value, seen = new WeakSet, depth = 0) {
+  if (value === null || typeof value !== "object")
+    return value;
+  if (value instanceof Error)
+    return errorForWire(value);
+  if (depth >= MAX_WIRE_DEPTH)
+    return "[truncated]";
+  if (seen.has(value))
+    return "[circular]";
+  seen.add(value);
+  try {
+    if (Array.isArray(value))
+      return value.map((entry) => toWireValue(entry, seen, depth + 1));
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null)
+      return value;
+    const out = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (STACK_KEYS.has(key))
+        continue;
+      out[key] = toWireValue(entry, seen, depth + 1);
+    }
+    return out;
+  } finally {
+    seen.delete(value);
+  }
+}
+function serializeForWire(body) {
+  return JSON.stringify(toWireValue(body)) ?? "null";
+}
 function sendJson(res, statusCode, body) {
   res.writeHead(statusCode, { "content-type": "application/json" });
-  res.end(JSON.stringify(body));
+  res.end(serializeForWire(body));
 }
 function parseFeedEventsRequest(url) {
   if (!url)
@@ -62603,7 +62665,7 @@ async function startServe(argv = process.argv.slice(3)) {
 async function run42(argv = process.argv.slice(3)) {
   await startServe(argv);
 }
-var AUDIT_WINDOW_MS = 60000, DEFAULT_REQUIRED_PI_FLAGS;
+var AUDIT_WINDOW_MS = 60000, DEFAULT_REQUIRED_PI_FLAGS, STACK_KEYS, MAX_WIRE_DEPTH = 1000;
 var init_serve = __esm(() => {
   init_loader();
   init_script_runner();
@@ -62613,6 +62675,7 @@ var init_serve = __esm(() => {
   init_schema();
   init_serve_hot_reload();
   DEFAULT_REQUIRED_PI_FLAGS = ["--mode", "--no-session", "--no-extensions", "--no-tools", "--no-context-files", "--no-skills", "--no-prompt-templates", "--no-themes"];
+  STACK_KEYS = new Set(["stack", "stackTrace", "stacktrace", "stack_trace"]);
 });
 
 // src/cli/script.ts

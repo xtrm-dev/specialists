@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import {
   applyFieldEdit,
   coerceFieldValue,
+  safeFieldPathSegments,
+  UnsafeFieldPathError,
   writeGlobalConfigSafe,
   statConfigFileMtimeMs,
 } from '../../../src/cli/console/config-source.js';
@@ -94,6 +96,25 @@ describe('applyFieldEdit — preserves _doc and other underscore keys', () => {
     const raw = { executor: {} };
     const next = applyFieldEdit(raw, 'executor', 'execution.extensions.serena', true);
     expect((next.executor as any).execution.extensions.serena).toBe(true);
+  });
+
+  it('refuses prototype-walking path segments and leaves Object.prototype alone', () => {
+    // CodeQL #21: a dotted path used as a key is a prototype-pollution primitive if unvalidated.
+    for (const path of ['__proto__.polluted', 'constructor.prototype.polluted', 'execution.prototype.x']) {
+      expect(() => applyFieldEdit({}, 'executor', path, 'owned')).toThrow(UnsafeFieldPathError);
+    }
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.prototype).not.toHaveProperty('polluted');
+  });
+
+  it('refuses a specialist key that is a prototype property', () => {
+    expect(() => applyFieldEdit({}, '__proto__', 'execution.model', 'x')).toThrow(UnsafeFieldPathError);
+    expect(() => applyFieldEdit({}, 'constructor', 'execution.model', 'x')).toThrow(UnsafeFieldPathError);
+  });
+
+  it('rejects empty segments instead of writing a key named ""', () => {
+    expect(() => safeFieldPathSegments('execution..model')).toThrow(UnsafeFieldPathError);
+    expect(safeFieldPathSegments(' execution.model ')).toEqual(['execution', 'model']);
   });
 
   it('does not mutate the input', () => {

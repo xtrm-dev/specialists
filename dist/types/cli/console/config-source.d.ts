@@ -44,6 +44,11 @@ export interface CoerceResult {
 }
 export declare function getLeafSchema(path: string): z.ZodTypeAny | undefined;
 export declare function coerceFieldValue(path: string, rawInput: string): CoerceResult;
+export declare class UnsafeFieldPathError extends Error {
+    constructor(message: string);
+}
+/** Split a dotted edit path, refusing empty and prototype-walking segments. */
+export declare function safeFieldPathSegments(path: string): string[];
 export declare function applyFieldEdit(raw: Record<string, unknown>, specialist: string, path: string, value: unknown): Record<string, unknown>;
 export interface WriteOutcome {
     ok: boolean;
