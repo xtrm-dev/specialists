@@ -903,11 +903,31 @@ export function resolveGlobalPackageDir(packageName: string, deps: GlobalNodeMod
  *    repository layer.
  * 2. An npm/bun global prefix, for a machine that installed it with the package manager instead.
  */
-export function resolveClaudeBridgeExtensionPath(
-  env: NodeJS.ProcessEnv = process.env,
-  exists: (path: string) => boolean = existsSync,
-  home: string = homedir(),
-): string | undefined {
+/**
+ * Resolver dependencies, all injectable.
+ *
+ * `execPath` is here for the same reason as `env` and `home`: the interpreter's own prefix is one of
+ * the global roots, and a test that reads `process.execPath` is only deterministic on this machine.
+ */
+export interface ClaudeBridgeResolverDeps {
+  env?: NodeJS.ProcessEnv;
+  home?: string;
+  execPath?: string;
+  exists?: (path: string) => boolean;
+  readDir?: (path: string) => string[];
+}
+
+function resolverEnv(deps: ClaudeBridgeResolverDeps): NodeJS.ProcessEnv {
+  return deps.env ?? process.env;
+}
+
+function resolverExists(deps: ClaudeBridgeResolverDeps): (path: string) => boolean {
+  return deps.exists ?? existsSync;
+}
+
+export function resolveClaudeBridgeExtensionPath(deps: ClaudeBridgeResolverDeps = {}): string | undefined {
+  const env = resolverEnv(deps);
+  const exists = resolverExists(deps);
   const override = env[CLAUDE_BRIDGE_PATH_ENV]?.trim();
   if (override) {
     // Absolute only: a relative value would resolve against whatever cwd the dispatch happens to
@@ -915,7 +935,7 @@ export function resolveClaudeBridgeExtensionPath(
     return isAbsolute(override) && exists(override) ? override : undefined;
   }
 
-  for (const packageDir of claudeBridgePackageCandidates(env, exists, home)) {
+  for (const packageDir of claudeBridgePackageCandidates(deps)) {
     const entry = resolveClaudeBridgePackageEntry(packageDir, exists);
     if (entry) return entry;
   }
@@ -928,17 +948,17 @@ export function resolveClaudeBridgeExtensionPath(
  * Nothing here is derived from the workspace: a project path would be a place a repository could
  * plant the extension.
  */
-export function claudeBridgeSearchPaths(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string[] {
-  return claudeBridgeCandidateDirs(env, home);
+export function claudeBridgeSearchPaths(deps: ClaudeBridgeResolverDeps = {}): string[] {
+  return claudeBridgeCandidateDirs(deps);
 }
 
 /** The refusal note, shared by the native host and the legacy argv path so the two cannot drift. */
-export function claudeBridgeUnavailableNote(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
-  const searched = claudeBridgeSearchPaths(env, home).join(', ');
+export function claudeBridgeUnavailableNote(deps: ClaudeBridgeResolverDeps = {}): string {
+  const searched = claudeBridgeSearchPaths(deps).join(', ');
   return (
     'execution.claude_bridge is enabled but the pi-claude-bridge extension was not found. ' +
     'Install it with `pi install npm:pi-claude-bridge@0.12.0` (pi writes it to <agentDir>/npm, ' +
-    `i.e. ${claudeBridgeAgentStoreDir(env, home)}), or set ${CLAUDE_BRIDGE_PATH_ENV} to an ` +
+    `i.e. ${claudeBridgeAgentStoreDir(deps)}), or set ${CLAUDE_BRIDGE_PATH_ENV} to an ` +
     `absolute entry. Searched: ${searched}`
   );
 }
@@ -951,12 +971,9 @@ export function claudeBridgeUnavailableNote(env: NodeJS.ProcessEnv = process.env
  * The agent store is checked before the global roots because `pi install` is the documented install
  * path: when both hold a copy, the one pi manages is the one the operator updated.
  */
-export function claudeBridgePackageCandidates(
-  env: NodeJS.ProcessEnv = process.env,
-  exists: (path: string) => boolean = existsSync,
-  home: string = homedir(),
-): string[] {
-  return claudeBridgeCandidateDirs(env, home).filter(candidate => isBridgePackage(candidate, exists));
+export function claudeBridgePackageCandidates(deps: ClaudeBridgeResolverDeps = {}): string[] {
+  const exists = resolverExists(deps);
+  return claudeBridgeCandidateDirs(deps).filter(candidate => isBridgePackage(candidate, exists));
 }
 
 /**
@@ -966,12 +983,18 @@ export function claudeBridgePackageCandidates(
  * would be resolved against whatever cwd the dispatch happens to run in — the same hazard as a
  * relative PI_CODING_AGENT_DIR, so such a root is dropped and reported once rather than trusted.
  */
-function claudeBridgeCandidateDirs(env: NodeJS.ProcessEnv, home: string): string[] {
+function claudeBridgeCandidateDirs(deps: ClaudeBridgeResolverDeps): string[] {
+  const env = { ...process.env, ...resolverEnv(deps) };
   const roots = [
-    claudeBridgeAgentStoreDir(env, home),
+    claudeBridgeAgentStoreDir(deps),
     // Explicit entries win over the ambient environment, so a caller (a test, a relocated host)
     // can neutralise a machine's global roots without mutating process.env.
-    ...resolveGlobalNodeModulesDirs({ env: { ...process.env, ...env }, home }),
+    ...resolveGlobalNodeModulesDirs({
+      env,
+      home: deps.home ?? homedir(),
+      execPath: deps.execPath ?? process.execPath,
+      ...(deps.readDir ? { readDir: deps.readDir } : {}),
+    }),
   ];
   const candidates: string[] = [];
   for (const root of roots) {
@@ -1015,11 +1038,8 @@ export type ClaudeBridgeAgentDirSource = 'default' | 'env' | 'tilde' | 'ignored-
  * ignored, because it would resolve against the dispatch cwd and let a repository plant the
  * extension.
  */
-export function claudeBridgeAgentDirSource(
-  env: NodeJS.ProcessEnv = process.env,
-  home: string = homedir(),
-): ClaudeBridgeAgentDirSource {
-  const configured = env.PI_CODING_AGENT_DIR?.trim();
+export function claudeBridgeAgentDirSource(deps: ClaudeBridgeResolverDeps = {}): ClaudeBridgeAgentDirSource {
+  const configured = resolverEnv(deps).PI_CODING_AGENT_DIR?.trim();
   if (!configured) return 'default';
   // Pi expands `~` and `~/` only. `~user/x` is NOT a home reference, so it is relative here and
   // must be ignored like any other relative value rather than silently joined to our home.
@@ -1027,10 +1047,11 @@ export function claudeBridgeAgentDirSource(
   return isAbsolute(configured) ? 'env' : 'ignored-relative';
 }
 
-export function claudeBridgeAgentStoreDir(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
-  const source = claudeBridgeAgentDirSource(env, home);
+export function claudeBridgeAgentStoreDir(deps: ClaudeBridgeResolverDeps = {}): string {
+  const home = deps.home ?? homedir();
+  const source = claudeBridgeAgentDirSource(deps);
   if (source === 'default') return join(home, '.pi', 'agent', 'npm', 'node_modules');
-  const configured = env.PI_CODING_AGENT_DIR!.trim();
+  const configured = resolverEnv(deps).PI_CODING_AGENT_DIR!.trim();
   if (source === 'ignored-relative') {
     warnOnce('agent-dir', configured, 'PI_CODING_AGENT_DIR is not absolute; ignoring it for the Claude Code bridge lookup');
     return join(home, '.pi', 'agent', 'npm', 'node_modules');
