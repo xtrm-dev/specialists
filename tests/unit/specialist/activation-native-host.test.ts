@@ -1708,6 +1708,8 @@ function chainHost(opts: {
     sessions: PiAgentSessionLike[];
     unavailable?: string[];
     permission?: string;
+    /** Replaces the single-spec fake loader: used to make a RETRY read a different answer. */
+    loader?: unknown;
   }) {
     const created: unknown[] = [];
     const sink = collectingSink();
@@ -1715,7 +1717,7 @@ function chainHost(opts: {
     if (opts.permission) (spec.specialist.execution as Record<string, unknown>).permission_required = opts.permission;
     const host = new NativeActivationHost({
             provisionWriterWorkspace: workspaceIdentityFor,
-            loader: loaderFor(spec),
+            loader: (opts.loader ?? loaderFor(spec)) as never,
       workItems: fakeWorkItems(),
       forensics: sink,
       loadSdk: async () => chainSdk(created, opts.sessions, opts.unavailable),
@@ -2326,6 +2328,39 @@ function chainHost(opts: {
     expect(host.inspect(handle.activationId)?.attemptId).toBe(handle.attemptId);
     expect(host.inspect(handle.activationId)?.state).toBe('failed');
     expect(session.prompts).toHaveLength(1);
+  });
+
+  it('refuses a RETRY of a listed Specialist whose block resolves no bridged model, with the dedicated code (SPECIALISTS-4442)', async () => {
+    // Dispatch reads the merged spec; the retry re-reads the SAME loader entry, so a refused
+    // Specialist stays refused instead of being retried onto whatever model the repo wrote.
+    const { ClaudeBridgeRouteModelMismatchError } = await import('../../../src/specialist/loader.js');
+    const mismatch = new ClaudeBridgeRouteModelMismatchError(
+      'researcher',
+      'anthropic/claude-sonnet-4-6',
+      '/tmp/user.json',
+      null,
+    );
+    let calls = 0;
+    const loader = {
+      get: async () => {
+        calls += 1;
+        if (calls === 1) return readOnlySpec({ model: 'primaryprov/primary-model' });
+        throw mismatch;
+      },
+    };
+    const { host } = chainHost({
+      loader,
+      sessions: [scriptSession([{ text: '', stopReason: 'error', errorMessage: 'permanent boom' }])],
+    });
+
+    const handle = await start(host);
+    expect((await handle.result).status).toBe('failed');
+
+    const refusal = await host.retry(handle.activationId, { modelOverride: 'otherprov/other-model' })
+      .catch((caught: unknown) => caught) as DispatchRejectedError;
+    expect(refusal.reason).toBe('claude_bridge_route_model_mismatch');
+    expect(String(refusal.detail?.note)).toContain('claude_bridge');
+    expect(calls).toBe(2);
   });
 
   it("refuses a bridged model with today's message when the definition does not select the route (SPECIALISTS-4405)", async () => {

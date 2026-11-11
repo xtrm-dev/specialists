@@ -219,7 +219,9 @@ describe('operatorClaudeBridgeEnabled', () => {
       explorer: { execution: { model: 'not-a-number' } },
     }));
     expect(result.valid).toBe(false);
-    expect(result.errors.some(error => error.path === CLAUDE_BRIDGE_SWITCH_KEY)).toBe(true);
+    // Leaf path (claude_bridge.enabled): the block has several fields now, and naming the one at
+    // fault is what makes the message actionable.
+    expect(result.errors.some(error => error.path.startsWith(CLAUDE_BRIDGE_SWITCH_KEY))).toBe(true);
     expect(result.errors.length).toBeGreaterThan(1);
   });
 
@@ -244,7 +246,7 @@ describe('the switch key in the global user config', () => {
       [CLAUDE_BRIDGE_SWITCH_KEY]: { enabled: 'yes' },
     }));
     expect(invalid.valid).toBe(false);
-    expect(invalid.errors[0]?.path).toBe(CLAUDE_BRIDGE_SWITCH_KEY);
+    expect(invalid.errors[0]?.path).toBe(`${CLAUDE_BRIDGE_SWITCH_KEY}.enabled`);
   });
 });
 

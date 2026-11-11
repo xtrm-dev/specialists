@@ -19,8 +19,11 @@ import {
 } from './schema.js';
 import { resolveCanonicalAssetDir } from './canonical-asset-resolver.js';
 import {
+  CLAUDE_BRIDGE_MODEL_PREFIX,
   getGlobalUserConfigPath,
+  readClaudeBridgeBlock,
   readGlobalUserConfig,
+  type ClaudeBridgeBlockRead,
   type GlobalUserConfigPath,
 } from './global-config.js';
 import { loadPresets, resolvePresetReference } from './preset-resolver.js';
@@ -90,6 +93,169 @@ export class SpecialistMissingModelError extends Error {
     );
     this.name = 'SpecialistMissingModelError';
   }
+}
+
+/**
+ * Thrown by SpecialistLoader.get when the operator's Claude Code allow list names a Specialist
+ * whose resolved model is not `claude-bridge/...` (SPECIALISTS-4442).
+ *
+ * The run is REFUSED, never run inert: loading the bridge and then billing another provider is the
+ * silent billing-surface swap the route exists to prevent. The message names the Specialist, the
+ * model and the block so an operator can fix the one entry instead of guessing.
+ */
+export class ClaudeBridgeRouteModelMismatchError extends Error {
+  readonly code = 'claude_bridge_route_model_mismatch';
+  constructor(
+    public readonly specialistName: string,
+    public readonly model: string | null,
+    public readonly blockPath: string,
+    public readonly blockError: string | null,
+  ) {
+    super(
+      `specialist '${specialistName}' is listed in the claude_bridge block of ${blockPath}, but its ` +
+        `resolved model ${model === null ? 'is unset' : `"${model}"`} is not a claude-bridge/... model` +
+        `${blockError ? ` (block error: ${blockError})` : ''}. ` +
+        'Refusing the run rather than loading the bridge and billing another provider: fix ' +
+        'claude_bridge.models / claude_bridge.default_model (or remove the name from ' +
+        'claude_bridge.specialists) in ~/.config/specialists/user.json and re-dispatch.',
+    );
+    this.name = 'ClaudeBridgeRouteModelMismatchError';
+  }
+}
+
+/**
+ * The route decision for one Specialist, after every layer merged (SPECIALISTS-4442).
+ *
+ * One resolver, one answer: the native host (dispatch and retry), `sp run`, `sp script`, session
+ * start, `sp list` and `sp view` all read the merged spec it produced, so no runtime can disagree
+ * with another or silently change the model on a retry.
+ */
+export interface ClaudeBridgeRouteDecision {
+  /** `block` = the operator allow list decided; `legacy` = the merged definition flag decides. */
+  source: 'block' | 'legacy';
+  reason:
+    | 'block_absent'
+    | 'block_invalid'
+    | 'block_disabled'
+    | 'legacy_no_list'
+    | 'listed'
+    | 'unlisted'
+    | 'listed_model_mismatch';
+  /** The block's allow list names this Specialist. */
+  listed: boolean;
+  /** Effective route permission for this Specialist. */
+  enabled: boolean;
+  /** Effective bridge model the block supplies (listed only). */
+  model: string | null;
+  blockError: string | null;
+  blockPath: string;
+  /** Lower-layer values the block shadowed, for the provenance warning (and `sp doctor`). */
+  shadowed: Array<{
+    field: 'execution.claude_bridge' | 'execution.model';
+    layerValue: unknown;
+    blockValue: unknown;
+  }>;
+}
+
+/**
+ * Apply the operator block to a merged execution record. Pure: the loader is the only caller, and
+ * the caller writes the result back (see `buildMergedSpec`), so this can be unit-tested without a
+ * filesystem.
+ *
+ * Precedence, in order:
+ *   1. no block, or `enabled !== true`      -> no injection; the legacy rule stands (route off);
+ *   2. `specialists` absent                -> legacy rule, definition flag decides;
+ *   3. `specialists` present, name listed   -> flag true, model = models[name] ?? default_model;
+ *   4. `specialists` present, name unlisted -> flag FALSE even if a repo/home layer set it;
+ *   5. listed but no bridged model          -> `listed_model_mismatch` (dispatch refuses).
+ */
+export function resolveClaudeBridgeRoute(
+  name: string,
+  execution: { claude_bridge?: unknown; model?: unknown } | undefined,
+  read: ClaudeBridgeBlockRead,
+): ClaudeBridgeRouteDecision {
+  const definitionFlag = execution?.claude_bridge === true;
+  const layerModel = typeof execution?.model === 'string' && execution.model !== '' ? execution.model : null;
+  const base: ClaudeBridgeRouteDecision = {
+    source: 'legacy',
+    reason: 'block_absent',
+    listed: false,
+    enabled: definitionFlag,
+    model: null,
+    blockError: read.error,
+    blockPath: read.path,
+    shadowed: [],
+  };
+
+  // Fail closed on malformed or invalid block content, exactly like operatorClaudeBridgeEnabled.
+  // A name the raw block still appears to list is refused (never routed off silently); every other
+  // name simply loses the route.
+  if (read.error !== null) {
+    const listed = read.listedNames.includes(name);
+    return {
+      ...base,
+      source: 'block',
+      reason: listed ? 'listed_model_mismatch' : 'block_invalid',
+      listed,
+      enabled: false,
+      model: layerModel,
+    };
+  }
+
+  const block = read.block;
+  if (block === null) return base;
+  if (block.enabled !== true) {
+    return { ...base, source: 'block', reason: 'block_disabled', enabled: false };
+  }
+  if (block.specialists === undefined) {
+    // Legacy shape: the merged definition flag decides, the operator switch is the machine gate.
+    return { ...base, source: 'legacy', reason: 'legacy_no_list' };
+  }
+
+  const listed = block.specialists.includes(name);
+  if (!listed) {
+    return {
+      ...base,
+      source: 'block',
+      reason: 'unlisted',
+      enabled: false,
+      shadowed: definitionFlag
+        ? [{ field: 'execution.claude_bridge', layerValue: true, blockValue: false }]
+        : [],
+    };
+  }
+
+  const model = block.models?.[name] ?? block.default_model ?? null;
+  // Same test as `isBridgedModel` in src/pi/claude-bridge.ts, taken from the schema constant so the
+  // specialist layer does not import the runtime layer.
+  if (model === null || !model.startsWith(CLAUDE_BRIDGE_MODEL_PREFIX)) {
+    return {
+      ...base,
+      source: 'block',
+      reason: 'listed_model_mismatch',
+      listed: true,
+      enabled: false,
+      model,
+    };
+  }
+
+  const shadowed: ClaudeBridgeRouteDecision['shadowed'] = [];
+  if ('claude_bridge' in (execution ?? {}) && execution?.claude_bridge !== true) {
+    shadowed.push({ field: 'execution.claude_bridge', layerValue: execution?.claude_bridge, blockValue: true });
+  }
+  if (layerModel !== null && layerModel !== model) {
+    shadowed.push({ field: 'execution.model', layerValue: layerModel, blockValue: model });
+  }
+
+  return {
+    ...base,
+    source: 'block',
+    reason: 'listed',
+    listed: true,
+    enabled: true,
+    model,
+    shadowed,
+  };
 }
 
 /** Thrown when config layers resolve two distinct enabled `npm:` specs for the same package. */
@@ -177,6 +343,7 @@ function resolveHomeDir(): string | null {
 export class SpecialistLoader {
   private cache = new Map<string, Specialist>();
   private blockedFieldWarnings = new Map<string, BlockedFieldWarning[]>();
+  private claudeBridgeDecisions = new Map<string, ClaudeBridgeRouteDecision>();
   private projectDir: string;
   private homeDir: string | null;
 
@@ -488,6 +655,34 @@ export class SpecialistLoader {
       );
     }
 
+    // Layer 5 (SPECIALISTS-4442): the operator's Claude Code allow list, applied AFTER every
+    // other layer and authoritative both ways for exactly two fields. This is the documented
+    // precedence exception: a repository layer may write `execution.claude_bridge` and
+    // `execution.model` (both are override-allowed), but consent for a subscription-billed route
+    // is not repository content, so the block wins for the two fields it names.
+    const executionRecord = (base.specialist.execution ?? {}) as Record<string, unknown>;
+    const claudeBridgeDecision = resolveClaudeBridgeRoute(name, executionRecord, readClaudeBridgeBlock());
+    this.claudeBridgeDecisions.set(name, claudeBridgeDecision);
+    if (claudeBridgeDecision.source === 'block' && claudeBridgeDecision.reason === 'listed') {
+      executionRecord.claude_bridge = true;
+      executionRecord.model = claudeBridgeDecision.model;
+      base.specialist.execution = executionRecord as typeof base.specialist.execution;
+    } else if (claudeBridgeDecision.source === 'block') {
+      // Unlisted (authoritative both ways) or a malformed block that names this Specialist:
+      // either way the route is off here, so a repo/home flag cannot keep it on.
+      if (executionRecord.claude_bridge === true || claudeBridgeDecision.reason === 'listed_model_mismatch') {
+        executionRecord.claude_bridge = false;
+        base.specialist.execution = executionRecord as typeof base.specialist.execution;
+      }
+    }
+    for (const shadow of claudeBridgeDecision.shadowed) {
+      process.stderr.write(
+        `[specialists] claude_bridge allow list in ${claudeBridgeDecision.blockPath} overrides '${name}' ` +
+          `${shadow.field}: layer value ${JSON.stringify(shadow.layerValue)} ignored, using ` +
+          `${JSON.stringify(shadow.blockValue)}\n`,
+      );
+    }
+
     // The TOP layer (highest-priority hit) drives the SpecialistSummary scope/source.
     const top = hits[hits.length - 1];
     resolveSkillsPaths(base, baseHit.dir.path, this.projectDir);
@@ -582,6 +777,19 @@ export class SpecialistLoader {
     // Cache warnings even if no model error — doctor consumes both paths.
     if (merged.warnings.length) this.blockedFieldWarnings.set(name, merged.warnings);
 
+    // SPECIALISTS-4442: a listed Specialist that cannot resolve a bridged model is refused here,
+    // where every runtime (host dispatch and retry, sp run, sp script) already loads the merged
+    // spec. Never an inert run on another provider.
+    const routeDecision = this.claudeBridgeDecisions.get(name);
+    if (routeDecision?.reason === 'listed_model_mismatch') {
+      throw new ClaudeBridgeRouteModelMismatchError(
+        name,
+        routeDecision.model,
+        routeDecision.blockPath,
+        routeDecision.blockError,
+      );
+    }
+
     const model = merged.spec.specialist.execution.model;
     if (model === null || model === undefined || model === '') {
       throw new SpecialistMissingModelError(name);
@@ -633,6 +841,15 @@ export class SpecialistLoader {
     return all;
   }
 
+  /**
+   * The Claude Code route decision recorded for `name` by the most recent merge
+   * (SPECIALISTS-4442). Undefined until `list()`, `get()` or `getEffective()` merged it. Doctor
+   * reads it instead of re-deriving the precedence from the block.
+   */
+  getClaudeBridgeDecision(name: string): ClaudeBridgeRouteDecision | undefined {
+    return this.claudeBridgeDecisions.get(name);
+  }
+
   /** Resolution of the global user-config path. Returns null only if HOME is unset and XDG_CONFIG_HOME is empty. */
   getGlobalLayerPath(): GlobalUserConfigPath | null {
     try {
@@ -646,9 +863,11 @@ export class SpecialistLoader {
     if (name) {
       this.cache.delete(name);
       this.blockedFieldWarnings.delete(name);
+      this.claudeBridgeDecisions.delete(name);
     } else {
       this.cache.clear();
       this.blockedFieldWarnings.clear();
+      this.claudeBridgeDecisions.clear();
     }
   }
 }

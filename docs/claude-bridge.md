@@ -15,28 +15,90 @@ they do on a built-in provider — Pi executes the tools, not Claude Code.
 
 ## Enabling it
 
-Two independent switches must both be on. The definition selects the route for one Specialist; the
-operator grants it for the machine. **The definition flag alone is never enough**, because a
-repository can write the definition layer — a repo-shipped `.specialists/user/<name>.json`, a
-repo-defined specialist name that becomes the merge base, or a repo layer that is a symlink into
-the home layer. Nothing inside a repository can write the operator switch.
+One operator surface selects the route: the reserved `claude_bridge` block in
+`~/.config/specialists/user.json` (or `$XDG_CONFIG_HOME/specialists/user.json`). The block asks for
+consent once, names every Specialist that may use the route, and may name a bridge model per
+Specialist. There is no per-Specialist `~/.specialists/user/<name>.specialist.json` copy to keep, and
+no wildcard: consent names a Specialist.
 
-1. Operator, once per machine — `~/.config/specialists/user.json` (or `$XDG_CONFIG_HOME`):
+```json
+{
+  "claude_bridge": {
+    "enabled": true,
+    "default_model": "claude-bridge/claude-sonnet-5-5",
+    "specialists": ["advisor", "reviewer", "explorer"],
+    "models": { "advisor": "claude-bridge/claude-opus-5-5" }
+  }
+}
+```
 
-   ```json
-   { "claude_bridge": { "enabled": true } }
-   ```
+| Key | Meaning | Default |
+| --- | --- | --- |
+| `enabled` | machine consent for the route; `false` disables it for every Specialist | `false` |
+| `default_model` | bridge model for a listed Specialist with no entry in `models` | absent |
+| `specialists` | the allow list. Explicit kebab-case Specialist names, no wildcard | absent (legacy) |
+| `models` | per-name bridge model; wins over `default_model` | absent |
 
-2. Definition, per Specialist (in your own layer, never in a shipped definition):
+The CLI writes the block, so it never has to be hand-edited:
 
-   ```json
-   { "specialist": { "execution": { "claude_bridge": true, "model": "claude-bridge/claude-sonnet-5-5" } } }
-   ```
+```bash
+sp edit --global claude_bridge.enabled true
+sp edit --global claude_bridge.default_model claude-bridge/claude-sonnet-5-5
+sp edit --global claude_bridge.specialists '["advisor","reviewer","explorer"]'
+sp edit --global claude_bridge.models.advisor claude-bridge/claude-opus-5-5
+```
 
-   Put that in a Specialist spec layer — `~/.specialists/user/<name>.specialist.json` (home) or
-   `.specialists/user/<name>.specialist.json` (project) — not in a shipped definition.
-   `sp edit --global` rejects the field today (the global override schema does not list it), so edit
-   the layer directly until that mismatch is fixed.
+`sp init --global` preserves the block: it is machine configuration, not a Specialist entry, and it
+is never reported as a removed Specialist. Every model in the block must be a `claude-bridge/...`
+id; `anthropic/...` is Pi's own API-key provider and does not go through Claude Code.
+
+### How the block resolves
+
+The block is applied **after every other layer** (package canonical, `user.json`, the home layer,
+the repository layer) and is authoritative **both ways** for exactly two fields:
+`execution.claude_bridge` and `execution.model`. One exported resolver in the loader produces the
+decision, and every runtime reads the merged spec, so the native host (dispatch and retry), `sp run`,
+`sp script`, `sp list`, `sp view` and session start cannot disagree.
+
+For Specialist `N`:
+
+1. `enabled !== true`: no injection, the route is off for every Specialist.
+2. `specialists` absent: **legacy rule** — the merged definition flag decides and the machine
+   switch is the gate. Nothing changes for an existing home-layer setup; `sp doctor` reports this
+   shape as legacy once an allow list exists.
+3. `specialists` present (including `[]`): the list is authoritative both ways. A listed `N` gets
+   `execution.claude_bridge = true` and `execution.model = models[N] ?? default_model`; an unlisted
+   `N` gets `execution.claude_bridge = false` even when a home or repository layer set it.
+4. A listed `N` that resolves no `claude-bridge/...` model is **invalid input**: the schema refuses
+   the block at write time and `sp doctor` reports it for a hand-edited file. At dispatch the run is
+   **refused** with `claude_bridge_route_model_mismatch` — naming the Specialist, the resolved model
+   and the block — never admitted and then billed to another provider.
+5. When the block changes a value a lower layer set, the loader records a provenance warning that
+   `sp doctor` and the loader's stderr line show, so an operator sees that the selection shadowed a
+   layer rather than silently observing a different model.
+6. An explicit `--model` override keeps its meaning: it replaces the candidate chain for that run.
+   It does not grant the route.
+
+This precedence exception is the point: a repository can write `execution.claude_bridge` and
+`execution.model` (both are override-allowed), and it can ship a Specialist whose definition becomes
+the merge base. Consent for a subscription-billed route is not repository content, so the operator
+block wins for the two fields it names, and a repository layer can neither enable the route nor
+redirect a listed Specialist.
+
+`fallback_models` is not rewritten. A bridged primary already suppresses the walk (see the no-fallback rule
+later in this section), so a fallback on a listed Specialist is inert; `sp doctor` warns and suggests removing it.
+
+`sp doctor` reports each shape it can see: legacy without an allow list; a listed Specialist whose
+block resolves no bridged model; a definition flag on an unlisted Specialist; a bridged primary with
+fallbacks; a malformed block (through the same reader the route decision uses); and a per-Specialist
+`execution.claude_bridge` entry the allow list now owns.
+
+### The legacy definition flag
+
+`execution.claude_bridge: true` in a definition is still read when the block carries no allow list,
+and it is the documented way to keep an existing home-layer setup during a rollout. Keep it out of
+shipped definitions, and prefer the allow list: a per-Specialist entry in `~/.specialists/user/`
+that the list supersedes is redundant surface, which `sp doctor` reports as such.
 
 Requirements:
 
@@ -81,18 +143,20 @@ a `package.json` and a loadable entry (`src/index.ts` for the published package,
 `main` nor `exports`); a half-finished install therefore falls through to the next store instead of
 shadowing a working one.
 
-Either switch off: the extension is not loaded, and a dispatch whose primary model is
-`claude-bridge/...` is refused with `model_unavailable` **before any session exists** — it is never
-walked to another provider, because a run on a model the definition did not ask for is not
-attributable. The note names which switch is off. So the package need not be installed at all, and a
-repo-selected flag changes nothing. The one exception is a `claude-bridge/...` pattern that the gate
+Route off — `enabled: false`, an allow list that does not name the Specialist, or (in the legacy
+shape) a definition flag that is not `true`: the extension is not loaded, and a dispatch whose
+primary model is `claude-bridge/...` is refused with `model_unavailable` **before any session
+exists** — it is never walked to another provider, because a run on a model the definition did not
+ask for is not attributable. The note names the switch that is off, including the allow list and the
+Specialist it does not name. So the package need not be installed at all, and a repo-selected flag
+changes nothing. The one exception is a `claude-bridge/...` pattern that the gate
 itself accepts: that happens only when the operator's own `~/.pi/agent/models.json` defines a
 provider named `claude-bridge`, in which case the run uses that endpoint and not Claude Code.
-Both on with the package missing: the dispatch is refused with
-`claude_bridge_unavailable` rather than quietly running on another provider, and the note lists the
-paths searched. Both on, but the
+Route on with the package missing: the dispatch is refused with `claude_bridge_unavailable` rather
+than quietly running on another provider, and the note lists the paths searched. Route on, but the
 extension fails to register its provider on the live session: the session is disposed and the
-dispatch is refused with `model_unavailable`.
+dispatch is refused with `model_unavailable`. A listed Specialist whose block cannot supply a
+`claude-bridge/...` model is refused earlier still, with `claude_bridge_route_model_mismatch`.
 
 **The refusal holds for the whole run, not only at admission.** If an admitted bridged primary fails
 mid-run — a subscription rate limit, a timeout, a transient error, a closed session — the activation
@@ -111,13 +175,15 @@ exists.
 
 ### The trust boundary (stated, not enforced)
 
-The switch is exactly as trustworthy as the environment of the process that reads it: `HOME` and
-`XDG_CONFIG_HOME` decide **which** `user.json` is read. A process whose `XDG_CONFIG_HOME` points
+The block — `enabled` plus the allow list — is exactly as trustworthy as the environment of the
+process that reads it: `HOME` and `XDG_CONFIG_HOME` decide **which** `user.json` is read. A process whose `XDG_CONFIG_HOME` points
 into a repository would read that repository's file, and a repository cannot set the environment of
 the operator's own process — so this is still not a repository-controlled route. It becomes one only
 if the operator, a wrapper script or a service unit hands a checkout control of those variables. Do
 not start the host with `HOME`/`XDG_CONFIG_HOME` inherited from untrusted content, and treat the
-switch as an operator consent record, not as a sandbox boundary.
+block as an operator consent record, not as a sandbox boundary. The allow list is what makes the
+consent specific: a repository can write `execution.claude_bridge` and a repository-defined name
+can become the merge base, but a name does not enter the list unless the operator writes it.
 
 ## Limits
 

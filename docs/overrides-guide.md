@@ -16,6 +16,54 @@ The examples below are delta snippets to add inside an existing specialist entry
 
 `beads_write_notes` (and the spec-level `beads_integration`) apply to the legacy `sp` CLI only. Native activations, dispatched through the MCP server or the Pi extension, ignore them and publish their result to the Substrate Journal instead; a native activation whose spec sets them to a non-default value reports it in `config_notes`. `specialists doctor` reports fields your `user.json` is missing against the current template, and extension keys that are retired or change nothing; `sp init --global` adds the missing fields without touching existing values.
 
+## The reserved `claude_bridge` block
+
+`user.json` also carries one reserved top-level key that is **not** a Specialist entry:
+`claude_bridge`. It is the operator's whole selection for the Claude Code route, and the loader
+applies it after every other layer. Full semantics, trust boundary and no-fallback interaction:
+[claude-bridge.md](claude-bridge.md).
+
+```json
+{
+  "claude_bridge": {
+    "enabled": true,
+    "default_model": "claude-bridge/claude-sonnet-5-5",
+    "specialists": ["advisor", "reviewer"],
+    "models": { "advisor": "claude-bridge/claude-opus-5-5" }
+  }
+}
+```
+
+- `enabled` (boolean, default `false`): machine consent. `false` turns the route off for every
+  Specialist.
+- `default_model` (string): bridge model for a listed Specialist with no entry in `models`. Must
+  start with `claude-bridge/`.
+- `specialists` (array of kebab-case names): the explicit allow list. No wildcard. Absent keeps the
+  legacy behaviour (the merged `execution.claude_bridge` flag decides); present — including `[]` —
+  is authoritative both ways, so an unlisted Specialist is off even when a home or repository layer
+  sets the flag.
+- `models` (object): per-Specialist bridge model; wins over `default_model`. Every listed name needs
+  a model, here or via `default_model`.
+
+Write it through the CLI; it validates before writing and fails closed on an invalid block:
+
+```bash
+sp edit --global claude_bridge.enabled true
+sp edit --global claude_bridge.default_model claude-bridge/claude-sonnet-5-5
+sp edit --global claude_bridge.specialists '["advisor","reviewer"]'
+sp edit --global claude_bridge.models.advisor claude-bridge/claude-opus-5-5
+sp edit --global --get claude_bridge.enabled
+```
+
+Pitfalls:
+
+- An unknown key in the block invalidates the block, and an invalid block never enables the route.
+- `sp init --global` preserves the block; it is machine configuration, not a retired Specialist.
+- A per-Specialist `execution.claude_bridge` entry next to a listed name is redundant: the allow list
+  owns the route. `sp doctor` reports it.
+- The block cannot be written by a repository layer, and it outranks one: a repository can neither
+  enable the route nor redirect the model of a listed Specialist.
+
 ## Per-field reference
 
 ### `prompt.system_prompt_mode`
