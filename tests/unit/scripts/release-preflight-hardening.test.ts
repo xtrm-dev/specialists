@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   CHECK_RUNS_PER_PAGE,
@@ -12,6 +12,10 @@ import {
 import { runDistWarning, type Exec, type ExecResult } from '../../../scripts/release-dist-warning.ts';
 import { resolvePiVersion } from '../../../scripts/release-pi-version.ts';
 import { waitForPublishedVersion } from '../../../scripts/release-registry-wait.ts';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 const SHA = 'f43c5cef833b3fd7327f3e577229260a5ee21008';
 const run = (name: string, conclusion: string | null, head_sha: string | undefined = SHA) => ({
@@ -208,7 +212,10 @@ describe('host rebuild warning', () => {
     expect(calls).toContain('git clean -fdq -- dist/');
   });
 
-  it('builds with NODE_ENV=test, like the release does', () => {
+  it('forces NODE_ENV=test even when the caller runs under production', () => {
+    // vitest already sets NODE_ENV=test, so asserting "test" proves nothing on its own: stub a
+    // different value and require the helper to overwrite it. Without the override this fails.
+    vi.stubEnv('NODE_ENV', 'production');
     const { environments, exec } = recorder({
       'bun run build': { status: 0 },
       'git diff --quiet -- dist/': { status: 0 },
