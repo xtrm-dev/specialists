@@ -325,6 +325,17 @@ export function formatEventLine(
     }
   } else if (event.type === 'tool') {
     detail = formatToolDetail(event);
+  } else if (event.type === 'model_change') {
+    // SPECIALISTS-4425: a skipped fallback is a decision, not a cycle. `model` is the model that
+    // ran, so printing "a → b" would claim a hop that never happened.
+    if (event.skipped) {
+      detail = yellow(
+        `fallback skipped${event.not_started_model ? ` (not started: ${event.not_started_model})` : ''}` +
+        `${event.note ? ` (${event.note.replace(/^fallback skipped:\s*/, '')})` : ''}`,
+      );
+    } else {
+      detail = dim(`${event.previous_model ?? '?'} → ${event.model ?? '?'}`);
+    }
   } else if (event.type === 'error') {
     detailParts.push(`source=${event.source}`);
     detailParts.push(`error=${event.error_message}`);
@@ -465,6 +476,15 @@ export function formatEventInline(event: TimelineEvent): string | null {
       return yellow(`[warning] ${event.reason}: ${Math.round(event.silence_ms / 1000)}s silent`);
     case 'thinking_level_unavailable':
       return yellow(`[warning] thinking level "${event.requested_level}" not applied: ${event.note}`);
+    case 'model_change': {
+      // SPECIALISTS-4425: a skipped fallback is not a cycle. Say what ran and what was not started,
+      // instead of printing a hop that never happened.
+      if (event.skipped) {
+        const notStarted = event.not_started_model ? `, not started: ${event.not_started_model}` : '';
+        return yellow(`[model] ${event.previous_model ?? event.model ?? '?'} — fallback skipped${notStarted}`);
+      }
+      return dim(`[model] ${event.previous_model ?? '?'} → ${event.model ?? '?'}`);
+    }
     case 'control_signal':
       return dim(`[control] ${event.action}`);
     case 'error':

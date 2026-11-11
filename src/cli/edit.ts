@@ -7,6 +7,7 @@ import { SpecialistSchema } from '../specialist/schema.js';
 import {
   GlobalSpecialistOverrideSchema,
   getGlobalUserConfigPath,
+  listGlobalSpecialistNames,
   readGlobalUserConfig,
   validateGlobalUserConfig,
   writeGlobalUserConfig,
@@ -757,7 +758,7 @@ async function runGlobalEdit(args: ParsedArgs): Promise<void> {
 
   const specialistOverride = (existing as Record<string, unknown>)[resolvedPath.specialistName];
   if (specialistOverride === undefined) {
-    const available = Object.keys(existing).sort().join(', ');
+    const available = listGlobalSpecialistNames(existing as Record<string, unknown>).join(', ');
     fail(`Error: specialist "${resolvedPath.specialistName}" not in global config. Available: ${available || 'none'}`);
   }
 

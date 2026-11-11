@@ -124,3 +124,37 @@ export function claudeBridgeSessionOption(
 ): { claudeBridge?: true } {
   return claudeBridgeEnabled(execution) ? { claudeBridge: true } : {};
 }
+
+/**
+ * Is this model served by the Claude Code route? The single predicate for every fallback decision:
+ * a bridged model is a subscription surface, so a run must not move off it silently. Both the
+ * native host and the legacy runner call this, so the two cannot drift.
+ */
+export function isBridgedModel(model: string | null | undefined): boolean {
+  return typeof model === 'string' && model.startsWith(`${CLAUDE_BRIDGE_PROVIDER}/`);
+}
+
+/**
+ * The event a skipped fallback emits, shared by both runtimes. It carries the model that was NOT
+ * started under its own key (`not_started_model`), so a reader cannot mistake it for a model that
+ * ran, and `resolved_model` stays the bridged model that actually ran.
+ */
+export function bridgedFallbackSkipEvent(args: {
+  fromModel: string;
+  toModel?: string;
+  errorClass: string;
+  cause: string;
+}): Record<string, unknown> {
+  const { fromModel, toModel, errorClass, cause } = args;
+  return {
+    from_model: fromModel,
+    ...(toModel ? { to_model: toModel, not_started_model: toModel } : {}),
+    error_class: errorClass,
+    terminal: true,
+    skipped: true,
+    note:
+      `fallback skipped: the primary "${fromModel}" is served by the Claude Code route, ` +
+      `so the walk does not continue to another provider (cause: ${cause})`,
+    resolved_model: fromModel,
+  };
+}

@@ -106,19 +106,23 @@ repository layer and consent cannot.
   { "specialist": { "execution": { "claude_bridge": true, "model": "claude-bridge/claude-sonnet-5-5" } } }
   ```
 
-  `sp edit --global` rejects the field today: the global override schema
-  (`src/specialist/global-config.ts`, `OverrideExecutionSchema`) does not list it, even though
-  `OVERRIDE_ALLOWED_EXECUTION_FIELDS` does. Use a spec layer until that mismatch is fixed.
+  The CLI writes the same layer, so both forms work:
+
+  ```bash
+  sp edit --global --set <name>.execution.claude_bridge true
+  sp edit --global --set <name>.execution.model claude-bridge/claude-sonnet-5-5
+  ```
 - Use a `claude-bridge/...` model id. `anthropic/...` is Pi's own API-key provider and does not go
   through Claude Code.
-- **Admission is strict; the runtime walk is narrower than "any failure".** A `claude-bridge/...`
-  primary that cannot be admitted ends the dispatch with `model_unavailable` and is not substituted —
-  that guard sits in `src/activation/native-host.ts` next to the first model check. An admitted run
-  that fails mid-run walks `fallback_models` only for the retryable classes
-  `FALLBACK_RETRYABLE_CLASSES = {rate_limit, timeout, transient}`; any other class, including `auth`,
-  ends the run on the primary without a hop. So the realistic route-change case is a Claude
-  subscription **rate limit** (or a timeout, or a transient error) continuing on an API-key
-  fallback, on a different billing surface than the one the operator chose.
+- **Model selection is strict: a refusal is a refusal, at admission and at runtime.** A
+  `claude-bridge/...` primary that cannot be admitted ends the dispatch with `model_unavailable`; one
+  that is admitted and then fails mid-run ends `failed` on that model, with a `model_fallback` event
+  carrying `terminal: true`, `skipped: true`, the cause, and `not_started_model` for the model that
+  was never started. In both cases `fallback_models` is not walked, on the native host and on the
+  legacy `sp run` runner alike — one shared predicate, one shared payload — so a run never moves from
+  the subscription surface to a metered one. The rule is about the walk, not the provider: a bridged
+  primary is not walked even to a second `claude-bridge/...` model. Non-bridged primaries keep their
+  fallback behaviour, including the retryable classes (`rate_limit`, `timeout`, `transient`).
 - Pinning one model is `model_override`: it replaces the chain with `[override]`, so no fallback
   entry can be reached regardless of the failure class.
 

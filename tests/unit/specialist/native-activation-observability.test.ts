@@ -399,6 +399,56 @@ describe('native activation observability parity', () => {
 });
 
 // ── SPECIALISTS-120: native settlement capture and reconciliation ─────────────
+describe('skipped fallback durability (SPECIALISTS-4425)', () => {
+  it('keeps `skipped` and names the never-started model, instead of looking like a cycle', () => {
+    const row = mapNativeLifecycleEvent({
+      activationId: 'act:test',
+      attemptId: 'att:test',
+      name: 'model_fallback',
+      payload: {
+        from_model: 'claude-bridge/claude-sonnet-5-5',
+        to_model: 'commandcode/deepseek/deepseek-v4.1-flash',
+        not_started_model: 'commandcode/deepseek/deepseek-v4.1-flash',
+        error_class: 'transient',
+        terminal: true,
+        skipped: true,
+        note: 'fallback skipped: the primary is served by the Claude Code route',
+        resolved_model: 'claude-bridge/claude-sonnet-5-5',
+      },
+    }, 1_700_000_000_000);
+
+    expect(row).toMatchObject({
+      type: 'model_change',
+      action: 'cycle_model',
+      // The model that RAN, not the one that was not started.
+      model: 'claude-bridge/claude-sonnet-5-5',
+      previous_model: 'claude-bridge/claude-sonnet-5-5',
+      skipped: true,
+      not_started_model: 'commandcode/deepseek/deepseek-v4.1-flash',
+      terminal: true,
+      resolved_model: 'claude-bridge/claude-sonnet-5-5',
+    });
+  });
+
+  it('leaves a real cycle unmarked', () => {
+    const row = mapNativeLifecycleEvent({
+      activationId: 'act:test',
+      attemptId: 'att:test',
+      name: 'model_fallback',
+      payload: {
+        from_model: 'primaryprov/primary-model',
+        to_model: 'fallbackprov/fallback-model',
+        error_class: 'transient',
+        terminal: false,
+      },
+    }, 1_700_000_000_000);
+
+    expect(row).toMatchObject({ model: 'fallbackprov/fallback-model', terminal: false });
+    expect((row as Record<string, unknown>).skipped).toBeUndefined();
+    expect((row as Record<string, unknown>).not_started_model).toBeUndefined();
+  });
+});
+
 describe('native Pi usage telemetry (SPECIALISTS-120)', () => {
   const CONTEXT = { startedAtMs: 1_000 };
 

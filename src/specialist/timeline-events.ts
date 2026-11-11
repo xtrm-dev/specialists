@@ -458,6 +458,10 @@ export interface TimelineEventModelChange extends TimelineEventBase {
   note?: string;
   attempt_n?: number;
   resolved_model?: string;
+  // SPECIALISTS-4425: a skipped fallback is not a cycle. `model` then stays the model that RAN
+  // (the bridged primary), and the model that was deliberately not started is named separately.
+  skipped?: boolean;
+  not_started_model?: string;
 }
 
 export interface TimelineEventExtensionError extends TimelineEventBase {

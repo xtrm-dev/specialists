@@ -94,6 +94,17 @@ paths searched. Both on, but the
 extension fails to register its provider on the live session: the session is disposed and the
 dispatch is refused with `model_unavailable`.
 
+**The refusal holds for the whole run, not only at admission.** If an admitted bridged primary fails
+mid-run — a subscription rate limit, a timeout, a transient error, a closed session — the activation
+ends `failed` on that model and `fallback_models` is **not** walked, because the next model would
+bill a different surface and answer a question the definition did not ask. The `model_fallback`
+event records `terminal: true`, `skipped: true`, the cause, and `not_started_model` for the model
+that was never started, so a durable row or a feed line cannot read as a hop. Non-bridged primaries
+keep today's fallback behaviour, including the retryable classes (`rate_limit`, `timeout`,
+`transient`). The rule is about the walk, not the provider: a bridged primary is not walked even to a
+second `claude-bridge/...` model. The native host and the legacy `sp run` runner both enforce it
+through one shared predicate and one shared event payload.
+
 ### The trust boundary (stated, not enforced)
 
 The switch is exactly as trustworthy as the environment of the process that reads it: `HOME` and

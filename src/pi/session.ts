@@ -993,6 +993,7 @@ function claudeBridgeCandidateDirs(deps: ClaudeBridgeResolverDeps): string[] {
       env,
       home: deps.home ?? homedir(),
       execPath: deps.execPath ?? process.execPath,
+      ...(deps.exists ? { exists: deps.exists } : {}),
       ...(deps.readDir ? { readDir: deps.readDir } : {}),
     }),
   ];

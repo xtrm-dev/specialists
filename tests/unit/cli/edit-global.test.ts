@@ -3,6 +3,7 @@
 // $EDITOR flow, mutual exclusion with --scope.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getGlobalUserConfigPath } from '../../../src/specialist/global-config.js';
@@ -291,6 +292,20 @@ describe('edit CLI — --global --get / --set', () => {
     const { run } = await importEdit();
     await expect(run()).rejects.toThrow('exit:1');
     exitSpy.mockRestore();
+  });
+});
+
+describe('edit CLI — the reserved switch key is not a Specialist', () => {
+  it('lists only real Specialist names, so the operator switch is not offered as an editable one', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'edit-global-switch-'));
+    try {
+      await seedGlobalConfig(home, { claude_bridge: { enabled: true } });
+      const { listGlobalSpecialistNames } = await import('../../../src/specialist/global-config.js');
+      const loaded = JSON.parse(await readFile(join(home, '.config', 'specialists', 'user.json'), 'utf-8')) as Record<string, unknown>;
+      expect(listGlobalSpecialistNames(loaded)).toEqual(['executor']);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 

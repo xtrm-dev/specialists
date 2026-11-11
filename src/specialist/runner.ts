@@ -108,7 +108,11 @@ import {
 } from './payload-measure.js';
 
 import { execSync, spawnSync } from 'node:child_process';
-import { claudeBridgeSessionOption } from '../pi/claude-bridge.js';
+import {
+  bridgedFallbackSkipEvent,
+  claudeBridgeSessionOption,
+  isBridgedModel,
+} from '../pi/claude-bridge.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { homedir } from 'node:os';
@@ -1037,6 +1041,42 @@ export function classifyFallbackError(error: unknown): string {
   return 'unknown';
 }
 
+/**
+ * SPECIALISTS-4425, legacy path: a bridged primary is a subscription surface, so a run must not
+ * move off it silently. Same predicate and same payload shape as the native host, emitted as both
+ * `model_fallback` (parity with native) and `fallback_step` (this runtime's existing consumer
+ * shape), with `skipped` and `not_started_model` so neither is read as a model that ran.
+ */
+function emitBridgedFallbackSkip(
+  onEvent: ((type: string, details?: { model?: string; data?: Record<string, unknown> }) => void) | undefined,
+  specialist: string,
+  attemptN: number,
+  fromModel: string,
+  toModel: string,
+  errorClass: string,
+  cause: string,
+): void {
+  const payload = bridgedFallbackSkipEvent({ fromModel, toModel, errorClass, cause });
+  onEvent?.('model_fallback', {
+    model: fromModel,
+    data: { event: 'model_fallback', specialist, ...payload },
+  });
+  onEvent?.('fallback_step', {
+    model: fromModel,
+    data: {
+      event: 'fallback_step',
+      specialist,
+      attempt_n: attemptN,
+      model_tried: fromModel,
+      not_started_model: toModel,
+      error_class: errorClass,
+      terminal: true,
+      skipped: true,
+      note: payload.note,
+    },
+  });
+}
+
 function emitFallbackStep(
   onEvent: ((type: string, details?: { model?: string; data?: Record<string, unknown> }) => void) | undefined,
   specialist: string,
@@ -1409,6 +1449,16 @@ export class SpecialistRunner {
         const isTerminalModel = modelIndex === modelChain.length - 1;
 
         if (!circuitBreaker.isAvailable(currentModel) && !isTerminalModel) {
+          if (isBridgedModel(currentModel)) {
+            emitBridgedFallbackSkip(
+              onEvent, metadata.name, modelIndex + 2, currentModel, modelChain[modelIndex + 1]!, 'transient',
+              'the model is circuit-broken and a bridged primary is not walked',
+            );
+            throw new Error(
+              `fallback skipped: the primary "${currentModel}" is served by the Claude Code route, ` +
+              `so the walk does not continue to another provider (the model is circuit-broken)`,
+            );
+          }
           emitFallbackStep(onEvent, metadata.name, modelIndex + 2, modelChain[modelIndex + 1], 'transient', false);
           continue;
         }
@@ -1480,6 +1530,17 @@ export class SpecialistRunner {
             }
 
             if (!isTransient) throw err;
+
+            if (isBridgedModel(currentModel)) {
+              // The same billing-surface rule as the native host: no hop off a bridged primary.
+              emitBridgedFallbackSkip(
+                onEvent, metadata.name, modelIndex + 2, currentModel,
+                modelChain[modelIndex + 1] ?? currentModel,
+                classifyFallbackError(err), err instanceof Error ? err.message : String(err),
+              );
+              circuitBreaker.recordFailure(currentModel);
+              throw err;
+            }
 
             circuitBreaker.recordFailure(currentModel);
             currentFailureRecorded = true;

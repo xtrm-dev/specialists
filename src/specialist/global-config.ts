@@ -56,6 +56,17 @@ export interface GlobalUserConfigPath {
  * When unset, config-home is the write target; legacy is a read-only
  * fallback surfaced only when config-home is absent but legacy exists.
  */
+/**
+ * The Specialist names an operator layer actually holds. The reserved switch key is not a
+ * Specialist, so it must never be offered as one: `sp edit --global nope.execution.model` used to
+ * list `claude_bridge` under "Available", which reads as an editable definition named that.
+ */
+export function listGlobalSpecialistNames(config: Record<string, unknown>): string[] {
+  return Object.keys(config)
+    .filter(key => key !== CLAUDE_BRIDGE_SWITCH_KEY && !key.startsWith('_'))
+    .sort();
+}
+
 export function getGlobalUserConfigPath(): GlobalUserConfigPath {
   const home = process.env.HOME?.trim() || homedir();
 
