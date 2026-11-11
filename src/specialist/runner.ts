@@ -1531,11 +1531,13 @@ export class SpecialistRunner {
 
             if (!isTransient) throw err;
 
-            if (isBridgedModel(currentModel)) {
+            const nextModel = modelChain[modelIndex + 1];
+            if (isBridgedModel(currentModel) && nextModel) {
               // The same billing-surface rule as the native host: no hop off a bridged primary.
+              // Only emitted when something WOULD have been walked; a terminal bridged leg is an
+              // ordinary failure and must not claim a skipped fallback to itself.
               emitBridgedFallbackSkip(
-                onEvent, metadata.name, modelIndex + 2, currentModel,
-                modelChain[modelIndex + 1] ?? currentModel,
+                onEvent, metadata.name, modelIndex + 2, currentModel, nextModel,
                 classifyFallbackError(err), err instanceof Error ? err.message : String(err),
               );
               circuitBreaker.recordFailure(currentModel);

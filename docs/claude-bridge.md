@@ -102,8 +102,10 @@ event records `terminal: true`, `skipped: true`, the cause, and `not_started_mod
 that was never started, so a durable row or a feed line cannot read as a hop. Non-bridged primaries
 keep today's fallback behaviour, including the retryable classes (`rate_limit`, `timeout`,
 `transient`). The rule is about the walk, not the provider: a bridged primary is not walked even to a
-second `claude-bridge/...` model. The native host and the legacy `sp run` runner both enforce it
-through one shared predicate and one shared event payload.
+second `claude-bridge/...` model. All three walk paths enforce it through one shared predicate
+(`isBridgedModel`) and one shared payload shape: the native host, the legacy `sp run` runner, and the
+script runner behind `sp script` / `runScriptSpecialist` (whose candidates include
+`options.fallbackModel` as a separate route).
 
 ### The trust boundary (stated, not enforced)
 

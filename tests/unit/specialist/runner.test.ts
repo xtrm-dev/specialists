@@ -952,6 +952,47 @@ describe('SpecialistRunner', () => {
     }));
   });
 
+  it('does not walk a circuit-broken bridged primary (SPECIALISTS-4425)', async () => {
+    const cb = new CircuitBreaker({ failureThreshold: 1 });
+    cb.recordFailure('claude-bridge/claude-sonnet-5-5');
+    const sessionFactory = vi.fn();
+    const onEvent = vi.fn();
+    const runner = new SpecialistRunner({
+      loader: makeLoader({ model: 'claude-bridge/claude-sonnet-5-5', fallback_models: ['qwen'] }),
+      hooks: new HookEmitter({ tracePath: '/tmp/test-hooks-trace-bridged-cb.jsonl' }),
+      circuitBreaker: cb,
+      sessionFactory,
+    });
+
+    await expect(runner.run({ name: 'test-spec', prompt: 'test' }, undefined, onEvent)).rejects.toThrow(/fallback skipped/);
+    // The circuit-broken model was not started, and the fallback was not either.
+    expect(sessionFactory).not.toHaveBeenCalled();
+    expect(onEvent).toHaveBeenCalledWith('fallback_step', expect.objectContaining({
+      model: 'claude-bridge/claude-sonnet-5-5',
+      data: expect.objectContaining({ skipped: true, terminal: true, not_started_model: 'qwen' }),
+    }));
+  });
+
+  it('does not claim a skipped fallback on a terminal bridged leg (no next model)', async () => {
+    const firstSession = makeMockSession();
+    firstSession.waitForDone.mockRejectedValue(new Error('503 service unavailable'));
+    const sessionFactory = vi.fn().mockResolvedValueOnce(firstSession);
+    const onEvent = vi.fn();
+    const runner = new SpecialistRunner({
+      loader: makeLoader({ model: 'claude-bridge/claude-sonnet-5-5' }),
+      hooks: new HookEmitter({ tracePath: '/tmp/test-hooks-trace-bridged-terminal.jsonl' }),
+      circuitBreaker: new CircuitBreaker(),
+      sessionFactory,
+    });
+
+    await expect(runner.run({ name: 'test-spec', prompt: 'test' }, undefined, onEvent)).rejects.toThrow(/503/);
+    // Nothing was skipped, because nothing would have been walked.
+    const skipped = onEvent.mock.calls
+      .filter(([type]) => type === 'fallback_step')
+      .filter(([, payload]) => (payload as { data?: { skipped?: boolean } }).data?.skipped === true);
+    expect(skipped).toHaveLength(0);
+  });
+
   it('walks fallback_models until available model and emits fallback_step events', async () => {
     const cb = new CircuitBreaker({ failureThreshold: 1 });
     cb.recordFailure('gemini');
