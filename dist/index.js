@@ -16024,7 +16024,7 @@ class SqliteClient {
       const rows = this.db.query(`
         SELECT job_id FROM specialist_jobs
         WHERE ${clauses.join(" AND ")}
-        ORDER BY updated_at_ms DESC
+        ORDER BY updated_at_ms DESC, job_id DESC
         LIMIT ?
       `).all(...params, limit);
       return rows.map((row) => row.job_id);
@@ -92856,6 +92856,9 @@ function recordReplyDelivery(repoRoot, activationId, messageId, reply) {
   writeAtomic(recordPath(repoRoot, activationId, messageId), record);
   return record;
 }
+function comparePendingViews(a, b) {
+  return a.createdAtMs - b.createdAtMs || a.messageId.localeCompare(b.messageId);
+}
 function listForActivation(repoRoot, activationId) {
   const dir = join60(interactionsRoot(repoRoot), activationId);
   if (!existsSync56(dir))
@@ -92869,13 +92872,13 @@ function listForActivation(repoRoot, activationId) {
       continue;
     views.push({ ...record, reply: readReply(repoRoot, activationId, record.messageId) });
   }
-  return views.sort((a, b) => a.createdAtMs - b.createdAtMs);
+  return views.sort(comparePendingViews);
 }
 function listAll(repoRoot) {
   const root = interactionsRoot(repoRoot);
   if (!existsSync56(root))
     return [];
-  return readdirSync25(root).flatMap((activationId) => listForActivation(repoRoot, activationId)).sort((a, b) => a.createdAtMs - b.createdAtMs);
+  return readdirSync25(root).flatMap((activationId) => listForActivation(repoRoot, activationId)).sort(comparePendingViews);
 }
 var KINDS_AWAITING_REPLY;
 var init_pending_store = __esm(() => {

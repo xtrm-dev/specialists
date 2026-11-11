@@ -163,11 +163,28 @@ describe('native activation selection (unitAI-kmbb9)', () => {
     expect(client.listNativeActivationIds({ limit: 20, beadId: 'unitAI-sel-noisy' })).toEqual(['act:sel-noisy']);
   });
 
+  it('breaks an updated_at_ms tie by activation id, not by insertion order', () => {
+    const { client, dbPath } = createClient();
+    const { quiets } = buildScenario(client);
+    // Force the tie the flake exposes: same timestamp, insertion order opposite to id order.
+    const tie = new Database(dbPath);
+    try {
+      tie.run(
+        'UPDATE specialist_jobs SET updated_at_ms = ? WHERE job_id IN (?, ?)',
+        [1700000000000, quiets[1], quiets[2]],
+      );
+    } finally {
+      tie.close();
+    }
+    const ids = client.listNativeActivationIds({ limit: 20, activationIds: [quiets[1], quiets[2]] });
+    expect(ids).toEqual([quiets[2], quiets[1]]);
+  });
+
   it('serves the id selection from an index (SEARCH, never SCAN)', () => {
     const { dbPath } = createClient();
     db = new Database(dbPath, { readonly: true });
     const idPlan = db.query(
-      "EXPLAIN QUERY PLAN SELECT job_id FROM specialist_jobs WHERE job_id >= 'act:' AND job_id < 'act;' ORDER BY updated_at_ms DESC LIMIT 20",
+      "EXPLAIN QUERY PLAN SELECT job_id FROM specialist_jobs WHERE job_id >= 'act:' AND job_id < 'act;' ORDER BY updated_at_ms DESC, job_id DESC LIMIT 20",
     ).all() as Array<Record<string, unknown>>;
     const idPlanText = JSON.stringify(idPlan);
     expect(idPlanText).toContain('SEARCH');
