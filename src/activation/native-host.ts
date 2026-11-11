@@ -74,7 +74,14 @@ import {
   claudeBridgeRouteEnabled,
 } from '../pi/claude-bridge.js';
 import { getPermissionGuardExtensionPath, resolvePermissionGuardForSpawn } from '../pi/permission-guard-extension.js';
-import { resolveAgentLaunchEnv, specialistHolderName } from '../pi/identity-env.js';
+import {
+  clearIdentityEnv,
+  resolveAgentLaunchEnv,
+  restoreIdentityEnv,
+  snapshotIdentityEnv,
+  specialistHolderName,
+  type IdentityEnvRun,
+} from '../pi/identity-env.js';
 import { formatResolvedToolContract, withDiscoveredExtensionTools, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 import { resolveModelChain } from '../specialist/model-chain.js';
 import { extractPurposeExcerpt, extractSections } from './contract-sections.js';
@@ -933,6 +940,12 @@ export interface NativeActivationHostDeps {
   forensics?: ActivationForensicSink;
   /** Injected for tests; defaults to resolving the real Pi SDK. */
   loadSdk?: () => Promise<PiSdk>;
+  /**
+   * Injected for tests: the `xt identity env --json` lookup behind the agent identity
+   * env. Defaults to the real CLI. Without this seam a test asserts whatever role map
+   * the HOST machine happens to have (SPECIALISTS-4423 F3).
+   */
+  identityEnvRun?: IdentityEnvRun;
   /** Defaults to `process.cwd()`. */
   cwd?: string;
   /** The isolated worktree a writer runs in. Defaults to `provisionWriterWorkspace` (git). */
@@ -1084,6 +1097,8 @@ export class NativeActivationHost {
   private workItemsDefault?: SpecialistWorkItemBoundary;
   private readonly forensics: ActivationForensicSink;
   private readonly loadSdk: () => Promise<PiSdk>;
+  /** See `NativeActivationHostDeps.identityEnvRun`; undefined means the real `xt`. */
+  private readonly identityEnvRun?: IdentityEnvRun;
   private readonly cwd: string;
   private readonly provisionWriterWorkspace: (cwd: string, issueRef: string, role: string) => ProvisionedWorkspace;
   private readonly backgroundTaskAlive: (pid: number) => boolean;
@@ -1126,6 +1141,15 @@ export class NativeActivationHost {
   private readonly admission: (specialist: unknown, tier: string, toolContract: ResolvedToolContract) => void;
   /** Guards the once-per-process settlement republish pass (SPECIALISTS-54). */
   private republished = false;
+  /**
+   * The identity env the running activation put on `process.env`, and the values it
+   * replaced (SPECIALISTS-4423 F2). One host, one process env: the managed keys are
+   * cleared before each apply, so a smaller answer cannot inherit a bigger one's
+   * GIT_CONFIG index, and the prior values are restored when the activation settles.
+   * Two activations running at the same moment still race here — that needs a
+   * per-session env on the SDK, not a guard in this class.
+   */
+  private appliedIdentityEnv: { activationId: string; snapshot: Record<string, string | undefined> } | null = null;
   private readonly env: Record<string, string | undefined>;
 
   private readonly registry = new FleetRegistry();
@@ -1209,6 +1233,7 @@ export class NativeActivationHost {
     // already has and every future one, the same guarantee withChannelPush buys for push.
     this.forensics = withFleetWake(deps.forensics ?? NULL_FORENSIC_SINK, () => this.wakeFleetWaiters());
     this.loadSdk = deps.loadSdk ?? loadPiSdk;
+    this.identityEnvRun = deps.identityEnvRun;
     this.now = deps.now ?? (() => Date.now());
     this.wakeSettlement = deps.onWakeSettlement;
     this.sessionStatsTimeoutMs = deps.sessionStatsTimeoutMs;
@@ -1228,6 +1253,44 @@ export class NativeActivationHost {
    * evidence: a refused dispatch is still runtime evidence, and a dispatch that failed
    * silently is indistinguishable from one that never happened.
    */
+  /**
+   * Give `process.env` this activation's agent identity (SPECIALISTS-4423 F2).
+   *
+   * The managed keys are cleared FIRST: `xt identity env` answers with a block sized
+   * by the role's App, so a later, smaller answer must not leave an earlier one's
+   * GIT_CONFIG index or author behind. The replaced values are remembered so the
+   * settle can put them back.
+   */
+  private applyActivationIdentityEnv(
+    activationId: string,
+    specialistName: string,
+    workspacePath: string,
+  ): void {
+    const launchEnv = resolveAgentLaunchEnv({
+      holder: specialistHolderName(specialistName, activationId),
+      roleName: specialistName,
+      cwd: workspacePath,
+      env: process.env,
+      run: this.identityEnvRun,
+    });
+    const prior = snapshotIdentityEnv(process.env);
+    clearIdentityEnv(process.env);
+    Object.assign(process.env, launchEnv);
+    this.appliedIdentityEnv = { activationId, snapshot: prior };
+  }
+
+  /**
+   * Put `process.env` back when `activationId` settles. A newer activation that
+   * already applied its own identity owns the env: restoring an older snapshot over
+   * it would hand the live activation someone else's holder.
+   */
+  private restoreActivationIdentityEnv(activationId: string): void {
+    if (this.appliedIdentityEnv?.activationId !== activationId) return;
+    const prior = this.appliedIdentityEnv.snapshot;
+    this.appliedIdentityEnv = null;
+    restoreIdentityEnv(prior, process.env);
+  }
+
   async start(request: ActivationRequest): Promise<ActivationHandle> {
     const activationId = `act:${randomUUID().slice(0, 12)}`;
     const attemptId = `att:${activationId.slice(4)}:1`;
@@ -1324,6 +1387,7 @@ export class NativeActivationHost {
 
     const reject = (reason: string, detail: Record<string, unknown> = {}): never => {
       // All first, so no refusal path can forget any of them.
+      this.restoreActivationIdentityEnv(activationId);
       releaseLeaseOnRefusal();
       releaseClaimForRefusal();
       removeWorkspaceOnRefusal();
@@ -2179,12 +2243,7 @@ export class NativeActivationHost {
     // `gh` would be the real binary and a review would post as the operator. The
     // shim directory precedes the host PATH, so it is also visible to this host
     // process while the activation runs; one process, one PATH.
-    Object.assign(process.env, resolveAgentLaunchEnv({
-      holder: specialistHolderName(specialist.specialist.metadata.name, activationId),
-      roleName: specialist.specialist.metadata.name,
-      cwd: workspace.worktreePath,
-      env: process.env,
-    }));
+    this.applyActivationIdentityEnv(activationId, specialist.specialist.metadata.name, workspace.worktreePath);
     const resourceLoader = createActivationResourceLoader(sdk, {
       cwd: workspace.worktreePath,
       skillPaths: specialist.specialist.skills?.paths ?? [],
@@ -2703,6 +2762,10 @@ export class NativeActivationHost {
         snapshot.state = 'settled';
         this.save(snapshot);
         this.releaseIfWriter(snapshot, 'settled');
+        // MEDIUM F2: the identity this activation put on process.env goes back to what
+        // the host had. A stale GIT_AUTHOR_*/GIT_CONFIG_* would otherwise author the
+        // host's own commits or route its git through a settled role's transport.
+        this.restoreActivationIdentityEnv(snapshot.activationId);
         if (unframedWake) {
           this.wakeDirty.delete(snapshot.activationId);
           const record = this.registry.get(snapshot.activationId);
@@ -3003,6 +3066,8 @@ export class NativeActivationHost {
     } catch (error) {
       snapshot.state = 'failed';
       this.save(snapshot);
+      // A throw is a terminal state too: the identity must not outlive it.
+      this.restoreActivationIdentityEnv(snapshot.activationId);
       const message = error instanceof Error ? error.message : String(error);
       // The run failed by THROWING, not by settling: without this the terminal event would be
       // the only record, and a reader could not tell "Pi never reported totals" from "the
@@ -3076,6 +3141,7 @@ export class NativeActivationHost {
       const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
       snapshot.state = 'failed';
       this.save(snapshot);
+      this.restoreActivationIdentityEnv(snapshot.activationId);
       emit('activation_failed', { error: detail, stop_reason: last.stopReason });
       const failedResult: ActivationResult = {
         activationId: snapshot.activationId,
@@ -4001,6 +4067,13 @@ export class NativeActivationHost {
     record.snapshot.attemptId = attemptId;
     record.snapshot.state = 'starting';
     this.save(record.snapshot);
+    // F2 restores the host env at settle, so a resumed turn must apply the identity
+    // again or it would run as the operator — the exact gap #525 exists to close.
+    this.applyActivationIdentityEnv(
+      activationId,
+      record.snapshot.specialist,
+      record.snapshot.workspace?.worktreePath ?? this.cwd,
+    );
 
     const emit = (name: string, payload?: Record<string, unknown>) =>
       this.forensics.emit({

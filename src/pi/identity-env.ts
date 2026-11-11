@@ -41,6 +41,13 @@ const GIT_CONFIG_COUNT_KEY = 'GIT_CONFIG_COUNT';
 const GIT_CONFIG_KEY_PREFIX = 'GIT_CONFIG_KEY_';
 const GIT_CONFIG_VALUE_PREFIX = 'GIT_CONFIG_VALUE_';
 
+/** One `xt identity env --json` invocation. `error` mirrors spawnSync's ENOENT/signal field. */
+export type IdentityEnvRun = (
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number },
+) => { status: number | null; stdout: string; error?: unknown };
+
 export interface IdentityEnvInput {
   /** Substrate holder of the launched agent; absent or blank means no identity. */
   holder?: string | null;
@@ -50,12 +57,8 @@ export interface IdentityEnvInput {
   cwd?: string;
   /** Base env for the lookup. Default: process.env. */
   env?: NodeJS.ProcessEnv;
-  /** Injected for tests; defaults to a real `xt identity env --json`. */
-  run?: (
-    cmd: string,
-    args: string[],
-    opts: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number },
-  ) => { status: number | null; stdout: string };
+  /** Injected for tests and for a host that owns its own resolver; defaults to a real `xt identity env --json`. */
+  run?: IdentityEnvRun;
   /** Lookup timeout floor. Default 5000 ms. */
   timeoutMs?: number;
   /**
@@ -77,6 +80,49 @@ function isAllowed(key: string): boolean {
  */
 function launcherWarning(message: string): void {
   process.stderr.write(`[specialists] identity-env: ${message}\n`);
+}
+
+/**
+ * Every key one identity env OWNS. PATH is deliberately not here: the launched
+ * PATH is one process-wide value by design (CORE-2524.4), while these keys name a
+ * holder and a transport and must never outlive the activation that set them.
+ */
+const IDENTITY_MANAGED_KEY = /^(?:SUBSTRATE_HOLDER|XTRM_ROLE|GIT_AUTHOR_NAME|GIT_AUTHOR_EMAIL|GIT_COMMITTER_NAME|GIT_COMMITTER_EMAIL|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+)$/;
+
+export function isIdentityManagedKey(key: string): boolean {
+  return IDENTITY_MANAGED_KEY.test(key);
+}
+
+/** Every identity-managed key present in `env`, with its value (or undefined when absent). */
+export function snapshotIdentityEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string | undefined> {
+  const snapshot: Record<string, string | undefined> = {};
+  for (const key of Object.keys(env)) {
+    if (isIdentityManagedKey(key)) snapshot[key] = env[key];
+  }
+  return snapshot;
+}
+
+/**
+ * Remove every identity-managed key from `env`. Called BEFORE an activation's
+ * own identity is applied: a smaller answer must not leave a bigger answer's
+ * GIT_CONFIG index or author behind, and the host's own git/gh calls must not
+ * inherit a settled activation's identity.
+ */
+export function clearIdentityEnv(env: NodeJS.ProcessEnv = process.env): void {
+  for (const key of Object.keys(env)) {
+    if (isIdentityManagedKey(key)) delete env[key];
+  }
+}
+
+/** Put `env` back to a snapshot: managed keys cleared first, then the snapshot's values. */
+export function restoreIdentityEnv(
+  snapshot: Record<string, string | undefined>,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  clearIdentityEnv(env);
+  for (const [key, value] of Object.entries(snapshot)) {
+    if (typeof value === 'string') env[key] = value;
+  }
 }
 
 /**
@@ -118,6 +164,13 @@ function keepConsistentGitConfig(env: Record<string, string>, warn: (message: st
   }
 }
 
+/** A spawn error's class and code, e.g. `Error ENOENT`; never a value. */
+function describeErrorClass(error: unknown): string {
+  if (!(error instanceof Error)) return 'non-Error';
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && code ? `${error.name} ${code}` : error.name || 'Error';
+}
+
 /**
  * The identity env for one launched session. Never throws: on any doubt it
  * returns the holder (and the role name) and nothing else.
@@ -140,21 +193,39 @@ export function resolveAgentIdentityEnv(input: IdentityEnvInput = {}): Record<st
     return { status: result.status, stdout: String(result.stdout ?? '') };
   });
 
-  let answer: unknown;
+  const warn = input.warn ?? launcherWarning;
+  // MEDIUM F1: returning the holder without a role identity means git and gh act
+  // as the operator, so every silent fallback is a warning. The reason names the
+  // failure class only — never xt's output, never a value.
+  const withoutRole = (reason: string): Record<string, string> => {
+    warn(`identity env unavailable (${reason}); the session runs without an agent identity`);
+    return base;
+  };
+
+  let result: { status: number | null; stdout: string; error?: unknown };
   try {
-    const result = run('xt', ['identity', 'env', '--json'], {
+    result = run('xt', ['identity', 'env', '--json'], {
       cwd: input.cwd,
       env: { ...(input.env ?? process.env), ...base },
       timeoutMs: input.timeoutMs ?? 5000,
     });
-    if (result.status !== 0) return base;
+  } catch (error) {
+    return withoutRole(`lookup threw ${describeErrorClass(error)}`);
+  }
+  if (result.error) return withoutRole(`lookup did not run (${describeErrorClass(result.error)})`);
+  if (result.status !== 0) {
+    return withoutRole(result.status === null ? 'xt exited on a signal' : `xt exited ${result.status}`);
+  }
+
+  let answer: unknown;
+  try {
     answer = JSON.parse(result.stdout);
   } catch {
-    return base;
+    return withoutRole('returned unparseable JSON');
   }
 
   const env = (answer as { env?: unknown } | null)?.env;
-  if (!env || typeof env !== 'object') return base;
+  if (!env || typeof env !== 'object' || Array.isArray(env)) return withoutRole('returned no env');
   const merged: Record<string, string> = { ...base };
   for (const [key, value] of Object.entries(env as Record<string, unknown>)) {
     if (typeof value !== 'string' || !isAllowed(key)) continue;
@@ -162,7 +233,7 @@ export function resolveAgentIdentityEnv(input: IdentityEnvInput = {}): Record<st
     if (value === '' && !key.startsWith(GIT_CONFIG_VALUE_PREFIX)) continue;
     merged[key] = value;
   }
-  keepConsistentGitConfig(merged, input.warn ?? launcherWarning);
+  keepConsistentGitConfig(merged, warn);
   // The holder we were asked to carry always wins over the CLI's echo.
   merged.SUBSTRATE_HOLDER = holder;
   return merged;

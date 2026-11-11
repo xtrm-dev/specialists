@@ -21,20 +21,70 @@ describe('resolveAgentIdentityEnv', () => {
   });
 
   it('carries the holder and the specialist name when xt is unavailable', () => {
+    const warnings: string[] = [];
     const env = resolveAgentIdentityEnv({
       holder: 'sp-pr-reviewer-1a2b3c4d',
       roleName: 'pr-reviewer',
       env: {},
+      warn: (message) => warnings.push(message),
       run: () => ({ status: 127, stdout: 'xt: not found' }),
     });
     expect(env).toEqual({ SUBSTRATE_HOLDER: 'sp-pr-reviewer-1a2b3c4d', XTRM_ROLE: 'pr-reviewer' });
   });
 
-  it('survives a throwing runner and junk output', () => {
-    const base = { SUBSTRATE_HOLDER: 'h', XTRM_ROLE: 'r' };
-    expect(resolveAgentIdentityEnv({ holder: 'h', roleName: 'r', run: () => { throw new Error('EAGAIN'); } })).toEqual(base);
-    expect(resolveAgentIdentityEnv({ holder: 'h', roleName: 'r', run: () => ({ status: 0, stdout: 'not json' }) })).toEqual(base);
-    expect(resolveAgentIdentityEnv({ holder: 'h', roleName: 'r', run: () => ({ status: 0, stdout: '{"env":"x"}' }) })).toEqual(base);
+  // MEDIUM F1: a fallback to "no role identity" is git running as the operator, so
+  // it is never silent. One warning per reason, and the warning carries the failure
+  // class only — never xt's output, never a value.
+  it('warns with the exit status when xt fails', () => {
+    const warnings: string[] = [];
+    resolveAgentIdentityEnv({ holder: 'h', warn: (message) => warnings.push(message), run: () => ({ status: 3, stdout: 'SECRET=x' }) });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('xt exited 3');
+    expect(warnings[0]).toContain('without an agent identity');
+    expect(warnings[0]).not.toContain('SECRET');
+  });
+
+  it('warns with the spawn error class when xt cannot be started', () => {
+    const warnings: string[] = [];
+    const error = Object.assign(new Error('spawn xt ENOENT'), { code: 'ENOENT' });
+    resolveAgentIdentityEnv({ holder: 'h', warn: (message) => warnings.push(message), run: () => ({ status: null, stdout: '', error }) });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('lookup did not run (Error ENOENT)');
+    expect(warnings[0]).not.toContain('spawn xt');
+  });
+
+  it('warns with the error class when the injected runner throws', () => {
+    const warnings: string[] = [];
+    resolveAgentIdentityEnv({ holder: 'h', warn: (message) => warnings.push(message), run: () => { throw Object.assign(new Error('boom'), { code: 'EAGAIN' }); } });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('lookup threw Error EAGAIN');
+  });
+
+  it('warns when the answer is unparseable or carries no env', () => {
+    const junk: string[] = [];
+    resolveAgentIdentityEnv({ holder: 'h', warn: (message) => junk.push(message), run: () => ({ status: 0, stdout: 'not json' }) });
+    expect(junk).toHaveLength(1);
+    expect(junk[0]).toContain('unparseable JSON');
+    expect(junk[0]).not.toContain('not json');
+
+    const noEnv: string[] = [];
+    resolveAgentIdentityEnv({ holder: 'h', warn: (message) => noEnv.push(message), run: () => ({ status: 0, stdout: '{"env":"x"}' }) });
+    expect(noEnv).toHaveLength(1);
+    expect(noEnv[0]).toContain('returned no env');
+
+    const missing: string[] = [];
+    resolveAgentIdentityEnv({ holder: 'h', warn: (message) => missing.push(message), run: () => ({ status: 0, stdout: '{}' }) });
+    expect(missing[0]).toContain('returned no env');
+  });
+
+  it('stays quiet when the lookup succeeds', () => {
+    const warnings: string[] = [];
+    resolveAgentIdentityEnv({
+      holder: 'h',
+      warn: (message) => warnings.push(message),
+      run: () => ({ status: 0, stdout: JSON.stringify({ env: { XTRM_ROLE: 'reviewer' } }) }),
+    });
+    expect(warnings).toEqual([]);
   });
 
   it('asks xt identity env with the holder in the lookup env and merges its answer', () => {

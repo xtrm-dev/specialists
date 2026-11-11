@@ -177,23 +177,38 @@ describe('SpecialistRunner', () => {
       sessionFactory,
     });
 
+    // F3: the xt answer is injected. Left to the real CLI this asserts whichever
+    // role map the machine has, so it passes or fails by host configuration.
+    const identityEnvRun = vi.fn().mockReturnValue({
+      status: 0,
+      stdout: JSON.stringify({ env: { XTRM_ROLE: 'reviewer', GIT_AUTHOR_NAME: 'sp-reviewer', GIT_AUTHOR_EMAIL: 'reviewer@example.invalid' } }),
+    });
     await runner.run({
       name: 'test-spec',
       prompt: 'analyze this',
       variables: { SPECIALISTS_JOB_ID: 'abc12345-6789-4def' },
+      identityEnvRun,
     });
 
     const env = sessionFactory.mock.calls[0]?.[0]?.env ?? {};
-    // The holder is stable per job; the specialist name lets xt resolve the role.
+    // The holder is stable per job; the specialist name goes in the lookup, and the
+    // role the injected answer names is what the child actually carries.
     expect(env).toMatchObject({
       SUBSTRATE_HOLDER: 'sp-test-spec-abc12345',
-      XTRM_ROLE: 'test-spec',
+      XTRM_ROLE: 'reviewer',
+      GIT_AUTHOR_NAME: 'sp-reviewer',
     });
+    expect(identityEnvRun).toHaveBeenCalledWith(
+      'xt',
+      ['identity', 'env', '--json'],
+      expect.objectContaining({ env: expect.objectContaining({ SUBSTRATE_HOLDER: 'sp-test-spec-abc12345' }) }),
+    );
   });
 
   it('gives the child a PATH with the gh shim directory first (CORE-2524.4)', async () => {
     const originalPath = process.env.PATH;
     const shim = join(process.env.HOME ?? homedir(), '.local', 'bin');
+    const fakeIdentity = () => ({ status: 0, stdout: JSON.stringify({ env: { XTRM_ROLE: 'reviewer' } }) });
     try {
       // A host PATH that does not contain the shim is the defect: the child's `gh`
       // would be the real binary and a review would post as the operator.
@@ -205,7 +220,7 @@ describe('SpecialistRunner', () => {
         circuitBreaker: new CircuitBreaker(),
         sessionFactory,
       });
-      await runner.run({ name: 'test-spec', prompt: 'analyze this' });
+      await runner.run({ name: 'test-spec', prompt: 'analyze this', identityEnvRun: fakeIdentity });
 
       const env = sessionFactory.mock.calls[0]?.[0]?.env ?? {};
       expect(String(env.PATH)).toBe(`${shim}${delimiter}/usr/bin${delimiter}/bin`);
@@ -219,7 +234,7 @@ describe('SpecialistRunner', () => {
         circuitBreaker: new CircuitBreaker(),
         sessionFactory: again,
       });
-      await secondRunner.run({ name: 'test-spec', prompt: 'analyze this' });
+      await secondRunner.run({ name: 'test-spec', prompt: 'analyze this', identityEnvRun: fakeIdentity });
 
       const entry = String(again.mock.calls[0]?.[0]?.env?.PATH ?? '').split(delimiter);
       expect(entry).toEqual([shim, '/usr/bin']);
