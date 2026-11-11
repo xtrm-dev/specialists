@@ -69,6 +69,31 @@ describe('release dist gate', () => {
     expect(verdict.reason).toContain('did not run');
   });
 
+  it('requires payload-contract as well: a failed one refuses even when packed-smoke passed', () => {
+    const verdict = evaluateDistGate(SHA, {
+      check_runs: [
+        run('packed-smoke', 'success'),
+        run('payload-contract', 'failure', { html_url: 'https://github.com/o/r/actions/runs/9/job/8' }),
+      ],
+    });
+    expect(verdict.ok).toBe(false);
+    if (verdict.ok) throw new Error('unreachable');
+    expect(verdict.reason).toContain('payload-contract: failure');
+    expect(verdict.reason).toContain('https://github.com/o/r/actions/runs/9/job/8');
+  });
+
+  it('requires payload-contract as well: a missing one refuses even when packed-smoke passed', () => {
+    const verdict = evaluateDistGate(SHA, { check_runs: [run('packed-smoke', 'success'), run('test', 'success')] });
+    expect(verdict.ok).toBe(false);
+    if (verdict.ok) throw new Error('unreachable');
+    expect(verdict.reason).toContain('payload-contract: did not run');
+    expect(verdict.reason).not.toContain('packed-smoke:');
+  });
+
+  it('names both dist jobs, so shrinking the list cannot pass silently', () => {
+    expect([...DIST_CHECK_JOBS].sort()).toEqual(['packed-smoke', 'payload-contract']);
+  });
+
   it('refuses on an empty payload rather than assuming success', () => {
     const verdict = evaluateDistGate(SHA, {});
     expect(verdict.ok).toBe(false);
