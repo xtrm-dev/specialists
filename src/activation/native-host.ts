@@ -63,6 +63,7 @@ import {
   deduplicateExtensionSources,
   resolveGlobalNodeModulesDirs,
   resolvePiVersion,
+  claudeBridgeUnavailableNote,
   resolveClaudeBridgeExtensionPath,
   BUILTIN_CODEMODE_EXTENSION,
 } from '../pi/session.js';
@@ -1689,10 +1690,7 @@ export class NativeActivationHost {
     const claudeBridgePath = claudeBridge ? resolveClaudeBridgeExtensionPath() : undefined;
     if (claudeBridge && !claudeBridgePath) {
       return reject('claude_bridge_unavailable', {
-        note:
-          'execution.claude_bridge is enabled but the pi-claude-bridge extension was not found ' +
-          `(expected the global package "${'pi-claude-bridge'}" or ${'SPECIALISTS_CLAUDE_BRIDGE_PATH'}); ` +
-          'install it or clear the flag',
+        note: claudeBridgeUnavailableNote(),
       });
     }
     // The gate cannot resolve a provider that only exists once the session binds its extensions,

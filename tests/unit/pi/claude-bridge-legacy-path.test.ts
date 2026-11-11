@@ -73,7 +73,11 @@ describe('legacy argv path — Claude Code route (SPECIALISTS-4405)', () => {
     const restore = withOperatorSwitch(true);
     process.env.SPECIALISTS_CLAUDE_BRIDGE_PATH = '/nonexistent/pi-claude-bridge/src/index.ts';
     try {
-      await expect((await legacySession(true)).start()).rejects.toThrow(/claude_bridge_unavailable/);
+      const { claudeBridgeUnavailableNote } = await import('../../../src/pi/session.js');
+      // Identity, not a prefix match: an inline copy of the message must fail this assertion.
+      await expect((await legacySession(true)).start()).rejects.toThrow(
+        `claude_bridge_unavailable: ${claudeBridgeUnavailableNote()}`,
+      );
       expect(spawnReached.calls).toHaveLength(0);
     } finally {
       restore();
