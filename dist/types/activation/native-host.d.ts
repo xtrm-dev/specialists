@@ -46,7 +46,7 @@ import { type SpecialistWorkItemBoundary } from './workitem-store.js';
 import { type InteractionMessage, type PendingAsk } from './interaction.js';
 import { PeerAdapter, type TransportForensicEvent } from './transport/peer-adapter.js';
 import { type ProvisionedWorkspace } from './workspace-lease.js';
-import { type PiSdk, type PiAgentSessionEvent, type PiResourceLoaderLike } from './pi-sdk.js';
+import { type PiSdk, type PiAgentSessionLike, type PiAgentSessionEvent, type PiResourceLoaderLike } from './pi-sdk.js';
 import { type SettlementStore } from './settlement-store.js';
 import { type AuthorityWriter } from './authority-store.js';
 import { type ActivationHandle, type ActivationRequest, type ActivationResult, type ActivationSnapshot, type LiveActivationStats, type WorkspaceIdentity } from './types.js';
@@ -291,6 +291,23 @@ export declare function discoverDynamicExtensionTools(input: {
  * the merge path is the ordinary PR path, not the legacy per-activation merge-back.
  */
 export declare function resolveWorkspace(cwd: string): WorkspaceIdentity;
+/**
+ * Emit `session_start` on a freshly created native session.
+ *
+ * `sdk.createAgentSession` builds the session but does NOT emit the lifecycle: that is
+ * `AgentSession.bindExtensions`, which the CLI calls after it creates a session. A host that
+ * skips it runs every extension without its `session_start` handler. SPECIALISTS-4441: the
+ * Claude Code bridge registers its provider from exactly that handler for every module instance
+ * after the first in a process, so skipping it left the bridged provider unregistered and the
+ * post-load verification reported "the extension is installed but did not load its provider".
+ *
+ * No UI bindings are passed: a native activation has no terminal to bind to, and every binding
+ * field is optional on pi's side.
+ */
+export declare function bindActivationSession(session: Pick<PiAgentSessionLike, 'bindExtensions'>): Promise<{
+    bound: boolean;
+    error?: string;
+}>;
 export declare function createActivationResourceLoader(sdk: PiSdk, options: {
     cwd: string;
     skillPaths: string[];

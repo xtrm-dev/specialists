@@ -74,17 +74,17 @@ var require_visit = __commonJS(function(exports) {
   visit.BREAK = BREAK;
   visit.SKIP = SKIP;
   visit.REMOVE = REMOVE;
-  function visit_(key, node, visitor, path) {
-    const ctrl = callVisitor(key, node, visitor, path);
+  function visit_(key, node, visitor, path2) {
+    const ctrl = callVisitor(key, node, visitor, path2);
     if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-      replaceNode(key, path, ctrl);
-      return visit_(key, ctrl, visitor, path);
+      replaceNode(key, path2, ctrl);
+      return visit_(key, ctrl, visitor, path2);
     }
     if (typeof ctrl !== "symbol") {
       if (identity.isCollection(node)) {
-        path = Object.freeze(path.concat(node));
+        path2 = Object.freeze(path2.concat(node));
         for (let i = 0;i < node.items.length; ++i) {
-          const ci = visit_(i, node.items[i], visitor, path);
+          const ci = visit_(i, node.items[i], visitor, path2);
           if (typeof ci === "number")
             i = ci - 1;
           else if (ci === BREAK)
@@ -95,13 +95,13 @@ var require_visit = __commonJS(function(exports) {
           }
         }
       } else if (identity.isPair(node)) {
-        path = Object.freeze(path.concat(node));
-        const ck = visit_("key", node.key, visitor, path);
+        path2 = Object.freeze(path2.concat(node));
+        const ck = visit_("key", node.key, visitor, path2);
         if (ck === BREAK)
           return BREAK;
         else if (ck === REMOVE)
           node.key = null;
-        const cv = visit_("value", node.value, visitor, path);
+        const cv = visit_("value", node.value, visitor, path2);
         if (cv === BREAK)
           return BREAK;
         else if (cv === REMOVE)
@@ -122,17 +122,17 @@ var require_visit = __commonJS(function(exports) {
   visitAsync.BREAK = BREAK;
   visitAsync.SKIP = SKIP;
   visitAsync.REMOVE = REMOVE;
-  async function visitAsync_(key, node, visitor, path) {
-    const ctrl = await callVisitor(key, node, visitor, path);
+  async function visitAsync_(key, node, visitor, path2) {
+    const ctrl = await callVisitor(key, node, visitor, path2);
     if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-      replaceNode(key, path, ctrl);
-      return visitAsync_(key, ctrl, visitor, path);
+      replaceNode(key, path2, ctrl);
+      return visitAsync_(key, ctrl, visitor, path2);
     }
     if (typeof ctrl !== "symbol") {
       if (identity.isCollection(node)) {
-        path = Object.freeze(path.concat(node));
+        path2 = Object.freeze(path2.concat(node));
         for (let i = 0;i < node.items.length; ++i) {
-          const ci = await visitAsync_(i, node.items[i], visitor, path);
+          const ci = await visitAsync_(i, node.items[i], visitor, path2);
           if (typeof ci === "number")
             i = ci - 1;
           else if (ci === BREAK)
@@ -143,13 +143,13 @@ var require_visit = __commonJS(function(exports) {
           }
         }
       } else if (identity.isPair(node)) {
-        path = Object.freeze(path.concat(node));
-        const ck = await visitAsync_("key", node.key, visitor, path);
+        path2 = Object.freeze(path2.concat(node));
+        const ck = await visitAsync_("key", node.key, visitor, path2);
         if (ck === BREAK)
           return BREAK;
         else if (ck === REMOVE)
           node.key = null;
-        const cv = await visitAsync_("value", node.value, visitor, path);
+        const cv = await visitAsync_("value", node.value, visitor, path2);
         if (cv === BREAK)
           return BREAK;
         else if (cv === REMOVE)
@@ -176,23 +176,23 @@ var require_visit = __commonJS(function(exports) {
     }
     return visitor;
   }
-  function callVisitor(key, node, visitor, path) {
+  function callVisitor(key, node, visitor, path2) {
     if (typeof visitor === "function")
-      return visitor(key, node, path);
+      return visitor(key, node, path2);
     if (identity.isMap(node))
-      return visitor.Map?.(key, node, path);
+      return visitor.Map?.(key, node, path2);
     if (identity.isSeq(node))
-      return visitor.Seq?.(key, node, path);
+      return visitor.Seq?.(key, node, path2);
     if (identity.isPair(node))
-      return visitor.Pair?.(key, node, path);
+      return visitor.Pair?.(key, node, path2);
     if (identity.isScalar(node))
-      return visitor.Scalar?.(key, node, path);
+      return visitor.Scalar?.(key, node, path2);
     if (identity.isAlias(node))
-      return visitor.Alias?.(key, node, path);
+      return visitor.Alias?.(key, node, path2);
     return;
   }
-  function replaceNode(key, path, node) {
-    const parent = path[path.length - 1];
+  function replaceNode(key, path2, node) {
+    const parent = path2[path2.length - 1];
     if (identity.isCollection(parent)) {
       parent.items[key] = node;
     } else if (identity.isPair(parent)) {
@@ -284,8 +284,8 @@ var require_directives = __commonJS(function(exports) {
             this.yaml.version = version;
             return true;
           } else {
-            const isValid = /^\d+\.\d+$/.test(version);
-            onError(6, `Unsupported YAML version ${version}`, isValid);
+            const isValid2 = /^\d+\.\d+$/.test(version);
+            onError(6, `Unsupported YAML version ${version}`, isValid2);
             return false;
           }
         }
@@ -483,8 +483,8 @@ var require_toJS = __commonJS(function(exports) {
         return value.toJSON(arg, ctx);
       const data = { aliasCount: 0, count: 1, res: undefined };
       ctx.anchors.set(value, data);
-      ctx.onCreate = (res) => {
-        data.res = res;
+      ctx.onCreate = (res2) => {
+        data.res = res2;
         delete ctx.onCreate;
       };
       const res = value.toJSON(arg, ctx);
@@ -528,8 +528,8 @@ var require_Node = __commonJS(function(exports) {
       };
       const res = toJS.toJS(this, "", ctx);
       if (typeof onAnchor === "function")
-        for (const { count, res } of ctx.anchors.values())
-          onAnchor(res, count);
+        for (const { count, res: res2 } of ctx.anchors.values())
+          onAnchor(res2, count);
       return typeof reviver === "function" ? applyReviver.applyReviver(reviver, { "": res }, "", res) : res;
     }
   }
@@ -583,16 +583,16 @@ var require_Alias = __commonJS(function(exports) {
     toJSON(_arg, ctx) {
       if (!ctx)
         return { source: this.source };
-      const { anchors, doc, maxAliasCount } = ctx;
+      const { anchors: anchors2, doc, maxAliasCount } = ctx;
       const source = this.resolve(doc, ctx);
       if (!source) {
         const msg = `Unresolved alias (the anchor must be set before the alias): ${this.source}`;
         throw new ReferenceError(msg);
       }
-      let data = anchors.get(source);
+      let data = anchors2.get(source);
       if (!data) {
         toJS.toJS(source, null, ctx);
-        data = anchors.get(source);
+        data = anchors2.get(source);
       }
       if (data?.res === undefined) {
         const msg = "This should not happen: Alias anchor was not resolved?";
@@ -601,7 +601,7 @@ var require_Alias = __commonJS(function(exports) {
       if (maxAliasCount >= 0) {
         data.count += 1;
         if (data.aliasCount === 0)
-          data.aliasCount = getAliasCount(doc, source, anchors);
+          data.aliasCount = getAliasCount(doc, source, anchors2);
         if (data.count * data.aliasCount > maxAliasCount) {
           const msg = "Excessive alias count indicates a resource exhaustion attack";
           throw new ReferenceError(msg);
@@ -623,22 +623,22 @@ var require_Alias = __commonJS(function(exports) {
       return src;
     }
   }
-  function getAliasCount(doc, node, anchors) {
+  function getAliasCount(doc, node, anchors2) {
     if (identity.isAlias(node)) {
       const source = node.resolve(doc);
-      const anchor = anchors && source && anchors.get(source);
+      const anchor = anchors2 && source && anchors2.get(source);
       return anchor ? anchor.count * anchor.aliasCount : 0;
     } else if (identity.isCollection(node)) {
       let count = 0;
       for (const item of node.items) {
-        const c = getAliasCount(doc, item, anchors);
+        const c = getAliasCount(doc, item, anchors2);
         if (c > count)
           count = c;
       }
       return count;
     } else if (identity.isPair(node)) {
-      const kc = getAliasCount(doc, node.key, anchors);
-      const vc = getAliasCount(doc, node.value, anchors);
+      const kc = getAliasCount(doc, node.key, anchors2);
+      const vc = getAliasCount(doc, node.value, anchors2);
       return Math.max(kc, vc);
     }
     return 1;
@@ -723,10 +723,10 @@ var require_createNode = __commonJS(function(exports) {
         value = value.toJSON();
       }
       if (!value || typeof value !== "object") {
-        const node = new Scalar.Scalar(value);
+        const node2 = new Scalar.Scalar(value);
         if (ref)
-          ref.node = node;
-        return node;
+          ref.node = node2;
+        return node2;
       }
       tagObj = value instanceof Map ? schema[identity.MAP] : (Symbol.iterator in Object(value)) ? schema[identity.SEQ] : schema[identity.MAP];
     }
@@ -751,10 +751,10 @@ var require_Collection = __commonJS(function(exports) {
   var createNode = require_createNode();
   var identity = require_identity();
   var Node = require_Node();
-  function collectionFromPath(schema, path, value) {
+  function collectionFromPath(schema, path2, value) {
     let v = value;
-    for (let i = path.length - 1;i >= 0; --i) {
-      const k = path[i];
+    for (let i = path2.length - 1;i >= 0; --i) {
+      const k = path2[i];
       if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
         const a = [];
         a[k] = v;
@@ -773,7 +773,7 @@ var require_Collection = __commonJS(function(exports) {
       sourceObjects: new Map
     });
   }
-  var isEmptyPath = (path) => path == null || typeof path === "object" && !!path[Symbol.iterator]().next().done;
+  var isEmptyPath = (path2) => path2 == null || typeof path2 === "object" && !!path2[Symbol.iterator]().next().done;
 
   class Collection extends Node.NodeBase {
     constructor(type, schema) {
@@ -794,11 +794,11 @@ var require_Collection = __commonJS(function(exports) {
         copy.range = this.range.slice();
       return copy;
     }
-    addIn(path, value) {
-      if (isEmptyPath(path))
+    addIn(path2, value) {
+      if (isEmptyPath(path2))
         this.add(value);
       else {
-        const [key, ...rest] = path;
+        const [key, ...rest] = path2;
         const node = this.get(key, true);
         if (identity.isCollection(node))
           node.addIn(rest, value);
@@ -808,8 +808,8 @@ var require_Collection = __commonJS(function(exports) {
           throw new Error(`Expected YAML collection at ${key}. Remaining path: ${rest}`);
       }
     }
-    deleteIn(path) {
-      const [key, ...rest] = path;
+    deleteIn(path2) {
+      const [key, ...rest] = path2;
       if (rest.length === 0)
         return this.delete(key);
       const node = this.get(key, true);
@@ -818,8 +818,8 @@ var require_Collection = __commonJS(function(exports) {
       else
         throw new Error(`Expected YAML collection at ${key}. Remaining path: ${rest}`);
     }
-    getIn(path, keepScalar) {
-      const [key, ...rest] = path;
+    getIn(path2, keepScalar) {
+      const [key, ...rest] = path2;
       const node = this.get(key, true);
       if (rest.length === 0)
         return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -834,15 +834,15 @@ var require_Collection = __commonJS(function(exports) {
         return n == null || allowScalar && identity.isScalar(n) && n.value == null && !n.commentBefore && !n.comment && !n.tag;
       });
     }
-    hasIn(path) {
-      const [key, ...rest] = path;
+    hasIn(path2) {
+      const [key, ...rest] = path2;
       if (rest.length === 0)
         return this.has(key);
       const node = this.get(key, true);
       return identity.isCollection(node) ? node.hasIn(rest) : false;
     }
-    setIn(path, value) {
-      const [key, ...rest] = path;
+    setIn(path2, value) {
+      const [key, ...rest] = path2;
       if (rest.length === 0) {
         this.set(key, value);
       } else {
@@ -975,17 +975,17 @@ var require_foldFlowLines = __commonJS(function(exports) {
     if (onFold)
       onFold();
     let res = text.slice(0, folds[0]);
-    for (let i = 0;i < folds.length; ++i) {
-      const fold = folds[i];
-      const end = folds[i + 1] || text.length;
+    for (let i2 = 0;i2 < folds.length; ++i2) {
+      const fold = folds[i2];
+      const end2 = folds[i2 + 1] || text.length;
       if (fold === 0)
         res = `
-${indent}${text.slice(0, end)}`;
+${indent}${text.slice(0, end2)}`;
       else {
         if (mode === FOLD_QUOTED && escapedFolds[fold])
           res += `${text[fold]}\\`;
         res += `
-${indent}${text.slice(fold + 1, end)}`;
+${indent}${text.slice(fold + 1, end2)}`;
       }
     }
     return res;
@@ -1621,15 +1621,15 @@ var require_merge = __commonJS(function(exports) {
     if (!identity.isMap(source))
       throw new Error("Merge sources must be maps or map aliases");
     const srcMap = source.toJSON(null, ctx, Map);
-    for (const [key, value] of srcMap) {
+    for (const [key, value2] of srcMap) {
       if (map instanceof Map) {
         if (!map.has(key))
-          map.set(key, value);
+          map.set(key, value2);
       } else if (map instanceof Set) {
         map.add(key);
       } else if (!Object.prototype.hasOwnProperty.call(map, key)) {
         Object.defineProperty(map, key, {
-          value,
+          value: value2,
           writable: true,
           enumerable: true,
           configurable: true
@@ -1752,8 +1752,8 @@ var require_stringifyCollection = __commonJS(function(exports) {
   var stringifyComment = require_stringifyComment();
   function stringifyCollection(collection, ctx, options) {
     const flow = ctx.inFlow ?? collection.flow;
-    const stringify = flow ? stringifyFlowCollection : stringifyBlockCollection;
-    return stringify(collection, ctx, options);
+    const stringify2 = flow ? stringifyFlowCollection : stringifyBlockCollection;
+    return stringify2(collection, ctx, options);
   }
   function stringifyBlockCollection({ comment, items }, ctx, { blockItemPrefix, flowChars, itemIndent, onChompKeep, onComment }) {
     const { indent, options: { commentString } } = ctx;
@@ -1762,13 +1762,13 @@ var require_stringifyCollection = __commonJS(function(exports) {
     const lines = [];
     for (let i = 0;i < items.length; ++i) {
       const item = items[i];
-      let comment = null;
+      let comment2 = null;
       if (identity.isNode(item)) {
         if (!chompKeep && item.spaceBefore)
           lines.push("");
         addCommentBefore(ctx, lines, item.commentBefore, chompKeep);
         if (item.comment)
-          comment = item.comment;
+          comment2 = item.comment;
       } else if (identity.isPair(item)) {
         const ik = identity.isNode(item.key) ? item.key : null;
         if (ik) {
@@ -1778,12 +1778,12 @@ var require_stringifyCollection = __commonJS(function(exports) {
         }
       }
       chompKeep = false;
-      let str = stringify.stringify(item, itemCtx, () => comment = null, () => chompKeep = true);
-      if (comment)
-        str += stringifyComment.lineComment(str, itemIndent, commentString(comment));
-      if (chompKeep && comment)
+      let str2 = stringify.stringify(item, itemCtx, () => comment2 = null, () => chompKeep = true);
+      if (comment2)
+        str2 += stringifyComment.lineComment(str2, itemIndent, commentString(comment2));
+      if (chompKeep && comment2)
         chompKeep = false;
-      lines.push(blockItemPrefix + str);
+      lines.push(blockItemPrefix + str2);
     }
     let str;
     if (lines.length === 0) {
@@ -2033,10 +2033,10 @@ var require_map = __commonJS(function(exports) {
     default: true,
     nodeClass: YAMLMap.YAMLMap,
     tag: "tag:yaml.org,2002:map",
-    resolve(map, onError) {
-      if (!identity.isMap(map))
+    resolve(map2, onError) {
+      if (!identity.isMap(map2))
         onError("Expected a mapping for this tag");
-      return map;
+      return map2;
     },
     createNode: (schema, obj, ctx) => YAMLMap.YAMLMap.from(schema, obj, ctx)
   };
@@ -2145,10 +2145,10 @@ var require_seq = __commonJS(function(exports) {
     default: true,
     nodeClass: YAMLSeq.YAMLSeq,
     tag: "tag:yaml.org,2002:seq",
-    resolve(seq, onError) {
-      if (!identity.isSeq(seq))
+    resolve(seq2, onError) {
+      if (!identity.isSeq(seq2))
         onError("Expected a sequence for this tag");
-      return seq;
+      return seq2;
     },
     createNode: (schema, obj, ctx) => YAMLSeq.YAMLSeq.from(schema, obj, ctx)
   };
@@ -2494,8 +2494,8 @@ ${cn.comment}` : item.comment;
   }
   function createPairs(schema, iterable, ctx) {
     const { replacer } = ctx;
-    const pairs = new YAMLSeq.YAMLSeq(schema);
-    pairs.tag = "tag:yaml.org,2002:pairs";
+    const pairs2 = new YAMLSeq.YAMLSeq(schema);
+    pairs2.tag = "tag:yaml.org,2002:pairs";
     let i = 0;
     if (iterable && Symbol.iterator in Object(iterable))
       for (let it of iterable) {
@@ -2519,9 +2519,9 @@ ${cn.comment}` : item.comment;
         } else {
           key = it;
         }
-        pairs.items.push(Pair.createPair(key, value, ctx));
+        pairs2.items.push(Pair.createPair(key, value, ctx));
       }
-    return pairs;
+    return pairs2;
   }
   var pairs = {
     collection: "seq",
@@ -2575,9 +2575,9 @@ var require_omap = __commonJS(function(exports) {
     }
     static from(schema, iterable, ctx) {
       const pairs$1 = pairs.createPairs(schema, iterable, ctx);
-      const omap = new this;
-      omap.items = pairs$1.items;
-      return omap;
+      const omap2 = new this;
+      omap2.items = pairs$1.items;
+      return omap2;
     }
   }
   YAMLOMap.tag = "tag:yaml.org,2002:omap";
@@ -2703,8 +2703,8 @@ var require_int2 = __commonJS(function(exports) {
           str = `0x${str}`;
           break;
       }
-      const n = BigInt(str);
-      return sign === "-" ? BigInt(-1) * n : n;
+      const n2 = BigInt(str);
+      return sign === "-" ? BigInt(-1) * n2 : n2;
     }
     const n = parseInt(str, radix);
     return sign === "-" ? -1 * n : n;
@@ -2808,14 +2808,14 @@ var require_set = __commonJS(function(exports) {
     }
     static from(schema, iterable, ctx) {
       const { replacer } = ctx;
-      const set = new this(schema);
+      const set2 = new this(schema);
       if (iterable && Symbol.iterator in Object(iterable))
         for (let value of iterable) {
           if (typeof replacer === "function")
             value = replacer.call(iterable, value, value);
-          set.items.push(Pair.createPair(value, null, ctx));
+          set2.items.push(Pair.createPair(value, null, ctx));
         }
-      return set;
+      return set2;
     }
   }
   YAMLSet.tag = "tag:yaml.org,2002:set";
@@ -2848,7 +2848,7 @@ var require_timestamp = __commonJS(function(exports) {
     const sign = str[0];
     const parts = sign === "-" || sign === "+" ? str.substring(1) : str;
     const num = (n) => asBigInt ? BigInt(n) : Number(n);
-    const res = parts.replace(/_/g, "").split(":").reduce((res, p) => res * num(60) + num(p), num(0));
+    const res = parts.replace(/_/g, "").split(":").reduce((res2, p) => res2 * num(60) + num(p), num(0));
     return sign === "-" ? num(-1) * res : res;
   }
   function stringifySexagesimal(node) {
@@ -3039,16 +3039,16 @@ var require_tags = __commonJS(function(exports) {
     }
     if (addMergeTag)
       tags = tags.concat(merge.merge);
-    return tags.reduce((tags, tag) => {
+    return tags.reduce((tags2, tag) => {
       const tagObj = typeof tag === "string" ? tagsByName[tag] : tag;
       if (!tagObj) {
         const tagName = JSON.stringify(tag);
         const keys = Object.keys(tagsByName).map((key) => JSON.stringify(key)).join(", ");
         throw new Error(`Unknown custom tag ${tagName}; use one of ${keys}`);
       }
-      if (!tags.includes(tagObj))
-        tags.push(tagObj);
-      return tags;
+      if (!tags2.includes(tagObj))
+        tags2.push(tagObj);
+      return tags2;
     }, []);
   }
   exports.coreKnownTags = coreKnownTags;
@@ -3235,9 +3235,9 @@ var require_Document = __commonJS(function(exports) {
       if (assertCollection(this.contents))
         this.contents.add(value);
     }
-    addIn(path, value) {
+    addIn(path2, value) {
       if (assertCollection(this.contents))
-        this.contents.addIn(path, value);
+        this.contents.addIn(path2, value);
     }
     createAlias(node, name) {
       if (!node.anchor) {
@@ -3286,30 +3286,30 @@ var require_Document = __commonJS(function(exports) {
     delete(key) {
       return assertCollection(this.contents) ? this.contents.delete(key) : false;
     }
-    deleteIn(path) {
-      if (Collection.isEmptyPath(path)) {
+    deleteIn(path2) {
+      if (Collection.isEmptyPath(path2)) {
         if (this.contents == null)
           return false;
         this.contents = null;
         return true;
       }
-      return assertCollection(this.contents) ? this.contents.deleteIn(path) : false;
+      return assertCollection(this.contents) ? this.contents.deleteIn(path2) : false;
     }
     get(key, keepScalar) {
       return identity.isCollection(this.contents) ? this.contents.get(key, keepScalar) : undefined;
     }
-    getIn(path, keepScalar) {
-      if (Collection.isEmptyPath(path))
+    getIn(path2, keepScalar) {
+      if (Collection.isEmptyPath(path2))
         return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-      return identity.isCollection(this.contents) ? this.contents.getIn(path, keepScalar) : undefined;
+      return identity.isCollection(this.contents) ? this.contents.getIn(path2, keepScalar) : undefined;
     }
     has(key) {
       return identity.isCollection(this.contents) ? this.contents.has(key) : false;
     }
-    hasIn(path) {
-      if (Collection.isEmptyPath(path))
+    hasIn(path2) {
+      if (Collection.isEmptyPath(path2))
         return this.contents !== undefined;
-      return identity.isCollection(this.contents) ? this.contents.hasIn(path) : false;
+      return identity.isCollection(this.contents) ? this.contents.hasIn(path2) : false;
     }
     set(key, value) {
       if (this.contents == null) {
@@ -3318,13 +3318,13 @@ var require_Document = __commonJS(function(exports) {
         this.contents.set(key, value);
       }
     }
-    setIn(path, value) {
-      if (Collection.isEmptyPath(path)) {
+    setIn(path2, value) {
+      if (Collection.isEmptyPath(path2)) {
         this.contents = value;
       } else if (this.contents == null) {
-        this.contents = Collection.collectionFromPath(this.schema, Array.from(path), value);
+        this.contents = Collection.collectionFromPath(this.schema, Array.from(path2), value);
       } else if (assertCollection(this.contents)) {
-        this.contents.setIn(path, value);
+        this.contents.setIn(path2, value);
       }
     }
     setSchema(version, options = {}) {
@@ -3375,8 +3375,8 @@ var require_Document = __commonJS(function(exports) {
       };
       const res = toJS.toJS(this.contents, jsonArg ?? "", ctx);
       if (typeof onAnchor === "function")
-        for (const { count, res } of ctx.anchors.values())
-          onAnchor(res, count);
+        for (const { count, res: res2 } of ctx.anchors.values())
+          onAnchor(res2, count);
       return typeof reviver === "function" ? applyReviver.applyReviver(reviver, { "": res }, "", res) : res;
     }
     toJSON(jsonArg, onAnchor) {
@@ -3680,10 +3680,10 @@ var require_resolve_block_map = __commonJS(function(exports) {
     let offset = bm.offset;
     let commentEnd = null;
     for (const collItem of bm.items) {
-      const { start, key, sep, value } = collItem;
+      const { start, key, sep: sep3, value } = collItem;
       const keyProps = resolveProps.resolveProps(start, {
         indicator: "explicit-key-ind",
-        next: key ?? sep?.[0],
+        next: key ?? sep3?.[0],
         offset,
         onError,
         parentIndent: bm.indent,
@@ -3697,7 +3697,7 @@ var require_resolve_block_map = __commonJS(function(exports) {
           else if ("indent" in key && key.indent !== bm.indent)
             onError(offset, "BAD_INDENT", startColMsg);
         }
-        if (!keyProps.anchor && !keyProps.tag && !sep) {
+        if (!keyProps.anchor && !keyProps.tag && !sep3) {
           commentEnd = keyProps.end;
           if (keyProps.comment) {
             if (map.comment)
@@ -3722,7 +3722,7 @@ var require_resolve_block_map = __commonJS(function(exports) {
       ctx.atKey = false;
       if (utilMapIncludes.mapIncludes(ctx, map.items, keyNode))
         onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
-      const valueProps = resolveProps.resolveProps(sep ?? [], {
+      const valueProps = resolveProps.resolveProps(sep3 ?? [], {
         indicator: "map-value-ind",
         next: value,
         offset: keyNode.range[2],
@@ -3738,7 +3738,7 @@ var require_resolve_block_map = __commonJS(function(exports) {
           if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
             onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
         }
-        const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep, null, valueProps, onError);
+        const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep3, null, valueProps, onError);
         if (ctx.schema.compat)
           utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
         offset = valueNode.range[2];
@@ -3824,7 +3824,7 @@ var require_resolve_end = __commonJS(function(exports) {
     let comment = "";
     if (end) {
       let hasSpace = false;
-      let sep = "";
+      let sep3 = "";
       for (const token of end) {
         const { source, type } = token;
         switch (type) {
@@ -3838,13 +3838,13 @@ var require_resolve_end = __commonJS(function(exports) {
             if (!comment)
               comment = cb;
             else
-              comment += sep + cb;
-            sep = "";
+              comment += sep3 + cb;
+            sep3 = "";
             break;
           }
           case "newline":
             if (comment)
-              sep += source;
+              sep3 += source;
             hasSpace = true;
             break;
           default:
@@ -3884,18 +3884,18 @@ var require_resolve_flow_collection = __commonJS(function(exports) {
     let offset = fc.offset + fc.start.source.length;
     for (let i = 0;i < fc.items.length; ++i) {
       const collItem = fc.items[i];
-      const { start, key, sep, value } = collItem;
+      const { start, key, sep: sep3, value } = collItem;
       const props = resolveProps.resolveProps(start, {
         flow: fcName,
         indicator: "explicit-key-ind",
-        next: key ?? sep?.[0],
+        next: key ?? sep3?.[0],
         offset,
         onError,
         parentIndent: fc.indent,
         startOnNewline: false
       });
       if (!props.found) {
-        if (!props.anchor && !props.tag && !sep && !value) {
+        if (!props.anchor && !props.tag && !sep3 && !value) {
           if (i === 0 && props.comma)
             onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
           else if (i < fc.items.length - 1)
@@ -3947,8 +3947,8 @@ var require_resolve_flow_collection = __commonJS(function(exports) {
           }
         }
       }
-      if (!isMap && !sep && !props.found) {
-        const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep, null, props, onError);
+      if (!isMap && !sep3 && !props.found) {
+        const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep3, null, props, onError);
         coll.items.push(valueNode);
         offset = valueNode.range[2];
         if (isBlock(value))
@@ -3960,7 +3960,7 @@ var require_resolve_flow_collection = __commonJS(function(exports) {
         if (isBlock(key))
           onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
         ctx.atKey = false;
-        const valueProps = resolveProps.resolveProps(sep ?? [], {
+        const valueProps = resolveProps.resolveProps(sep3 ?? [], {
           flow: fcName,
           indicator: "map-value-ind",
           next: value,
@@ -3971,8 +3971,8 @@ var require_resolve_flow_collection = __commonJS(function(exports) {
         });
         if (valueProps.found) {
           if (!isMap && !props.found && ctx.options.strict) {
-            if (sep)
-              for (const st of sep) {
+            if (sep3)
+              for (const st of sep3) {
                 if (st === valueProps.found)
                   break;
                 if (st.type === "newline") {
@@ -3989,7 +3989,7 @@ var require_resolve_flow_collection = __commonJS(function(exports) {
           else
             onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
         }
-        const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep, null, valueProps, onError) : null;
+        const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep3, null, valueProps, onError) : null;
         if (valueNode) {
           if (isBlock(value))
             onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
@@ -4130,12 +4130,12 @@ var require_resolve_block_scalar = __commonJS(function(exports) {
         break;
     }
     if (chompStart === 0) {
-      const value = header.chomp === "+" && lines.length > 0 ? `
+      const value2 = header.chomp === "+" && lines.length > 0 ? `
 `.repeat(Math.max(1, lines.length - 1)) : "";
-      let end = start + header.length;
+      let end2 = start + header.length;
       if (scalar.source)
-        end += scalar.source.length;
-      return { value, type, comment: header.comment, range: [start, end, end] };
+        end2 += scalar.source.length;
+      return { value: value2, type, comment: header.comment, range: [start, end2, end2] };
     }
     let trimIndent = scalar.indent + header.indent;
     let offset = scalar.offset + header.length;
@@ -4166,7 +4166,7 @@ var require_resolve_block_scalar = __commonJS(function(exports) {
         chompStart = i + 1;
     }
     let value = "";
-    let sep = "";
+    let sep3 = "";
     let prevMoreIndented = false;
     for (let i = 0;i < contentStart; ++i)
       value += lines[i][0].slice(trimIndent) + `
@@ -4184,33 +4184,33 @@ var require_resolve_block_scalar = __commonJS(function(exports) {
         indent = "";
       }
       if (type === Scalar.Scalar.BLOCK_LITERAL) {
-        value += sep + indent.slice(trimIndent) + content;
-        sep = `
+        value += sep3 + indent.slice(trimIndent) + content;
+        sep3 = `
 `;
       } else if (indent.length > trimIndent || content[0] === "\t") {
-        if (sep === " ")
-          sep = `
+        if (sep3 === " ")
+          sep3 = `
 `;
-        else if (!prevMoreIndented && sep === `
+        else if (!prevMoreIndented && sep3 === `
 `)
-          sep = `
+          sep3 = `
 
 `;
-        value += sep + indent.slice(trimIndent) + content;
-        sep = `
+        value += sep3 + indent.slice(trimIndent) + content;
+        sep3 = `
 `;
         prevMoreIndented = true;
       } else if (content === "") {
-        if (sep === `
+        if (sep3 === `
 `)
           value += `
 `;
         else
-          sep = `
+          sep3 = `
 `;
       } else {
-        value += sep + content;
-        sep = " ";
+        value += sep3 + content;
+        sep3 = " ";
         prevMoreIndented = false;
       }
     }
@@ -4391,27 +4391,27 @@ var require_resolve_flow_scalar = __commonJS(function(exports) {
     if (!match)
       return source;
     let res = match[1];
-    let sep = " ";
+    let sep3 = " ";
     let pos = first.lastIndex;
     line.lastIndex = pos;
     while (match = line.exec(source)) {
       if (match[1] === "") {
-        if (sep === `
+        if (sep3 === `
 `)
-          res += sep;
+          res += sep3;
         else
-          sep = `
+          sep3 = `
 `;
       } else {
-        res += sep + match[1];
-        sep = " ";
+        res += sep3 + match[1];
+        sep3 = " ";
       }
       pos = line.lastIndex;
     }
     const last = /[ \t]*(.*)/sy;
     last.lastIndex = pos;
     match = last.exec(source);
-    return res + sep + (match?.[1] ?? "");
+    return res + sep3 + (match?.[1] ?? "");
   }
   function doubleQuotedValue(source, onError) {
     let res = "";
@@ -4584,9 +4584,9 @@ var require_compose_scalar = __commonJS(function(exports) {
     return schema[identity.SCALAR];
   }
   function findScalarTagByTest({ atKey, directives, schema }, value, token, onError) {
-    const tag = schema.tags.find((tag) => (tag.default === true || atKey && tag.default === "key") && tag.test?.test(value)) || schema[identity.SCALAR];
+    const tag = schema.tags.find((tag2) => (tag2.default === true || atKey && tag2.default === "key") && tag2.test?.test(value)) || schema[identity.SCALAR];
     if (schema.compat) {
-      const compat = schema.compat.find((tag) => tag.default && tag.test?.test(value)) ?? schema[identity.SCALAR];
+      const compat = schema.compat.find((tag2) => tag2.default && tag2.test?.test(value)) ?? schema[identity.SCALAR];
       if (tag.tag !== compat.tag) {
         const ts = directives.tagString(tag.tag);
         const cs = directives.tagString(compat.tag);
@@ -5192,14 +5192,14 @@ var require_cst_stringify = __commonJS(function(exports) {
       }
     }
   }
-  function stringifyItem({ start, key, sep, value }) {
+  function stringifyItem({ start, key, sep: sep3, value }) {
     let res = "";
     for (const st of start)
       res += st.source;
     if (key)
       res += stringifyToken(key);
-    if (sep)
-      for (const st of sep)
+    if (sep3)
+      for (const st of sep3)
         res += st.source;
     if (value)
       res += stringifyToken(value);
@@ -5221,9 +5221,9 @@ var require_cst_visit = __commonJS(function(exports) {
   visit.BREAK = BREAK;
   visit.SKIP = SKIP;
   visit.REMOVE = REMOVE;
-  visit.itemAtPath = (cst, path) => {
+  visit.itemAtPath = (cst, path2) => {
     let item = cst;
-    for (const [field, index] of path) {
+    for (const [field, index] of path2) {
       const tok = item?.[field];
       if (tok && "items" in tok) {
         item = tok.items[index];
@@ -5232,23 +5232,23 @@ var require_cst_visit = __commonJS(function(exports) {
     }
     return item;
   };
-  visit.parentCollection = (cst, path) => {
-    const parent = visit.itemAtPath(cst, path.slice(0, -1));
-    const field = path[path.length - 1][0];
+  visit.parentCollection = (cst, path2) => {
+    const parent = visit.itemAtPath(cst, path2.slice(0, -1));
+    const field = path2[path2.length - 1][0];
     const coll = parent?.[field];
     if (coll && "items" in coll)
       return coll;
     throw new Error("Parent collection not found");
   };
-  function _visit(path, item, visitor) {
-    let ctrl = visitor(item, path);
+  function _visit(path2, item, visitor) {
+    let ctrl = visitor(item, path2);
     if (typeof ctrl === "symbol")
       return ctrl;
     for (const field of ["key", "value"]) {
       const token = item[field];
       if (token && "items" in token) {
         for (let i = 0;i < token.items.length; ++i) {
-          const ci = _visit(Object.freeze(path.concat([[field, i]])), token.items[i], visitor);
+          const ci = _visit(Object.freeze(path2.concat([[field, i]])), token.items[i], visitor);
           if (typeof ci === "number")
             i = ci - 1;
           else if (ci === BREAK)
@@ -5259,10 +5259,10 @@ var require_cst_visit = __commonJS(function(exports) {
           }
         }
         if (typeof ctrl === "function" && field === "key")
-          ctrl = ctrl(item, path);
+          ctrl = ctrl(item, path2);
       }
     }
-    return typeof ctrl === "function" ? ctrl(item, path) : ctrl;
+    return typeof ctrl === "function" ? ctrl(item, path2) : ctrl;
   }
   exports.visit = visit;
 });
@@ -5742,18 +5742,18 @@ var require_lexer = __commonJS(function(exports) {
       let indent = 0;
       let ch;
       loop:
-        for (let i = this.pos;ch = this.buffer[i]; ++i) {
+        for (let i2 = this.pos;ch = this.buffer[i2]; ++i2) {
           switch (ch) {
             case " ":
               indent += 1;
               break;
             case `
 `:
-              nl = i;
+              nl = i2;
               indent = 0;
               break;
             case "\r": {
-              const next = this.buffer[i + 1];
+              const next = this.buffer[i2 + 1];
               if (!next && !this.atEnd)
                 return this.setNext("block-scalar");
               if (next === `
@@ -5796,16 +5796,16 @@ var require_lexer = __commonJS(function(exports) {
         nl = i - 1;
       } else if (!this.blockScalarKeep) {
         do {
-          let i = nl - 1;
-          let ch = this.buffer[i];
-          if (ch === "\r")
-            ch = this.buffer[--i];
-          const lastChar = i;
-          while (ch === " ")
-            ch = this.buffer[--i];
-          if (ch === `
-` && i >= this.pos && i + 1 + indent > lastChar)
-            nl = i;
+          let i2 = nl - 1;
+          let ch2 = this.buffer[i2];
+          if (ch2 === "\r")
+            ch2 = this.buffer[--i2];
+          const lastChar = i2;
+          while (ch2 === " ")
+            ch2 = this.buffer[--i2];
+          if (ch2 === `
+` && i2 >= this.pos && i2 + 1 + indent > lastChar)
+            nl = i2;
           else
             break;
         } while (true);
@@ -6347,18 +6347,18 @@ var require_parser = __commonJS(function(exports) {
       if (this.type === "map-value-ind") {
         const prev = getPrevProps(this.peek(2));
         const start = getFirstKeyStartProps(prev);
-        let sep;
+        let sep3;
         if (scalar.end) {
-          sep = scalar.end;
-          sep.push(this.sourceToken);
+          sep3 = scalar.end;
+          sep3.push(this.sourceToken);
           delete scalar.end;
         } else
-          sep = [this.sourceToken];
+          sep3 = [this.sourceToken];
         const map = {
           type: "block-map",
           offset: scalar.offset,
           indent: scalar.indent,
-          items: [{ start, key: scalar, sep }]
+          items: [{ start, key: scalar, sep: sep3 }]
         };
         this.onKeyLine = true;
         this.stack[this.stack.length - 1] = map;
@@ -6492,12 +6492,12 @@ var require_parser = __commonJS(function(exports) {
                 if (includesToken(it.start, "newline")) {
                   Object.assign(it, { key: null, sep: [this.sourceToken] });
                 } else {
-                  const start = getFirstKeyStartProps(it.start);
+                  const start2 = getFirstKeyStartProps(it.start);
                   this.stack.push({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start, key: null, sep: [this.sourceToken] }]
+                    items: [{ start: start2, key: null, sep: [this.sourceToken] }]
                   });
                 }
               } else if (it.value) {
@@ -6510,17 +6510,17 @@ var require_parser = __commonJS(function(exports) {
                   items: [{ start, key: null, sep: [this.sourceToken] }]
                 });
               } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
-                const start = getFirstKeyStartProps(it.start);
+                const start2 = getFirstKeyStartProps(it.start);
                 const key = it.key;
-                const sep = it.sep;
-                sep.push(this.sourceToken);
+                const sep3 = it.sep;
+                sep3.push(this.sourceToken);
                 delete it.key;
                 delete it.sep;
                 this.stack.push({
                   type: "block-map",
                   offset: this.offset,
                   indent: this.indent,
-                  items: [{ start, key, sep }]
+                  items: [{ start: start2, key, sep: sep3 }]
                 });
               } else if (start.length > 0) {
                 it.sep = it.sep.concat(start, this.sourceToken);
@@ -6714,13 +6714,13 @@ var require_parser = __commonJS(function(exports) {
           const prev = getPrevProps(parent);
           const start = getFirstKeyStartProps(prev);
           fixFlowSeqItems(fc);
-          const sep = fc.end.splice(1, fc.end.length);
-          sep.push(this.sourceToken);
+          const sep3 = fc.end.splice(1, fc.end.length);
+          sep3.push(this.sourceToken);
           const map = {
             type: "block-map",
             offset: fc.offset,
             indent: fc.indent,
-            items: [{ start, key: fc, sep }]
+            items: [{ start, key: fc, sep: sep3 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map;
@@ -6864,22 +6864,22 @@ var require_public_api = __commonJS(function(exports) {
     return { lineCounter: lineCounter$1, prettyErrors };
   }
   function parseAllDocuments(source, options = {}) {
-    const { lineCounter, prettyErrors } = parseOptions(options);
-    const parser$1 = new parser.Parser(lineCounter?.addNewLine);
+    const { lineCounter: lineCounter2, prettyErrors } = parseOptions(options);
+    const parser$1 = new parser.Parser(lineCounter2?.addNewLine);
     const composer$1 = new composer.Composer(options);
     const docs = Array.from(composer$1.compose(parser$1.parse(source)));
-    if (prettyErrors && lineCounter)
+    if (prettyErrors && lineCounter2)
       for (const doc of docs) {
-        doc.errors.forEach(errors.prettifyError(source, lineCounter));
-        doc.warnings.forEach(errors.prettifyError(source, lineCounter));
+        doc.errors.forEach(errors.prettifyError(source, lineCounter2));
+        doc.warnings.forEach(errors.prettifyError(source, lineCounter2));
       }
     if (docs.length > 0)
       return docs;
     return Object.assign([], { empty: true }, composer$1.streamInfo());
   }
   function parseDocument(source, options = {}) {
-    const { lineCounter, prettyErrors } = parseOptions(options);
-    const parser$1 = new parser.Parser(lineCounter?.addNewLine);
+    const { lineCounter: lineCounter2, prettyErrors } = parseOptions(options);
+    const parser$1 = new parser.Parser(lineCounter2?.addNewLine);
     const composer$1 = new composer.Composer(options);
     let doc = null;
     for (const _doc of composer$1.compose(parser$1.parse(source), true, source.length)) {
@@ -6890,9 +6890,9 @@ var require_public_api = __commonJS(function(exports) {
         break;
       }
     }
-    if (prettyErrors && lineCounter) {
-      doc.errors.forEach(errors.prettifyError(source, lineCounter));
-      doc.warnings.forEach(errors.prettifyError(source, lineCounter));
+    if (prettyErrors && lineCounter2) {
+      doc.errors.forEach(errors.prettifyError(source, lineCounter2));
+      doc.warnings.forEach(errors.prettifyError(source, lineCounter2));
     }
     return doc;
   }
@@ -7161,35 +7161,35 @@ import { homedir } from "node:os";
 
 // node_modules/zod/v3/helpers/util.js
 var util;
-(function(util) {
-  util.assertEqual = (_) => {};
+(function(util2) {
+  util2.assertEqual = (_) => {};
   function assertIs(_arg) {}
-  util.assertIs = assertIs;
+  util2.assertIs = assertIs;
   function assertNever(_x) {
     throw new Error;
   }
-  util.assertNever = assertNever;
-  util.arrayToEnum = (items) => {
+  util2.assertNever = assertNever;
+  util2.arrayToEnum = (items) => {
     const obj = {};
     for (const item of items) {
       obj[item] = item;
     }
     return obj;
   };
-  util.getValidEnumValues = (obj) => {
-    const validKeys = util.objectKeys(obj).filter((k) => typeof obj[obj[k]] !== "number");
+  util2.getValidEnumValues = (obj) => {
+    const validKeys = util2.objectKeys(obj).filter((k) => typeof obj[obj[k]] !== "number");
     const filtered = {};
     for (const k of validKeys) {
       filtered[k] = obj[k];
     }
-    return util.objectValues(filtered);
+    return util2.objectValues(filtered);
   };
-  util.objectValues = (obj) => {
-    return util.objectKeys(obj).map(function(e) {
+  util2.objectValues = (obj) => {
+    return util2.objectKeys(obj).map(function(e) {
       return obj[e];
     });
   };
-  util.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object) => {
+  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object) => {
     const keys = [];
     for (const key in object) {
       if (Object.prototype.hasOwnProperty.call(object, key)) {
@@ -7198,19 +7198,19 @@ var util;
     }
     return keys;
   };
-  util.find = (arr, checker) => {
+  util2.find = (arr, checker) => {
     for (const item of arr) {
       if (checker(item))
         return item;
     }
     return;
   };
-  util.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
+  util2.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
   function joinValues(array, separator = " | ") {
     return array.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
   }
-  util.joinValues = joinValues;
-  util.jsonStringifyReplacer = (_, value) => {
+  util2.joinValues = joinValues;
+  util2.jsonStringifyReplacer = (_, value) => {
     if (typeof value === "bigint") {
       return value.toString();
     }
@@ -7218,8 +7218,8 @@ var util;
   };
 })(util || (util = {}));
 var objectUtil;
-(function(objectUtil) {
-  objectUtil.mergeShapes = (first, second) => {
+(function(objectUtil2) {
+  objectUtil2.mergeShapes = (first, second) => {
     return {
       ...first,
       ...second
@@ -7621,9 +7621,9 @@ var isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
 
 // node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil;
-(function(errorUtil) {
-  errorUtil.errToObj = (message) => typeof message === "string" ? { message } : message || {};
-  errorUtil.toString = (message) => typeof message === "string" ? message : message?.message;
+(function(errorUtil2) {
+  errorUtil2.errToObj = (message) => typeof message === "string" ? { message } : message || {};
+  errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
 })(errorUtil || (errorUtil = {}));
 
 // node_modules/zod/v3/types.js
@@ -7668,12 +7668,12 @@ var handleResult = (ctx, result) => {
 function processCreateParams(params) {
   if (!params)
     return {};
-  const { errorMap, invalid_type_error, required_error, description } = params;
-  if (errorMap && (invalid_type_error || required_error)) {
+  const { errorMap: errorMap2, invalid_type_error, required_error, description } = params;
+  if (errorMap2 && (invalid_type_error || required_error)) {
     throw new Error(`Can't use "invalid_type_error" or "required_error" in conjunction with custom error map.`);
   }
-  if (errorMap)
-    return { errorMap, description };
+  if (errorMap2)
+    return { errorMap: errorMap2, description };
   const customMap = (iss, ctx) => {
     const { message } = params;
     if (iss.code === "invalid_enum_value") {
@@ -8060,11 +8060,11 @@ class ZodString extends ZodType {
     }
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.string) {
-      const ctx = this._getOrReturnCtx(input);
-      addIssueToContext(ctx, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.string,
-        received: ctx.parsedType
+        received: ctx2.parsedType
       });
       return INVALID;
     }
@@ -8618,11 +8618,11 @@ class ZodNumber extends ZodType {
     }
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.number) {
-      const ctx = this._getOrReturnCtx(input);
-      addIssueToContext(ctx, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.number,
-        received: ctx.parsedType
+        received: ctx2.parsedType
       });
       return INVALID;
     }
@@ -9044,17 +9044,17 @@ class ZodDate extends ZodType {
     }
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.date) {
-      const ctx = this._getOrReturnCtx(input);
-      addIssueToContext(ctx, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.date,
-        received: ctx.parsedType
+        received: ctx2.parsedType
       });
       return INVALID;
     }
     if (Number.isNaN(input.data.getTime())) {
-      const ctx = this._getOrReturnCtx(input);
-      addIssueToContext(ctx, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_date
       });
       return INVALID;
@@ -9342,8 +9342,8 @@ class ZodArray extends ZodType {
     if (ctx.common.async) {
       return Promise.all([...ctx.data].map((item, i) => {
         return def.type._parseAsync(new ParseInputLazyPath(ctx, item, ctx.path, i));
-      })).then((result) => {
-        return ParseStatus.mergeArray(status, result);
+      })).then((result2) => {
+        return ParseStatus.mergeArray(status, result2);
       });
     }
     const result = [...ctx.data].map((item, i) => {
@@ -9431,11 +9431,11 @@ class ZodObject extends ZodType {
   _parse(input) {
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.object) {
-      const ctx = this._getOrReturnCtx(input);
-      addIssueToContext(ctx, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.object,
-        received: ctx.parsedType
+        received: ctx2.parsedType
       });
       return INVALID;
     }
@@ -9739,7 +9739,7 @@ class ZodUnion extends ZodType {
         ctx.common.issues.push(...dirty.ctx.common.issues);
         return dirty.result;
       }
-      const unionErrors = issues.map((issues) => new ZodError(issues));
+      const unionErrors = issues.map((issues2) => new ZodError(issues2));
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_union,
         unionErrors
@@ -10179,9 +10179,9 @@ class ZodSet extends ZodType {
       }
     }
     const valueType = this._def.valueType;
-    function finalizeSet(elements) {
+    function finalizeSet(elements2) {
       const parsedSet = new Set;
-      for (const element of elements) {
+      for (const element of elements2) {
         if (element.status === "aborted")
           return INVALID;
         if (element.status === "dirty")
@@ -10192,7 +10192,7 @@ class ZodSet extends ZodType {
     }
     const elements = [...ctx.data.values()].map((item, i) => valueType._parse(new ParseInputLazyPath(ctx, item, ctx.path, i)));
     if (ctx.common.async) {
-      return Promise.all(elements).then((elements) => finalizeSet(elements));
+      return Promise.all(elements).then((elements2) => finalizeSet(elements2));
     } else {
       return finalizeSet(elements);
     }
@@ -10545,11 +10545,11 @@ class ZodEffects extends ZodType {
     if (effect.type === "preprocess") {
       const processed = effect.transform(ctx.data, checkCtx);
       if (ctx.common.async) {
-        return Promise.resolve(processed).then(async (processed) => {
+        return Promise.resolve(processed).then(async (processed2) => {
           if (status.value === "aborted")
             return INVALID;
           const result = await this._def.schema._parseAsync({
-            data: processed,
+            data: processed2,
             path: ctx.path,
             parent: ctx
           });
@@ -10741,10 +10741,10 @@ class ZodCatch extends ZodType {
       }
     });
     if (isAsync(result)) {
-      return result.then((result) => {
+      return result.then((result2) => {
         return {
           status: "valid",
-          value: result.status === "valid" ? result.value : this._def.catchValue({
+          value: result2.status === "valid" ? result2.value : this._def.catchValue({
             get error() {
               return new ZodError(newCtx.common.issues);
             },
@@ -10897,43 +10897,43 @@ var late = {
   object: ZodObject.lazycreate
 };
 var ZodFirstPartyTypeKind;
-(function(ZodFirstPartyTypeKind) {
-  ZodFirstPartyTypeKind["ZodString"] = "ZodString";
-  ZodFirstPartyTypeKind["ZodNumber"] = "ZodNumber";
-  ZodFirstPartyTypeKind["ZodNaN"] = "ZodNaN";
-  ZodFirstPartyTypeKind["ZodBigInt"] = "ZodBigInt";
-  ZodFirstPartyTypeKind["ZodBoolean"] = "ZodBoolean";
-  ZodFirstPartyTypeKind["ZodDate"] = "ZodDate";
-  ZodFirstPartyTypeKind["ZodSymbol"] = "ZodSymbol";
-  ZodFirstPartyTypeKind["ZodUndefined"] = "ZodUndefined";
-  ZodFirstPartyTypeKind["ZodNull"] = "ZodNull";
-  ZodFirstPartyTypeKind["ZodAny"] = "ZodAny";
-  ZodFirstPartyTypeKind["ZodUnknown"] = "ZodUnknown";
-  ZodFirstPartyTypeKind["ZodNever"] = "ZodNever";
-  ZodFirstPartyTypeKind["ZodVoid"] = "ZodVoid";
-  ZodFirstPartyTypeKind["ZodArray"] = "ZodArray";
-  ZodFirstPartyTypeKind["ZodObject"] = "ZodObject";
-  ZodFirstPartyTypeKind["ZodUnion"] = "ZodUnion";
-  ZodFirstPartyTypeKind["ZodDiscriminatedUnion"] = "ZodDiscriminatedUnion";
-  ZodFirstPartyTypeKind["ZodIntersection"] = "ZodIntersection";
-  ZodFirstPartyTypeKind["ZodTuple"] = "ZodTuple";
-  ZodFirstPartyTypeKind["ZodRecord"] = "ZodRecord";
-  ZodFirstPartyTypeKind["ZodMap"] = "ZodMap";
-  ZodFirstPartyTypeKind["ZodSet"] = "ZodSet";
-  ZodFirstPartyTypeKind["ZodFunction"] = "ZodFunction";
-  ZodFirstPartyTypeKind["ZodLazy"] = "ZodLazy";
-  ZodFirstPartyTypeKind["ZodLiteral"] = "ZodLiteral";
-  ZodFirstPartyTypeKind["ZodEnum"] = "ZodEnum";
-  ZodFirstPartyTypeKind["ZodEffects"] = "ZodEffects";
-  ZodFirstPartyTypeKind["ZodNativeEnum"] = "ZodNativeEnum";
-  ZodFirstPartyTypeKind["ZodOptional"] = "ZodOptional";
-  ZodFirstPartyTypeKind["ZodNullable"] = "ZodNullable";
-  ZodFirstPartyTypeKind["ZodDefault"] = "ZodDefault";
-  ZodFirstPartyTypeKind["ZodCatch"] = "ZodCatch";
-  ZodFirstPartyTypeKind["ZodPromise"] = "ZodPromise";
-  ZodFirstPartyTypeKind["ZodBranded"] = "ZodBranded";
-  ZodFirstPartyTypeKind["ZodPipeline"] = "ZodPipeline";
-  ZodFirstPartyTypeKind["ZodReadonly"] = "ZodReadonly";
+(function(ZodFirstPartyTypeKind2) {
+  ZodFirstPartyTypeKind2["ZodString"] = "ZodString";
+  ZodFirstPartyTypeKind2["ZodNumber"] = "ZodNumber";
+  ZodFirstPartyTypeKind2["ZodNaN"] = "ZodNaN";
+  ZodFirstPartyTypeKind2["ZodBigInt"] = "ZodBigInt";
+  ZodFirstPartyTypeKind2["ZodBoolean"] = "ZodBoolean";
+  ZodFirstPartyTypeKind2["ZodDate"] = "ZodDate";
+  ZodFirstPartyTypeKind2["ZodSymbol"] = "ZodSymbol";
+  ZodFirstPartyTypeKind2["ZodUndefined"] = "ZodUndefined";
+  ZodFirstPartyTypeKind2["ZodNull"] = "ZodNull";
+  ZodFirstPartyTypeKind2["ZodAny"] = "ZodAny";
+  ZodFirstPartyTypeKind2["ZodUnknown"] = "ZodUnknown";
+  ZodFirstPartyTypeKind2["ZodNever"] = "ZodNever";
+  ZodFirstPartyTypeKind2["ZodVoid"] = "ZodVoid";
+  ZodFirstPartyTypeKind2["ZodArray"] = "ZodArray";
+  ZodFirstPartyTypeKind2["ZodObject"] = "ZodObject";
+  ZodFirstPartyTypeKind2["ZodUnion"] = "ZodUnion";
+  ZodFirstPartyTypeKind2["ZodDiscriminatedUnion"] = "ZodDiscriminatedUnion";
+  ZodFirstPartyTypeKind2["ZodIntersection"] = "ZodIntersection";
+  ZodFirstPartyTypeKind2["ZodTuple"] = "ZodTuple";
+  ZodFirstPartyTypeKind2["ZodRecord"] = "ZodRecord";
+  ZodFirstPartyTypeKind2["ZodMap"] = "ZodMap";
+  ZodFirstPartyTypeKind2["ZodSet"] = "ZodSet";
+  ZodFirstPartyTypeKind2["ZodFunction"] = "ZodFunction";
+  ZodFirstPartyTypeKind2["ZodLazy"] = "ZodLazy";
+  ZodFirstPartyTypeKind2["ZodLiteral"] = "ZodLiteral";
+  ZodFirstPartyTypeKind2["ZodEnum"] = "ZodEnum";
+  ZodFirstPartyTypeKind2["ZodEffects"] = "ZodEffects";
+  ZodFirstPartyTypeKind2["ZodNativeEnum"] = "ZodNativeEnum";
+  ZodFirstPartyTypeKind2["ZodOptional"] = "ZodOptional";
+  ZodFirstPartyTypeKind2["ZodNullable"] = "ZodNullable";
+  ZodFirstPartyTypeKind2["ZodDefault"] = "ZodDefault";
+  ZodFirstPartyTypeKind2["ZodCatch"] = "ZodCatch";
+  ZodFirstPartyTypeKind2["ZodPromise"] = "ZodPromise";
+  ZodFirstPartyTypeKind2["ZodBranded"] = "ZodBranded";
+  ZodFirstPartyTypeKind2["ZodPipeline"] = "ZodPipeline";
+  ZodFirstPartyTypeKind2["ZodReadonly"] = "ZodReadonly";
 })(ZodFirstPartyTypeKind || (ZodFirstPartyTypeKind = {}));
 var stringType = ZodString.create;
 var numberType = ZodNumber.create;
@@ -12886,8 +12886,8 @@ class PiAgentSession {
       env: worktreeBoundary ? { ...hookEnv, [WORKTREE_BOUNDARY_ENV_KEY]: worktreeBoundary } : hookEnv,
       detached: true
     });
-    const donePromise = new Promise((resolve, reject) => {
-      this._doneResolve = resolve;
+    const donePromise = new Promise((resolve6, reject) => {
+      this._doneResolve = resolve6;
       this._doneReject = reject;
     });
     donePromise.catch(() => {});
@@ -13305,7 +13305,7 @@ ${stderrTail}` : ""}`;
     }
   }
   sendCommand(cmd, timeoutMs = 30000) {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve6, reject) => {
       if (!this.proc?.stdin) {
         reject(new Error("No stdin available"));
         return;
@@ -13315,7 +13315,7 @@ ${stderrTail}` : ""}`;
         this._pendingRequests.delete(id);
         reject(new Error(`RPC timeout: no response for command id=${id} after ${timeoutMs}ms`));
       }, timeoutMs);
-      this._pendingRequests.set(id, { resolve, reject, timer });
+      this._pendingRequests.set(id, { resolve: resolve6, reject, timer });
       this.proc.stdin.write(JSON.stringify({ ...cmd, id }) + `
 `, (err) => {
         if (err) {
@@ -13396,15 +13396,15 @@ ${stderrTail}` : ""}`;
     this.proc?.stdin?.end();
     if (this.proc) {
       const proc = this.proc;
-      await new Promise((resolve) => {
-        proc.on("close", () => resolve());
+      await new Promise((resolve6) => {
+        proc.on("close", () => resolve6());
         setTimeout(() => {
           if (proc.exitCode === null && proc.pid != null) {
             try {
               process.kill(-proc.pid, "SIGKILL");
             } catch {}
           }
-          resolve();
+          resolve6();
         }, 8000);
       });
     }
@@ -13459,8 +13459,8 @@ ${stderrTail}` : ""}`;
       throw new Error("Session is not active");
     }
     this._agentEndReceived = false;
-    const donePromise = new Promise((resolve, reject) => {
-      this._doneResolve = resolve;
+    const donePromise = new Promise((resolve6, reject) => {
+      this._doneResolve = resolve6;
       this._doneReject = reject;
     });
     donePromise.catch(() => {});
@@ -17927,14 +17927,14 @@ function resolveAgentIdentityEnv(input = {}) {
   if (roleName)
     base.XTRM_ROLE = roleName;
   const run = input.run ?? ((cmd, args, opts) => {
-    const result = spawnSync3(cmd, args, {
+    const result2 = spawnSync3(cmd, args, {
       encoding: "utf8",
       cwd: opts.cwd,
       env: opts.env,
       timeout: opts.timeoutMs,
       stdio: ["ignore", "pipe", "pipe"]
     });
-    return { status: result.status, stdout: String(result.stdout ?? ""), error: result.error };
+    return { status: result2.status, stdout: String(result2.stdout ?? ""), error: result2.error };
   });
   const warn = input.warn ?? launcherWarning;
   const withoutRole = (reason) => {
@@ -19224,12 +19224,12 @@ function createSessionStatsEvent(session_stats) {
     session_stats
   };
 }
-function createSessionStatsErrorEvent(errorMessage, timeoutMs) {
+function createSessionStatsErrorEvent(errorMessage2, timeoutMs) {
   return {
     t: Date.now(),
     type: TIMELINE_EVENT_TYPES.SESSION_STATS_ERROR,
     source: "settlement",
-    error_message: errorMessage,
+    error_message: errorMessage2,
     ...timeoutMs !== undefined ? { timeout_ms: timeoutMs } : {}
   };
 }
@@ -19288,10 +19288,10 @@ class CompatGuardError extends Error {
     this.name = "CompatGuardError";
   }
 }
-function normalizePath(path, baseDir) {
-  if (isAbsolute2(path))
-    return path;
-  return resolve10(baseDir ?? process.cwd(), path);
+function normalizePath(path2, baseDir) {
+  if (isAbsolute2(path2))
+    return path2;
+  return resolve10(baseDir ?? process.cwd(), path2);
 }
 function isPathWithinRoot(candidate, root) {
   const rel = relative(root, candidate);
@@ -19311,9 +19311,9 @@ function canonicalizeSkillRoot(root, baseDir) {
     throw new CompatGuardError("skills.paths", "--allow-skills-roots entry is not usable; rejected");
   }
 }
-function canonicalizeSkillPath(field, path, baseDir) {
+function canonicalizeSkillPath(field, path2, baseDir) {
   try {
-    const normalized = normalizePath(path, baseDir);
+    const normalized = normalizePath(path2, baseDir);
     lstatSync2(normalized);
     const canonical = realpathSync2(normalized);
     const stat = lstatSync2(canonical);
@@ -19332,8 +19332,8 @@ function canonicalizeSkillPath(field, path, baseDir) {
     throw new CompatGuardError(field, "skill path is not usable; rejected");
   }
 }
-function assertSkillPathWithinRoots(field, path, canonicalRoots, baseDir) {
-  const candidate = canonicalizeSkillPath(field, path, baseDir);
+function assertSkillPathWithinRoots(field, path2, canonicalRoots, baseDir) {
+  const candidate = canonicalizeSkillPath(field, path2, baseDir);
   if (!canonicalRoots.some((root) => isPathWithinRoot(candidate, root))) {
     throw new CompatGuardError(field, "skill path is not under any --allow-skills-roots entry");
   }
@@ -19372,7 +19372,7 @@ function compatGuard(spec, trust) {
   if (trust?.allowSkills) {
     const canonicalRoots = (trust.allowSkillsRoots ?? []).map((root) => canonicalizeSkillRoot(root, trust.baseDir));
     const paths = spec.specialist.skills?.paths ?? [];
-    const canonicalPaths = paths.map((path) => canonicalRoots.length > 0 ? assertSkillPathWithinRoots("skills.paths", path, canonicalRoots, trust.baseDir) : canonicalizeSkillPath("skills.paths", path, trust.baseDir));
+    const canonicalPaths = paths.map((path2) => canonicalRoots.length > 0 ? assertSkillPathWithinRoots("skills.paths", path2, canonicalRoots, trust.baseDir) : canonicalizeSkillPath("skills.paths", path2, trust.baseDir));
     if (spec.specialist.skills?.paths)
       spec.specialist.skills.paths = canonicalPaths;
     if (typeof spec.specialist.prompt.skill_inherit === "string") {
@@ -19382,7 +19382,7 @@ function compatGuard(spec, trust) {
 }
 function collectSkillPathEntries(spec, baseDir) {
   return [
-    ...(spec.specialist.skills?.paths ?? []).map((path) => ({ path: normalizePath(path, baseDir), source: "skills.paths" })),
+    ...(spec.specialist.skills?.paths ?? []).map((path2) => ({ path: normalizePath(path2, baseDir), source: "skills.paths" })),
     ...typeof spec.specialist.prompt.skill_inherit === "string" ? [{ path: normalizePath(spec.specialist.prompt.skill_inherit, baseDir), source: "prompt.skill_inherit" }] : []
   ];
 }
@@ -19395,13 +19395,13 @@ function requireNoFollowFlag() {
   }
   return constants.O_NOFOLLOW;
 }
-function readSkillSourceBytes(path, noFollowFlag) {
-  if (realpathSync2(path) !== path)
+function readSkillSourceBytes(path2, noFollowFlag) {
+  if (realpathSync2(path2) !== path2)
     throw new Error("skill source canonical path changed");
-  const declaredStat = lstatSync2(path);
+  const declaredStat = lstatSync2(path2);
   if (declaredStat.isSymbolicLink())
     throw new Error("symlinked skill source");
-  const sourcePath = declaredStat.isDirectory() ? join10(path, "SKILL.md") : path;
+  const sourcePath = declaredStat.isDirectory() ? join10(path2, "SKILL.md") : path2;
   if (realpathSync2(sourcePath) !== sourcePath)
     throw new Error("skill file canonical path changed");
   const sourceStat = lstatSync2(sourcePath);
@@ -19421,13 +19421,13 @@ function computeSkillSources(spec, baseDir) {
   const entries = collectSkillPathEntries(spec, baseDir);
   const noFollowFlag = entries.length > 0 ? requireNoFollowFlag() : 0;
   const sources = [];
-  for (const { path, source } of entries) {
+  for (const { path: path2, source } of entries) {
     try {
-      const content = readSkillSourceBytes(path, noFollowFlag);
+      const content = readSkillSourceBytes(path2, noFollowFlag);
       const sha256 = createHash4("sha256").update(content).digest("hex");
-      sources.push({ path, sha256, source, attestation: "observation_time_only" });
+      sources.push({ path: path2, sha256, source, attestation: "observation_time_only" });
     } catch {
-      sources.push({ path, sha256: "unreadable", source, attestation: "observation_time_only" });
+      sources.push({ path: path2, sha256: "unreadable", source, attestation: "observation_time_only" });
     }
   }
   return sources;
@@ -19806,7 +19806,7 @@ async function runScriptSpecialist(input, options) {
     const preScriptResults = preScripts.map((script) => runScript(getLocalScriptCommand(script), baseDir, scriptDisplayName(script)));
     const requiredPreFailure = findRequiredPreScriptFailure(preScripts, preScriptResults);
     if (requiredPreFailure) {
-      const modelCandidates = collectModelCandidates(input, spec, options);
+      const modelCandidates2 = collectModelCandidates(input, spec, options);
       return {
         success: false,
         error: formatRequiredPreScriptFailure(requiredPreFailure),
@@ -19815,7 +19815,7 @@ async function runScriptSpecialist(input, options) {
           specialist: resolvedSpecialist,
           requested_specialist: input.requested_specialist ?? input.specialist,
           resolved_specialist: resolvedSpecialist,
-          model: modelCandidates[0],
+          model: modelCandidates2[0],
           duration_ms: Date.now() - startedAt,
           trace_id: traceId
         }
@@ -19831,7 +19831,7 @@ async function runScriptSpecialist(input, options) {
       template = resolveRequestedTemplate(input, spec);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const modelCandidates = collectModelCandidates(input, spec, options);
+      const modelCandidates2 = collectModelCandidates(input, spec, options);
       return {
         success: false,
         error: message,
@@ -19840,7 +19840,7 @@ async function runScriptSpecialist(input, options) {
           specialist: resolvedSpecialist,
           requested_specialist: input.requested_specialist ?? input.specialist,
           resolved_specialist: resolvedSpecialist,
-          model: modelCandidates[0],
+          model: modelCandidates2[0],
           duration_ms: Date.now() - startedAt,
           trace_id: traceId
         }
@@ -20004,7 +20004,7 @@ ${mandatoryRulesBlock}`;
       }
       if (retryableHop && !bridgedSkip)
         continue;
-      const durationMs = Date.now() - startedAt;
+      const durationMs2 = Date.now() - startedAt;
       if (parsed.kind === "success") {
         let parsed_json;
         if (shouldParseJson) {
@@ -20033,7 +20033,7 @@ ${mandatoryRulesBlock}`;
               });
             }
             runPostScripts();
-            return { success: false, error: error instanceof Error ? error.message : String(error), error_type: "invalid_json", meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model, duration_ms: durationMs, trace_id: traceId } };
+            return { success: false, error: error instanceof Error ? error.message : String(error), error_type: "invalid_json", meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model, duration_ms: durationMs2, trace_id: traceId } };
           }
         }
         if (observability) {
@@ -20053,7 +20053,7 @@ ${mandatoryRulesBlock}`;
           });
         }
         runPostScripts();
-        return { success: true, output: parsed.text, parsed_json, meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model, duration_ms: durationMs, trace_id: traceId } };
+        return { success: true, output: parsed.text, parsed_json, meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model, duration_ms: durationMs2, trace_id: traceId } };
       }
       if (observability) {
         persistTerminalOnce({
@@ -20073,7 +20073,7 @@ ${mandatoryRulesBlock}`;
         });
       }
       runPostScripts();
-      return { success: false, error: parsed.error, error_type: parsed.errorType, meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model, duration_ms: durationMs, trace_id: traceId } };
+      return { success: false, error: parsed.error, error_type: parsed.errorType, meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model, duration_ms: durationMs2, trace_id: traceId } };
     }
     const lastAttempt = attempts.at(-1);
     const durationMs = Date.now() - startedAt;
@@ -20280,7 +20280,7 @@ async function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assista
       });
     }
   }
-  return await new Promise((resolve, reject) => {
+  return await new Promise((resolve11, reject) => {
     const args = ["--mode", "json", "--no-session", "--no-extensions", "--no-skills"];
     if (extensionSelection.offline !== false)
       args.push("--offline");
@@ -20375,7 +20375,7 @@ async function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assista
     pi.on("error", reject);
     pi.on("close", (code) => {
       clearTimeout(timer);
-      resolve({
+      resolve11({
         model,
         text: assistantText,
         stderr,
@@ -20557,17 +20557,17 @@ function loadPresets(options = {}) {
     join11(baseDir, "config", "presets.json"),
     join11(baseDir, "config", "specialists", "presets.json")
   ];
-  for (const path of paths) {
-    if (!existsSync14(path))
+  for (const path2 of paths) {
+    if (!existsSync14(path2))
       continue;
     try {
-      presetsCache = JSON.parse(readFileSync9(path, "utf-8"));
+      presetsCache = JSON.parse(readFileSync9(path2, "utf-8"));
       presetsCacheBaseDir = baseDir;
       return presetsCache;
     } catch (error) {
       presetsCache = null;
       presetsCacheBaseDir = null;
-      throw new SpecialistPresetConfigError(path, error);
+      throw new SpecialistPresetConfigError(path2, error);
     }
   }
   presetsCache = {};
@@ -20881,11 +20881,11 @@ class SpecialistExtensionSourceCollisionError extends Error {
     this.name = "SpecialistExtensionSourceCollisionError";
   }
 }
-function realpathOr(path) {
+function realpathOr(path2) {
   try {
-    return realpathSync4(path);
+    return realpathSync4(path2);
   } catch {
-    return path;
+    return path2;
   }
 }
 function resolveHomeDir() {
@@ -20982,7 +20982,7 @@ class SpecialistLoader {
       specialist: name,
       baseExecution,
       overrideExecution,
-      resolveValue: (path, value) => this.resolveOverrideValue(name, `specialist.execution.${path}`, value)
+      resolveValue: (path2, value) => this.resolveOverrideValue(name, `specialist.execution.${path2}`, value)
     });
     baseSpec.execution = baseExecution;
     const overridePrompt = overrideSpec.prompt ?? {};
@@ -20998,11 +20998,11 @@ class SpecialistLoader {
     baseSpec.prompt = basePrompt;
     const overrideStallDetection = overrideSpec.stall_detection ?? {};
     const baseStallDetection = baseSpec.stall_detection ?? {};
-    for (const path of OVERRIDE_ALLOWED_STALL_DETECTION_PATHS) {
-      const overrideValue = readDottedPath(overrideStallDetection, path);
+    for (const path2 of OVERRIDE_ALLOWED_STALL_DETECTION_PATHS) {
+      const overrideValue = readDottedPath(overrideStallDetection, path2);
       if (overrideValue === null || overrideValue === undefined)
         continue;
-      writeDottedPath(baseStallDetection, path, this.resolveOverrideValue(name, `specialist.stall_detection.${path}`, overrideValue));
+      writeDottedPath(baseStallDetection, path2, this.resolveOverrideValue(name, `specialist.stall_detection.${path2}`, overrideValue));
     }
     if (Object.keys(baseStallDetection).length > 0) {
       baseSpec.stall_detection = baseStallDetection;
@@ -21133,7 +21133,7 @@ class SpecialistLoader {
       specialist: name,
       baseExecution: execution,
       overrideExecution: execution,
-      resolveValue: (path, value) => this.resolveOverrideValue(name, `specialist.execution.${path}`, value)
+      resolveValue: (path2, value) => this.resolveOverrideValue(name, `specialist.execution.${path2}`, value)
     });
   }
   async list(category) {
@@ -21247,23 +21247,23 @@ class SpecialistLoader {
 }
 var PROTOTYPE_POLLUTION_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 function mergeExecutionExtensionOverrides(options) {
-  for (const path of OVERRIDE_ALLOWED_NESTED_EXECUTION_PATHS) {
-    if (path !== "extensions")
+  for (const path2 of OVERRIDE_ALLOWED_NESTED_EXECUTION_PATHS) {
+    if (path2 !== "extensions")
       continue;
-    const overrideValue = readDottedPath(options.overrideExecution, path);
+    const overrideValue = readDottedPath(options.overrideExecution, path2);
     if (!overrideValue || typeof overrideValue !== "object" || Array.isArray(overrideValue))
       continue;
-    const baseValue = readDottedPath(options.baseExecution, path);
+    const baseValue = readDottedPath(options.baseExecution, path2);
     const mergedExtensions = {
       ...baseValue && typeof baseValue === "object" && !Array.isArray(baseValue) ? baseValue : {}
     };
     for (const [key, value] of Object.entries(overrideValue)) {
       if (value === null || value === undefined)
         continue;
-      mergedExtensions[key] = options.resolveValue(`${path}.${key}`, value);
+      mergedExtensions[key] = options.resolveValue(`${path2}.${key}`, value);
     }
     rejectNpmSourceCollisions(options.specialist, mergedExtensions);
-    writeDottedPath(options.baseExecution, path, mergedExtensions);
+    writeDottedPath(options.baseExecution, path2, mergedExtensions);
   }
 }
 var NPM_NAME_RE = /^[a-z0-9][a-z0-9._~-]{0,213}$/;
@@ -22245,8 +22245,8 @@ function renderContextRefsSection(context, opts = {}) {
     const fence = fenceFor(raw);
     const block = (body, notice) => [heading, fence, body, fence, ...notice ? [notice] : []].join(`
 `);
-    const join = blocks.length > 0 ? utf8Bytes(separator) : 0;
-    const room = Math.min(entryMax, totalMax - OMITTED_NOTICE_RESERVE_BYTES - used - join);
+    const join16 = blocks.length > 0 ? utf8Bytes(separator) : 0;
+    const room = Math.min(entryMax, totalMax - OMITTED_NOTICE_RESERVE_BYTES - used - join16);
     let rendered = block(raw);
     if (utf8Bytes(rendered) > room) {
       const notice = `[cut at NNNNNNNN of ${utf8Bytes(raw)} bytes; the full value is contextRef ${displayKey(entry.key)} on ${source}]`;
@@ -22259,7 +22259,7 @@ function renderContextRefsSection(context, opts = {}) {
       rendered = block(body, notice.replace("NNNNNNNN", String(utf8Bytes(body))));
     }
     blocks.push(rendered);
-    used += join + utf8Bytes(rendered);
+    used += join16 + utf8Bytes(rendered);
   }
   if (omitted > 0) {
     blocks.push(`[${omitted} more context entr${omitted === 1 ? "y" : "ies"} omitted: section budget of ${totalMax} bytes reached]`);
@@ -22314,8 +22314,8 @@ class InteractionTransport {
   }
   async request(input) {
     const messageId = this.newId();
-    const waited = new Promise((resolve) => {
-      this.waiters.set(messageId, resolve);
+    const waited = new Promise((resolve11) => {
+      this.waiters.set(messageId, resolve11);
     });
     await this.send({ ...input, kind: input.kind ?? "question" }, messageId);
     const early = this.answered.get(messageId);
@@ -22374,9 +22374,9 @@ class InteractionTransport {
     }
   }
 }
-function composeInteractionMessage(input, identity) {
+function composeInteractionMessage(input, identity2) {
   return {
-    messageId: identity.messageId,
+    messageId: identity2.messageId,
     kind: input.kind,
     from: input.from,
     to: input.to,
@@ -22385,7 +22385,7 @@ function composeInteractionMessage(input, identity) {
     ...input.piSessionId ? { piSessionId: input.piSessionId } : {},
     body: input.body,
     ...input.inReplyTo ? { inReplyTo: input.inReplyTo } : {},
-    createdAt: identity.createdAt
+    createdAt: identity2.createdAt
   };
 }
 
@@ -22405,15 +22405,15 @@ function recordPath(repoRoot, activationId, messageId) {
 function replyPath(repoRoot, activationId, messageId) {
   return join16(interactionsRoot(repoRoot), activationId, `${messageId}.reply.json`);
 }
-function writeAtomic(path, value, exclusive = false) {
-  if (exclusive && existsSync17(path)) {
-    throw new Error(`interaction record already exists: ${path}`);
+function writeAtomic(path2, value, exclusive = false) {
+  if (exclusive && existsSync17(path2)) {
+    throw new Error(`interaction record already exists: ${path2}`);
   }
-  const tmp = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  const tmp = `${path2}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
   writeFileSync4(tmp, `${JSON.stringify(value, null, 2)}
 `, { mode: 384 });
   try {
-    renameSync2(tmp, path);
+    renameSync2(tmp, path2);
   } catch (err) {
     try {
       unlinkSync(tmp);
@@ -22421,11 +22421,11 @@ function writeAtomic(path, value, exclusive = false) {
     throw err;
   }
 }
-function readJson(path) {
-  if (!existsSync17(path))
+function readJson(path2) {
+  if (!existsSync17(path2))
     return;
   try {
-    return JSON.parse(readFileSync10(path, "utf-8"));
+    return JSON.parse(readFileSync10(path2, "utf-8"));
   } catch {
     return;
   }
@@ -22582,13 +22582,13 @@ async function awaitReply(repoRoot, activationId, messageId, options) {
   }
 }
 function sleep(ms, signal) {
-  return new Promise((resolve) => {
+  return new Promise((resolve11) => {
     const timer = setTimeout(done, ms);
     signal?.addEventListener("abort", done, { once: true });
     function done() {
       clearTimeout(timer);
       signal?.removeEventListener("abort", done);
-      resolve();
+      resolve11();
     }
   });
 }
@@ -22616,8 +22616,8 @@ function procProbe() {
             return;
           bootSeconds = Number(match[1]);
         }
-        const stat = readFileSync11(`/proc/${pid}/stat`, "utf-8");
-        const afterComm = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/);
+        const stat2 = readFileSync11(`/proc/${pid}/stat`, "utf-8");
+        const afterComm = stat2.slice(stat2.lastIndexOf(")") + 2).trim().split(/\s+/);
         const ticksSinceBoot = Number(afterComm[19]);
         if (!Number.isFinite(ticksSinceBoot))
           return;
@@ -22632,9 +22632,9 @@ var PROC_START_TOLERANCE_SECONDS = 2;
 function procStartMatches(claim, actual) {
   if (typeof claim === "number")
     return claim === actual.ticksSinceBoot;
-  const asNumber = Number(claim);
-  if (claim.trim() !== "" && Number.isFinite(asNumber))
-    return asNumber === actual.ticksSinceBoot;
+  const asNumber2 = Number(claim);
+  if (claim.trim() !== "" && Number.isFinite(asNumber2))
+    return asNumber2 === actual.ticksSinceBoot;
   const claimedMs = Date.parse(claim);
   if (!Number.isFinite(claimedMs))
     return false;
@@ -22725,7 +22725,7 @@ function buildUserFrame(input) {
   };
 }
 function sendFrame(socketPath, frame, timeoutMs = 5000) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve11, reject) => {
     const payload = `${JSON.stringify(frame)}
 `;
     if (Buffer.byteLength(payload) > MAX_LINE_BYTES) {
@@ -22738,7 +22738,7 @@ function sendFrame(socketPath, frame, timeoutMs = 5000) {
       reject(new Error(`timed out writing to ${socketPath}`));
     });
     socket.on("error", reject);
-    socket.on("connect", () => socket.end(payload, () => resolve()));
+    socket.on("connect", () => socket.end(payload, () => resolve11()));
   });
 }
 
@@ -22749,7 +22749,7 @@ class PeerAdapter {
     this.options = options;
   }
   async push(request) {
-    const { repoRoot, emit } = this.options;
+    const { repoRoot, emit: emit2 } = this.options;
     const existing = read(repoRoot, request.activationId, request.messageId);
     const record = existing ?? create(repoRoot, {
       messageId: request.messageId,
@@ -22762,7 +22762,7 @@ class PeerAdapter {
       probe: this.options.probe
     });
     if (!route) {
-      emit?.({ event: "peer.route_absent", activationId: request.activationId, messageId: request.messageId });
+      emit2?.({ event: "peer.route_absent", activationId: request.activationId, messageId: request.messageId });
       return {
         outcome: "no_route",
         record: recordAttempt(repoRoot, request.activationId, request.messageId, {
@@ -22773,7 +22773,7 @@ class PeerAdapter {
         })
       };
     }
-    emit?.({
+    emit2?.({
       event: "peer.route_selected",
       activationId: request.activationId,
       messageId: request.messageId,
@@ -22793,7 +22793,7 @@ class PeerAdapter {
     try {
       await sendFrame(route.socketPath, frame);
     } catch (err) {
-      emit?.({
+      emit2?.({
         event: "peer.send_attempted",
         activationId: request.activationId,
         messageId: request.messageId,
@@ -22818,7 +22818,7 @@ class PeerAdapter {
     });
     const receipt = await pendingReceipt;
     if (!receipt) {
-      emit?.({
+      emit2?.({
         event: "peer.no_receipt",
         activationId: request.activationId,
         messageId: request.messageId,
@@ -22826,7 +22826,7 @@ class PeerAdapter {
       });
       return { outcome: "no_receipt", route, record: read(repoRoot, request.activationId, request.messageId) };
     }
-    emit?.({
+    emit2?.({
       event: "peer.receipt",
       activationId: request.activationId,
       messageId: request.messageId,
@@ -23004,8 +23004,8 @@ function procLeaseProbe() {
     canVerify: () => existsSync19("/proc/self/stat"),
     startTicks(pid) {
       try {
-        const stat = readFileSync12(`/proc/${pid}/stat`, "utf-8");
-        const afterComm = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/);
+        const stat2 = readFileSync12(`/proc/${pid}/stat`, "utf-8");
+        const afterComm = stat2.slice(stat2.lastIndexOf(")") + 2).trim().split(/\s+/);
         const ticks = Number(afterComm[19]);
         return Number.isFinite(ticks) ? ticks : undefined;
       } catch {
@@ -23035,12 +23035,12 @@ function leasePath(workspace) {
   return join18(leaseDir(workspace), `${workspaceKey(workspace)}.json`);
 }
 function inspect(workspace, probe = procLeaseProbe()) {
-  const path = leasePath(workspace);
-  if (!existsSync19(path))
+  const path2 = leasePath(workspace);
+  if (!existsSync19(path2))
     return { state: "free" };
   let lease;
   try {
-    lease = JSON.parse(readFileSync12(path, "utf-8"));
+    lease = JSON.parse(readFileSync12(path2, "utf-8"));
     if (typeof lease?.holder?.pid !== "number")
       throw new Error("missing holder");
   } catch {
@@ -23059,10 +23059,10 @@ function inspect(workspace, probe = procLeaseProbe()) {
   return { state: "held", lease };
 }
 function releaseHolderLease(workspace, input) {
-  const path = leasePath(workspace);
+  const path2 = leasePath(workspace);
   let lease;
   try {
-    lease = JSON.parse(readFileSync12(path, "utf-8"));
+    lease = JSON.parse(readFileSync12(path2, "utf-8"));
   } catch {
     return { applied: false, reason: "already_free" };
   }
@@ -23071,7 +23071,7 @@ function releaseHolderLease(workspace, input) {
   }
   const at = input.now ?? Date.now();
   try {
-    appendFileSync2(join18(dirname12(path), "recoveries.jsonl"), `${JSON.stringify({
+    appendFileSync2(join18(dirname12(path2), "recoveries.jsonl"), `${JSON.stringify({
       workspace: workspace.worktreePath,
       holderActivationId: lease.activationId,
       holderPid: lease.holder.pid,
@@ -23080,7 +23080,7 @@ function releaseHolderLease(workspace, input) {
       recoveredAt: at
     })}
 `);
-    rmSync2(path, { force: true });
+    rmSync2(path2, { force: true });
   } catch {
     return { applied: false, reason: "not_recoverable" };
   }
@@ -23088,7 +23088,7 @@ function releaseHolderLease(workspace, input) {
 }
 function recoverDeadHolder(workspace, input) {
   const probe = input.probe ?? procLeaseProbe();
-  const path = leasePath(workspace);
+  const path2 = leasePath(workspace);
   const status = inspect(workspace, probe);
   if (status.state === "free")
     return { applied: false, reason: "already_free" };
@@ -23099,7 +23099,7 @@ function recoverDeadHolder(workspace, input) {
   }
   let current;
   try {
-    current = JSON.parse(readFileSync12(path, "utf-8"));
+    current = JSON.parse(readFileSync12(path2, "utf-8"));
   } catch {
     return { applied: false, reason: "already_free" };
   }
@@ -23108,7 +23108,7 @@ function recoverDeadHolder(workspace, input) {
   }
   const at = input.now ?? Date.now();
   try {
-    appendFileSync2(join18(dirname12(path), "recoveries.jsonl"), `${JSON.stringify({
+    appendFileSync2(join18(dirname12(path2), "recoveries.jsonl"), `${JSON.stringify({
       workspace: workspace.worktreePath,
       holderActivationId: status.lease.activationId,
       holderPid: status.lease.holder.pid,
@@ -23117,7 +23117,7 @@ function recoverDeadHolder(workspace, input) {
       recoveredAt: at
     })}
 `);
-    rmSync2(path, { force: true });
+    rmSync2(path2, { force: true });
   } catch {
     return { applied: false, reason: "not_recoverable", observedReason: status.uncertainReason };
   }
@@ -23125,7 +23125,7 @@ function recoverDeadHolder(workspace, input) {
 }
 function acquire(request, probe = procLeaseProbe()) {
   const { workspace, activationId, attemptId } = request;
-  const path = leasePath(workspace);
+  const path2 = leasePath(workspace);
   const status = inspect(workspace, probe);
   if (status.state === "held" && status.lease) {
     if (status.lease.activationId === activationId) {
@@ -23147,11 +23147,11 @@ function acquire(request, probe = procLeaseProbe()) {
     acquiredAtMs: Date.now()
   };
   mkdirSync7(leaseDir(workspace), { recursive: true, mode: 448 });
-  const staging = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  const staging = `${path2}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
   writeFileSync5(staging, `${JSON.stringify(lease, null, 2)}
 `, { mode: 384 });
   try {
-    linkSync(staging, path);
+    linkSync(staging, path2);
   } catch (err) {
     if (err.code === "EEXIST") {
       throw refusal("workspace_held_by_another_writer", request, inspect(workspace, probe));
@@ -23165,11 +23165,11 @@ function acquire(request, probe = procLeaseProbe()) {
   return lease;
 }
 function rewrite(workspace, lease) {
-  const path = leasePath(workspace);
-  const staging = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  const path2 = leasePath(workspace);
+  const staging = `${path2}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
   writeFileSync5(staging, `${JSON.stringify(lease, null, 2)}
 `, { mode: 384 });
-  renameSync3(staging, path);
+  renameSync3(staging, path2);
   return lease;
 }
 function release(workspace, activationId, probe = procLeaseProbe()) {
@@ -23304,14 +23304,14 @@ function createGuardedTools(sdk, input) {
         const verdict = input.admit(name);
         if (verdict.allow)
           return originalExecute(...args);
-        const refusal = {
+        const refusal2 = {
           content: [{
             type: "text",
             text: `Refused: ${verdict.reason ?? `${name} is not admitted against this workspace`}`
           }],
           details: { blocked: true, tool: name }
         };
-        return refusal;
+        return refusal2;
       }
     });
     guarded.push(name);
@@ -23980,8 +23980,8 @@ function provisionalModelDescriptor(requested, provider) {
 // src/activation/registry.ts
 class FleetRegistry {
   records = new Map;
-  register(record) {
-    this.records.set(record.snapshot.activationId, record);
+  register(record2) {
+    this.records.set(record2.snapshot.activationId, record2);
   }
   get(activationId) {
     return this.records.get(activationId);
@@ -24118,9 +24118,9 @@ function buildBoundedResult(opts) {
   if (opts.valid) {
     out.outcome = "completed";
   } else {
-    const errors = (opts.errors ?? ["validation failed"]).filter((e) => e.trim() !== "");
-    out.outcome = trunc(`completed_with_validation_errors: ${errors.join("; ")}`, SUMMARY_MAX);
-    out.validation = errors.slice(0, RESULT_ARRAY_MAX).map((e) => trunc(e, RESULT_ITEM_MAX));
+    const errors2 = (opts.errors ?? ["validation failed"]).filter((e) => e.trim() !== "");
+    out.outcome = trunc(`completed_with_validation_errors: ${errors2.join("; ")}`, SUMMARY_MAX);
+    out.validation = errors2.slice(0, RESULT_ARRAY_MAX).map((e) => trunc(e, RESULT_ITEM_MAX));
   }
   const bounded = (refs) => refs.length > 0 ? refs.slice(0, RESULT_ARRAY_MAX).map((r) => trunc(r, RESULT_ITEM_MAX)) : undefined;
   const artifactRefs = bounded(opts.artifactRefs);
@@ -24190,41 +24190,41 @@ function buildSettlementExecutionContext(opts) {
   return ctx;
 }
 async function republishSettlement(opts) {
-  const { boundary, store, record } = opts;
+  const { boundary, store, record: record2 } = opts;
   const now = opts.now ?? Date.now();
-  const emit = opts.emit ?? (() => {});
-  if (record.status !== "completed") {
+  const emit2 = opts.emit ?? (() => {});
+  if (record2.status !== "completed") {
     return { outcome: "refused", note: "a failed settlement publishes nothing" };
   }
-  if (record.receiptId && record.journalEntryId) {
-    return { outcome: "published", journalEntryId: record.journalEntryId, receiptId: record.receiptId };
+  if (record2.receiptId && record2.journalEntryId) {
+    return { outcome: "published", journalEntryId: record2.journalEntryId, receiptId: record2.receiptId };
   }
   if (!boundary.appendResult || !boundary.allocateReceipt) {
     const note = "work boundary carries no settlement surface; not republishable by THIS runtime";
-    saveState(store, record, "refused", note, {}, "runtime_lacks_settlement_surface");
-    emit("settlement_republish_refused", { activationId: record.activationId, attemptId: record.attemptId, note });
+    saveState(store, record2, "refused", note, {}, "runtime_lacks_settlement_surface");
+    emit2("settlement_republish_refused", { activationId: record2.activationId, attemptId: record2.attemptId, note });
     return { outcome: "refused", note };
   }
   const allocateReceipt = boundary.allocateReceipt;
   const appendResult = boundary.appendResult;
   const defer = (reason) => {
-    saveState(store, record, "pending", reason);
-    emit("settlement_republish_deferred", {
-      activationId: record.activationId,
-      attemptId: record.attemptId,
+    saveState(store, record2, "pending", reason);
+    emit2("settlement_republish_deferred", {
+      activationId: record2.activationId,
+      attemptId: record2.attemptId,
       note: reason
     });
     return { outcome: "pending", note: reason };
   };
   const reconcileAndPublish = async () => {
-    let journalEntryId = record.journalEntryId;
+    let journalEntryId = record2.journalEntryId;
     if (!journalEntryId) {
       if (!boundary.findResultEntry) {
         return defer("work boundary exposes no Journal reconciliation, so a republish cannot prove it is the first");
       }
-      const lookup = await boundary.findResultEntry(record.issueRef, {
-        activationId: record.activationId,
-        attemptId: record.attemptId
+      const lookup = await boundary.findResultEntry(record2.issueRef, {
+        activationId: record2.activationId,
+        attemptId: record2.attemptId
       });
       if (lookup.status === "unavailable") {
         return defer(`Journal reconciliation unavailable: ${lookup.reason}`);
@@ -24232,12 +24232,12 @@ async function republishSettlement(opts) {
       if (lookup.status === "found")
         journalEntryId = lookup.value.entryId;
     }
-    let receiptId = record.receiptId;
+    let receiptId = record2.receiptId;
     if (!receiptId) {
       if (!boundary.findReceiptForBinding) {
         return defer("work boundary exposes no receipt reconciliation, so a republish cannot prove it is the first");
       }
-      const lookup = await boundary.findReceiptForBinding(record.issueRef, record.executionBindingId);
+      const lookup = await boundary.findReceiptForBinding(record2.issueRef, record2.executionBindingId);
       if (lookup.status === "unavailable") {
         return defer(`receipt reconciliation unavailable: ${lookup.reason}`);
       }
@@ -24246,54 +24246,54 @@ async function republishSettlement(opts) {
     }
     if (journalEntryId) {
       if (!receiptId) {
-        const note = `Journal result ${journalEntryId} exists but no WorkReceipt is recorded for binding ` + `${record.executionBindingId} and none is resolvable; the provenance chain cannot be completed`;
-        saveState(store, record, "refused", note, { journalEntryId }, "receipt_unreconstructable");
-        emit("settlement_republish_refused", { activationId: record.activationId, attemptId: record.attemptId, note });
+        const note = `Journal result ${journalEntryId} exists but no WorkReceipt is recorded for binding ` + `${record2.executionBindingId} and none is resolvable; the provenance chain cannot be completed`;
+        saveState(store, record2, "refused", note, { journalEntryId }, "receipt_unreconstructable");
+        emit2("settlement_republish_refused", { activationId: record2.activationId, attemptId: record2.attemptId, note });
         return { outcome: "refused", note, journalEntryId };
       }
-      saveState(store, record, "published", "reconciled with the existing Journal result", {
+      saveState(store, record2, "published", "reconciled with the existing Journal result", {
         journalEntryId,
         receiptId
       });
-      emit("settlement_republish_reconciled", {
-        activationId: record.activationId,
-        attemptId: record.attemptId,
+      emit2("settlement_republish_reconciled", {
+        activationId: record2.activationId,
+        attemptId: record2.attemptId,
         entry: journalEntryId
       });
       return { outcome: "published", journalEntryId, receiptId };
     }
     try {
-      const storedRef = store.save(record);
+      const storedRef = store.save(record2);
       if (!receiptId) {
-        const receipt = await allocateReceipt(record.executionBindingId);
+        const receipt = await allocateReceipt(record2.executionBindingId);
         receiptId = receipt.id;
-        emit("settlement_receipt_allocated", { receipt: receipt.id, republish: true });
+        emit2("settlement_receipt_allocated", { receipt: receipt.id, republish: true });
       }
-      let artifactValue = record.artifactRef ?? storedRef;
-      if (boundary.attachArtifact && !record.artifactRef) {
+      let artifactValue = record2.artifactRef ?? storedRef;
+      if (boundary.attachArtifact && !record2.artifactRef) {
         try {
           artifactValue = (await boundary.attachArtifact(receiptId, "artifact", storedRef)).value ?? artifactValue;
-          emit("settlement_artifact_attached", { receipt: receiptId, kind: "artifact", republish: true });
+          emit2("settlement_artifact_attached", { receipt: receiptId, kind: "artifact", republish: true });
         } catch (error) {
-          emit("settlement_degraded", {
+          emit2("settlement_degraded", {
             note: `artifact attach failed: ${error instanceof Error ? error.message : String(error)}`
           });
         }
       }
-      const entry = await appendResult(record.issueRef, {
+      const entry = await appendResult(record2.issueRef, {
         result: buildBoundedResult({
-          output: record.output,
-          valid: record.validation.valid,
-          errors: record.validation.errors,
+          output: record2.output,
+          valid: record2.validation.valid,
+          errors: record2.validation.errors,
           artifactRefs: [artifactValue],
           receiptRefs: [receiptId],
-          provenanceRefs: [record.executionBindingId, receiptId]
+          provenanceRefs: [record2.executionBindingId, receiptId]
         }),
         executionContext: buildSettlementExecutionContext({
           participantId: opts.participantId,
-          specialistName: record.specialist,
-          activationId: record.activationId,
-          attemptId: record.attemptId,
+          specialistName: record2.specialist,
+          activationId: record2.activationId,
+          attemptId: record2.attemptId,
           coordinatorParticipantId: opts.coordinator?.participantId,
           coordinatorSessionId: opts.coordinator?.sessionId,
           repoPath: opts.repositoryRoot,
@@ -24306,53 +24306,53 @@ async function republishSettlement(opts) {
           { kind: "receipt", key: receiptId }
         ],
         participantId: opts.participantId,
-        activationId: record.activationId
+        activationId: record2.activationId
       });
       store.save({
-        ...record,
+        ...record2,
         receiptId,
         journalEntryId: entry.entryId,
         artifactRef: artifactValue,
-        publication: { state: "published", attempts: (record.publication?.attempts ?? 0) + 1, updatedAt: now }
+        publication: { state: "published", attempts: (record2.publication?.attempts ?? 0) + 1, updatedAt: now }
       });
-      emit("settlement_result_published", { entry: entry.entryId, receipt: receiptId, republish: true });
+      emit2("settlement_result_published", { entry: entry.entryId, receipt: receiptId, republish: true });
       return { outcome: "published", journalEntryId: entry.entryId, receiptId };
     } catch (error) {
       const note = error instanceof Error ? error.message : String(error);
-      saveState(store, record, "pending", note, { ...receiptId ? { receiptId } : {} });
-      emit("settlement_degraded", { note, republish: true });
+      saveState(store, record2, "pending", note, { ...receiptId ? { receiptId } : {} });
+      emit2("settlement_degraded", { note, republish: true });
       return { outcome: "pending", note, ...receiptId ? { receiptId } : {} };
     }
   };
-  const guarded = await withSettlementExclusionAsync({ repositoryRoot: opts.repositoryRoot, activationId: record.activationId, attemptId: record.attemptId }, reconcileAndPublish, { reclaimStale: true });
+  const guarded = await withSettlementExclusionAsync({ repositoryRoot: opts.repositoryRoot, activationId: record2.activationId, attemptId: record2.attemptId }, reconcileAndPublish, { reclaimStale: true });
   return guarded.ok ? guarded.value : defer(guarded.reason);
 }
 var REPUBLISH_PASS_LIMIT = 50;
 async function republishPendingSettlements(opts) {
-  const emit = opts.emit ?? (() => {});
+  const emit2 = opts.emit ?? (() => {});
   const limit = Math.max(1, opts.limit ?? REPUBLISH_PASS_LIMIT);
   const revivable = opts.boundary.appendResult && opts.boundary.allocateReceipt ? opts.store.listRuntimeRefused?.() ?? [] : [];
   const pending = [...opts.store.listPendingPublication?.() ?? [], ...revivable].sort((a, b) => a.completedAt - b.completedAt).slice(0, limit);
   const outcomes = [];
-  for (const record of pending) {
+  for (const record2 of pending) {
     try {
       const result = await republishSettlement({
         boundary: opts.boundary,
         store: opts.store,
-        record,
+        record: record2,
         participantId: opts.participantId,
         repositoryRoot: opts.repositoryRoot,
         ...opts.worktreePath ? { worktreePath: opts.worktreePath } : {},
         ...opts.env ? { env: opts.env } : {},
         ...opts.now ? { now: opts.now() } : {},
-        emit
+        emit: emit2
       });
-      outcomes.push({ activationId: record.activationId, attemptId: record.attemptId, outcome: result.outcome });
+      outcomes.push({ activationId: record2.activationId, attemptId: record2.attemptId, outcome: result.outcome });
     } catch (error) {
-      outcomes.push({ activationId: record.activationId, attemptId: record.attemptId, outcome: "error" });
-      emit("settlement_republish_error", {
-        activationId: record.activationId,
-        attemptId: record.attemptId,
+      outcomes.push({ activationId: record2.activationId, attemptId: record2.attemptId, outcome: "error" });
+      emit2("settlement_republish_error", {
+        activationId: record2.activationId,
+        attemptId: record2.attemptId,
         note: error instanceof Error ? error.message : String(error)
       });
     }
@@ -24362,7 +24362,7 @@ async function republishPendingSettlements(opts) {
 async function publishSettlement(opts) {
   const { boundary, store, subject } = opts;
   const now = opts.now ?? Date.now();
-  const emit = opts.emit ?? (() => {});
+  const emit2 = opts.emit ?? (() => {});
   const executionContext = buildSettlementExecutionContext({
     participantId: subject.participantId,
     specialistName: subject.specialist,
@@ -24378,7 +24378,7 @@ async function publishSettlement(opts) {
     env: opts.env,
     now
   });
-  const record = {
+  const record2 = {
     activationId: subject.activationId,
     attemptId: subject.attemptId,
     specialist: subject.specialist,
@@ -24393,19 +24393,19 @@ async function publishSettlement(opts) {
   };
   let storedRef;
   try {
-    storedRef = store.save(record);
+    storedRef = store.save(record2);
   } catch (error) {
     const note = error instanceof Error ? error.message : String(error);
-    emit("settlement_store_failed", { note });
+    emit2("settlement_store_failed", { note });
     return { storedRef: "", degraded: `result storage unavailable: ${note}` };
   }
-  emit("settlement_stored", { ref: storedRef, status: opts.status });
+  emit2("settlement_stored", { ref: storedRef, status: opts.status });
   if (opts.status !== "completed")
     return { storedRef, publicationState: "not-applicable" };
   if (!boundary.allocateReceipt || !boundary.appendResult) {
     const note = "work boundary carries no settlement surface; result stored only";
-    saveState(store, record, "refused", note, {}, "runtime_lacks_settlement_surface");
-    emit("settlement_degraded", { note });
+    saveState(store, record2, "refused", note, {}, "runtime_lacks_settlement_surface");
+    emit2("settlement_degraded", { note });
     return { storedRef, degraded: "boundary without settlement surface", publicationState: "refused" };
   }
   const allocateReceipt = boundary.allocateReceipt;
@@ -24416,17 +24416,17 @@ async function publishSettlement(opts) {
     try {
       const receipt = await allocateReceipt(subject.executionBindingId);
       allocatedReceiptId = receipt.id;
-      emit("settlement_receipt_allocated", { receipt: receipt.id });
+      emit2("settlement_receipt_allocated", { receipt: receipt.id });
       let artifactValue = storedRef;
       try {
         if (boundary.attachArtifact) {
           const attached = await boundary.attachArtifact(receipt.id, "artifact", storedRef);
           artifactValue = attached.value;
           allocatedArtifactRef = artifactValue;
-          emit("settlement_artifact_attached", { receipt: receipt.id, kind: "artifact" });
+          emit2("settlement_artifact_attached", { receipt: receipt.id, kind: "artifact" });
         }
       } catch (error) {
-        emit("settlement_degraded", {
+        emit2("settlement_degraded", {
           note: `artifact attach failed: ${error instanceof Error ? error.message : String(error)}`
         });
       }
@@ -24449,13 +24449,13 @@ async function publishSettlement(opts) {
         activationId: subject.activationId,
         sessionId: subject.piSessionId
       });
-      emit("settlement_result_published", { entry: entry.entryId, receipt: receipt.id });
+      emit2("settlement_result_published", { entry: entry.entryId, receipt: receipt.id });
       const published = {
-        ...record,
+        ...record2,
         receiptId: receipt.id,
         journalEntryId: entry.entryId,
         artifactRef: artifactValue,
-        publication: { state: "published", attempts: (record.publication?.attempts ?? 0) + 1, updatedAt: now }
+        publication: { state: "published", attempts: (record2.publication?.attempts ?? 0) + 1, updatedAt: now }
       };
       try {
         store.save(published);
@@ -24469,32 +24469,32 @@ async function publishSettlement(opts) {
       };
     } catch (error) {
       const note = error instanceof Error ? error.message : String(error);
-      saveState(store, record, "pending", note, {
+      saveState(store, record2, "pending", note, {
         ...allocatedReceiptId ? { receiptId: allocatedReceiptId } : {},
         ...allocatedArtifactRef ? { artifactRef: allocatedArtifactRef } : {}
       });
-      emit("settlement_degraded", { note, ...allocatedReceiptId ? { partial_receipt: allocatedReceiptId } : {} });
+      emit2("settlement_degraded", { note, ...allocatedReceiptId ? { partial_receipt: allocatedReceiptId } : {} });
       return { storedRef, degraded: note, publicationState: "pending" };
     }
   };
   const guarded = await withSettlementExclusionAsync({ repositoryRoot: subject.repositoryRoot, activationId: subject.activationId, attemptId: subject.attemptId }, publishNow);
   if (!guarded.ok) {
-    saveState(store, record, "pending", guarded.reason);
-    emit("settlement_degraded", { note: guarded.reason, contended: true });
+    saveState(store, record2, "pending", guarded.reason);
+    emit2("settlement_degraded", { note: guarded.reason, contended: true });
     return { storedRef, degraded: guarded.reason, publicationState: "pending" };
   }
   return guarded.value;
 }
-function saveState(store, record, state, note, links = {}, refusal) {
+function saveState(store, record2, state, note, links = {}, refusal2) {
   try {
-    const existing = store.get(record.activationId, record.attemptId) ?? record;
+    const existing = store.get(record2.activationId, record2.attemptId) ?? record2;
     store.save({
       ...existing,
       ...links,
       publication: {
         state,
         note,
-        ...refusal ? { refusal } : {},
+        ...refusal2 ? { refusal: refusal2 } : {},
         attempts: (existing.publication?.attempts ?? 0) + 1,
         updatedAt: Date.now()
       }
@@ -24511,27 +24511,27 @@ function safeSegment(id) {
     throw new Error(`unusable settlement id: ${id}`);
   return safe;
 }
-function isRuntimeRefused(record) {
-  return publicationStateOf(record) === "refused" && record.publication?.refusal === "runtime_lacks_settlement_surface";
+function isRuntimeRefused(record2) {
+  return publicationStateOf(record2) === "refused" && record2.publication?.refusal === "runtime_lacks_settlement_surface";
 }
-function isPendingPublication(record) {
-  return publicationStateOf(record) === "pending";
+function isPendingPublication(record2) {
+  return publicationStateOf(record2) === "pending";
 }
-function publicationStateOf(record) {
-  if (record.status !== "completed")
+function publicationStateOf(record2) {
+  if (record2.status !== "completed")
     return "not-applicable";
-  if (record.journalEntryId && record.receiptId)
+  if (record2.journalEntryId && record2.receiptId)
     return "published";
-  return record.publication?.state === "refused" ? "refused" : "pending";
+  return record2.publication?.state === "refused" ? "refused" : "pending";
 }
 function createFileSettlementStore(root) {
   const pathFor = (activationId, attemptId) => join20(root, safeSegment(activationId), `${safeSegment(attemptId)}.json`);
   return {
-    save(record) {
-      const path = pathFor(record.activationId, record.attemptId);
-      mkdirSync8(join20(root, safeSegment(record.activationId)), { recursive: true });
-      writeFileSync6(path, JSON.stringify(record), "utf8");
-      return `${safeSegment(record.activationId)}/${safeSegment(record.attemptId)}.json`;
+    save(record2) {
+      const path2 = pathFor(record2.activationId, record2.attemptId);
+      mkdirSync8(join20(root, safeSegment(record2.activationId)), { recursive: true });
+      writeFileSync6(path2, JSON.stringify(record2), "utf8");
+      return `${safeSegment(record2.activationId)}/${safeSegment(record2.attemptId)}.json`;
     },
     get(activationId, attemptId) {
       try {
@@ -24571,8 +24571,8 @@ function createFileSettlementStore(root) {
     }
     const out = [];
     for (const activation of activations) {
-      for (const record of readActivationDir(activation))
-        out.push(record);
+      for (const record2 of readActivationDir(activation))
+        out.push(record2);
     }
     return out;
   }
@@ -24613,10 +24613,10 @@ function extractTokenUsage(event) {
   for (const candidate of candidates) {
     if (!candidate || typeof candidate !== "object")
       continue;
-    const record = candidate;
+    const record2 = candidate;
     const usage = {};
     for (const key of TOKEN_USAGE_KEYS) {
-      const value = record[key];
+      const value = record2[key];
       if (typeof value === "number" && Number.isFinite(value))
         usage[key] = value;
     }
@@ -24819,6 +24819,16 @@ async function discoverDynamicExtensionTools(input) {
 function resolveWorkspace(cwd) {
   return workspaceIdentityFor(cwd);
 }
+async function bindActivationSession(session) {
+  if (typeof session.bindExtensions !== "function")
+    return { bound: false };
+  try {
+    await session.bindExtensions({});
+    return { bound: true };
+  } catch (error) {
+    return { bound: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
 function processAlive(pid) {
   try {
     process.kill(pid, 0);
@@ -24854,11 +24864,11 @@ function createNativeToolAdmission(input) {
 var FALLBACK_RETRYABLE_CLASSES = new Set(["rate_limit", "timeout", "transient"]);
 var NULL_FORENSIC_SINK = { emit: () => {} };
 function withFleetWake(base, wake) {
-  const emit = base.emit.bind(base);
+  const emit2 = base.emit.bind(base);
   return {
     ...base,
     emit(event) {
-      emit(event);
+      emit2(event);
       wake();
     }
   };
@@ -24966,7 +24976,7 @@ class NativeActivationHost {
   }
   assertActivationIdentityEnv(snapshot) {
     const previousTop = this.liveIdentityEnv[this.liveIdentityEnv.length - 1]?.activationId;
-    const index = this.liveIdentityEnv.findIndex((entry) => entry.activationId === snapshot.activationId);
+    const index = this.liveIdentityEnv.findIndex((entry2) => entry2.activationId === snapshot.activationId);
     if (index < 0) {
       this.applyActivationIdentityEnv(snapshot.activationId, snapshot.specialist, snapshot.workspace?.worktreePath ?? this.cwd);
       this.warnIdentityTakeover(snapshot.activationId, previousTop);
@@ -25017,7 +25027,7 @@ class NativeActivationHost {
     const attemptId = `att:${activationId.slice(4)}:1`;
     const participantId = `specialist::${request.specialist}`;
     let eventIssueRef = request.issueRef;
-    const emit = (name, payload) => this.forensics.emit({
+    const emit2 = (name, payload) => this.forensics.emit({
       activationId,
       attemptId,
       participantId,
@@ -25026,7 +25036,7 @@ class NativeActivationHost {
       name,
       payload
     });
-    emit("activation_requested", {
+    emit2("activation_requested", {
       requested_by: request.requestedByParticipantId,
       model_override: request.modelOverride ?? null,
       thinking_override: request.thinkingOverride ?? null
@@ -25041,25 +25051,25 @@ class NativeActivationHost {
     const releaseLeaseOnRefusal = () => {
       if (!releaseOwnLease)
         return;
-      const release = releaseOwnLease;
+      const release2 = releaseOwnLease;
       releaseOwnLease = null;
-      release();
+      release2();
     };
     let createdRefForRefusals;
     let releaseInlineClaimOnRefusal = null;
     const releaseClaimForRefusal = () => {
       if (!releaseInlineClaimOnRefusal)
         return;
-      const release = releaseInlineClaimOnRefusal;
+      const release2 = releaseInlineClaimOnRefusal;
       releaseInlineClaimOnRefusal = null;
-      release();
+      release2();
     };
     const reject = (reason, detail = {}) => {
       this.settleActivationIdentityEnv(activationId);
       releaseLeaseOnRefusal();
       releaseClaimForRefusal();
       removeWorkspaceOnRefusal();
-      emit("activation_rejected", { reason, ...detail });
+      emit2("activation_rejected", { reason, ...detail });
       throw new DispatchRejectedError(reason, {
         specialist: request.specialist,
         issueRef: request.issueRef,
@@ -25290,7 +25300,7 @@ class NativeActivationHost {
     }
     while ((!modelCheck.ok || !modelCheck.model) && modelIndex < modelChain.length - 1) {
       const skipped = modelChain[modelIndex];
-      emit("model_fallback", {
+      emit2("model_fallback", {
         from_model: skipped ?? null,
         to_model: modelChain[modelIndex + 1],
         error_class: "unavailable",
@@ -25326,7 +25336,7 @@ class NativeActivationHost {
 `);
     }
     const emitDiscoverySessionsSignal = () => {
-      emit("extension_discovery_sessions", {
+      emit2("extension_discovery_sessions", {
         fenced_sessions: 2,
         baseline_session: "builtin-enumeration (never prompted)",
         discovery_session: "extension-discovery (never prompted)",
@@ -25362,14 +25372,14 @@ class NativeActivationHost {
       refusedProvenance: discovery.refusedProvenance
     });
     if (discovery.refusedCollisions.length > 0 || discovery.refusedProvenance.length > 0) {
-      emit("extension_tools_refused", {
+      emit2("extension_tools_refused", {
         refused_collisions: discovery.refusedCollisions.join(",") || null,
         refused_provenance: discovery.refusedProvenance.join(",") || null,
         pinned: discovery.pinned.join(",") || null
       });
     }
     if (discovery.pinned.length > 0) {
-      emit("extension_tools_discovered", {
+      emit2("extension_tools_discovered", {
         pinned: discovery.pinned.join(","),
         sources: dynamicExtensions.join(",")
       });
@@ -25385,13 +25395,13 @@ class NativeActivationHost {
         });
       } catch (error) {
         if (error instanceof DispatchRejectedError) {
-          emit("lease_denied", {
+          emit2("lease_denied", {
             workspace: workspace.worktreePath,
             reason: error.reason,
             note: error.detail.holder
           });
         }
-        emit("activation_rejected", { reason: "workspace_lease_unavailable" });
+        emit2("activation_rejected", { reason: "workspace_lease_unavailable" });
         releaseClaimForRefusal();
         removeWorkspaceOnRefusal();
         if (error instanceof DispatchRejectedError && createdRefForRefusals) {
@@ -25402,13 +25412,13 @@ class NativeActivationHost {
         }
         throw error;
       }
-      emit("lease_acquired", { workspace: workspace.worktreePath, lease_waiver: leaseWaiver });
+      emit2("lease_acquired", { workspace: workspace.worktreePath, lease_waiver: leaseWaiver });
       releaseOwnLease = () => {
         try {
           release(workspace, activationId);
-          emit("lease_released", { workspace: workspace.worktreePath, reason: "activation_refused" });
+          emit2("lease_released", { workspace: workspace.worktreePath, reason: "activation_refused" });
         } catch (error) {
-          emit("lease_release_failed", {
+          emit2("lease_release_failed", {
             workspace: workspace.worktreePath,
             note: error instanceof Error ? error.message : String(error)
           });
@@ -25422,7 +25432,7 @@ class NativeActivationHost {
       responseFormat: execution.response_format,
       now: this.now
     });
-    emit("step_contract_compiled", {
+    emit2("step_contract_compiled", {
       root_work_ref: stepContract.rootWorkRef,
       inputs: stepContract.inputs.length,
       outputs: stepContract.outputs.length,
@@ -25467,7 +25477,7 @@ class NativeActivationHost {
     }
     if (rendered.mandatoryRules && rendered.mandatoryRulesBlock?.trim()) {
       const rules = rendered.mandatoryRules;
-      emit("mandatory_rules_injection", {
+      emit2("mandatory_rules_injection", {
         source: "mandatory_rules_injection",
         sets_loaded: rules.setsLoaded,
         rules_count: rules.ruleCount,
@@ -25506,7 +25516,7 @@ class NativeActivationHost {
         note: error instanceof Error ? error.message : String(error)
       });
     }
-    emit("activation_admitted", {
+    emit2("activation_admitted", {
       tier,
       access,
       lease_waiver: leaseWaiver,
@@ -25520,7 +25530,7 @@ class NativeActivationHost {
       tools: effectiveToolContract.toolsList.join(","),
       custom_tools: `${ASK_TOOL},${ESCALATE_TOOL}`
     });
-    emit("activation_starting", { pi_session_id: null });
+    emit2("activation_starting", { pi_session_id: null });
     const askTools = createAskTools(sdk, {
       transport: this.interactions,
       activationId,
@@ -25528,20 +25538,20 @@ class NativeActivationHost {
       self: participantId,
       parent: request.requestedByParticipantId,
       onAsk: (kind, body) => {
-        const record = this.registry.get(activationId);
-        if (record)
-          record.snapshot.state = kind === "escalation" ? "escalated" : "needs_reply";
-        if (record)
-          this.save(record.snapshot);
-        emit(kind === "escalation" ? "escalation_raised" : "clarification_requested", { body });
+        const record2 = this.registry.get(activationId);
+        if (record2)
+          record2.snapshot.state = kind === "escalation" ? "escalated" : "needs_reply";
+        if (record2)
+          this.save(record2.snapshot);
+        emit2(kind === "escalation" ? "escalation_raised" : "clarification_requested", { body });
       },
       onAnswered: (kind) => {
-        const record = this.registry.get(activationId);
-        if (record)
-          record.snapshot.state = "running";
-        if (record)
-          this.save(record.snapshot);
-        emit(kind === "escalation" ? "escalation_resolved" : "clarification_answered");
+        const record2 = this.registry.get(activationId);
+        if (record2)
+          record2.snapshot.state = "running";
+        if (record2)
+          this.save(record2.snapshot);
+        emit2(kind === "escalation" ? "escalation_resolved" : "clarification_answered");
       }
     });
     const guardedTools = createGuardedTools(sdk, {
@@ -25554,7 +25564,7 @@ class NativeActivationHost {
       })
     });
     if (guardedTools.unguardable.length > 0) {
-      emit("lease_denied", {
+      emit2("lease_denied", {
         workspace: workspace.worktreePath,
         note: `cannot guard mutating tools: ${guardedTools.unguardable.join(", ")}`
       });
@@ -25597,6 +25607,12 @@ class NativeActivationHost {
       };
       const createVerifiedSession = async (model, options = {}) => {
         const created = await sdk.createAgentSession({ ...baseSessionOptions, model });
+        const sessionBinding = await bindActivationSession(created.session);
+        if (claudeBridge) {
+          try {
+            await modelRuntime.refresh?.({ allowNetwork: false });
+          } catch {}
+        }
         const missing = missingPromisedTools(created.session);
         if (missing.length > 0) {
           created.session.dispose();
@@ -25606,7 +25622,7 @@ class NativeActivationHost {
             note: `the session did not expose ${missing.join(", ")}; the resolved contract promised them, ` + "and a native activation is never launched with a smaller tool surface than its contract declares"
           };
           if (options.viaFallback) {
-            emit("tool_contract_unsatisfied_on_fallback", { missing, model: model.id ?? null });
+            emit2("tool_contract_unsatisfied_on_fallback", { missing, model: model.id ?? null });
             throw new DispatchRejectedError("tool_contract_unsatisfied", {
               specialist: request.specialist,
               issueRef: request.issueRef,
@@ -25617,18 +25633,19 @@ class NativeActivationHost {
         }
         const provisionalPattern = provisionalModelPatterns.get(model);
         if (provisionalPattern) {
-          let resolvedModel;
+          let resolvedModel2;
           try {
             const scope = await sdk.resolveModelScopeWithDiagnostics([provisionalPattern], modelRuntime);
-            resolvedModel = scope.scopedModels?.[0]?.model;
+            resolvedModel2 = scope.scopedModels?.[0]?.model;
           } catch {
-            resolvedModel = undefined;
+            resolvedModel2 = undefined;
           }
-          if (!resolvedModel) {
+          if (!resolvedModel2) {
             created.session.dispose();
+            const registered = typeof modelRuntime.getProvider === "function" ? modelRuntime.getProvider(CLAUDE_BRIDGE_PROVIDER)?.id ?? null : null;
             const detail = {
               requestedModel: provisionalPattern,
-              note: `the "${CLAUDE_BRIDGE_PROVIDER}" provider did not register on the session runtime, so ` + `"${provisionalPattern}" does not exist; the extension is installed but did not load its provider`
+              note: `the "${CLAUDE_BRIDGE_PROVIDER}" provider did not register on the session runtime, so ` + `"${provisionalPattern}" does not exist; the extension is installed but did not load its provider` + ` (extension ${claudeBridgePath ?? "<unresolved>"}: ` + `${sessionBinding.bound ? "session_start emitted" : "session_start not emitted"}` + `${sessionBinding.error ? `, bind failed: ${sessionBinding.error}` : ""}` + `; provider "${CLAUDE_BRIDGE_PROVIDER}" is ${registered ? "registered" : "absent"} on the runtime)`
             };
             if (options.viaFallback) {
               throw new DispatchRejectedError("model_unavailable", {
@@ -25656,7 +25673,7 @@ class NativeActivationHost {
             return reject("model_unavailable", detail);
           }
           try {
-            await installModel.call(created.session, resolvedModel);
+            await installModel.call(created.session, resolvedModel2);
           } catch (error) {
             created.session.dispose();
             const detail = {
@@ -25675,7 +25692,7 @@ class NativeActivationHost {
           if (thinkingLevel) {
             const applyThinking = created.session.setThinkingLevel;
             if (typeof applyThinking !== "function") {
-              emit("thinking_level_unavailable", {
+              emit2("thinking_level_unavailable", {
                 requested_level: thinkingLevel,
                 note: "this pi SDK session has no setThinkingLevel; the run continues at the default thinking level"
               });
@@ -25766,9 +25783,9 @@ class NativeActivationHost {
         ...toolContractNotes.length > 0 ? { toolContractNotes } : {},
         ...configNotes.length > 0 ? { configNotes } : {}
       };
-      emit("activation_started", { pi_session_id: session.sessionId });
-      const unsubscribe = session.subscribe((event) => this.onSessionEvent(snapshot, event, emit));
-      const record = {
+      emit2("activation_started", { pi_session_id: session.sessionId });
+      const unsubscribe = session.subscribe((event) => this.onSessionEvent(snapshot, event, emit2));
+      const record2 = {
         snapshot,
         session,
         unsubscribe,
@@ -25783,16 +25800,16 @@ class NativeActivationHost {
         workItems,
         ...typeof binding.baseCommit === "string" && binding.baseCommit.trim() !== "" ? { bindingBaseCommit: binding.baseCommit } : {}
       };
-      const result = this.runWithFallback(record, {
+      const result = this.runWithFallback(record2, {
         modelChain,
         modelIndex,
         sdk,
         modelRuntime,
         initialPrompt: rendered.initial_prompt,
-        emit
+        emit: emit2
       });
-      record.result = result;
-      this.registry.register(record);
+      record2.result = result;
+      this.registry.register(record2);
       this.save(snapshot);
       releaseOwnLease = null;
       return {
@@ -25859,7 +25876,7 @@ class NativeActivationHost {
 `);
     }
   }
-  onSessionEvent(snapshot, event, emit) {
+  onSessionEvent(snapshot, event, emit2) {
     snapshot.lastActivityAt = this.now();
     const usage = isNativeUsageEvent(event) ? extractTokenUsage(event) : undefined;
     if (usage) {
@@ -25886,10 +25903,10 @@ class NativeActivationHost {
         this.assertActivationIdentityEnv(snapshot);
         snapshot.state = "running";
         this.save(snapshot);
-        emit("turn_started");
+        emit2("turn_started");
         break;
       case "agent_end":
-        emit("turn_completed", { will_retry: Boolean(event.willRetry) });
+        emit2("turn_completed", { will_retry: Boolean(event.willRetry) });
         break;
       case "turn_end":
         snapshot.turnCount = (snapshot.turnCount ?? 0) + 1;
@@ -25901,10 +25918,10 @@ class NativeActivationHost {
         this.releaseIfWriter(snapshot, "settled");
         if (unframedWake) {
           this.wakeDirty.delete(snapshot.activationId);
-          const record = this.registry.get(snapshot.activationId);
-          if (record && !this.wakeFinalising.has(snapshot.activationId)) {
+          const record2 = this.registry.get(snapshot.activationId);
+          if (record2 && !this.wakeFinalising.has(snapshot.activationId)) {
             this.wakeFinalising.add(snapshot.activationId);
-            this.finalizeWakeTurn(snapshot, record, emit).finally(() => {
+            this.finalizeWakeTurn(snapshot, record2, emit2).finally(() => {
               this.wakeFinalising.delete(snapshot.activationId);
             });
           } else {
@@ -25913,16 +25930,16 @@ class NativeActivationHost {
         }
         break;
       case "auto_retry_start":
-        emit("retry_started", { attempt: event.attempt, max_attempts: event.maxAttempts });
+        emit2("retry_started", { attempt: event.attempt, max_attempts: event.maxAttempts });
         break;
       case "auto_retry_end":
-        emit("retry_completed", { success: event.success, attempt: event.attempt });
+        emit2("retry_completed", { success: event.success, attempt: event.attempt });
         break;
       case "compaction_start":
-        emit("compaction_started", { reason: event.reason });
+        emit2("compaction_started", { reason: event.reason });
         break;
       case "compaction_end":
-        emit("compaction_completed", { reason: event.reason, aborted: event.aborted });
+        emit2("compaction_completed", { reason: event.reason, aborted: event.aborted });
         break;
       case "tool_execution_start":
         this.noteToolStart(snapshot, event);
@@ -25939,18 +25956,18 @@ class NativeActivationHost {
         break;
     }
   }
-  async captureSessionStats(session, emit) {
+  async captureSessionStats(session, emit2) {
     const timeoutMs = this.sessionStatsTimeoutMs ?? SESSION_STATS_TIMEOUT_MS;
     const piVersion = this.piVersion ?? resolvePiVersion();
     const { stats, error } = await captureNativeSessionStats(session, timeoutMs);
     if (stats) {
-      emit("session_stats_captured", {
+      emit2("session_stats_captured", {
         session_stats: stats,
         ...piVersion ? { pi_version: piVersion } : {}
       });
       return;
     }
-    emit("session_stats_failed", {
+    emit2("session_stats_failed", {
       error: error ?? "session stats unavailable",
       timeout_ms: timeoutMs,
       ...piVersion ? { pi_version: piVersion } : {}
@@ -25978,23 +25995,23 @@ class NativeActivationHost {
     const label = text?.split(`
 `)[0]?.trim() || (typeof details?.summary === "string" ? details.summary : undefined);
     if (taskId) {
-      const tasks = this.backgroundTasks.get(activationId) ?? new Map;
+      const tasks2 = this.backgroundTasks.get(activationId) ?? new Map;
       if (status !== undefined && TERMINAL_BACKGROUND_STATUSES.has(status)) {
-        const existing = tasks.get(taskId);
+        const existing = tasks2.get(taskId);
         if (existing)
           existing.live = false;
-        this.backgroundTasks.set(activationId, tasks);
+        this.backgroundTasks.set(activationId, tasks2);
         return;
       }
       if (status === undefined || !LIVE_BACKGROUND_STATUSES.has(status))
         return;
-      tasks.set(taskId, {
+      tasks2.set(taskId, {
         id: taskId,
         label: label ?? taskId,
         deadlineMs: this.now() + BACKGROUND_TASK_MAX_HOLD_MS,
         live: true
       });
-      this.backgroundTasks.set(activationId, tasks);
+      this.backgroundTasks.set(activationId, tasks2);
       return;
     }
     const pid = Number(text?.match(/^PID: (\d+)$/m)?.[1]);
@@ -26073,18 +26090,18 @@ class NativeActivationHost {
     if (elapsed <= thresholdMs)
       return;
     watch.warned = true;
-    const record = this.registry.get(activationId);
-    if (!record || record.snapshot.state !== "starting" && record.snapshot.state !== "running") {
+    const record2 = this.registry.get(activationId);
+    if (!record2 || record2.snapshot.state !== "starting" && record2.snapshot.state !== "running") {
       this.stopToolDurationWatch(activationId);
       return;
     }
     try {
       this.forensics.emit({
         activationId,
-        attemptId: record.snapshot.attemptId,
-        participantId: record.snapshot.participantId,
-        specialist: record.snapshot.specialist,
-        beadId: record.snapshot.issueRef,
+        attemptId: record2.snapshot.attemptId,
+        participantId: record2.snapshot.participantId,
+        specialist: record2.snapshot.specialist,
+        beadId: record2.snapshot.issueRef,
         name: "stale_warning",
         payload: {
           reason: "tool_duration",
@@ -26102,27 +26119,27 @@ class NativeActivationHost {
     clearInterval(watch.timer);
     this.toolDurationWatch.delete(activationId);
   }
-  async runToSettled(snapshot, session, initialPrompt, emit, record) {
+  async runToSettled(snapshot, session, initialPrompt, emit2, record2) {
     this.framedTurns.add(snapshot.activationId);
     let settlementRecorded = false;
     const recordSettlementOnce = async () => {
       if (settlementRecorded)
         return;
       settlementRecorded = true;
-      await this.captureSessionStats(session, emit);
+      await this.captureSessionStats(session, emit2);
     };
     try {
       await session.prompt(initialPrompt);
       await session.waitForIdle();
       await recordSettlementOnce();
-      return this.settleTurnTail(snapshot, session, emit, record, { notifyWake: false });
+      return this.settleTurnTail(snapshot, session, emit2, record2, { notifyWake: false });
     } catch (error) {
       snapshot.state = "failed";
       this.save(snapshot);
       this.settleActivationIdentityEnv(snapshot.activationId);
       const message = error instanceof Error ? error.message : String(error);
       await recordSettlementOnce();
-      emit("activation_failed", { error: message });
+      emit2("activation_failed", { error: message });
       this.releaseIfWriter(snapshot, "failed");
       const thrownResult = {
         activationId: snapshot.activationId,
@@ -26146,18 +26163,18 @@ class NativeActivationHost {
         fallbackUsed: false,
         completedAt: this.now()
       };
-      await this.publishTerminalSettlement(snapshot, thrownResult, record, emit);
+      await this.publishTerminalSettlement(snapshot, thrownResult, record2, emit2);
       return thrownResult;
     }
   }
-  async settleTurnTail(snapshot, session, emit, record, opts) {
+  async settleTurnTail(snapshot, session, emit2, record2, opts) {
     const last = lastAssistantMessage(session.messages);
     if (last && (last.stopReason === "error" || last.stopReason === "aborted")) {
       const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
       snapshot.state = "failed";
       this.save(snapshot);
       this.settleActivationIdentityEnv(snapshot.activationId);
-      emit("activation_failed", { error: detail, stop_reason: last.stopReason });
+      emit2("activation_failed", { error: detail, stop_reason: last.stopReason });
       const failedResult = {
         activationId: snapshot.activationId,
         participantId: snapshot.participantId,
@@ -26180,24 +26197,24 @@ class NativeActivationHost {
         fallbackUsed: false,
         completedAt: this.now()
       };
-      await this.publishTerminalSettlement(snapshot, failedResult, record, emit);
+      await this.publishTerminalSettlement(snapshot, failedResult, record2, emit2);
       if (opts.notifyWake)
         this.notifyWakeSettlement(failedResult);
       return failedResult;
     }
     const output = textOf(last);
-    emit("activation_settled");
-    emit("output_validation_started");
+    emit2("activation_settled");
+    emit2("output_validation_started");
     const pendingTasks = this.liveBackgroundTasks(snapshot.activationId);
     const validation = pendingTasks.length > 0 ? { valid: false, errors: [`background tasks still running: ${pendingTasks.join(", ")}; resume the activation after they finish`] } : output.trim().length > 0 ? { valid: true } : { valid: false, errors: ["empty output: specialist produced no output"] };
     if (validation.valid) {
-      emit("output_validation_passed");
+      emit2("output_validation_passed");
     } else {
-      emit("output_validation_failed", { errors: validation.errors });
+      emit2("output_validation_failed", { errors: validation.errors });
     }
     snapshot.state = "settled";
     this.save(snapshot);
-    emit("activation_completed", { pi_session_id: session.sessionId, output });
+    emit2("activation_completed", { pi_session_id: session.sessionId, output });
     this.releaseIfWriter(snapshot, "completed");
     const completedResult = {
       activationId: snapshot.activationId,
@@ -26221,7 +26238,7 @@ class NativeActivationHost {
       fallbackUsed: false,
       completedAt: this.now()
     };
-    await this.publishTerminalSettlement(snapshot, completedResult, record, emit);
+    await this.publishTerminalSettlement(snapshot, completedResult, record2, emit2);
     if (opts.notifyWake)
       this.notifyWakeSettlement(completedResult);
     return completedResult;
@@ -26230,11 +26247,11 @@ class NativeActivationHost {
     if (snapshot.state === "settled")
       this.wakeDirty.add(snapshot.activationId);
   }
-  async finalizeWakeTurn(snapshot, record, emit) {
+  async finalizeWakeTurn(snapshot, record2, emit2) {
     try {
-      const session = record.session;
-      await this.captureSessionStats(session, emit);
-      this.settleTurnTail(snapshot, session, emit, record, { notifyWake: true });
+      const session = record2.session;
+      await this.captureSessionStats(session, emit2);
+      this.settleTurnTail(snapshot, session, emit2, record2, { notifyWake: true });
     } catch {} finally {
       this.settleActivationIdentityEnv(snapshot.activationId);
     }
@@ -26247,7 +26264,7 @@ class NativeActivationHost {
       notify(result);
     } catch {}
   }
-  async publishTerminalSettlement(snapshot, result, record, emit) {
+  async publishTerminalSettlement(snapshot, result, record2, emit2) {
     this.wakeDirty.delete(snapshot.activationId);
     this.framedTurns.delete(snapshot.activationId);
     try {
@@ -26264,29 +26281,29 @@ class NativeActivationHost {
         repositoryRoot: snapshot.workspace.repositoryRoot,
         worktreePath: snapshot.workspace.worktreePath,
         ...snapshot.workspace.branch ? { branch: snapshot.workspace.branch } : {},
-        ...record.bindingBaseCommit ? { bindingBaseCommit: record.bindingBaseCommit } : {}
+        ...record2.bindingBaseCommit ? { bindingBaseCommit: record2.bindingBaseCommit } : {}
       };
       await publishSettlement({
-        boundary: record.workItems,
+        boundary: record2.workItems,
         store: this.settlements,
         subject,
         status: result.status,
         output: result.output,
         validation: result.validation,
         coordinator: {
-          ...record.lineage.coordinatorParticipantId ? { participantId: record.lineage.coordinatorParticipantId } : {},
-          ...record.lineage.coordinatorSessionId ? { sessionId: record.lineage.coordinatorSessionId } : {}
+          ...record2.lineage.coordinatorParticipantId ? { participantId: record2.lineage.coordinatorParticipantId } : {},
+          ...record2.lineage.coordinatorSessionId ? { sessionId: record2.lineage.coordinatorSessionId } : {}
         },
         env: this.env,
         now: this.now(),
-        emit
+        emit: emit2
       });
     } catch {}
     this.stopToolDurationWatch(snapshot.activationId);
     if (result.status !== "uncertain")
       this.forgetBackgroundTasks(snapshot.activationId);
   }
-  async runWithFallback(record, ctx) {
+  async runWithFallback(record2, ctx) {
     let index = ctx.modelIndex;
     let fallbackUsed = index > 0;
     let heldFailure;
@@ -26305,23 +26322,23 @@ class NativeActivationHost {
       ctx.emit("activation_failed", payload);
     };
     try {
-      return await this.walkFallbackChain(record, ctx, legEmit, flushFailure, index, fallbackUsed);
+      return await this.walkFallbackChain(record2, ctx, legEmit, flushFailure, index, fallbackUsed);
     } finally {
       flushFailure(false);
-      this.settleActivationIdentityEnv(record.snapshot.activationId);
+      this.settleActivationIdentityEnv(record2.snapshot.activationId);
     }
   }
-  async walkFallbackChain(record, ctx, legEmit, flushFailure, index, fallbackUsed) {
-    let result = await this.runToSettled(record.snapshot, record.session, ctx.initialPrompt, legEmit, record);
+  async walkFallbackChain(record2, ctx, legEmit, flushFailure, index, fallbackUsed) {
+    let result = await this.runToSettled(record2.snapshot, record2.session, ctx.initialPrompt, legEmit, record2);
     while (result.status === "failed" && index < ctx.modelChain.length - 1) {
-      if (this.registry.get(record.snapshot.activationId) !== record)
+      if (this.registry.get(record2.snapshot.activationId) !== record2)
         break;
       const detail = result.validation.errors?.[0] ?? "unknown failure";
       const errorClass = classifyFallbackError(detail);
       if (!FALLBACK_RETRYABLE_CLASSES.has(errorClass))
         break;
       const nextModel = ctx.modelChain[index + 1];
-      const fromModel = record.snapshot.resolvedModel;
+      const fromModel = record2.snapshot.resolvedModel;
       if (isBridgedModel(fromModel)) {
         ctx.emit("model_fallback", bridgedFallbackSkipEvent({
           fromModel,
@@ -26351,23 +26368,23 @@ class NativeActivationHost {
         attempt_n: index + 2,
         resolved_model: check.resolvedModel ?? nextModel
       });
-      if (record.snapshot.access === "write" || record.snapshot.leaseWaiver) {
+      if (record2.snapshot.access === "write" || record2.snapshot.leaseWaiver) {
         try {
           acquire({
-            workspace: record.snapshot.workspace,
-            activationId: record.snapshot.activationId,
-            attemptId: record.snapshot.attemptId,
-            specialist: record.snapshot.specialist,
-            ...record.snapshot.leaseWaiver ? { leaseWaiver: true } : {}
+            workspace: record2.snapshot.workspace,
+            activationId: record2.snapshot.activationId,
+            attemptId: record2.snapshot.attemptId,
+            specialist: record2.snapshot.specialist,
+            ...record2.snapshot.leaseWaiver ? { leaseWaiver: true } : {}
           });
         } catch (error) {
           if (error instanceof DispatchRejectedError) {
             this.forensics.emit({
-              activationId: record.snapshot.activationId,
-              attemptId: record.snapshot.attemptId,
-              participantId: record.snapshot.participantId,
-              specialist: record.snapshot.specialist,
-              beadId: record.snapshot.issueRef,
+              activationId: record2.snapshot.activationId,
+              attemptId: record2.snapshot.attemptId,
+              participantId: record2.snapshot.participantId,
+              specialist: record2.snapshot.specialist,
+              beadId: record2.snapshot.issueRef,
               name: "lease_denied",
               payload: { reason: error.reason, note: error.detail.holder, on: "fallback" }
             });
@@ -26385,9 +26402,9 @@ class NativeActivationHost {
       }
       let nextSession;
       try {
-        nextSession = await record.createSession(check.model);
+        nextSession = await record2.createSession(check.model);
       } catch (error) {
-        this.releaseIfWriter(record.snapshot, "fallback_session_unavailable");
+        this.releaseIfWriter(record2.snapshot, "fallback_session_unavailable");
         ctx.emit("model_fallback", {
           from_model: fromModel,
           to_model: nextModel,
@@ -26399,32 +26416,32 @@ class NativeActivationHost {
         break;
       }
       try {
-        record.session.dispose();
+        record2.session.dispose();
       } catch {}
-      record.unsubscribe();
-      record.session = nextSession;
-      record.snapshot.resolvedModel = check.resolvedModel ?? nextModel;
-      record.snapshot.piSessionId = nextSession.sessionId;
-      record.snapshot.state = "starting";
-      record.snapshot.lastActivityAt = this.now();
-      this.save(record.snapshot);
-      record.unsubscribe = nextSession.subscribe((event) => this.onSessionEvent(record.snapshot, event, ctx.emit));
+      record2.unsubscribe();
+      record2.session = nextSession;
+      record2.snapshot.resolvedModel = check.resolvedModel ?? nextModel;
+      record2.snapshot.piSessionId = nextSession.sessionId;
+      record2.snapshot.state = "starting";
+      record2.snapshot.lastActivityAt = this.now();
+      this.save(record2.snapshot);
+      record2.unsubscribe = nextSession.subscribe((event) => this.onSessionEvent(record2.snapshot, event, ctx.emit));
       flushFailure(true);
       ctx.emit("activation_started", { pi_session_id: nextSession.sessionId });
       index += 1;
       fallbackUsed = true;
-      result = await this.runToSettled(record.snapshot, record.session, ctx.initialPrompt, legEmit, record);
+      result = await this.runToSettled(record2.snapshot, record2.session, ctx.initialPrompt, legEmit, record2);
     }
     result.fallbackUsed = fallbackUsed;
     return result;
   }
   async retry(activationId, opts) {
-    const record = this.registry.get(activationId);
-    if (!record) {
+    const record2 = this.registry.get(activationId);
+    if (!record2) {
       throw new DispatchRejectedError("unknown_activation", { activationId });
     }
-    if (!RETRYABLE_STATES.has(record.snapshot.state)) {
-      const state = record.snapshot.state;
+    if (!RETRYABLE_STATES.has(record2.snapshot.state)) {
+      const state = record2.snapshot.state;
       const hint = state === "waiting" || state === "settled" || state === "needs_reply" || state === "escalated" ? `Activation ${activationId} is ${state} — use resume, which keeps the live session.` : `Activation ${activationId} is ${state} — steer it or stop it first.`;
       throw new DispatchRejectedError("not_resumable", {
         activationId,
@@ -26437,7 +26454,7 @@ class NativeActivationHost {
     if (overrideName) {
       const sdk = await this.loadSdk();
       const retryRuntime = await createGateModelRuntime(sdk);
-      const retrySpecialist = await this.loader.get(record.snapshot.specialist).catch(() => {
+      const retrySpecialist = await this.loader.get(record2.snapshot.specialist).catch(() => {
         return;
       });
       const retryBridge = retrySpecialist ? claudeBridgeRouteEnabled(retrySpecialist.specialist.execution) : false;
@@ -26453,23 +26470,23 @@ class NativeActivationHost {
       overrideModel = check.model;
       overrideResolved = check.resolvedModel ?? overrideName;
     }
-    const attemptId = nextAttemptId(record.snapshot.attemptId);
-    if (record.snapshot.access === "write" || record.snapshot.leaseWaiver) {
+    const attemptId = nextAttemptId(record2.snapshot.attemptId);
+    if (record2.snapshot.access === "write" || record2.snapshot.leaseWaiver) {
       try {
         acquire({
-          workspace: record.snapshot.workspace,
+          workspace: record2.snapshot.workspace,
           activationId,
           attemptId,
-          specialist: record.snapshot.specialist
+          specialist: record2.snapshot.specialist
         });
       } catch (error) {
         if (error instanceof DispatchRejectedError) {
           this.forensics.emit({
             activationId,
             attemptId,
-            participantId: record.snapshot.participantId,
-            specialist: record.snapshot.specialist,
-            beadId: record.snapshot.issueRef,
+            participantId: record2.snapshot.participantId,
+            specialist: record2.snapshot.specialist,
+            beadId: record2.snapshot.issueRef,
             name: "lease_denied",
             payload: { reason: error.reason, note: error.detail.holder, on: "retry" }
           });
@@ -26477,16 +26494,16 @@ class NativeActivationHost {
         throw error;
       }
     }
-    record.snapshot.attemptId = attemptId;
-    record.snapshot.state = "starting";
-    record.snapshot.lastActivityAt = this.now();
-    this.save(record.snapshot);
-    const emit = (name, payload) => this.forensics.emit({
+    record2.snapshot.attemptId = attemptId;
+    record2.snapshot.state = "starting";
+    record2.snapshot.lastActivityAt = this.now();
+    this.save(record2.snapshot);
+    const emit2 = (name, payload) => this.forensics.emit({
       activationId,
       attemptId,
-      participantId: record.snapshot.participantId,
-      specialist: record.snapshot.specialist,
-      beadId: record.snapshot.issueRef,
+      participantId: record2.snapshot.participantId,
+      specialist: record2.snapshot.specialist,
+      beadId: record2.snapshot.issueRef,
       name,
       payload
     });
@@ -26494,47 +26511,47 @@ class NativeActivationHost {
     if (overrideModel && overrideResolved && overrideName) {
       let nextSession;
       try {
-        nextSession = await record.createSession(overrideModel);
+        nextSession = await record2.createSession(overrideModel);
       } catch (error) {
-        record.snapshot.state = "failed";
-        record.snapshot.lastActivityAt = this.now();
-        this.save(record.snapshot);
-        this.releaseIfWriter(record.snapshot, "tool_contract_unsatisfied_on_retry");
+        record2.snapshot.state = "failed";
+        record2.snapshot.lastActivityAt = this.now();
+        this.save(record2.snapshot);
+        this.releaseIfWriter(record2.snapshot, "tool_contract_unsatisfied_on_retry");
         throw error;
       }
       try {
-        record.session.dispose();
+        record2.session.dispose();
       } catch {}
-      record.unsubscribe();
-      record.session = nextSession;
-      record.snapshot.requestedModel = overrideName;
-      record.snapshot.resolvedModel = overrideResolved;
-      record.snapshot.modelOverride = true;
-      record.snapshot.piSessionId = nextSession.sessionId;
+      record2.unsubscribe();
+      record2.session = nextSession;
+      record2.snapshot.requestedModel = overrideName;
+      record2.snapshot.resolvedModel = overrideResolved;
+      record2.snapshot.modelOverride = true;
+      record2.snapshot.piSessionId = nextSession.sessionId;
       reusedSession = false;
     } else {
-      record.unsubscribe();
+      record2.unsubscribe();
     }
-    record.unsubscribe = record.session.subscribe((event) => this.onSessionEvent(record.snapshot, event, emit));
-    emit("activation_retried", {
-      requested_model: record.snapshot.requestedModel ?? null,
-      resolved_model: record.snapshot.resolvedModel,
-      model_override: record.snapshot.modelOverride,
+    record2.unsubscribe = record2.session.subscribe((event) => this.onSessionEvent(record2.snapshot, event, emit2));
+    emit2("activation_retried", {
+      requested_model: record2.snapshot.requestedModel ?? null,
+      resolved_model: record2.snapshot.resolvedModel,
+      model_override: record2.snapshot.modelOverride,
       reused_session: reusedSession
     });
-    const result = this.runToSettled(record.snapshot, record.session, opts?.prompt ?? record.initialPrompt, emit, record).finally(() => this.settleActivationIdentityEnv(activationId));
-    record.result = result;
+    const result = this.runToSettled(record2.snapshot, record2.session, opts?.prompt ?? record2.initialPrompt, emit2, record2).finally(() => this.settleActivationIdentityEnv(activationId));
+    record2.result = result;
     return {
       activationId,
-      participantId: record.snapshot.participantId,
+      participantId: record2.snapshot.participantId,
       attemptId,
-      specialist: record.snapshot.specialist,
-      issueId: record.snapshot.issueId,
-      issueRef: record.snapshot.issueRef,
-      access: record.snapshot.access,
-      workspace: record.snapshot.workspace,
-      resolvedModel: record.snapshot.resolvedModel,
-      stepContract: record.stepContract,
+      specialist: record2.snapshot.specialist,
+      issueId: record2.snapshot.issueId,
+      issueRef: record2.snapshot.issueRef,
+      access: record2.snapshot.access,
+      workspace: record2.snapshot.workspace,
+      resolvedModel: record2.snapshot.resolvedModel,
+      stepContract: record2.stepContract,
       result
     };
   }
@@ -26598,21 +26615,21 @@ class NativeActivationHost {
     }
   }
   admitToolCall(activationId, toolName) {
-    const record = this.registry.get(activationId);
-    if (!record)
+    const record2 = this.registry.get(activationId);
+    if (!record2)
       return { allow: false, reason: `unknown activation ${activationId}` };
     const verdict = admitToolCall({
       toolName,
-      workspace: record.snapshot.workspace,
+      workspace: record2.snapshot.workspace,
       activationId
     });
     if (!verdict.allow) {
       this.forensics.emit({
         activationId,
-        attemptId: record.snapshot.attemptId,
-        participantId: record.snapshot.participantId,
-        specialist: record.snapshot.specialist,
-        beadId: record.snapshot.issueRef,
+        attemptId: record2.snapshot.attemptId,
+        participantId: record2.snapshot.participantId,
+        specialist: record2.snapshot.specialist,
+        beadId: record2.snapshot.issueRef,
         name: "tool_blocked",
         payload: { tool: toolName, note: verdict.reason }
       });
@@ -26661,11 +26678,11 @@ class NativeActivationHost {
   waitForFleetChange(timeoutMs, sinceEpoch = this.fleetEpoch) {
     if (this.fleetEpoch > sinceEpoch)
       return Promise.resolve("change");
-    return new Promise((resolve) => {
+    return new Promise((resolve11) => {
       const settle = (outcome) => {
         clearTimeout(timer);
         this.fleetWaiters.delete(wake);
-        resolve(outcome);
+        resolve11(outcome);
       };
       const wake = () => settle("change");
       const timer = setTimeout(() => settle("timeout"), Math.max(0, timeoutMs));
@@ -26679,12 +26696,12 @@ class NativeActivationHost {
     this.fleetWaiters.clear();
   }
   async stop(activationId, reason = "operator request") {
-    const record = this.registry.get(activationId);
-    if (!record)
+    const record2 = this.registry.get(activationId);
+    if (!record2)
       return;
-    record.snapshot.state = "stopping";
+    record2.snapshot.state = "stopping";
     try {
-      await record.session.abort();
+      await record2.session.abort();
     } finally {
       this.stopToolDurationWatch(activationId);
       this.toolDurationWarnMsByActivation.delete(activationId);
@@ -26693,17 +26710,17 @@ class NativeActivationHost {
       this.wakeDirty.delete(activationId);
       this.wakeFinalising.delete(activationId);
       this.framedTurns.delete(activationId);
-      record.unsubscribe();
-      record.session.dispose();
-      record.snapshot.state = "stopped";
-      this.forget(record.snapshot.activationId);
-      this.releaseIfWriter(record.snapshot, reason);
+      record2.unsubscribe();
+      record2.session.dispose();
+      record2.snapshot.state = "stopped";
+      this.forget(record2.snapshot.activationId);
+      this.releaseIfWriter(record2.snapshot, reason);
       this.forensics.emit({
         activationId,
-        attemptId: record.snapshot.attemptId,
-        participantId: record.snapshot.participantId,
-        specialist: record.snapshot.specialist,
-        beadId: record.snapshot.issueRef,
+        attemptId: record2.snapshot.attemptId,
+        participantId: record2.snapshot.participantId,
+        specialist: record2.snapshot.specialist,
+        beadId: record2.snapshot.issueRef,
         name: "activation_disposed",
         payload: { reason }
       });
@@ -26711,66 +26728,66 @@ class NativeActivationHost {
     }
   }
   async steer(activationId, message) {
-    const record = this.registry.get(activationId);
-    if (!record) {
+    const record2 = this.registry.get(activationId);
+    if (!record2) {
       throw new DispatchRejectedError("unknown_activation", { activationId });
     }
-    if (record.snapshot.state !== "running" && record.snapshot.state !== "starting") {
-      const state = record.snapshot.state;
+    if (record2.snapshot.state !== "running" && record2.snapshot.state !== "starting") {
+      const state = record2.snapshot.state;
       const hint = state === "settled" || state === "waiting" || state === "needs_reply" || state === "escalated" ? `Activation ${activationId} is ${state} — use resume, which keeps the live session.` : state === "failed" ? `Activation ${activationId} is failed — use retry to re-run it in place.` : `Activation ${activationId} is ${state} — steer it or stop it first.`;
       throw new DispatchRejectedError("not_steerable", {
         activationId,
         note: `state is "${state}". steer only redirects running activations. ${hint}`
       });
     }
-    await record.session.steer(message);
+    await record2.session.steer(message);
     this.forensics.emit({
       activationId,
-      attemptId: record.snapshot.attemptId,
-      participantId: record.snapshot.participantId,
-      specialist: record.snapshot.specialist,
-      beadId: record.snapshot.issueRef,
+      attemptId: record2.snapshot.attemptId,
+      participantId: record2.snapshot.participantId,
+      specialist: record2.snapshot.specialist,
+      beadId: record2.snapshot.issueRef,
       name: "activation_steered",
       payload: {}
     });
   }
   attach(activationId, listener) {
-    const record = this.registry.get(activationId);
-    if (!record)
+    const record2 = this.registry.get(activationId);
+    if (!record2)
       return;
-    return { snapshot: record.snapshot, detach: record.session.subscribe(listener) };
+    return { snapshot: record2.snapshot, detach: record2.session.subscribe(listener) };
   }
   return(attachment) {
     attachment.detach();
   }
   async resume(activationId, prompt) {
-    const record = this.registry.get(activationId);
-    if (!record) {
+    const record2 = this.registry.get(activationId);
+    if (!record2) {
       throw new DispatchRejectedError("unknown_activation", { activationId });
     }
-    if (!RESUMABLE_STATES.has(record.snapshot.state)) {
+    if (!RESUMABLE_STATES.has(record2.snapshot.state)) {
       throw new DispatchRejectedError("not_resumable", {
         activationId,
-        note: `state is "${record.snapshot.state}"`
+        note: `state is "${record2.snapshot.state}"`
       });
     }
-    const attemptId = nextAttemptId(record.snapshot.attemptId);
-    if (record.snapshot.access === "write" || record.snapshot.leaseWaiver) {
+    const attemptId = nextAttemptId(record2.snapshot.attemptId);
+    if (record2.snapshot.access === "write" || record2.snapshot.leaseWaiver) {
       try {
         acquire({
-          workspace: record.snapshot.workspace,
+          workspace: record2.snapshot.workspace,
           activationId,
           attemptId,
-          specialist: record.snapshot.specialist
+          specialist: record2.snapshot.specialist
         });
       } catch (error) {
         if (error instanceof DispatchRejectedError) {
           this.forensics.emit({
             activationId,
             attemptId,
-            participantId: record.snapshot.participantId,
-            specialist: record.snapshot.specialist,
-            beadId: record.snapshot.issueRef,
+            participantId: record2.snapshot.participantId,
+            specialist: record2.snapshot.specialist,
+            beadId: record2.snapshot.issueRef,
             name: "lease_denied",
             payload: { reason: error.reason, note: error.detail.holder, on: "resume" }
           });
@@ -26778,40 +26795,40 @@ class NativeActivationHost {
         throw error;
       }
     }
-    record.snapshot.attemptId = attemptId;
-    record.snapshot.state = "starting";
-    this.save(record.snapshot);
-    const emit = (name, payload) => this.forensics.emit({
+    record2.snapshot.attemptId = attemptId;
+    record2.snapshot.state = "starting";
+    this.save(record2.snapshot);
+    const emit2 = (name, payload) => this.forensics.emit({
       activationId,
       attemptId,
-      participantId: record.snapshot.participantId,
-      specialist: record.snapshot.specialist,
-      beadId: record.snapshot.issueRef,
+      participantId: record2.snapshot.participantId,
+      specialist: record2.snapshot.specialist,
+      beadId: record2.snapshot.issueRef,
       name,
       payload
     });
-    emit("activation_resumed", {
-      requested_model: record.snapshot.requestedModel,
-      resolved_model: record.snapshot.resolvedModel,
-      model_override: record.snapshot.modelOverride,
-      thinking_level: record.snapshot.thinkingLevel ?? null,
-      thinking_override: record.snapshot.thinkingOverride
+    emit2("activation_resumed", {
+      requested_model: record2.snapshot.requestedModel,
+      resolved_model: record2.snapshot.resolvedModel,
+      model_override: record2.snapshot.modelOverride,
+      thinking_level: record2.snapshot.thinkingLevel ?? null,
+      thinking_override: record2.snapshot.thinkingOverride
     });
-    record.unsubscribe();
-    record.unsubscribe = record.session.subscribe((event) => this.onSessionEvent(record.snapshot, event, emit));
-    const result = this.runToSettled(record.snapshot, record.session, prompt, emit, record).finally(() => this.settleActivationIdentityEnv(activationId));
-    record.result = result;
+    record2.unsubscribe();
+    record2.unsubscribe = record2.session.subscribe((event) => this.onSessionEvent(record2.snapshot, event, emit2));
+    const result = this.runToSettled(record2.snapshot, record2.session, prompt, emit2, record2).finally(() => this.settleActivationIdentityEnv(activationId));
+    record2.result = result;
     return {
       activationId,
-      participantId: record.snapshot.participantId,
+      participantId: record2.snapshot.participantId,
       attemptId,
-      specialist: record.snapshot.specialist,
-      issueId: record.snapshot.issueId,
-      issueRef: record.snapshot.issueRef,
-      access: record.snapshot.access,
-      workspace: record.snapshot.workspace,
-      resolvedModel: record.snapshot.resolvedModel,
-      stepContract: record.stepContract,
+      specialist: record2.snapshot.specialist,
+      issueId: record2.snapshot.issueId,
+      issueRef: record2.snapshot.issueRef,
+      access: record2.snapshot.access,
+      workspace: record2.snapshot.workspace,
+      resolvedModel: record2.snapshot.resolvedModel,
+      stepContract: record2.stepContract,
       result
     };
   }
@@ -26911,15 +26928,15 @@ import { createHash as createHash6 } from "node:crypto";
 import { readFileSync as readFileSync14 } from "node:fs";
 var BUILD_ID_BYTES = 12;
 var UNKNOWN_BUILD_ID = "unknown";
-function hashFileBytes(path) {
-  return createHash6("sha256").update(readFileSync14(path)).digest("hex");
+function hashFileBytes(path2) {
+  return createHash6("sha256").update(readFileSync14(path2)).digest("hex");
 }
 function shortBuildId(hash) {
   return hash.slice(0, BUILD_ID_BYTES);
 }
-function readBuildId(path) {
+function readBuildId(path2) {
   try {
-    return shortBuildId(hashFileBytes(path));
+    return shortBuildId(hashFileBytes(path2));
   } catch {
     return UNKNOWN_BUILD_ID;
   }
@@ -27305,9 +27322,9 @@ function toActivationResultView(result) {
 }
 var DIST_LIB_PATH = (() => {
   for (const candidate of ["./lib.js", "../../../dist/lib.js"]) {
-    const path = fileURLToPath6(new URL(candidate, import.meta.url));
-    if (existsSync22(path))
-      return path;
+    const path2 = fileURLToPath6(new URL(candidate, import.meta.url));
+    if (existsSync22(path2))
+      return path2;
   }
   return fileURLToPath6(new URL("../../../dist/lib.js", import.meta.url));
 })();
@@ -27382,15 +27399,15 @@ function displayCounter(usage, key) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 function displayLastActivityAt(view) {
-  const at = view.lastActivityAt ?? view.last_activity_at;
-  return typeof at === "number" && Number.isFinite(at) ? at : undefined;
+  const at2 = view.lastActivityAt ?? view.last_activity_at;
+  return typeof at2 === "number" && Number.isFinite(at2) ? at2 : undefined;
 }
 function displayAskActivationId(ask) {
   return ask.message?.activationId ?? ask.message?.activation_id ?? ask.activationId ?? ask.activation_id ?? "";
 }
 function displayAskedAt(ask, nowMs) {
-  const at = ask.askedAt ?? ask.asked_at;
-  return typeof at === "number" && Number.isFinite(at) ? at : nowMs;
+  const at2 = ask.askedAt ?? ask.asked_at;
+  return typeof at2 === "number" && Number.isFinite(at2) ? at2 : nowMs;
 }
 function formatDisplayElapsed(elapsedS) {
   const total = Math.max(0, Math.floor(elapsedS ?? 0));
@@ -27418,10 +27435,10 @@ function formatDisplayTurns(turnCount) {
   return `${turnCount} turn${turnCount === 1 ? "" : "s"}`;
 }
 function displayIdleS(view, nowMs) {
-  const at = displayLastActivityAt(view);
-  if (at == null)
+  const at2 = displayLastActivityAt(view);
+  if (at2 == null)
     return null;
-  return Math.max(0, Math.floor((nowMs - at) / 1000));
+  return Math.max(0, Math.floor((nowMs - at2) / 1000));
 }
 var DISPLAY_STATE_VERBS = {
   starting: "starting",
@@ -27902,7 +27919,7 @@ function createSpecialistFeedTool(getHost, openObservability = () => createObser
           return { status: "error", error: "observability.db is unavailable; specialist_status still answers for live activations" };
         const live = (getHost?.()?.list() ?? []).map((s) => s.activationId);
         const known = new Set([...live, ...client.listNativeActivationIds({ limit: 500 })]);
-        const matches = known.has(wanted) ? [wanted] : [...known].filter((id) => id.startsWith(wanted)).sort();
+        const matches = known.has(wanted) ? [wanted] : [...known].filter((id2) => id2.startsWith(wanted)).sort();
         if (matches.length > 1) {
           return { status: "error", error: `Ambiguous activation prefix: ${input.activation_id}`, candidates: matches.slice(0, 10) };
         }
@@ -27912,14 +27929,14 @@ function createSpecialistFeedTool(getHost, openObservability = () => createObser
           const rows = client.readForensicEvents({ jobId: id, limit: 5000 }).filter((r) => r.seq > since);
           if (rows.length === 0 && since < 0)
             return { status: "error", error: `No events for activation: ${input.activation_id}` };
-          const shown = rows.slice(-limit);
+          const shown2 = rows.slice(-limit);
           return {
             activation_id: id,
             view,
-            events: shown.map((r) => `${clock(r.t)} #${r.seq} ${r.event_name}`),
-            last_seq: shown.at(-1)?.seq ?? since,
+            events: shown2.map((r) => `${clock(r.t)} #${r.seq} ${r.event_name}`),
+            last_seq: shown2.at(-1)?.seq ?? since,
             total: rows.length,
-            truncated: rows.length > shown.length
+            truncated: rows.length > shown2.length
           };
         }
         const all = client.readEvents(id);
@@ -28108,13 +28125,13 @@ function validateLaunchOutcome(value) {
   if (value.identity !== undefined) {
     if (!isObject(value.identity))
       fail("invalid_outcome", "identity must be an object");
-    const identity = value.identity;
+    const identity2 = value.identity;
     for (const key of ["thread_id", "session_name", "tmux_session_id", "pane_id"]) {
-      if (!(key in identity))
+      if (!(key in identity2))
         fail("invalid_outcome", `identity.${key} is required when identity is present`);
     }
     const nullableId = (field) => {
-      const v = identity[field];
+      const v = identity2[field];
       if (v === null)
         return null;
       return boundedString(v, `identity.${field}`, 256);
@@ -28122,8 +28139,8 @@ function validateLaunchOutcome(value) {
     outcome.identity = {
       thread_id: nullableId("thread_id"),
       session_name: nullableId("session_name"),
-      tmux_session_id: nullablePatternString(identity.tmux_session_id, "identity.tmux_session_id", 32, TMUX_SESSION_ID_RE),
-      pane_id: nullablePatternString(identity.pane_id, "identity.pane_id", 32, PANE_ID_RE)
+      tmux_session_id: nullablePatternString(identity2.tmux_session_id, "identity.tmux_session_id", 32, TMUX_SESSION_ID_RE),
+      pane_id: nullablePatternString(identity2.pane_id, "identity.pane_id", 32, PANE_ID_RE)
     };
   }
   if (value.worktree !== undefined) {
@@ -28254,26 +28271,26 @@ function positiveInteger(value, fallback, name) {
   }
   return resolved;
 }
-async function safeCitationPath(path, trustedRoot = process.cwd()) {
-  if (/[\u0000-\u001f\u007f]/u.test(path)) {
+async function safeCitationPath(path2, trustedRoot = process.cwd()) {
+  if (/[\u0000-\u001f\u007f]/u.test(path2)) {
     throw new TypeError("path must not contain control characters");
   }
-  if (isAbsolute4(path)) {
+  if (isAbsolute4(path2)) {
     throw new TypeError("path must be relative to trusted root");
   }
-  if (path.split(/[\\/]/u).includes("..")) {
+  if (path2.split(/[\\/]/u).includes("..")) {
     throw new TypeError("path must remain within trusted root");
   }
   const canonicalRoot = await realpath(trustedRoot);
-  const canonicalPath = await realpath(resolve11(canonicalRoot, path));
+  const canonicalPath = await realpath(resolve11(canonicalRoot, path2));
   const pathFromRoot = relative3(canonicalRoot, canonicalPath);
   if (pathFromRoot === ".." || pathFromRoot.startsWith(`..${resolve11("/").slice(0, 1)}`) || isAbsolute4(pathFromRoot)) {
     throw new TypeError("path must remain within trusted root");
   }
   return canonicalPath;
 }
-async function readVerifiedCitationWindow(path, options = {}) {
-  const resolvedPath = await safeCitationPath(path, options.trustedRoot);
+async function readVerifiedCitationWindow(path2, options = {}) {
+  const resolvedPath = await safeCitationPath(path2, options.trustedRoot);
   const offset = positiveInteger(options.offset, 1, "offset");
   const limit = options.limit === undefined ? undefined : positiveInteger(options.limit, 1, "limit");
   const maxLines = positiveInteger(options.maxLines, 2000, "maxLines");
@@ -28308,7 +28325,7 @@ async function readVerifiedCitationWindow(path, options = {}) {
   const complete = consumedThrough >= totalLines;
   return {
     source: "deterministic_file_read",
-    path,
+    path: path2,
     trustedRoot: options.trustedRoot ?? process.cwd(),
     offset,
     totalLines,
@@ -28359,10 +28376,10 @@ function reconcile(workspace, request, options = {}) {
   const probe = options.probe ?? procLeaseProbe();
   const now = options.now ?? Date.now;
   const status = inspect(workspace, probe);
-  const record = decide(workspace, request, status, now());
-  appendRecord(workspace, record);
-  emit2(options.forensics, record, status.lease);
-  return record;
+  const record2 = decide(workspace, request, status, now());
+  appendRecord(workspace, record2);
+  emit2(options.forensics, record2, status.lease);
+  return record2;
 }
 function decide(workspace, request, status, decidedAtMs) {
   const base = {
@@ -28417,23 +28434,23 @@ function removeLease(workspace) {
 function keyFor(workspace, lease) {
   return lease?.workspaceKey ?? basenameKey(leasePath(workspace));
 }
-function basenameKey(path) {
-  const file = path.slice(path.lastIndexOf("/") + 1);
+function basenameKey(path2) {
+  const file = path2.slice(path2.lastIndexOf("/") + 1);
   return file.endsWith(".json") ? file.slice(0, -5) : file;
 }
 function reconciliationLogPath(workspace) {
   return `${leasePath(workspace).slice(0, -".json".length)}.reconcile.jsonl`;
 }
-function appendRecord(workspace, record) {
+function appendRecord(workspace, record2) {
   mkdirSync9(leaseDir(workspace), { recursive: true, mode: 448 });
-  appendFileSync3(reconciliationLogPath(workspace), `${JSON.stringify(record)}
+  appendFileSync3(reconciliationLogPath(workspace), `${JSON.stringify(record2)}
 `, { mode: 384 });
 }
-function readLogAt(path) {
-  if (!existsSync23(path))
+function readLogAt(path2) {
+  if (!existsSync23(path2))
     return [];
   const out = [];
-  for (const line of readFileSync15(path, "utf-8").split(`
+  for (const line of readFileSync15(path2, "utf-8").split(`
 `)) {
     if (!line.trim())
       continue;
@@ -28443,31 +28460,31 @@ function readLogAt(path) {
   }
   return out;
 }
-function emit2(sink, record, lease) {
-  if (!sink)
+function emit2(sink2, record2, lease) {
+  if (!sink2)
     return;
   try {
-    sink.emit({
-      activationId: lease?.activationId ?? `workspace:${record.workspaceKey}`,
+    sink2.emit({
+      activationId: lease?.activationId ?? `workspace:${record2.workspaceKey}`,
       attemptId: lease?.attemptId ?? "reconciliation",
       participantId: lease?.specialist ? `specialist::${lease.specialist}` : "specialist::unknown",
       specialist: lease?.specialist ?? "unknown",
-      name: record.applied ? "lease_reconciled" : "lease_uncertain",
+      name: record2.applied ? "lease_reconciled" : "lease_uncertain",
       payload: {
-        workspace: record.worktreePath,
-        workspace_key: record.workspaceKey,
-        outcome: record.outcome,
-        applied: record.applied,
-        proposed_outcome: record.proposedOutcome,
-        refusal_reason: record.refusalReason,
-        observed_state: record.observedState,
-        uncertain_reason: record.observedUncertainReason,
-        decided_by: record.decidedBy,
-        basis: record.basis,
-        superseded_by: record.supersededBy,
-        note: record.note,
-        holder_activation_id: record.holder?.activationId,
-        holder_pid: record.holder?.pid,
+        workspace: record2.worktreePath,
+        workspace_key: record2.workspaceKey,
+        outcome: record2.outcome,
+        applied: record2.applied,
+        proposed_outcome: record2.proposedOutcome,
+        refusal_reason: record2.refusalReason,
+        observed_state: record2.observedState,
+        uncertain_reason: record2.observedUncertainReason,
+        decided_by: record2.decidedBy,
+        basis: record2.basis,
+        superseded_by: record2.supersededBy,
+        note: record2.note,
+        holder_activation_id: record2.holder?.activationId,
+        holder_pid: record2.holder?.pid,
         attributed_to_workspace: lease === undefined
       }
     });
@@ -28513,9 +28530,9 @@ function projectUncertainWorkspaces(scope, probe = procLeaseProbe()) {
   }
   return out;
 }
-function readLeaseFile(path) {
+function readLeaseFile(path2) {
   try {
-    const lease = JSON.parse(readFileSync15(path, "utf-8"));
+    const lease = JSON.parse(readFileSync15(path2, "utf-8"));
     return typeof lease?.holder?.pid === "number" && typeof lease.worktreePath === "string" ? lease : undefined;
   } catch {
     return;
@@ -28550,7 +28567,7 @@ function createSpecialistLeaseReconcileTool(probe) {
       if (!input.worktree || !input.outcome) {
         return { status: "error", error: "reconcile requires 'worktree' and 'outcome'" };
       }
-      const record = reconcile(leaseScopeFor(resolve12(input.worktree)), {
+      const record2 = reconcile(leaseScopeFor(resolve12(input.worktree)), {
         outcome: input.outcome,
         decidedBy: operatorIdentity("mcp"),
         basis: (input.basis ?? []).map((entry) => entry.trim()).filter((entry) => entry.length > 0),
@@ -28558,10 +28575,10 @@ function createSpecialistLeaseReconcileTool(probe) {
         ...input.note ? { note: input.note } : {}
       }, { probe });
       return {
-        applied: record.applied,
-        outcome: record.outcome,
-        refusal_reason: record.refusalReason ?? null,
-        record
+        applied: record2.applied,
+        outcome: record2.outcome,
+        refusal_reason: record2.refusalReason ?? null,
+        record: record2
       };
     }
   };

@@ -2482,8 +2482,72 @@ function chainHost(opts: {
 
       expect(refusal.reason).toBe('model_unavailable');
       expect(String(refusal.detail?.note)).toContain('did not register on the session runtime');
+      // SPECIALISTS-4441: the note reports the concrete cause, not just the symptom.
+      expect(String(refusal.detail?.note)).toContain('provider "claude-bridge" is absent on the runtime');
       // A refused session must not be left alive holding tools and a lease.
       expect(session.disposed).toBe(true);
+    } finally {
+      restore();
+      bridge.restore();
+    }
+  });
+
+  it('emits session_start before verifying a bridged model, so a provider registered there resolves (SPECIALISTS-4441)', async () => {
+    // The real failure: createAgentSession builds the session but never emits session_start, and
+    // pi-claude-bridge registers its provider from that handler for every module instance after
+    // the first in a process. A double whose provider appears ONLY when bindExtensions runs is a
+    // faithful reproduction: without the binding step this dispatch is refused.
+    const bridge = withBridgeEntry();
+    const restore = withOperatorSwitch(true);
+    try {
+      const record: { createArgs?: Record<string, unknown> } = {};
+      const order: string[] = [];
+      const registered = { value: false };
+      const modelRuntime = {
+        hasConfiguredAuth: () => true,
+        registerProvider: () => undefined,
+        getProvider: (name: string) => (registered.value ? { id: name } : undefined),
+        refresh: async () => { order.push('refresh'); },
+      };
+      const session = Object.assign(fakeSession({ record: {} }), {
+        bindExtensions: async () => {
+          order.push('bind');
+          registered.value = true;
+        },
+      });
+      const sdk = {
+        ...makeSdk(record, session),
+        ModelRuntime: { create: async () => modelRuntime },
+        resolveModelScopeWithDiagnostics: () => {
+          order.push('resolve');
+          if (!registered.value) {
+            return {
+              scopedModels: [],
+              diagnostics: [{ type: 'warning', code: 'no-match', message: 'No models match pattern "claude-bridge/claude-opus-5-5"' }],
+            };
+          }
+          return { scopedModels: [{ model: { id: 'claude-opus-5-5', provider: 'claude-bridge' } }], diagnostics: [] };
+        },
+      } as unknown as PiSdk;
+      const spec = readOnlySpec({ model: 'claude-bridge/claude-opus-5-5', claude_bridge: true });
+      const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
+            loader: loaderFor(spec),
+        workItems: fakeWorkItems(),
+        forensics: collectingSink(),
+        loadSdk: async () => sdk,
+        cwd: hostWorkspace(),
+      });
+
+      const handle = await start(host);
+      const result = await handle.result;
+
+      expect(result.status).toBe('completed');
+      // The lifecycle was emitted exactly once, before the verify step that needs the provider.
+      expect(order.filter(step => step === 'bind')).toHaveLength(1);
+      expect(order.lastIndexOf('resolve')).toBeGreaterThan(order.indexOf('bind'));
+      // And the session was given the runtime the provider landed on.
+      expect(record.createArgs?.modelRuntime).toBe(modelRuntime);
     } finally {
       restore();
       bridge.restore();
