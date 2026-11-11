@@ -118,10 +118,10 @@ repository layer and consent cannot.
   `claude-bridge/...` primary that cannot be admitted ends the dispatch with `model_unavailable`; one
   that is admitted and then fails mid-run ends `failed` on that model, with a `model_fallback` event
   carrying `terminal: true`, `skipped: true`, the cause, and `not_started_model` for the model that
-  was never started. In both cases `fallback_models` is not walked, on the native host and on the
-  legacy `sp run` runner alike — one shared predicate, one shared payload — so a run never moves from
-  the subscription surface to a metered one. The same rule applies on the script surface
-  (`sp script`, `runScriptSpecialist`), including its `options.fallbackModel` route. The rule is about
+  was never started. In both cases `fallback_models` is not walked — on the native host, on the
+  legacy `sp run` runner and on the script runner behind `sp script` alike, through one shared
+  predicate (`isBridgedModel`) — so a run never moves from the subscription surface to a metered one.
+  On the script surface the same rule covers its `options.fallbackModel` route as well. The rule is about
   the walk, not the provider: a bridged primary is not walked even to a second `claude-bridge/...`
   model. Non-bridged primaries keep their fallback behaviour, including the retryable classes
   (`rate_limit`, `timeout`, `transient`). A terminal bridged leg raises no skip claim, because

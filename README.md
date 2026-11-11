@@ -657,8 +657,8 @@ Two switches must both be on: the operator enables the route once per machine in
 its own. With either switch off, a dispatch whose primary model is `claude-bridge/...` is refused
 with `model_unavailable` before a session exists, and admission is not substituted. A run that is
 admitted and then fails mid-run ends `failed` on that model as well — `fallback_models` is not
-walked, on the native host or on the legacy `sp run` runner — so a run never moves from the
-subscription surface to a metered one. See the
+walked, on the native host, the legacy `sp run` runner or the script runner behind `sp script` — so
+a run never moves from the subscription surface to a metered one. See the
 [authoring reference](docs/authoring.md#the-claude-code-route-in-a-definition) for the exact rule.
 
 Install the bridge where Pi keeps its packages (`pi install npm:pi-claude-bridge@0.12.0`), log in

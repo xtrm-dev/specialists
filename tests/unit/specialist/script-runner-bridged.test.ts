@@ -24,7 +24,7 @@ import {
 import { resolveExecutionExtensionSelection } from '../../../src/pi/session.js';
 import { createObservabilitySqliteClientAtPath } from '../../../src/specialist/observability-sqlite.js';
 
-const { spawnMock, spawnSyncMock, piSessionCreateMock, resolveGlobalNodeModulesDirMock, resolveRuntimeToolContractMock, RuntimeToolCatalogResolutionErrorMock, sqliteClients } = vi.hoisted(() => {
+const { spawnMock, spawnSyncMock, piSessionCreateMock, resolveGlobalNodeModulesDirMock, resolveRuntimeToolContractMock, RuntimeToolCatalogResolutionErrorMock, sqliteClients, recordedEvents } = vi.hoisted(() => {
   class RuntimeToolCatalogResolutionErrorMock extends Error {
     readonly code = 'runtime_tool_catalog_unavailable';
 
@@ -42,6 +42,7 @@ const { spawnMock, spawnSyncMock, piSessionCreateMock, resolveGlobalNodeModulesD
     resolveRuntimeToolContractMock: vi.fn(() => undefined),
     RuntimeToolCatalogResolutionErrorMock,
     sqliteClients: new Map<string, any>(),
+    recordedEvents: [] as Array<{ job: string; event: any }>,
   };
 });
 
@@ -94,6 +95,7 @@ vi.mock('../../../src/specialist/observability-sqlite.js', () => {
     const eventsByJobId = new Map<string, any[]>();
     const append = (jobId: string, event: any) => {
       eventsByJobId.set(jobId, [...(eventsByJobId.get(jobId) ?? []), event]);
+      recordedEvents.push({ job: jobId, event });
     };
     return {
       appendEvent: vi.fn((jobId: string, _specialist: string, _beadId: string | undefined, event: any) => append(jobId, event)),
@@ -223,7 +225,15 @@ function createResolvedToolContract(overrides: Partial<{
 
 
 describe('runScriptSpecialist bridged candidate (SPECIALISTS-4425)', () => {
-  it('does not walk to the next candidate when the bridged candidate fails retryably', async () => {
+  const clearRecorded = () => { recordedEvents.length = 0; };
+  const skipRows = () => recordedEvents
+    .map(entry => entry.event)
+    .filter((event: any) => event?.type === 'model_change' && event?.skipped === true);
+
+  it('does not walk to the next candidate and records the skipped row', async () => {
+    // The third walk path: `sp script` / runScriptSpecialist. Without the guard this spawns a
+    // second time on the fallback model and bills a different surface.
+    clearRecorded();
     const spec = {
       ...baseSpec,
       specialist: {
@@ -241,7 +251,7 @@ describe('runScriptSpecialist bridged candidate (SPECIALISTS-4425)', () => {
 
     const resultPromise = runScriptSpecialist(
       { specialist: 'changelog-keeper', variables: { name: 'release notes' } },
-      { loader: makeLoader(spec) as never, projectDir: '.' },
+      { loader: makeLoader(spec) as never, projectDir: '.', observabilityDbPath: 'bridged-test.db', fallbackModel: 'nano-gpt/moonshotai/kimi-k2.5' } as never,
     );
     await new Promise((resolve) => setTimeout(resolve, 0));
     firstChild.stderr.emit('data', Buffer.from('429 insufficient_quota quota exceeded'));
@@ -252,10 +262,58 @@ describe('runScriptSpecialist bridged candidate (SPECIALISTS-4425)', () => {
 
     const result = await resultPromise;
     expect(result).toMatchObject({ success: false });
+    // One spawn: the bridged candidate. Neither fallback_models nor options.fallbackModel ran.
     expect(spawnMock).toHaveBeenCalledTimes(1);
     const spawnArgs = (spawnMock.mock.calls[0]?.[1] ?? []) as string[];
     expect(spawnArgs).toContain('claude-bridge/claude-sonnet-5-5');
     expect(spawnArgs).not.toContain('openai-codex/gpt-5.4');
+    expect(spawnArgs).not.toContain('nano-gpt/moonshotai/kimi-k2.5');
+
+    const rows = skipRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      type: 'model_change',
+      action: 'cycle_model',
+      // The model that RAN, and the one that was not started.
+      model: 'claude-bridge/claude-sonnet-5-5',
+      previous_model: 'claude-bridge/claude-sonnet-5-5',
+      skipped: true,
+      terminal: true,
+      not_started_model: 'openai-codex/gpt-5.4',
+      error_class: 'quota',
+    });
+    expect(String((rows[0] as any).note)).toMatch(/fallback skipped/);
+  });
+
+  it('records no skip row when there is no next candidate', async () => {
+    clearRecorded();
+    const spec = {
+      ...baseSpec,
+      specialist: {
+        ...baseSpec.specialist,
+        execution: {
+          ...baseSpec.specialist.execution,
+          model: 'claude-bridge/claude-sonnet-5-5',
+          fallback_model: undefined,
+          fallback_models: [],
+        },
+      },
+    } as never;
+    const firstChild = new FakeChild();
+    spawnMock.mockReturnValueOnce(firstChild as never);
+
+    const resultPromise = runScriptSpecialist(
+      { specialist: 'changelog-keeper', variables: { name: 'release notes' } },
+      { loader: makeLoader(spec) as never, projectDir: '.', observabilityDbPath: 'bridged-test.db' },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    firstChild.stderr.emit('data', Buffer.from('429 insufficient_quota quota exceeded'));
+    firstChild.emit('close', 1);
+
+    await resultPromise;
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    // Nothing would have been walked, so nothing is claimed as skipped.
+    expect(skipRows()).toHaveLength(0);
   });
 
   it('still walks a non-bridged candidate (control)', async () => {
@@ -276,7 +334,7 @@ describe('runScriptSpecialist bridged candidate (SPECIALISTS-4425)', () => {
 
     const resultPromise = runScriptSpecialist(
       { specialist: 'changelog-keeper', variables: { name: 'release notes' } },
-      { loader: makeLoader(spec) as never, projectDir: '.' },
+      { loader: makeLoader(spec) as never, projectDir: '.', observabilityDbPath: 'bridged-test.db' },
     );
     await new Promise((resolve) => setTimeout(resolve, 0));
     firstChild.stderr.emit('data', Buffer.from('429 insufficient_quota quota exceeded'));

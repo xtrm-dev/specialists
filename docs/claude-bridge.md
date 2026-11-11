@@ -103,9 +103,11 @@ that was never started, so a durable row or a feed line cannot read as a hop. No
 keep today's fallback behaviour, including the retryable classes (`rate_limit`, `timeout`,
 `transient`). The rule is about the walk, not the provider: a bridged primary is not walked even to a
 second `claude-bridge/...` model. All three walk paths enforce it through one shared predicate
-(`isBridgedModel`) and one shared payload shape: the native host, the legacy `sp run` runner, and the
-script runner behind `sp script` / `runScriptSpecialist` (whose candidates include
-`options.fallbackModel` as a separate route).
+(`isBridgedModel`): the native host, the legacy `sp run` runner, and the script runner behind
+`sp script` / `runScriptSpecialist` (whose candidates include `options.fallbackModel` as a separate
+route). The two Pi-session runtimes emit the same payload through `bridgedFallbackSkipEvent`; the
+script runner writes the same fields onto its `model_change` row, and only when a next candidate
+exists.
 
 ### The trust boundary (stated, not enforced)
 

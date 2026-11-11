@@ -976,17 +976,19 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
       // retryable failure must not move to the next candidate (including `options.fallbackModel`).
       // The attempt falls through to the failure return below instead of continuing the loop.
       const bridgedSkip = retryableHop && isBridgedModel(model);
-      if (bridgedSkip) {
-        const nextCandidate = modelCandidates[modelCandidates.indexOf(model) + 1];
+      const nextCandidate = modelCandidates[modelCandidates.indexOf(model) + 1];
+      // Only when something WOULD have been walked: a single-candidate chain has no skip to report.
+      if (bridgedSkip && nextCandidate) {
         appendTimelineEvent?.({
           t: Date.now(),
           type: 'model_change',
           action: 'cycle_model',
+          // The model that RAN, and the one that was deliberately not started.
           model,
           previous_model: model,
           skipped: true,
           terminal: true,
-          ...(nextCandidate ? { not_started_model: nextCandidate } : {}),
+          not_started_model: nextCandidate,
           error_class: parsed.errorType,
           note:
             `fallback skipped: the candidate "${model}" is served by the Claude Code route, ` +
