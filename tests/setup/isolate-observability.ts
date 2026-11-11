@@ -29,8 +29,10 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { resolveObservabilityDbLocation } from '../../src/specialist/observability-db.js';
 import { createObservabilitySqliteClientAtPath } from '../../src/specialist/observability-sqlite.js';
+import { registerTempDir } from './tmp-registry.js';
 
 const isolated = mkdtempSync(join(tmpdir(), 'specialists-test-db-'));
+registerTempDir(isolated);
 
 // Keep `sp init --global` off the operator's live Pi settings. Bun's os.homedir() ignores a
 // runtime HOME change, so tests that only swap process.env.HOME still resolved
@@ -69,4 +71,15 @@ createObservabilitySqliteClientAtPath(join(isolated, 'observability.db'))?.close
 
 afterAll(() => {
   rmSync(isolated, { recursive: true, force: true });
+});
+
+// Some files crash hard (timeout, OOM) and never reach afterAll. Remove the
+// per-file store on process exit as well, so a failed file does not leave a
+// specialists-test-db-* directory behind (CORE-2612).
+process.on('exit', () => {
+  try {
+    rmSync(isolated, { recursive: true, force: true });
+  } catch {
+    /* the process is already going away */
+  }
 });

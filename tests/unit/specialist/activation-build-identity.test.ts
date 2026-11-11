@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { tempDir } from '../../utils/temp-dir.js';
 import {
   describeBuildIdentity,
   hashFileBytes,
@@ -17,7 +18,7 @@ import {
  */
 
 function fixture(content: string): string {
-  const dir = mkdtempSync(join(tmpdir(), 'build-id-'));
+  const dir = tempDir('build-id-');
   const file = join(dir, 'artifact.js');
   writeFileSync(file, content);
   return file;

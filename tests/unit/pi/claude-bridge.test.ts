@@ -252,7 +252,11 @@ describe('path hygiene (review finding 6)', () => {
   });
 
   it('rejects a manifest entry that escapes the package directory', () => {
-    const pkg = tempDir();
+    // CORE-2612: keep the escaping file inside the registered temp root instead
+    // of writing evil.js directly into the OS temp dir.
+    const root = tempDir();
+    const pkg = join(root, 'pkg');
+    mkdirSync(pkg, { recursive: true });
     const outside = join(pkg, '..', 'evil.js');
     writeFileSync(outside, 'export default () => {};\n');
     writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'pi-claude-bridge', main: '../evil.js' }));

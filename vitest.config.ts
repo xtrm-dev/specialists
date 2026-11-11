@@ -70,6 +70,8 @@ export default defineConfig({
     // falls back to <gitRoot>/.specialists/db and tests operate on the repository's
     // authoritative forensic store. See tests/setup/isolate-observability.ts.
     setupFiles: ['tests/setup/isolate-observability.ts'],
+    // CORE-2612: sweep scratch directories a killed file could not remove.
+    globalSetup: ['tests/setup/tmp-registry.ts'],
     server: {
       deps: {
         // Keep the pi runtime packages out of the vite pipeline. Both names are listed: the runtime

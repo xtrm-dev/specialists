@@ -7,9 +7,9 @@
 
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { pathToFileURL } from 'node:url';
-import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { chmodSync, existsSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tempDir } from '../../utils/temp-dir.js';
 
 vi.mock('@earendil-works/pi-coding-agent', () => ({
   createBashTool: () => ({ name: 'bash' }),
@@ -358,7 +358,7 @@ describe('permission-guard fail-closed behavior', () => {
     // session_start to the guard. The guard must self-check on first use, not refuse
     // forever with 'self-check has not passed'. A hermetic fake bwrap (exit 0) stands
     // in for the host binary so the test proves the TRIGGER runs, not that bwrap exists.
-    const binDir = mkdtempSync(join(tmpdir(), 'perm-guard-bwrap-'));
+    const binDir = tempDir('perm-guard-bwrap-');
     const fakeBwrap = join(binDir, 'bwrap');
     writeFileSync(fakeBwrap, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     chmodSync(fakeBwrap, 0o755);

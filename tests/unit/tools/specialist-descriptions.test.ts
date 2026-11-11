@@ -19,10 +19,9 @@
 // is classified in V1/V2/PI_SPECIALIST_TOOL_NAMES.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
+import { tempDir } from '../../utils/temp-dir.js';
 import { z } from 'zod';
 
 // The extension imports Type from 'typebox' (resolved from pi's own install at
@@ -206,7 +205,7 @@ async function loadPiTools() {
 beforeEach(() => {
   // Hermetic observability/state: tool construction must never touch a
   // developer or CI database.
-  const xdg = mkdtempSync(join(tmpdir(), 'sp-descriptions-'));
+  const xdg = tempDir('sp-descriptions-');
   vi.stubEnv('XDG_DATA_HOME', xdg);
   vi.stubEnv('XTRM_STATE_DB', join(xdg, 'state.db'));
 });

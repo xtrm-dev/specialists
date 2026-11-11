@@ -1,15 +1,14 @@
 // ISSUE: xtrm-wiy5n.4.11 — runtime-gated skip is intentional.
 import { mkdirSync, statSync, writeFileSync } from 'node:fs';
-import { mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { tempDir } from '../../utils/temp-dir.js';
 import { describe, expect, it, vi } from 'vitest';
 import { loadBenchmarkSnapshot, PRIMARY_BENCHMARK_URL, SECONDARY_BENCHMARK_URL } from '../../../src/specialist/benchmarks.js';
 
 const NOW = new Date('2026-06-16T00:00:00.000Z');
 
 async function tempCache(): Promise<string> {
-  return mkdtemp(join(tmpdir(), 'specialists-benchmarks-'));
+  return tempDir('specialists-benchmarks-');
 }
 
 function writeCache(cacheDir: string, source: 'artificialanalysis' | 'lmarena', fetchedAt: string): void {

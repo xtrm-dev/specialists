@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempDir } from '../../utils/temp-dir.js';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   getNativeSpecialistsExtensionPath,
@@ -15,7 +15,7 @@ const read = () => JSON.parse(readFileSync(settingsPath, 'utf8'));
 const write = (value: unknown) => writeFileSync(settingsPath, JSON.stringify(value));
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'sp-pi-reg-'));
+  dir = tempDir('sp-pi-reg-');
   settingsPath = join(dir, 'agent', 'settings.json');
 });
 
