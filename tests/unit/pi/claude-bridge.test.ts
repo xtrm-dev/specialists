@@ -19,6 +19,8 @@ import {
 } from '../../../src/specialist/global-config.js';
 import { SpecialistLoader } from '../../../src/specialist/loader.js';
 import {
+  claudeBridgeAgentStoreDir,
+  claudeBridgePackageCandidates,
   resolveClaudeBridgeExtensionPath,
   resolveClaudeBridgePackageEntry,
   resolveCuratedExtensionPaths,
@@ -240,6 +242,76 @@ describe('path hygiene (review finding 6)', () => {
     // An absolute env override is operator-owned and stays accepted: this rule is about the
     // package manifest, not about an operator naming an entry explicitly.
     expect(resolveClaudeBridgeExtensionPath({ [CLAUDE_BRIDGE_PATH_ENV]: outside })).toBe(outside);
+  });
+});
+
+describe('pi store resolution (A2: `pi install` must satisfy the resolver)', () => {
+  /** A store root holding a mainless bridge package, exactly like the published npm package. */
+  function bridgePackage(root: string): string {
+    const pkg = join(root, 'pi-claude-bridge');
+    mkdirSync(join(pkg, 'src'), { recursive: true });
+    writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'pi-claude-bridge', type: 'module' }));
+    writeFileSync(join(pkg, 'src', 'index.ts'), 'export default () => {};\n');
+    return pkg;
+  }
+
+  it('mirrors pi getAgentDir: PI_CODING_AGENT_DIR, tilde included, else ~/.pi/agent', () => {
+    const home = tempDir();
+    expect(claudeBridgeAgentStoreDir({}, home)).toBe(join(home, '.pi', 'agent', 'npm', 'node_modules'));
+    expect(claudeBridgeAgentStoreDir({ PI_CODING_AGENT_DIR: '~/relocated/agent' }, home)).toBe(
+      join(home, 'relocated', 'agent', 'npm', 'node_modules'),
+    );
+    expect(claudeBridgeAgentStoreDir({ PI_CODING_AGENT_DIR: '/abs/agent' }, home)).toBe(
+      join('/abs/agent', 'npm', 'node_modules'),
+    );
+  });
+
+  it('resolves the package pi install wrote, with no env override', () => {
+    const home = tempDir();
+    const pkg = bridgePackage(join(home, '.pi', 'agent', 'npm', 'node_modules'));
+    expect(resolveClaudeBridgeExtensionPath({}, path => existsSync(path), home)).toBe(join(pkg, 'src', 'index.ts'));
+  });
+
+  it('never trusts project scope: a repository .pi/npm is not a candidate', () => {
+    const home = tempDir();
+    const project = tempDir();
+    bridgePackage(join(project, '.pi', 'npm', 'node_modules'));
+    // Nothing in the agent store, and the project store must not be consulted at all.
+    expect(claudeBridgePackageCandidates({}, path => existsSync(path), home)).toEqual([]);
+    expect(resolveClaudeBridgeExtensionPath({}, path => existsSync(path), home)).toBeUndefined();
+  });
+
+  it('prefers the pi store over a global prefix (the store pi keeps current wins)', () => {
+    const home = tempDir();
+    const globalRoot = tempDir();
+    const agentPkg = bridgePackage(join(home, '.pi', 'agent', 'npm', 'node_modules'));
+    bridgePackage(globalRoot);
+    const previous = process.env.PI_NPM_GLOBAL_DIR;
+    process.env.PI_NPM_GLOBAL_DIR = globalRoot;
+    try {
+      expect(claudeBridgePackageCandidates({}, path => existsSync(path), home)).toEqual([
+        agentPkg,
+        join(globalRoot, 'pi-claude-bridge'),
+      ]);
+      expect(resolveClaudeBridgeExtensionPath({}, path => existsSync(path), home)).toBe(join(agentPkg, 'src', 'index.ts'));
+    } finally {
+      if (previous === undefined) delete process.env.PI_NPM_GLOBAL_DIR;
+      else process.env.PI_NPM_GLOBAL_DIR = previous;
+    }
+  });
+
+  it('falls back to the global prefix when the pi store has no bridge', () => {
+    const home = tempDir();
+    const globalRoot = tempDir();
+    const globalPkg = bridgePackage(globalRoot);
+    const previous = process.env.PI_NPM_GLOBAL_DIR;
+    process.env.PI_NPM_GLOBAL_DIR = globalRoot;
+    try {
+      expect(resolveClaudeBridgeExtensionPath({}, path => existsSync(path), home)).toBe(join(globalPkg, 'src', 'index.ts'));
+    } finally {
+      if (previous === undefined) delete process.env.PI_NPM_GLOBAL_DIR;
+      else process.env.PI_NPM_GLOBAL_DIR = previous;
+    }
   });
 });
 

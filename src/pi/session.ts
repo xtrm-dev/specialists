@@ -892,10 +892,20 @@ export function resolveGlobalPackageDir(packageName: string, deps: GlobalNodeMod
  *
  * `SPECIALISTS_CLAUDE_BRIDGE_PATH` names an entry directly (a source checkout, a non-global
  * install, or a test fixture).
+ *
+ * Two stores are searched, in precedence order (SPECIALISTS-4405 A2):
+ * 1. Pi's own managed package store, user scope — `pi install npm:pi-claude-bridge` writes there
+ *    (`getNpmInstallRoot('user')` = `<agentDir>/npm`), and `agentDir` honours
+ *    `PI_CODING_AGENT_DIR`, so a relocated pi is followed rather than a hardcoded `~/.pi`.
+ *    Project scope (`<cwd>/.pi/npm`) is deliberately NOT searched: a repository must not be able
+ *    to supply this extension, which is the same reason the enable flag cannot live in a
+ *    repository layer.
+ * 2. An npm/bun global prefix, for a machine that installed it with the package manager instead.
  */
 export function resolveClaudeBridgeExtensionPath(
   env: NodeJS.ProcessEnv = process.env,
   exists: (path: string) => boolean = existsSync,
+  home: string = homedir(),
 ): string | undefined {
   const override = env[CLAUDE_BRIDGE_PATH_ENV]?.trim();
   if (override) {
@@ -904,9 +914,45 @@ export function resolveClaudeBridgeExtensionPath(
     return isAbsolute(override) && exists(override) ? override : undefined;
   }
 
-  const packageDir = resolveGlobalPackageDir(CLAUDE_BRIDGE_PACKAGE);
-  if (!packageDir) return undefined;
-  return resolveClaudeBridgePackageEntry(packageDir, exists) ?? packageDir;
+  for (const packageDir of claudeBridgePackageCandidates(env, exists, home)) {
+    const entry = resolveClaudeBridgePackageEntry(packageDir, exists);
+    if (entry) return entry;
+  }
+  return undefined;
+}
+
+/**
+ * Candidate package directories for the bridge, highest precedence first, filtered to those that
+ * really hold a package (judged by `package.json`). Separated from the entry resolution so a test
+ * can assert the store order without building a full package layout.
+ *
+ * The agent store is checked before the global roots because `pi install` is the documented install
+ * path: when both hold a copy, the one pi manages is the one the operator updated.
+ */
+export function claudeBridgePackageCandidates(
+  env: NodeJS.ProcessEnv = process.env,
+  exists: (path: string) => boolean = existsSync,
+  home: string = homedir(),
+): string[] {
+  const candidates = [
+    join(claudeBridgeAgentStoreDir(env, home), CLAUDE_BRIDGE_PACKAGE),
+    resolveGlobalPackageDir(CLAUDE_BRIDGE_PACKAGE),
+  ].filter((candidate): candidate is string => typeof candidate === 'string');
+  // Existence is judged on the package itself, never on the root: an existing store with no
+  // bridge in it must not shadow the other store.
+  return [...new Set(candidates)].filter(candidate => exists(join(candidate, 'package.json')));
+}
+
+/**
+ * Pi's managed npm store root, mirroring pi's own `getNpmInstallRoot('user')`.
+ * `PI_CODING_AGENT_DIR` is expanded the way pi expands it (`~` included), so a test or a relocated
+ * install is followed without reaching into the SDK.
+ */
+export function claudeBridgeAgentStoreDir(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
+  const configured = env.PI_CODING_AGENT_DIR?.trim();
+  const expanded = configured?.startsWith('~') ? join(home, configured.replace(/^~[/\\]?/, '')) : configured;
+  const agentDir = expanded && expanded.length > 0 ? expanded : join(home, '.pi', 'agent');
+  return join(agentDir, 'npm', 'node_modules');
 }
 
 export function resolveClaudeBridgePackageEntry(
