@@ -74,7 +74,7 @@ import {
   claudeBridgeRouteEnabled,
 } from '../pi/claude-bridge.js';
 import { getPermissionGuardExtensionPath, resolvePermissionGuardForSpawn } from '../pi/permission-guard-extension.js';
-import { resolveAgentIdentityEnv, specialistHolderName } from '../pi/identity-env.js';
+import { resolveAgentLaunchEnv, specialistHolderName } from '../pi/identity-env.js';
 import { formatResolvedToolContract, withDiscoveredExtensionTools, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 import { resolveModelChain } from '../specialist/model-chain.js';
 import { extractPurposeExcerpt, extractSections } from './contract-sections.js';
@@ -2174,7 +2174,12 @@ export class NativeActivationHost {
     // agent identity rides process.env like the guard tier above. Every activation
     // overwrites it before its first turn; two native activations running at the
     // same moment share it, which the spawned path does not (that one is exact).
-    Object.assign(process.env, resolveAgentIdentityEnv({
+    // CORE-2524.4: the launch env also carries PATH with the gh shim directory
+    // first. An identity without a reachable shim is useless — the activation's
+    // `gh` would be the real binary and a review would post as the operator. The
+    // shim directory precedes the host PATH, so it is also visible to this host
+    // process while the activation runs; one process, one PATH.
+    Object.assign(process.env, resolveAgentLaunchEnv({
       holder: specialistHolderName(specialist.specialist.metadata.name, activationId),
       roleName: specialist.specialist.metadata.name,
       cwd: workspace.worktreePath,

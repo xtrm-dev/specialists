@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
+import os from 'node:os';
+import path from 'node:path';
 import {
   IDENTITY_ENV_ALLOWLIST,
   resolveAgentIdentityEnv,
+  resolveAgentLaunchEnv,
+  shimBinDir,
   specialistHolderName,
+  specialistPath,
 } from '../../../src/pi/identity-env.js';
+
+const D = path.delimiter;
 
 describe('resolveAgentIdentityEnv', () => {
   it('fabricates nothing without a holder', () => {
@@ -91,6 +98,83 @@ describe('resolveAgentIdentityEnv', () => {
     });
     expect(env.SUBSTRATE_HOLDER).toBe('mine');
     expect(env.XTRM_ROLE).toBe('reviewer');
+  });
+});
+
+describe('specialistPath (CORE-2524.4)', () => {
+  it('is the directory `xt identity setup` installs the shim into', () => {
+    expect(shimBinDir({ HOME: '/home/worker' })).toBe(path.join('/home/worker', '.local', 'bin'));
+  });
+
+  it('falls back to the OS home when HOME is unset', () => {
+    expect(shimBinDir({})).toBe(path.join(os.homedir(), '.local', 'bin'));
+  });
+
+  it('prepends the shim directory when the host PATH does not contain it', () => {
+    expect(specialistPath({ HOME: '/home/worker', PATH: `/usr/bin${D}/bin` }))
+      .toBe(`/home/worker/.local/bin${D}/usr/bin${D}/bin`);
+  });
+
+  it('keeps exactly one entry when the shim directory is already first', () => {
+    const found = specialistPath({ HOME: '/home/worker', PATH: `/home/worker/.local/bin${D}/usr/bin` });
+    expect(found).toBe(`/home/worker/.local/bin${D}/usr/bin`);
+    expect(found.split(D).filter((entry) => entry === '/home/worker/.local/bin')).toHaveLength(1);
+  });
+
+  it('removes a later duplicate instead of adding a second one', () => {
+    expect(specialistPath({ HOME: '/home/worker', PATH: `/usr/bin${D}/home/worker/.local/bin${D}/bin` }))
+      .toBe(`/home/worker/.local/bin${D}/usr/bin${D}/bin`);
+  });
+
+  it('drops empty segments, which would mean the current directory', () => {
+    expect(specialistPath({ HOME: '/home/worker', PATH: `${D}/usr/bin${D}${D}/bin${D}` }))
+      .toBe(`/home/worker/.local/bin${D}/usr/bin${D}/bin`);
+  });
+
+  it('returns just the shim directory when PATH is unset or empty', () => {
+    expect(specialistPath({ HOME: '/home/worker' })).toBe('/home/worker/.local/bin');
+    expect(specialistPath({ HOME: '/home/worker', PATH: '' })).toBe('/home/worker/.local/bin');
+  });
+});
+
+describe('resolveAgentLaunchEnv', () => {
+  it('fabricates no PATH without a holder', () => {
+    expect(resolveAgentLaunchEnv({ env: { HOME: '/home/worker', PATH: '/usr/bin' } })).toEqual({});
+  });
+
+  it('adds PATH and nothing else to the identity env', () => {
+    const env = resolveAgentLaunchEnv({
+      holder: 'sp-pr-reviewer-1a2b3c4d',
+      roleName: 'pr-reviewer',
+      env: { HOME: '/home/worker', PATH: '/usr/bin' },
+      run: () => ({ status: 0, stdout: JSON.stringify({ env: { SUBSTRATE_HOLDER: 'h', XTRM_ROLE: 'reviewer', GITHUB_TOKEN: 'ghs_must_not_ride' } }) }),
+    });
+    expect(env).toEqual({
+      SUBSTRATE_HOLDER: 'sp-pr-reviewer-1a2b3c4d',
+      XTRM_ROLE: 'reviewer',
+      PATH: `/home/worker/.local/bin${D}/usr/bin`,
+    });
+  });
+
+  it('never takes PATH from the CLI answer', () => {
+    const env = resolveAgentLaunchEnv({
+      holder: 'h',
+      env: { HOME: '/home/worker', PATH: '/usr/bin' },
+      run: () => ({ status: 0, stdout: JSON.stringify({ env: { PATH: '/cli/answer/bin' } }) }),
+    });
+    expect(env.PATH).toBe(`/home/worker/.local/bin${D}/usr/bin`);
+    expect(env.PATH.split(D)).not.toContain('/cli/answer/bin');
+  });
+
+  it('carries the shim PATH even when xt is unavailable', () => {
+    const env = resolveAgentLaunchEnv({
+      holder: 'h',
+      roleName: 'pr-reviewer',
+      env: { HOME: '/home/worker', PATH: '/usr/bin' },
+      run: () => ({ status: 127, stdout: '' }),
+    });
+    expect(env.PATH).toBe(`/home/worker/.local/bin${D}/usr/bin`);
+    expect(env.SUBSTRATE_HOLDER).toBe('h');
   });
 });
 

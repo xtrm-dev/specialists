@@ -14,9 +14,14 @@
  *   session can resolve the role itself.
  * - Only an allowlist of keys is merged. The child never inherits arbitrary
  *   values from the CLI answer.
+ * - PATH is never taken from the CLI. `resolveAgentLaunchEnv` appends it locally
+ *   with the gh shim directory first (CORE-2524.4), because an identity the shim
+ *   cannot intercept is not an identity.
  */
 
 import { spawnSync } from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
 
 /** Keys the session may take from `xt identity env --json`. */
 export const IDENTITY_ENV_ALLOWLIST = [
@@ -98,6 +103,52 @@ export function resolveAgentIdentityEnv(input: IdentityEnvInput = {}): Record<st
   // The holder we were asked to carry always wins over the CLI's echo.
   merged.SUBSTRATE_HOLDER = holder;
   return merged;
+}
+
+/**
+ * CORE-2524.4: a Specialist's `gh` must resolve to the xt shim, not the real
+ * binary. The identity env above makes the shim INTERESTED in an agent call;
+ * PATH decides whether the shim is reached at all. A host whose PATH lacks the
+ * shim directory — or a pane that inherits the tmux server's PATH — still runs
+ * the real `gh`, and a review posts under the operator identity, silently.
+ *
+ * The directory `xt identity setup` installs the shim into, one source: the
+ * same rule as core `cli/src/core/pane-path.ts` (shimBinDir there).
+ */
+export function shimBinDir(env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(env.HOME || os.homedir(), '.local', 'bin');
+}
+
+/**
+ * The PATH a Specialist process gets: the shim directory first, then the host
+ * PATH, empty segments dropped (an empty entry means the current directory) and
+ * duplicates removed. A PATH that already starts with the shim keeps exactly one
+ * entry. Mirrors core panePath() so both repos apply one rule.
+ */
+export function specialistPath(env: NodeJS.ProcessEnv = process.env): string {
+  const shim = shimBinDir(env);
+  const seen = new Set<string>([shim]);
+  const entries = [shim];
+  for (const raw of (env.PATH ?? '').split(path.delimiter)) {
+    const entry = raw.trim();
+    if (!entry || seen.has(entry)) continue;
+    seen.add(entry);
+    entries.push(entry);
+  }
+  return entries.join(path.delimiter);
+}
+
+/**
+ * The full env one launched Specialist process receives: the agent identity env
+ * plus the PATH that makes the shim reachable. Both launch paths call this — the
+ * legacy runner's session env and the native host's process.env — so a Specialist
+ * never gets the holder without the shim. Without a holder nothing is fabricated,
+ * PATH included.
+ */
+export function resolveAgentLaunchEnv(input: IdentityEnvInput = {}): Record<string, string> {
+  const identity = resolveAgentIdentityEnv(input);
+  if (!identity.SUBSTRATE_HOLDER) return identity;
+  return { ...identity, PATH: specialistPath(input.env ?? process.env) };
 }
 
 /** The holder a supervised run claims: stable per job, unique per concurrent run. */

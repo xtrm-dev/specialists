@@ -10,7 +10,7 @@ import {
   resolveRuntimeToolContract,
   type PiSessionOptions,
 } from '../pi/session.js';
-import { resolveAgentIdentityEnv, specialistHolderName } from '../pi/identity-env.js';
+import { resolveAgentLaunchEnv, specialistHolderName } from '../pi/identity-env.js';
 import type { SessionMetricEvent, SessionRunMetrics } from './session-metrics-contract.js';
 import type { SpecialistLoader } from './loader.js';
 import type { HookEmitter } from './hooks.js';
@@ -1409,7 +1409,10 @@ export class SpecialistRunner {
       // xt CLI resolve the role (and therefore the GitHub App) without this repo
       // duplicating the role map. Never blocks: without a usable xt the child
       // still carries the holder and the name.
-      Object.assign(envVars, resolveAgentIdentityEnv({
+      // CORE-2524.4: the same env carries PATH with the gh shim directory first, so
+      // the child's `gh` is the shim even when this host's PATH lacks it — else a
+      // pr-reviewer review posts as the operator.
+      Object.assign(envVars, resolveAgentLaunchEnv({
         holder: specialistHolderName(
           options.specialistName ?? metadata.name,
           options.variables?.SPECIALISTS_JOB_ID ?? options.reusedFromJobId,

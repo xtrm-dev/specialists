@@ -2,8 +2,8 @@
 // tests/unit/specialist/runner.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { tmpdir, homedir } from 'node:os';
+import { delimiter, dirname, join } from 'node:path';
 import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { SpecialistRunner } from '../../../src/specialist/runner.js';
@@ -189,6 +189,44 @@ describe('SpecialistRunner', () => {
       SUBSTRATE_HOLDER: 'sp-test-spec-abc12345',
       XTRM_ROLE: 'test-spec',
     });
+  });
+
+  it('gives the child a PATH with the gh shim directory first (CORE-2524.4)', async () => {
+    const originalPath = process.env.PATH;
+    const shim = join(process.env.HOME ?? homedir(), '.local', 'bin');
+    try {
+      // A host PATH that does not contain the shim is the defect: the child's `gh`
+      // would be the real binary and a review would post as the operator.
+      process.env.PATH = `/usr/bin${delimiter}/bin`;
+      const sessionFactory = vi.fn().mockResolvedValue(mockSession);
+      const runner = new SpecialistRunner({
+        loader: makeLoader(),
+        hooks: new HookEmitter({ tracePath: '/tmp/test-hooks-trace.jsonl' }),
+        circuitBreaker: new CircuitBreaker(),
+        sessionFactory,
+      });
+      await runner.run({ name: 'test-spec', prompt: 'analyze this' });
+
+      const env = sessionFactory.mock.calls[0]?.[0]?.env ?? {};
+      expect(String(env.PATH)).toBe(`${shim}${delimiter}/usr/bin${delimiter}/bin`);
+
+      // A host PATH that already holds it keeps exactly one entry, still first.
+      process.env.PATH = `${shim}${delimiter}/usr/bin`;
+      const again = vi.fn().mockResolvedValue(mockSession);
+      const secondRunner = new SpecialistRunner({
+        loader: makeLoader(),
+        hooks: new HookEmitter({ tracePath: '/tmp/test-hooks-trace.jsonl' }),
+        circuitBreaker: new CircuitBreaker(),
+        sessionFactory: again,
+      });
+      await secondRunner.run({ name: 'test-spec', prompt: 'analyze this' });
+
+      const entry = String(again.mock.calls[0]?.[0]?.env?.PATH ?? '').split(delimiter);
+      expect(entry).toEqual([shim, '/usr/bin']);
+      expect(entry.filter((dir) => dir === shim)).toHaveLength(1);
+    } finally {
+      process.env.PATH = originalPath;
+    }
   });
 
   it('calls pi session lifecycle in order', async () => {
