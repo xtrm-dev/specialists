@@ -353,6 +353,17 @@ export function recordReplyDelivery(
   return record;
 }
 
+/**
+ * Oldest first, with the message id as the tie-break.
+ *
+ * Two asks can land in the same millisecond, and a comparator on `createdAtMs` alone then
+ * leaves the order to whatever the directory listing produced — a different order on a
+ * different filesystem, and a flaky expectation for every caller (SPECIALISTS-4436).
+ */
+function comparePendingViews(a: PendingInteractionView, b: PendingInteractionView): number {
+  return a.createdAtMs - b.createdAtMs || a.messageId.localeCompare(b.messageId);
+}
+
 /** Every record for one activation, joined with replies, oldest first. */
 export function listForActivation(repoRoot: string, activationId: string): PendingInteractionView[] {
   const dir = join(interactionsRoot(repoRoot), activationId);
@@ -364,7 +375,7 @@ export function listForActivation(repoRoot: string, activationId: string): Pendi
     if (!record) continue;
     views.push({ ...record, reply: readReply(repoRoot, activationId, record.messageId) });
   }
-  return views.sort((a, b) => a.createdAtMs - b.createdAtMs);
+  return views.sort(comparePendingViews);
 }
 
 /** Every record this repository knows about, joined with replies, oldest first. */
@@ -373,5 +384,5 @@ export function listAll(repoRoot: string): PendingInteractionView[] {
   if (!existsSync(root)) return [];
   return readdirSync(root)
     .flatMap(activationId => listForActivation(repoRoot, activationId))
-    .sort((a, b) => a.createdAtMs - b.createdAtMs);
+    .sort(comparePendingViews);
 }

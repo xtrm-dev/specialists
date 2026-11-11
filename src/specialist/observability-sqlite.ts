@@ -3001,7 +3001,7 @@ class SqliteClient implements ObservabilitySqliteClient {
       const rows = this.db.query(`
         SELECT job_id FROM specialist_jobs
         WHERE ${clauses.join(' AND ')}
-        ORDER BY updated_at_ms DESC
+        ORDER BY updated_at_ms DESC, job_id DESC
         LIMIT ?
       `).all(...params, limit) as Array<{ job_id: string }>;
       return rows.map((row) => row.job_id);
