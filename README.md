@@ -201,6 +201,14 @@ is a separate plugin because Claude Code never runs a plugin's own drawing hooks
 that plugin raised, and the wake comes from the `specialists` MCP server. Without it,
 everything works and the rows show as raw text.
 
+The `xtrm` marketplace also lists `skill-suggest`, which is built and versioned in `xtrm-dev/core`
+(`packages/claude-skill-suggest`) and installed from there by a git-subdir source. It is a monitor
+that suggests one skill per turn while a turn runs, and it does not need the Specialists runtime.
+
+```bash
+claude plugin install skill-suggest@xtrm
+```
+
 #### The `/specialists` command and the fleet band
 
 The `specialists` plugin draws the live fleet above the prompt and opens a fleet pane with
@@ -233,7 +241,7 @@ The plugins and the runtime update separately. Both carry the package version.
   **Enable auto-update**. For a whole fleet, set `"autoUpdate": true` on the `xtrm` entry of
   `extraKnownMarketplaces` in managed settings. Without auto-update, run
   `claude plugin marketplace update xtrm`, then `claude plugin update specialists@xtrm` (and
-  `specialists-ui@xtrm`). Run `/reload-plugins` or restart to apply.
+  `specialists-ui@xtrm`, `skill-suggest@xtrm`). Run `/reload-plugins` or restart to apply.
 - **The runtime** comes from npm, and Claude Code never updates it. Run
   `npm i -g @jaggerxtrm/specialists@latest`, then restart Claude Code. When the plugin and the
   runtime versions differ, the plugin's MCP launcher writes a warning to stderr with the
@@ -249,6 +257,7 @@ The plugins and the runtime update separately. Both carry the package version.
 | Claude Code with plugin hooks modules (verified on 2.1.288) | the fleet band, the fleet pane, `/specialists`, and all `specialists-ui` rows | a current Claude Code; hooks must not be turned off with `disableAllHooks` |
 | `specialists@xtrm` | MCP tools, session-start state, the fallback wake, the band, pane and command | `claude plugin install specialists@xtrm` |
 | `specialists-ui@xtrm` | teammate-style wake rows and native tool rows | `claude plugin install specialists-ui@xtrm` |
+| `skill-suggest@xtrm` (separate, from `xtrm-dev/core`) | one skill suggestion per turn; needs `python3` and Bun or Node, not the runtime | `claude plugin install skill-suggest@xtrm` |
 | `--channels plugin:specialists@xtrm` | the channel wake (primary) | launch flag; `xt claude` passes it for you |
 | Managed settings `channelsEnabled` + `allowedChannelPlugins` | the channel wake (primary) | root, `/etc/claude-code/managed-settings.json` (below) |
 

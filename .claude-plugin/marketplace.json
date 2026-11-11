@@ -15,6 +15,15 @@
       "name": "specialists-ui",
       "source": "./plugins/specialists-ui",
       "description": "Teammate-style transcript rows for Specialists: channel wakes, the fallback wake, and Specialists MCP calls under native labels. Install beside specialists."
+    },
+    {
+      "name": "skill-suggest",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/xtrm-dev/core.git",
+        "path": "packages/claude-skill-suggest"
+      },
+      "description": "Suggests one skill per turn from an async monitor that reads the session transcript tail. Never wakes an idle session, never wraps tool calls, fails open. Source: xtrm-dev/core."
     }
   ]
 }

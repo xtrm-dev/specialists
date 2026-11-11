@@ -154,6 +154,21 @@ describe('specialists plugin path discipline', () => {
     expect(pkg.files).toContain('plugins/specialists-ui/');
   });
 
+  it('offers skill-suggest from its home repo, xtrm-dev/core, by git subdirectory', () => {
+    // skill-suggest is built and versioned in xtrm-dev/core; the xtrm marketplace only points at it,
+    // so `claude plugin install skill-suggest@xtrm` installs it from GitHub (CORE-2580).
+    const root = join(PLUGIN_ROOT, '..', '..');
+    const marketplace = JSON.parse(readFileSync(join(root, '.claude-plugin', 'marketplace.json'), 'utf-8')) as {
+      plugins: Array<{ name: string; source: unknown }>;
+    };
+    const entry = marketplace.plugins.find((candidate) => candidate.name === 'skill-suggest');
+    expect(entry?.source).toEqual({
+      source: 'git-subdir',
+      url: 'https://github.com/xtrm-dev/core.git',
+      path: 'packages/claude-skill-suggest',
+    });
+  });
+
   it('versions every plugin with the package version so plugin update ships changes', () => {
     // Claude Code keys the plugin cache and `claude plugin update` on plugin.json "version".
     // Pinned at 0.1.0, every release was "already at the latest version" (SPECIALISTS-4254).
