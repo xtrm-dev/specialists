@@ -22,7 +22,14 @@ export interface PiVersionDeps {
   run?: (command: string, args: string[]) => string;
 }
 
-const VERSION = /\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?/;
+/**
+ * An override must BE a version, not merely contain one: "not 1.4.0" and "unavailable 1.0.0"
+ * both used to pass, which is the same class of mistake as attesting nothing.
+ */
+const OVERRIDE_VERSION = /^v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$/;
+
+/** Command output may carry decoration around the version, so this one searches. */
+const OUTPUT_VERSION = /\b\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\b/;
 
 /**
  * Decide the version string. Pure apart from the injected command, so the release path and its
@@ -37,11 +44,11 @@ export function resolvePiVersion(deps: PiVersionDeps = {}): PiVersionResult {
     if (supplied === 'unavailable') {
       return { ok: false, reason: 'PI_VERSION is set to "unavailable"; the attestation would record no runtime' };
     }
-    const match = supplied.match(VERSION);
+    const match = supplied.match(OVERRIDE_VERSION);
     if (!match) {
-      return { ok: false, reason: `PI_VERSION "${supplied}" is not a version; expected something like 1.4.0` };
+      return { ok: false, reason: `PI_VERSION "${supplied}" is not a version; expected something like 1.4.0 or v1.4.0` };
     }
-    return { ok: true, version: match[0], source: 'env' };
+    return { ok: true, version: match[1]!, source: 'env' };
   }
 
   let output: string;
@@ -51,7 +58,7 @@ export function resolvePiVersion(deps: PiVersionDeps = {}): PiVersionResult {
     const detail = error instanceof Error ? error.message : String(error);
     return { ok: false, reason: `could not run \`pi --version\`: ${detail}` };
   }
-  const match = output.match(VERSION);
+  const match = output.match(OUTPUT_VERSION);
   if (!match) {
     return { ok: false, reason: `\`pi --version\` printed no version (got "${output.trim()}")` };
   }

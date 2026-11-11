@@ -15,7 +15,11 @@
 import { execFileSync } from 'node:child_process';
 
 export type ExecResult = { status: number; stdout?: string; stderr?: string };
-export type Exec = (command: string, args: string[]) => ExecResult;
+export type Exec = (
+  command: string,
+  args: string[],
+  options?: { env?: Record<string, string | undefined> },
+) => ExecResult;
 
 export interface DistWarningDeps {
   exec: Exec;
@@ -29,20 +33,23 @@ export interface DistWarningDeps {
 export function runDistWarning(deps: DistWarningDeps): { differed: boolean } {
   const { exec, log } = deps;
 
-  const build = exec('bun', ['run', 'build']);
+  // NODE_ENV is part of the release build contract; dropping it here compared a different build.
+  const build = exec('bun', ['run', 'build'], { env: { ...process.env, NODE_ENV: 'test' } });
+  let differed = true;
   if (build.status !== 0) {
     log('WARNING: host rebuild failed; nothing to compare');
   } else if (exec('git', ['diff', '--quiet', '--', 'dist/']).status === 0) {
     log('   host rebuild matches the committed dist');
-    return { differed: false };
+    differed = false;
   } else {
     log('WARNING: a host rebuild differs from the committed dist (expected; CI is authoritative):');
     const stat = exec('git', ['diff', '--stat', '--', 'dist/']);
     if (stat.stdout) log(stat.stdout.trimEnd());
   }
 
-  const differed = true;
-  // Both halves matter: checkout restores tracked files, clean removes files the build created.
+  // Always restore, both halves: checkout for tracked files, clean for files the build created.
+  // A matching build can still leave untracked output, and returning early on a match left it
+  // behind for the clean-tree check to trip over later.
   const restoreTracked = exec('git', ['checkout', '--', 'dist/']);
   const restoreUntracked = exec('git', ['clean', '-fdq', '--', 'dist/']);
   if (restoreTracked.status !== 0 || restoreUntracked.status !== 0) {
@@ -52,9 +59,13 @@ export function runDistWarning(deps: DistWarningDeps): { differed: boolean } {
 }
 
 export function main(): number {
-  const exec: Exec = (command, args) => {
+  const exec: Exec = (command, args, options) => {
     try {
-      const stdout = execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      const stdout = execFileSync(command, args, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: options?.env,
+      });
       return { status: 0, stdout };
     } catch (error) {
       const err = error as { status?: number; stdout?: string };
