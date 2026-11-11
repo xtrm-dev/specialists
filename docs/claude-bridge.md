@@ -39,17 +39,32 @@ the home layer. Nothing inside a repository can write the operator switch.
 
 Requirements:
 
-1. the `pi-claude-bridge` package installed where Pi resolves global packages, or
-   `SPECIALISTS_CLAUDE_BRIDGE_PATH=/abs/path/to/entry` for a source checkout (absolute only);
+1. the bridge package installed into **Pi's own package store** as the user scope:
+
+   ```bash
+   pi install npm:pi-claude-bridge@0.12.0
+   ```
+
+   Pi writes it to `<agentDir>/npm/node_modules/pi-claude-bridge`, where `agentDir` is
+   `PI_CODING_AGENT_DIR` or `~/.pi/agent`. The resolver searches that store first and then the
+   npm/bun global prefixes; it never searches project scope (`<cwd>/.pi/npm`), so a repository
+   cannot supply this extension. `SPECIALISTS_CLAUDE_BRIDGE_PATH=/abs/path/to/entry` names an entry
+   directly for a source checkout (absolute only), and the refusal note lists every path searched;
 2. Claude Code logged in as the operator (`claude auth login`; `claude auth status` to check) — the
    agent never logs in and never reads credentials;
 3. a model whose provider is `claude-bridge`. Do not use `anthropic/...` for this route: that is
    Pi's own API-key provider and does not go through Claude Code.
 
-Either switch off: the extension is not loaded and the gate refuses `claude-bridge/...` with
-`no model matches`, so the package need not be installed at all and a repo-selected flag changes
-nothing. Both on with the package missing: the dispatch is refused with
-`claude_bridge_unavailable` rather than quietly running on another provider. Both on, but the
+Either switch off: the extension is not loaded, and a dispatch whose primary model is
+`claude-bridge/...` is refused with `model_unavailable` **before any session exists** — it is never
+walked to another provider, because a run on a model the definition did not ask for is not
+attributable. The note names which switch is off. So the package need not be installed at all, and a
+repo-selected flag changes nothing. The one exception is a `claude-bridge/...` pattern that the gate
+itself accepts: that happens only when the operator's own `~/.pi/agent/models.json` defines a
+provider named `claude-bridge`, in which case the run uses that endpoint and not Claude Code.
+Both on with the package missing: the dispatch is refused with
+`claude_bridge_unavailable` rather than quietly running on another provider, and the note lists the
+paths searched. Both on, but the
 extension fails to register its provider on the live session: the session is disposed and the
 dispatch is refused with `model_unavailable`.
 

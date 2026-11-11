@@ -49,6 +49,7 @@ import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, resolve, sep, join, dirname } from 'node:path';
 import { mapSpecialistBackend, getProviderArgs } from './backendMap.js';
 import { resolveCanonicalAssetDir } from '../specialist/canonical-asset-resolver.js';
+import { runtimeWarn } from '../utils/runtime-diagnostics.js';
 import { type ExtensionState, type ManifestPolicy, type ManifestPolicyTier, type ToolCatalog } from '../specialist/manifest-resolver.js';
 import { buildResolvedToolContract, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 import { loadToolCatalogIndex, type ToolCatalogIndex, resolveCatalogVersionVerdict } from '../specialist/tool-catalog.js';
@@ -922,6 +923,27 @@ export function resolveClaudeBridgeExtensionPath(
 }
 
 /**
+ * Every path the resolver searches, highest precedence first, whether or not it exists. Used by the
+ * `claude_bridge_unavailable` refusal so an operator sees where we looked instead of guessing.
+ * Nothing here is derived from the workspace: a project path would be a place a repository could
+ * plant the extension.
+ */
+export function claudeBridgeSearchPaths(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string[] {
+  return claudeBridgeCandidateDirs(env, home);
+}
+
+/** The refusal note, shared by the native host and the legacy argv path so the two cannot drift. */
+export function claudeBridgeUnavailableNote(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
+  const searched = claudeBridgeSearchPaths(env, home).join(', ');
+  return (
+    'execution.claude_bridge is enabled but the pi-claude-bridge extension was not found. ' +
+    'Install it with `pi install npm:pi-claude-bridge@0.12.0` (pi writes it to <agentDir>/npm, ' +
+    `i.e. ${claudeBridgeAgentStoreDir(env, home)}), or set ${CLAUDE_BRIDGE_PATH_ENV} to an ` +
+    `absolute entry. Searched: ${searched}`
+  );
+}
+
+/**
  * Candidate package directories for the bridge, highest precedence first, filtered to those that
  * really hold a package (judged by `package.json`). Separated from the entry resolution so a test
  * can assert the store order without building a full package layout.
@@ -934,13 +956,28 @@ export function claudeBridgePackageCandidates(
   exists: (path: string) => boolean = existsSync,
   home: string = homedir(),
 ): string[] {
+  return claudeBridgeCandidateDirs(env, home).filter(candidate => isBridgePackage(candidate, exists));
+}
+
+/** Candidate package directories before any existence test, in precedence order. */
+function claudeBridgeCandidateDirs(env: NodeJS.ProcessEnv, home: string): string[] {
   const candidates = [
     join(claudeBridgeAgentStoreDir(env, home), CLAUDE_BRIDGE_PACKAGE),
-    resolveGlobalPackageDir(CLAUDE_BRIDGE_PACKAGE),
-  ].filter((candidate): candidate is string => typeof candidate === 'string');
-  // Existence is judged on the package itself, never on the root: an existing store with no
-  // bridge in it must not shadow the other store.
-  return [...new Set(candidates)].filter(candidate => exists(join(candidate, 'package.json')));
+    // Explicit entries win over the ambient environment, so a caller (a test, a relocated host)
+    // can neutralise a machine's global roots without mutating process.env.
+    ...resolveGlobalNodeModulesDirs({ env: { ...process.env, ...env }, home }).map(root =>
+      join(root, CLAUDE_BRIDGE_PACKAGE)),
+  ];
+  return [...new Set(candidates)];
+}
+
+/**
+ * A usable package is a manifest AND a loadable entry. A directory alone, or a manifest whose entry
+ * files are missing, must fall through to the next store instead of shadowing it — otherwise a
+ * half-finished install in the pi store would hide a working global one.
+ */
+function isBridgePackage(packageDir: string, exists: (path: string) => boolean): boolean {
+  return exists(join(packageDir, 'package.json')) && resolveClaudeBridgePackageEntry(packageDir, exists) !== undefined;
 }
 
 /**
@@ -948,10 +985,37 @@ export function claudeBridgePackageCandidates(
  * `PI_CODING_AGENT_DIR` is expanded the way pi expands it (`~` included), so a test or a relocated
  * install is followed without reaching into the SDK.
  */
-export function claudeBridgeAgentStoreDir(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
+export type ClaudeBridgeAgentDirSource = 'default' | 'env' | 'tilde' | 'ignored-relative';
+
+/**
+ * Where the agent directory came from, so callers and tests can tell "unset" from "unusable".
+ * A blank value is unset (`default`), not a broken path; only a genuinely relative value is
+ * ignored, because it would resolve against the dispatch cwd and let a repository plant the
+ * extension.
+ */
+export function claudeBridgeAgentDirSource(
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+): ClaudeBridgeAgentDirSource {
   const configured = env.PI_CODING_AGENT_DIR?.trim();
-  const expanded = configured?.startsWith('~') ? join(home, configured.replace(/^~[/\\]?/, '')) : configured;
-  const agentDir = expanded && expanded.length > 0 ? expanded : join(home, '.pi', 'agent');
+  if (!configured) return 'default';
+  if (configured.startsWith('~')) return 'tilde';
+  return isAbsolute(configured) ? 'env' : 'ignored-relative';
+}
+
+export function claudeBridgeAgentStoreDir(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
+  const source = claudeBridgeAgentDirSource(env, home);
+  if (source === 'default') return join(home, '.pi', 'agent', 'npm', 'node_modules');
+  const configured = env.PI_CODING_AGENT_DIR!.trim();
+  if (source === 'ignored-relative') {
+    runtimeWarn(
+      'claude-bridge',
+      'PI_CODING_AGENT_DIR is not absolute; ignoring it for the Claude Code bridge lookup',
+      { configured, using: join(home, '.pi', 'agent', 'npm', 'node_modules') },
+    );
+    return join(home, '.pi', 'agent', 'npm', 'node_modules');
+  }
+  const agentDir = source === 'tilde' ? join(home, configured.replace(/^~[/\\]?/, '')) : configured;
   return join(agentDir, 'npm', 'node_modules');
 }
 
@@ -1446,11 +1510,7 @@ export class PiAgentSession {
       claudeBridge: claudeBridgeActive,
     });
     if (claudeBridgeActive && !curatedExtensions.claudeBridgePath) {
-      throw new Error(
-        'claude_bridge_unavailable: execution.claude_bridge is enabled but the pi-claude-bridge ' +
-          `extension was not found (expected the global package "${CLAUDE_BRIDGE_PACKAGE}" or ` +
-          `${CLAUDE_BRIDGE_PATH_ENV}); install it or clear the flag`,
-      );
+      throw new Error(`claude_bridge_unavailable: ${claudeBridgeUnavailableNote()}`);
     }
     for (const extensionPath of curatedExtensions.all) {
       args.push('-e', extensionPath);
