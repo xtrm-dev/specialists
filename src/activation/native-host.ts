@@ -1316,6 +1316,7 @@ export class NativeActivationHost {
    * about who wrote it last.
    */
   private assertActivationIdentityEnv(snapshot: ActivationSnapshot): void {
+    const previousTop = this.liveIdentityEnv[this.liveIdentityEnv.length - 1]?.activationId;
     const index = this.liveIdentityEnv.findIndex((entry) => entry.activationId === snapshot.activationId);
     if (index < 0) {
       this.applyActivationIdentityEnv(
@@ -1323,6 +1324,7 @@ export class NativeActivationHost {
         snapshot.specialist,
         snapshot.workspace?.worktreePath ?? this.cwd,
       );
+      this.warnIdentityTakeover(snapshot.activationId, previousTop);
       return;
     }
     const entry = this.liveIdentityEnv[index];
@@ -1331,6 +1333,19 @@ export class NativeActivationHost {
     this.liveIdentityEnv.splice(index, 1);
     this.liveIdentityEnv.push(entry);
     this.writeIdentityEnv(entry.env);
+    this.warnIdentityTakeover(snapshot.activationId, previousTop);
+  }
+
+  /**
+   * N5: taking the env from another live activation is the known concurrency limit, and
+   * it happens at a LEG ENTRY, not at a settle — so it must be visible on the same
+   * channel, not only once the winner finally settles. Ids only: never a value.
+   */
+  private warnIdentityTakeover(activationId: string, previousTop: string | undefined): void {
+    if (!previousTop || previousTop === activationId || this.liveIdentityEnv.length < 2) return;
+    warnIdentityEnv(
+      `activation ${activationId} started a leg and took process env from ${previousTop}; ${this.liveIdentityEnv.length} activations are live`,
+    );
   }
 
   /**
@@ -2876,6 +2891,12 @@ export class NativeActivationHost {
             void this.finalizeWakeTurn(snapshot, record, emit).finally(() => {
               this.wakeFinalising.delete(snapshot.activationId);
             });
+          } else {
+            // N6 (defensive): no finaliser will run for this settle, so nothing else
+            // would ever take the activation off the identity stack — a lost registry
+            // record or a settle redelivered while finalisation is in flight. The
+            // finaliser owns its own removal on the paths it does run.
+            this.settleActivationIdentityEnv(snapshot.activationId);
           }
         }
         break;

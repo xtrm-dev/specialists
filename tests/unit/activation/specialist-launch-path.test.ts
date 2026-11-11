@@ -56,6 +56,8 @@ function fakeSession(
     isIdle: true,
     disposed: false,
     activeTools: ['read', 'grep'],
+    /** Emit one leg start, as a new leg (fallback/retry/wake) would. */
+    emitLegStart() { listeners.forEach(l => l({ type: 'agent_start' })); },
     async prompt() {
       // The runtime tells the host the leg started BEFORE any tool runs, and that is
       // where the host re-asserts identity; captures therefore come after it.
@@ -444,6 +446,115 @@ describe('native launch path — every leg of an activation runs with its identi
     host.shutdown();
     expect(snapshotIdentityEnv(process.env)).toEqual(before);
     release();
+  });
+});
+
+/**
+ * N5: the known concurrency limit, made visible where it actually happens. A leg entry
+ * that takes the env from another LIVE activation is announced on the same channel as a
+ * settle, because the wrong-App window starts there — not when the winner settles.
+ */
+describe('native launch path — the identity takeover is announced at the leg that takes it (N5)', () => {
+  const holderFor = (activationId: string) =>
+    `sp-researcher-${activationId.replace(/[^A-Za-z0-9]/g, '').slice(0, 8)}`;
+
+  it('warns with both ids when a leg takes the env from another live activation', async () => {
+    const before = snapshotIdentityEnv(process.env);
+    let releaseA!: () => void;
+    let releaseB!: () => void;
+    const gateA = new Promise<void>((resolve) => { releaseA = resolve; });
+    const gateB = new Promise<void>((resolve) => { releaseB = resolve; });
+    const created: Array<PiAgentSessionLike & { emitLegStart: () => void }> = [];
+    const plans = [{ wait: gateA }, { wait: gateB }];
+    let index = 0;
+    const sdk = {
+      ...makeSdk(fakeSession()),
+      createAgentSession: async (options?: Record<string, unknown>) => {
+        const session = fakeSession(undefined, { wait: plans[Math.min(index, 1)].wait });
+        index += 1;
+        if (Array.isArray(options?.tools)) session.getActiveToolNames = () => options!.tools as string[];
+        created.push(session as PiAgentSessionLike & { emitLegStart: () => void });
+        return { session };
+      },
+    } as PiSdk;
+    const host = new NativeActivationHost({
+      workItems: testWorkItems({ description: BEAD.description }),
+      loader: { get: async () => ({
+        specialist: {
+          metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },
+          execution: {
+            model: 'testprov/test-model', permission_required: 'READ_ONLY', response_format: 'text',
+            output_type: 'research', bare: false,
+          },
+          prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
+        },
+      }) } as never,
+      loadSdk: async () => sdk,
+      identityEnvRun: () => ({ status: 0, stdout: JSON.stringify({ env: { XTRM_ROLE: 'researcher' } }) }),
+      cwd: process.cwd(),
+    });
+
+    const a = await host.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator' });
+    const b = await host.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator' });
+    expect(process.env.SUBSTRATE_HOLDER).toBe(holderFor(b.activationId));
+
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    created[0].emitLegStart(); // A starts another leg while B is live and on top
+    const lines = stderr.mock.calls.map((call) => String(call[0])).filter((line) => line.includes('identity-env'));
+    stderr.mockRestore();
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(`activation ${a.activationId} started a leg and took process env from ${b.activationId}`);
+    expect(lines[0]).toContain('2 activations are live');
+    expect(lines[0]).not.toContain(holderFor(a.activationId));
+    // The takeover is real, which is why it is worth warning about.
+    expect(process.env.SUBSTRATE_HOLDER).toBe(holderFor(a.activationId));
+
+    releaseA();
+    await a.result;
+    releaseB();
+    await b.result;
+    expect(snapshotIdentityEnv(process.env)).toEqual(before);
+  });
+
+  it('a wake settle with no registry record still leaves the stack (N6)', async () => {
+    const before = snapshotIdentityEnv(process.env);
+    const created: PiAgentSessionLike[] = [];
+    const sdk = {
+      ...makeSdk(fakeSession()),
+      createAgentSession: async (options?: Record<string, unknown>) => {
+        const session = fakeSession();
+        if (Array.isArray(options?.tools)) session.getActiveToolNames = () => options!.tools as string[];
+        created.push(session);
+        return { session };
+      },
+    } as PiSdk;
+    const host = new NativeActivationHost({
+      workItems: testWorkItems({ description: BEAD.description }),
+      loader: { get: async () => ({
+        specialist: {
+          metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },
+          execution: {
+            model: 'testprov/test-model', permission_required: 'READ_ONLY', response_format: 'text',
+            output_type: 'research', bare: false,
+          },
+          prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
+        },
+      }) } as never,
+      loadSdk: async () => sdk,
+      identityEnvRun: () => ({ status: 0, stdout: JSON.stringify({ env: { XTRM_ROLE: 'researcher' } }) }),
+      cwd: process.cwd(),
+    });
+    const a = await host.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator' });
+    await a.result;
+    expect(snapshotIdentityEnv(process.env)).toEqual(before);
+
+    // A wake settle whose registry record is gone: no finaliser can own the removal.
+    (host as unknown as { registry: { remove: (id: string) => void } }).registry.remove(a.activationId);
+    await created[0].prompt();
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+
+    expect(snapshotIdentityEnv(process.env)).toEqual(before);
   });
 });
 
