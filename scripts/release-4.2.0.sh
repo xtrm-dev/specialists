@@ -59,10 +59,24 @@ PKG_VERSION="$(node -p "require('./package.json').version")"
 [ "$PKG_VERSION" = "$VERSION" ] || die "package.json is ${PKG_VERSION}, expected ${VERSION}"
 node scripts/sync-plugin-versions.mjs --check || die "plugin manifests disagree with package.json"
 
-step "4/8 dist rebuilds to the committed dist"
-NODE_ENV=test bun run build >/dev/null || die "build failed" 3
-git diff --exit-code -- dist/ || die "committed dist differs from a fresh build; commit the rebuild in a PR" 3
-[ -z "$(git status --porcelain --untracked-files=all -- dist/)" ] || die "build left untracked files under dist/" 3
+step "4/8 CI dist checks passed on this commit"
+# CI is the dist gate. The committed dist is built in the CI image, and a host build can
+# disagree with it (bun tree-shakes two unused pi-tui re-exports differently on a
+# maintainer machine), so rebuilding here would test the host, not the artefact.
+bun scripts/ci-dist-gate.ts --sha "$HEAD_SHA" \
+  || die "CI dist checks (packed-smoke, payload-contract) are not green on ${HEAD_SHA}" 3
+
+if [ "${RELEASE_HOST_DIST_WARNING:-0}" = "1" ]; then
+  # Print-only. Never a gate: this is exactly the check that cannot hold on a host.
+  NODE_ENV=test bun run build >/dev/null 2>&1 || printf 'WARNING: host rebuild failed\n' >&2
+  if git diff --quiet -- dist/; then
+    printf '   host rebuild matches the committed dist\n'
+  else
+    printf 'WARNING: a host rebuild differs from the committed dist (expected; CI is authoritative):\n' >&2
+    git diff --stat -- dist/ >&2
+  fi
+  git checkout -- dist/
+fi
 
 step "5/8 pack and attest"
 # Pack OUTSIDE the repository: the attestation generator refuses a dirty tree, and a tarball
