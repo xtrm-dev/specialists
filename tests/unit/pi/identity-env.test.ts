@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import os from 'node:os';
-import path from 'node:path';
+import os, { tmpdir } from 'node:os';
+import path, { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
 import {
   IDENTITY_ENV_ALLOWLIST,
   resolveAgentIdentityEnv,
@@ -56,9 +58,11 @@ describe('resolveAgentIdentityEnv', () => {
               GIT_AUTHOR_EMAIL: 'op@example.com',
               GIT_COMMITTER_NAME: 'sp-pr-reviewer-1a2b3c4d',
               GIT_COMMITTER_EMAIL: 'op@example.com',
-              GIT_CONFIG_COUNT: '3',
+              GIT_CONFIG_COUNT: '2',
               GIT_CONFIG_KEY_0: 'url.https://github.com/.insteadOf',
               GIT_CONFIG_VALUE_0: 'git@github.com:',
+              GIT_CONFIG_KEY_1: 'credential.https://github.com.helper',
+              GIT_CONFIG_VALUE_1: '',
               PATH: '/usr/bin',
               GITHUB_TOKEN: 'ghs_must_not_ride',
               EMPTY: '',
@@ -79,9 +83,11 @@ describe('resolveAgentIdentityEnv', () => {
       GIT_AUTHOR_EMAIL: 'op@example.com',
       GIT_COMMITTER_NAME: 'sp-pr-reviewer-1a2b3c4d',
       GIT_COMMITTER_EMAIL: 'op@example.com',
-      GIT_CONFIG_COUNT: '3',
+      GIT_CONFIG_COUNT: '2',
       GIT_CONFIG_KEY_0: 'url.https://github.com/.insteadOf',
       GIT_CONFIG_VALUE_0: 'git@github.com:',
+      GIT_CONFIG_KEY_1: 'credential.https://github.com.helper',
+      GIT_CONFIG_VALUE_1: '',
     });
     // Allowlist holds: no token, no unrelated process env, no empty value.
     expect(env.GITHUB_TOKEN).toBeUndefined();
@@ -98,6 +104,160 @@ describe('resolveAgentIdentityEnv', () => {
     });
     expect(env.SUBSTRATE_HOLDER).toBe('mine');
     expect(env.XTRM_ROLE).toBe('reviewer');
+  });
+
+  it('keeps a deliberately empty GIT_CONFIG value so the exported count stays valid', () => {
+    // core git-transport.ts writes `credential.https://github.com.helper` with an
+    // EMPTY value to reset an inherited helper. Dropping it desynchronises
+    // GIT_CONFIG_COUNT from the pairs and breaks every git command.
+    const env = resolveAgentIdentityEnv({
+      holder: 'h',
+      roleName: 'pr-reviewer',
+      run: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          env: {
+            GIT_CONFIG_COUNT: '3',
+            GIT_CONFIG_KEY_0: 'url.https://github.com/.insteadOf',
+            GIT_CONFIG_VALUE_0: 'git@github.com:',
+            GIT_CONFIG_KEY_1: 'credential.https://github.com.helper',
+            GIT_CONFIG_VALUE_1: '',
+            GIT_CONFIG_KEY_2: 'credential.https://github.com.useHttpPath',
+            GIT_CONFIG_VALUE_2: 'true',
+            EMPTY: '',
+          },
+        }),
+      }),
+    });
+
+    expect(env.GIT_CONFIG_COUNT).toBe('3');
+    expect(env.GIT_CONFIG_VALUE_1).toBe('');
+    expect(env.GIT_CONFIG_KEY_2).toBe('credential.https://github.com.useHttpPath');
+    // The empty-value rule still drops unrelated empty keys.
+    expect(env.EMPTY).toBeUndefined();
+  });
+
+  it('drops the whole GIT_CONFIG block rather than export a count git cannot satisfy, and says why', () => {
+    const warnings: string[] = [];
+    const env = resolveAgentIdentityEnv({
+      holder: 'h',
+      warn: (message) => warnings.push(message),
+      run: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          env: {
+            GIT_CONFIG_COUNT: '3',
+            GIT_CONFIG_KEY_0: 'url.https://github.com/.insteadOf',
+            GIT_CONFIG_VALUE_0: 'git@github.com:',
+            GIT_CONFIG_KEY_1: 'credential.https://github.com.helper',
+            GIT_CONFIG_VALUE_1: '!xt identity credential',
+            GIT_CONFIG_KEY_3: 'credential.https://github.com.useHttpPath',
+            GIT_CONFIG_VALUE_3: 'true',
+          },
+        }),
+      }),
+    });
+
+    expect(Object.keys(env).filter((key) => key.startsWith('GIT_CONFIG_'))).toEqual([]);
+    expect(env.SUBSTRATE_HOLDER).toBe('h');
+    // Operator-visible: the fallback to the machine transport changes which
+    // identity git runs as, so it never happens silently. The reason names the
+    // missing pair (indexes and key names only, never a value).
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('dropped the GIT_CONFIG_* block');
+    expect(warnings[0]).toContain('GIT_CONFIG_KEY_2 is missing');
+    expect(warnings[0]).not.toContain('git@github.com:');
+  });
+
+  it('drops a GIT_CONFIG block whose count is not a number, and says why', () => {
+    const warnings: string[] = [];
+    const env = resolveAgentIdentityEnv({
+      holder: 'h',
+      warn: (message) => warnings.push(message),
+      run: () => ({ status: 0, stdout: JSON.stringify({ env: { GIT_CONFIG_COUNT: 'three', GIT_CONFIG_KEY_0: 'a', GIT_CONFIG_VALUE_0: 'b' } }) }),
+    });
+    expect(Object.keys(env).filter((key) => key.startsWith('GIT_CONFIG_'))).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('GIT_CONFIG_COUNT is not a number');
+  });
+
+  it('drops a GIT_CONFIG block whose index sits outside the count, and says why', () => {
+    const warnings: string[] = [];
+    const env = resolveAgentIdentityEnv({
+      holder: 'h',
+      warn: (message) => warnings.push(message),
+      run: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          env: {
+            GIT_CONFIG_COUNT: '1',
+            GIT_CONFIG_KEY_0: 'url.https://github.com/.insteadOf',
+            GIT_CONFIG_VALUE_0: 'git@github.com:',
+            GIT_CONFIG_KEY_4: 'credential.https://github.com.useHttpPath',
+            GIT_CONFIG_VALUE_4: 'true',
+          },
+        }),
+      }),
+    });
+    expect(Object.keys(env).filter((key) => key.startsWith('GIT_CONFIG_'))).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('GIT_CONFIG_KEY_4 is outside GIT_CONFIG_COUNT');
+  });
+
+  it('stays quiet for a valid block, including the empty reset value', () => {
+    const warnings: string[] = [];
+    const env = resolveAgentIdentityEnv({
+      holder: 'h',
+      warn: (message) => warnings.push(message),
+      run: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          env: {
+            GIT_CONFIG_COUNT: '2',
+            GIT_CONFIG_KEY_0: 'url.https://github.com/.insteadOf',
+            GIT_CONFIG_VALUE_0: 'git@github.com:',
+            GIT_CONFIG_KEY_1: 'credential.https://github.com.helper',
+            GIT_CONFIG_VALUE_1: '',
+          },
+        }),
+      }),
+    });
+    expect(warnings).toEqual([]);
+    expect(env.GIT_CONFIG_VALUE_1).toBe('');
+  });
+
+  it('exports an env git can actually run with, empty reset included', () => {
+    const env = resolveAgentIdentityEnv({
+      holder: 'h',
+      roleName: 'pr-reviewer',
+      run: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          env: {
+            GIT_CONFIG_COUNT: '2',
+            GIT_CONFIG_KEY_0: 'url.https://github.com/.insteadOf',
+            GIT_CONFIG_VALUE_0: 'git@github.com:',
+            GIT_CONFIG_KEY_1: 'credential.https://github.com.helper',
+            GIT_CONFIG_VALUE_1: '',
+          },
+        }),
+      }),
+    });
+
+    const dir = mkdtempSync(join(tmpdir(), 'identity-env-git-'));
+    try {
+      // git exits non-zero with `fatal: unable to parse command-line config` when
+      // GIT_CONFIG_COUNT names a pair it does not have.
+      const result = spawnSync('git', ['init', '--quiet'], {
+        cwd: dir,
+        env: { ...env, PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: process.env.HOME ?? dir },
+        encoding: 'utf8',
+      });
+      expect(result.stderr, String(result.stderr)).not.toContain('unable to parse command-line config');
+      expect(result.status).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

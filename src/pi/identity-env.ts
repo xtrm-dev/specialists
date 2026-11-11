@@ -13,7 +13,10 @@
  *   holder and the specialist name still ride along so that `xt` inside the
  *   session can resolve the role itself.
  * - Only an allowlist of keys is merged. The child never inherits arbitrary
- *   values from the CLI answer.
+ *   values from the CLI answer. Empty values are dropped, EXCEPT inside the
+ *   `GIT_CONFIG_*` block: core writes an empty `GIT_CONFIG_VALUE_*` on purpose
+ *   to reset a global credential helper, and git refuses every command when
+ *   `GIT_CONFIG_COUNT` names an index whose pair is absent.
  * - PATH is never taken from the CLI. `resolveAgentLaunchEnv` appends it locally
  *   with the gh shim directory first (CORE-2524.4), because an identity the shim
  *   cannot intercept is not an identity.
@@ -34,6 +37,9 @@ export const IDENTITY_ENV_ALLOWLIST = [
 ] as const;
 
 const GIT_CONFIG_PREFIXES = ['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_', 'GIT_CONFIG_VALUE_'];
+const GIT_CONFIG_COUNT_KEY = 'GIT_CONFIG_COUNT';
+const GIT_CONFIG_KEY_PREFIX = 'GIT_CONFIG_KEY_';
+const GIT_CONFIG_VALUE_PREFIX = 'GIT_CONFIG_VALUE_';
 
 export interface IdentityEnvInput {
   /** Substrate holder of the launched agent; absent or blank means no identity. */
@@ -52,11 +58,64 @@ export interface IdentityEnvInput {
   ) => { status: number | null; stdout: string };
   /** Lookup timeout floor. Default 5000 ms. */
   timeoutMs?: number;
+  /**
+   * Warning sink, called with one reason line. Default: the launcher channel, a
+   * `[specialists] identity-env:` line on stderr (the same `[specialists]`
+   * prefix the runner uses for pre-run warnings). Injected in tests.
+   */
+  warn?: (message: string) => void;
 }
 
 function isAllowed(key: string): boolean {
   if ((IDENTITY_ENV_ALLOWLIST as readonly string[]).includes(key)) return true;
   return GIT_CONFIG_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
+
+/**
+ * The launcher's warning channel: one prefixed stderr line, the same shape the
+ * runner emits for pre-run and output-contract warnings. Never a value.
+ */
+function launcherWarning(message: string): void {
+  process.stderr.write(`[specialists] identity-env: ${message}\n`);
+}
+
+/**
+ * `GIT_CONFIG_COUNT` is authoritative for git: it reads exactly that many
+ * KEY_i/VALUE_i pairs and dies with `fatal: unable to parse command-line config`
+ * when one is absent, which breaks EVERY git command in the session. So the
+ * block is exported all-or-nothing, and an empty `GIT_CONFIG_VALUE_*` is kept:
+ * core's transport writes one to reset an inherited credential helper, and
+ * dropping it is what desynchronises the count from the pairs.
+ *
+ * A malformed block is dropped whole rather than repaired. A partial rewrite
+ * would silently change git transport; with no block git works and uses the
+ * machine's transport, which is the pre-#525 behaviour. That fallback is a
+ * CHANGE of identity for git, so it is never silent: one warning names the
+ * reason before the block is dropped. Key names and indexes only, never values.
+ */
+function keepConsistentGitConfig(env: Record<string, string>, warn: (message: string) => void): void {
+  const gitConfigKeys = Object.keys(env).filter((key) => GIT_CONFIG_PREFIXES.some((prefix) => key.startsWith(prefix)));
+  if (gitConfigKeys.length === 0) return;
+  const dropped = (reason: string): void => {
+    for (const key of gitConfigKeys) delete env[key];
+    warn(
+      `dropped the GIT_CONFIG_* block (${reason}); git runs with the machine's transport, not this role's identity`,
+    );
+  };
+  const count = (env[GIT_CONFIG_COUNT_KEY] ?? '').trim();
+  if (!/^\d+$/.test(count)) return dropped(`GIT_CONFIG_COUNT is not a number`);
+  const indices = Number(count);
+  for (let index = 0; index < indices; index += 1) {
+    if (!(GIT_CONFIG_KEY_PREFIX + index in env)) return dropped(`${GIT_CONFIG_KEY_PREFIX}${index} is missing`);
+    if (!(GIT_CONFIG_VALUE_PREFIX + index in env)) return dropped(`${GIT_CONFIG_VALUE_PREFIX}${index} is missing`);
+  }
+  // No index outside the declared count may ride along: git ignores them, and a
+  // stale one would reappear if a future count is smaller.
+  for (const key of gitConfigKeys) {
+    if (key === GIT_CONFIG_COUNT_KEY) continue;
+    const suffix = key.replace(/^GIT_CONFIG_(?:KEY|VALUE)_/, '');
+    if (!/^\d+$/.test(suffix) || Number(suffix) >= indices) return dropped(`${key} is outside GIT_CONFIG_COUNT`);
+  }
 }
 
 /**
@@ -98,8 +157,12 @@ export function resolveAgentIdentityEnv(input: IdentityEnvInput = {}): Record<st
   if (!env || typeof env !== 'object') return base;
   const merged: Record<string, string> = { ...base };
   for (const [key, value] of Object.entries(env as Record<string, unknown>)) {
-    if (typeof value === 'string' && value !== '' && isAllowed(key)) merged[key] = value;
+    if (typeof value !== 'string' || !isAllowed(key)) continue;
+    // An empty GIT_CONFIG_VALUE_* is a deliberate reset, not a missing value.
+    if (value === '' && !key.startsWith(GIT_CONFIG_VALUE_PREFIX)) continue;
+    merged[key] = value;
   }
+  keepConsistentGitConfig(merged, input.warn ?? launcherWarning);
   // The holder we were asked to carry always wins over the CLI's echo.
   merged.SUBSTRATE_HOLDER = holder;
   return merged;
