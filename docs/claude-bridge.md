@@ -33,9 +33,10 @@ the home layer. Nothing inside a repository can write the operator switch.
    { "specialist": { "execution": { "claude_bridge": true, "model": "claude-bridge/claude-sonnet-5-5" } } }
    ```
 
-   ```bash
-   sb specialist override <name> execution.claude_bridge=true
-   ```
+   Put that in a Specialist spec layer — `~/.specialists/user/<name>.specialist.json` (home) or
+   `.specialists/user/<name>.specialist.json` (project) — not in a shipped definition.
+   `sp edit --global` rejects the field today (the global override schema does not list it), so edit
+   the layer directly until that mismatch is fixed.
 
 Requirements:
 
@@ -65,11 +66,16 @@ The host resolves the bridge itself; the operator does not pass `-e`. Search ord
    `agentDir` is `PI_CODING_AGENT_DIR` (with `~` and `~/` expanded) or `~/.pi/agent`. This is where
    `pi install npm:pi-claude-bridge@0.12.0` writes, so the documented install needs no environment
    variable.
-3. npm/bun global prefixes: `PI_NPM_GLOBAL_DIR`, `NPM_CONFIG_PREFIX` / `npm_config_prefix`,
-   `BUN_INSTALL`, `NVM_BIN`, the running interpreter's own prefix and nvm's node versions.
+3. npm/bun global prefixes: `PI_NPM_GLOBAL_DIR`, `NPM_CONFIG_PREFIX` / `npm_config_prefix`
+   (+ `lib/node_modules`), `NVM_BIN` (+ sibling `lib/node_modules`), `BUN_INSTALL`
+   (`install/global/node_modules`), `~/.bun/install/global/node_modules`, the running interpreter's
+   own `<prefix>/lib/node_modules`, and `~/.nvm/versions/node/<version>/lib/node_modules`.
+   Roots that do not exist are skipped; only the ones that exist are candidates.
 
 Every root must be absolute; a relative one (`BUN_INSTALL=.`) is dropped and reported once, because
-it would let a checkout supply the extension. **Project scope is never searched** (`<cwd>/.pi/npm`,
+it would let a checkout supply the extension. `SPECIALISTS_CLAUDE_BRIDGE_PATH` is **exclusive**: when
+it is set but not an absolute existing entry, resolution returns nothing and does not fall through to
+the stores, so a typo there looks like "not installed" rather than silently using a different copy. **Project scope is never searched** (`<cwd>/.pi/npm`,
 `<cwd>/.pi/agent/npm`, `<cwd>/node_modules`). A candidate counts as the bridge only when it has both
 a `package.json` and a loadable entry (`src/index.ts` for the published package, which ships neither
 `main` nor `exports`); a half-finished install therefore falls through to the next store instead of
@@ -125,25 +131,29 @@ switch as an operator consent record, not as a sandbox boundary.
   tool boundary, and bash calls gain Claude Code's 120-second default timeout where Pi would have
   none.
 - **Session history is per Pi session.** The bridge keeps its own session pointers under
-  `<agentDir>/claude-bridge/sessions/`; resume uses Claude Code's `--resume`, which needs write
-  access to `~/.claude`. The bridge's README states that running the same Pi session in two bridge
-  processes is unsupported, and it has no queue or lock: N concurrent activations mean N Claude Code
-  children. Treat the route as one or two sequential runs, not a fan-out backend.
+  `<agentDir>/claude-bridge/sessions/`. Its README states that running the same Pi session in two
+  bridge processes is unsupported, and that its integration tests need write access to `~/.claude`
+  for `--resume` — both are the bridge's own statements, quoted, not guarantees we enforce.
+  Observed in our runs, not guaranteed by any contract: one Claude Code child per query and no queue
+  or lock, so N concurrent activations mean N children. Treat the route as one or two sequential
+  runs, not a fan-out backend.
 - **Inherited Anthropic variables win.** An exported `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY` or
   `ANTHROPIC_AUTH_TOKEN` redirects the Claude Code child and every turn fails with its auth error
   (upstream issue #107). Unset them for the host process.
-- **Usage arrives as provider usage.** The bridge forwards Claude Code's `rate_limit_event` as
-  `anthropic-ratelimit-unified-*` headers, and the host records `usage_source: provider_usage` in
-  `specialist_job_metrics`. Only the latest event is kept, so a rate-limit change can surface one
-  turn late.
+- **Usage arrives as provider usage.** A bridged run reports `usage_source: provider_usage` in
+  `specialist_job_metrics` because the provider payload carries usage, which the host normalises
+  (`asProviderUsage` in `src/specialist/session-metrics-contract.ts`). The host does not read the
+  bridge's `anthropic-ratelimit-unified-*` headers, so no quota display comes from them here.
 - **This repository runs `dist/`.** `sp`, the `specialists` MCP server and the Pi extension execute
   the built bundle, so a source change to the route reaches a running host only after `dist/` is
   rebuilt and the checkout pulled.
 
 ## Troubleshooting
 
-`claude_bridge_unavailable` means the definition opted in but the extension could not be resolved.
-The refusal note lists every path it searched; the fix text names the install command. The common
+`claude_bridge_unavailable` is emitted only when **both** switches are on and the extension lookup
+then fails; a route that is merely off never produces it (it refuses with `model_unavailable`). The
+refusal note names `SPECIALISTS_CLAUDE_BRIDGE_PATH`, the install command, the store it lands in, and
+lists every path searched. The common
 causes are a bridge installed into a project directory (never searched), a `pi install` that landed
 in a different `agentDir`, or a relative `SPECIALISTS_CLAUDE_BRIDGE_PATH`.
 

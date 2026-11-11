@@ -98,20 +98,27 @@ repository layer and consent cannot.
 - Keep `claude_bridge` out of shipped definitions. The field defaults to `false` and the resolver
   requires `true`, so a package spec with no field is already off — adding explicit falses is churn,
   and adding `true` would ship consent.
-- Set it in your own layer, and pair it with the model:
+- Set it in a Specialist **spec** layer, next to the model — for example
+  `~/.specialists/user/<name>.specialist.json` (home layer) or `.specialists/user/<name>.specialist.json`
+  inside a project (repository layer, which cannot grant consent on its own):
 
   ```json
   { "specialist": { "execution": { "claude_bridge": true, "model": "claude-bridge/claude-sonnet-5-5" } } }
   ```
 
+  `sp edit --global` rejects the field today: the global override schema
+  (`src/specialist/global-config.ts`, `OverrideExecutionSchema`) does not list it, even though
+  `OVERRIDE_ALLOWED_EXECUTION_FIELDS` does. Use a spec layer until that mismatch is fixed.
 - Use a `claude-bridge/...` model id. `anthropic/...` is Pi's own API-key provider and does not go
   through Claude Code.
-- Model selection is strict: a refusal is a refusal. A `claude-bridge/...` primary that cannot be
-  admitted ends the dispatch with `model_unavailable`; the host does not substitute a fallback, and
-  a `fallback_models` entry will not be reached for that primary. A `model_override` on the dispatch
-  is therefore the safe way to pin one model for a proof run.
-- `claude_bridge` is override-allowed, so `sb specialist override <name> execution.claude_bridge=true`
-  works from the operator layer and nowhere else.
+- **Admission is strict; runtime is not.** A `claude-bridge/...` primary that cannot be admitted ends
+  the dispatch with `model_unavailable` and is not substituted — that guard sits in
+  `src/activation/native-host.ts` next to the first model check. An admitted run that then **fails
+  mid-run** (an inherited `ANTHROPIC_*` breaking auth on turn 1, a quota error, a closed session)
+  goes through `runWithFallback`/`walkFallbackChain`, where no bridge guard exists: it can continue
+  on the next `fallback_models` entry, which may be an API-key provider. If attribution matters more
+  than continuity for a run, pin a single model with `model_override` and leave `fallback_models`
+  empty.
 
 ### Permission tiers
 
