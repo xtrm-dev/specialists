@@ -642,7 +642,7 @@ interface ResolvedGlobalPath {
  * override schema. The first segment is the specialist name (dynamic key);
  * remaining segments navigate GlobalSpecialistOverrideSchema.
  */
-function resolveGlobalPath(rawPath: string): ResolvedGlobalPath {
+export function resolveGlobalPath(rawPath: string): ResolvedGlobalPath {
   const segments = rawPath.split('.').map(part => part.trim()).filter(Boolean);
   if (segments.length < 2) {
     fail(`Error: global path must be <specialist>.<field.path>, got: "${rawPath}"`);
@@ -674,7 +674,7 @@ function resolveGlobalPath(rawPath: string): ResolvedGlobalPath {
  * Coerce a raw string value to the leaf type of a global override field.
  * The literal string "null" clears a field back to inherit.
  */
-function coerceGlobalValue(schema: z.ZodTypeAny, rawValue: string): unknown {
+export function coerceGlobalValue(schema: z.ZodTypeAny, rawValue: string): unknown {
   if (rawValue === 'null') return null;
 
   const unwrapped = unwrapSchema(schema);

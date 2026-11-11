@@ -84,7 +84,7 @@ export function getGlobalUserConfigPath(): GlobalUserConfigPath {
 
 const OverrideExtensionsSchema = z.record(z.string(), ExtensionToggleSchema.nullable());
 
-const OverrideExecutionSchema = z.object({
+export const OverrideExecutionSchema = z.object({
   model: z.string().nullable(),
   fallback_model: z.string().nullable(),
   fallback_models: z.array(z.string()).nullable().optional(),
@@ -97,6 +97,12 @@ const OverrideExecutionSchema = z.object({
   max_retries: z.number().int().min(0).nullable(),
   /** Workspace-lease waiver for read-tier observers (mirrors specialist `execution.lease_waiver`). */
   lease_waiver: z.boolean().nullable().optional(),
+  /**
+   * Opt-in Claude Code route (SPECIALISTS-4405). Listed in
+   * `OVERRIDE_ALLOWED_EXECUTION_FIELDS`, so it belongs here too: a field the allowlist advertises
+   * must be settable, or the CLI rejects a route the docs say is configurable.
+   */
+  claude_bridge: z.boolean().nullable().optional(),
   prompt_limit_bytes: z.number().int().positive().nullable().optional(),
   stdout_limit_bytes: z.number().int().positive().nullable().optional(),
   extensions: OverrideExtensionsSchema.optional(),
