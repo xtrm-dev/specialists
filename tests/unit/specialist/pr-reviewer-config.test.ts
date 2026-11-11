@@ -1,4 +1,7 @@
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { parseSpecialist } from '../../../src/specialist/schema.js';
 
@@ -31,17 +34,48 @@ describe('pr-reviewer package specialist', () => {
     const spec = await loadPrReviewer();
     const system = spec.specialist.prompt.system ?? '';
 
-    expect(spec.specialist.metadata.version).toBe('1.3.2');
     expect(system).toContain('If only `BashBackground`, `Monitor` and `BackgroundStop` are exposed, there are no delegate, attested-run or fusion tools');
   });
 
-  it('posts exactly one identified PR comment and never approves, merges or edits', async () => {
+  it('posts exactly one formal review pinned to the head, and never merges or edits', async () => {
     const system = (await loadPrReviewer()).specialist.prompt.system ?? '';
 
-    expect(system).toContain('gh pr comment <pr>');
-    expect(system).toContain('Review by pr-reviewer specialist (<model>) at head <sha12>');
-    expect(system).toContain('Post one comment per reviewed head.');
-    expect(system).toContain('Never run `gh pr review`, `gh pr merge`, `gh pr close` or `gh pr edit`.');
+    expect(system).toContain('gh pr review <pr> --repo <owner/repo> --comment');
+    expect(system).toContain("resolves `<sha12>` against the PR");
+    expect(system).toContain('Review by pr-reviewer (<model>) at head <sha12>');
+    expect(system).toContain('One review per reviewed head');
+    expect(system).not.toContain('Post one comment per reviewed head.');
+    expect(system).not.toContain('Never run `gh pr review`');
+  });
+
+  it('binds each verdict to exactly one gh pr review flag', async () => {
+    const system = (await loadPrReviewer()).specialist.prompt.system ?? '';
+
+    // The prompt is the only place that decides which flag carries which verdict,
+    // and the shim refuses a flag that disagrees with the body. One assertion over
+    // the post instruction binds the three pairs in order: a swap
+    // (--approve for PARTIAL, --comment for PASS), a substitution (--reject) or a
+    // dropped binding changes this mapping.
+    const start = system.indexOf('Then post with exactly one verdict flag:');
+    const end = system.indexOf('The shim prints the review', start);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const post = system.slice(start, end);
+
+    const bindings = [...post.matchAll(/(--comment|--approve|--request-changes)[^,]*?for (PASS|PARTIAL|FAIL)/g)]
+      .map((match) => [match[1], match[2]]);
+    expect(bindings).toEqual([
+      ['--comment', 'PARTIAL'],
+      ['--approve', 'PASS'],
+      ['--request-changes', 'FAIL'],
+    ]);
+  });
+
+  it('says the review is one formal GitHub review, not a review comment', async () => {
+    const task = (await loadPrReviewer()).specialist.prompt.task_template;
+
+    expect(task).toContain('formal GitHub review');
+    expect(task).not.toContain('review comment');
   });
 
   it('emits one verdict format with the PASS, PARTIAL or FAIL enum', async () => {
@@ -70,12 +104,78 @@ describe('pr-reviewer package specialist', () => {
     expect(system).toContain('mutation runs keep `(ulimit -v 2000000; timeout 120 ...)`, one mutant at a time');
   });
 
-  it('lints the comment body mechanically before posting', async () => {
+  it('lints the findings body mechanically before posting and leaves the header to the shim', async () => {
     const system = (await loadPrReviewer()).specialist.prompt.system ?? '';
 
     expect(system).toContain('This exact command must exit 0, and a body that fails it is fixed and re-linted, never posted');
-    expect(system).toContain("<!-- mmd-review reviewer=pr-reviewer head=[0-9a-f]{12} -->");
-    expect(system).toContain("^- Verdict: (PASS|PARTIAL|FAIL)$");
-    expect(system).toContain("! grep -Eq '/home/|/Users/|/root/'");
+    expect(system).toContain('Do NOT write any hidden marker');
+    expect(system).not.toContain('mmd-review');
+  });
+
+  it('loads the pr-reviewer-only rule set and leaves the shared one to the job reviewer', async () => {
+    const pr = await loadPrReviewer();
+    expect(pr.specialist.mandatory_rules?.template_sets).toContain('pr-reviewer-verdict-format');
+    const shared = readFileSync('config/mandatory-rules/pr-reviewer-verdict-format.md', 'utf8');
+    expect(shared).toContain('pr-reviewer');
+    // The shared rule the job reviewer also loads must not carry PR-only text.
+    const sharedReviewer = readFileSync('config/mandatory-rules/reviewer-verdict-format.md', 'utf8');
+    expect(sharedReviewer).not.toContain('gh pr review');
+    expect(sharedReviewer).not.toContain('PR Review Verdict');
+  });
+
+  it('executes the lint command from the prompt: a good body passes, a self-written header or a second verdict fails', async () => {
+    const system = (await loadPrReviewer()).specialist.prompt.system ?? '';
+    const start = system.indexOf('f=<body file>;');
+    expect(start).toBeGreaterThan(0);
+    const end = system.indexOf('`. Then post', start);
+    expect(end).toBeGreaterThan(start);
+    const lint = system.slice(start + 'f=<body file>;'.length, end).replace(/^\s+/, '');
+
+    const dir = mkdtempSync(join(tmpdir(), 'pr-reviewer-lint-'));
+    try {
+      const run = (name: string, body: string) => {
+        const file = join(dir, name);
+        writeFileSync(file, body);
+        return spawnSync('bash', ['-c', `f=${JSON.stringify(file)}; ${lint}`], { encoding: 'utf8' });
+      };
+      const header = 'Review by pr-reviewer (Muse Spark) at head 0123456789ab';
+      const good = `${header}\n\n## PR Review Verdict\n- Verdict: PARTIAL\n\n## Findings\n- one thing\n`;
+      expect(run('good.md', good).status, 'good body must pass the prompt lint').toBe(0);
+
+      // A body with no header line fails line 1.
+      expect(run('no-header.md', '## PR Review Verdict\n- Verdict: PARTIAL\n').status).not.toBe(0);
+      // Two verdict lines fail.
+      expect(run('two-verdicts.md', `${good}- Verdict: PASS\n`).status).not.toBe(0);
+      // A self-written hidden marker fails.
+      expect(run('marker.md', `${header}\n<!-- agent=me run=x -->\n\n## PR Review Verdict\n- Verdict: PASS\n`).status).not.toBe(0);
+      // An absolute host path fails.
+      expect(run('path.md', `${good}- see /home/someone/file.ts\n`).status).not.toBe(0);
+      // The size cap fails on its own: drop the cap clause and this body passes.
+      expect(run('big.md', `${good}${'x'.repeat(60000)}\n`).status).not.toBe(0);
+      // The section clause fails on its own: drop the grep and this body passes.
+      expect(run('no-section.md', `${header}\n\n- Verdict: PARTIAL\n`).status).not.toBe(0);
+      // Line 1 is pinned, not merely prefix-matched: another role, an 11-hex or a
+      // 13-hex head, trailing text after the head, and a model that starts with
+      // whitespace all fail. Each case is a mutant killer — widening pr-reviewer
+      // to [a-z-]+, {12} to {3}, dropping the trailing $, or [^)]* opening to a
+      // leading space must turn one of these red.
+      expect(run('other-role.md', 'Review by other-role (Muse Spark) at head 0123456789ab\n\n## PR Review Verdict\n- Verdict: PASS\n').status, 'another role must fail line 1').not.toBe(0);
+      expect(run('short-head.md', 'Review by pr-reviewer (Muse Spark) at head 0123456789a\n\n## PR Review Verdict\n- Verdict: PASS\n').status, 'an 11-hex head must fail line 1').not.toBe(0);
+      expect(run('long-head.md', 'Review by pr-reviewer (Muse Spark) at head 0123456789abc\n\n## PR Review Verdict\n- Verdict: PASS\n').status, 'a 13-hex head must fail line 1').not.toBe(0);
+      expect(run('trailing-text.md', 'Review by pr-reviewer (Muse Spark) at head 0123456789ab (delta from 0123456789ab)\n\n## PR Review Verdict\n- Verdict: PASS\n').status, 'trailing text after the head must fail line 1').not.toBe(0);
+      expect(run('leading-space-model.md', 'Review by pr-reviewer ( Muse Spark) at head 0123456789ab\n\n## PR Review Verdict\n- Verdict: PASS\n').status, 'a model name starting with whitespace must fail line 1').not.toBe(0);
+      // Parity with the shim: a verdict line must start at column 0, so an
+      // indented one fails the lint instead of reaching the shim and being
+      // refused there.
+      expect(run('indented.md', `${header}\n\n## PR Review Verdict\n  - Verdict: PARTIAL\n`).status).not.toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses to post outside the reviewer role instead of working around the shim', async () => {
+    const system = (await loadPrReviewer()).specialist.prompt.system ?? '';
+    expect(system).toContain('the launch sets `XTRM_ROLE=reviewer`');
+    expect(system).toContain('do not work around it with `gh api` or `gh pr comment`');
   });
 });
