@@ -181,6 +181,40 @@ describe('format-helpers', () => {
   });
 
   describe('formatEventLine', () => {
+    it('renders a skipped fallback as a refusal, not as a model cycle (SPECIALISTS-4425)', () => {
+      const skipped = formatEventLine({
+        t: Date.now(),
+        type: 'model_change',
+        action: 'cycle_model',
+        model: 'claude-bridge/claude-sonnet-5-5',
+        previous_model: 'claude-bridge/claude-sonnet-5-5',
+        skipped: true,
+        not_started_model: 'commandcode/deepseek/deepseek-v4.1-flash',
+        terminal: true,
+      }, {
+        jobId: 'job1',
+        specialist: 'explorer',
+        colorize: (value: string) => value,
+      });
+
+      expect(skipped).toContain('fallback skipped');
+      expect(skipped).toContain('not started: commandcode/deepseek/deepseek-v4.1-flash');
+      // It must not read like a hop onto the fallback model.
+      expect(skipped).not.toContain('→');
+
+      const cycle = formatEventLine({
+        t: Date.now(),
+        type: 'model_change',
+        action: 'cycle_model',
+        model: 'fallbackprov/fallback-model',
+        previous_model: 'primaryprov/primary-model',
+      }, { jobId: 'job2', specialist: 'executor', colorize: (value: string) => value });
+
+      expect(cycle).toContain('primaryprov/primary-model');
+      expect(cycle).toContain('fallbackprov/fallback-model');
+      expect(cycle).toContain('→');
+    });
+
     it('renders run_complete token split metrics summary including turns/tools/exit', () => {
       const line = formatEventLine({
         t: Date.now(),

@@ -464,12 +464,21 @@ export function mapNativeLifecycleEvent(
     // terminal, note, attempt_n, resolved_model verbatim): the reason a fallback happened
     // and whether it terminated the activation must survive to the durable forensic row.
     // `terminal: false` is preserved explicitly (boolean, not truthiness-filtered).
-    case 'model_fallback':
+    case 'model_fallback': {
+      // A skipped fallback is a terminal decision, not a cycle: nothing moved. Keep `model` as the
+      // model that actually ran and name the one that was not started, so a feed row cannot be
+      // misread as "this activation ran on the fallback".
+      const skipped = booleanField(event.payload?.skipped) === true;
+      const notStarted = stringField(event.payload?.not_started_model) ?? stringField(event.payload?.to_model);
+      const ranModel = stringField(event.payload?.resolved_model) ?? stringField(event.payload?.from_model);
       return at({
         t,
         type: TIMELINE_EVENT_TYPES.MODEL_CHANGE,
         action: 'cycle_model',
-        ...(stringField(event.payload?.to_model) ? { model: stringField(event.payload?.to_model) as string } : {}),
+        ...(skipped && ranModel ? { model: ranModel as string } : {}),
+        ...(!skipped && stringField(event.payload?.to_model) ? { model: stringField(event.payload?.to_model) as string } : {}),
+        ...(skipped ? { skipped: true } : {}),
+        ...(skipped && notStarted ? { not_started_model: notStarted as string } : {}),
         ...(stringField(event.payload?.from_model) ? { previous_model: stringField(event.payload?.from_model) as string } : {}),
         ...(stringField(event.payload?.error_class) ? { error_class: stringField(event.payload?.error_class) as string } : {}),
         ...(booleanField(event.payload?.terminal) !== undefined ? { terminal: booleanField(event.payload?.terminal) as boolean } : {}),
@@ -477,6 +486,7 @@ export function mapNativeLifecycleEvent(
         ...(numberField(event.payload?.attempt_n) !== undefined ? { attempt_n: numberField(event.payload?.attempt_n) as number } : {}),
         ...(stringField(event.payload?.resolved_model) ? { resolved_model: stringField(event.payload?.resolved_model) as string } : {}),
       }, t);
+    }
     // SPECIALISTS-120 settlement capture. The native host captures Pi's own session totals
     // before the terminal activation event and emits the outcome under these two names. The
     // snapshot gets its own timeline type so a reader can tell Pi's session total apart from

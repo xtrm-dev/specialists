@@ -69,9 +69,11 @@ import {
 } from '../pi/session.js';
 import {
   CLAUDE_BRIDGE_PROVIDER,
+  bridgedFallbackSkipEvent,
   claudeBridgeExtensionProviders,
   claudeBridgeOffSwitches,
   claudeBridgeRouteEnabled,
+  isBridgedModel,
 } from '../pi/claude-bridge.js';
 import { getPermissionGuardExtensionPath, resolvePermissionGuardForSpawn } from '../pi/permission-guard-extension.js';
 import { formatResolvedToolContract, withDiscoveredExtensionTools, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
@@ -3352,6 +3354,19 @@ export class NativeActivationHost {
       if (!FALLBACK_RETRYABLE_CLASSES.has(errorClass)) break;
       const nextModel = ctx.modelChain[index + 1];
       const fromModel = record.snapshot.resolvedModel;
+      // SPECIALISTS-4425: a bridged primary that was admitted and then failed at runtime is not
+      // walked. The operator chose the subscription surface; continuing on the next model would
+      // bill a different one and report a run the definition never asked for. The failure keeps
+      // its cause, and the event says the walk was skipped rather than silently stopping.
+      if (isBridgedModel(fromModel)) {
+        ctx.emit('model_fallback', bridgedFallbackSkipEvent({
+          fromModel: fromModel as string,
+          toModel: nextModel,
+          errorClass,
+          cause: detail,
+        }));
+        break;
+      }
       // Validate BEFORE disposing: a fallback that cannot be honoured keeps the failed
       // session and its context rather than trading them for nothing.
       const check = await checkModelForRuntime(ctx.sdk, ctx.modelRuntime, nextModel);

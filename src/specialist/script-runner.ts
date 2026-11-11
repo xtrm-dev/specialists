@@ -19,6 +19,7 @@ import { resolvePermissionGuardForSpawn } from '../pi/permission-guard-extension
 import { SpecialistLoader } from './loader.js';
 import { buildMandatoryRulesInjection } from './mandatory-rules.js';
 import { buildRequiredPlatformRulesBlock } from './required-platform-rules.js';
+import { isBridgedModel } from '../pi/claude-bridge.js';
 import { resolveModelChain } from './model-chain.js';
 import { ensureObservabilityDbFile, resolveObservabilityDbLocation } from './observability-db.js';
 import { createObservabilitySqliteClient, createObservabilitySqliteClientAtPath } from './observability-sqlite.js';
@@ -970,7 +971,31 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
       }
       attempts.push(attempt);
       const parsed = classifyAttempt(attempt);
-      if (parsed.retryable && parsed.errorType !== 'auth') continue;
+      const retryableHop = parsed.retryable && parsed.errorType !== 'auth';
+      // SPECIALISTS-4425: the third walk path. A bridged candidate is a subscription surface, so a
+      // retryable failure must not move to the next candidate (including `options.fallbackModel`).
+      // The attempt falls through to the failure return below instead of continuing the loop.
+      const bridgedSkip = retryableHop && isBridgedModel(model);
+      const nextCandidate = modelCandidates[modelCandidates.indexOf(model) + 1];
+      // Only when something WOULD have been walked: a single-candidate chain has no skip to report.
+      if (bridgedSkip && nextCandidate) {
+        appendTimelineEvent?.({
+          t: Date.now(),
+          type: 'model_change',
+          action: 'cycle_model',
+          // The model that RAN, and the one that was deliberately not started.
+          model,
+          previous_model: model,
+          skipped: true,
+          terminal: true,
+          not_started_model: nextCandidate,
+          error_class: parsed.errorType,
+          note:
+            `fallback skipped: the candidate "${model}" is served by the Claude Code route, ` +
+            `so the walk does not continue to another provider`,
+        } as never);
+      }
+      if (retryableHop && !bridgedSkip) continue;
 
       const durationMs = Date.now() - startedAt;
 

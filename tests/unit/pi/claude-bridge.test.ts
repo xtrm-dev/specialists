@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, relative as relativePath } from 'node:path';
+import { dirname, isAbsolute, join, relative as relativePath } from 'node:path';
 import { readFileSync } from 'node:fs';
 import {
   CLAUDE_BRIDGE_PATH_ENV,
@@ -282,26 +282,25 @@ describe('pi store resolution (A2: `pi install` must satisfy the resolver)', () 
    */
   function isolate<T>(fn: (scratchRoots: Record<string, string>) => T): T {
     const scratchRoots: Record<string, string> = {};
-    const previous: Record<string, string | undefined> = {};
     for (const key of ROOT_ENV_KEYS) {
-      previous[key] = process.env[key];
       scratchRoots[key] = key === 'NVM_BIN' ? join(tempDir(), 'bin') : tempDir();
-      process.env[key] = scratchRoots[key];
     }
-    try {
-      const home = tempDir();
-      return fn({ ...scratchRoots, HOME: home, EXEC: join(tempDir(), 'bin', 'node') });
-    } finally {
-      for (const key of ROOT_ENV_KEYS) {
-        if (previous[key] === undefined) delete process.env[key];
-        else process.env[key] = previous[key];
-      }
-    }
+    const home = tempDir();
+    // No process.env mutation: the scratch roots travel through deps, so a test cannot leak them
+    // into the next one and an ambient variable cannot leak in.
+    return fn({ ...scratchRoots, HOME: home, EXEC: join(tempDir(), 'bin', 'node') });
   }
 
-  /** Default deps for a test: scratch home, scratch interpreter, real existence checks. */
+  /** Default deps for a test: the scratch roots, home, interpreter, and real existence checks. */
   function deps(scratchRoots: Record<string, string>, env: NodeJS.ProcessEnv = {}) {
-    return { env, home: scratchRoots.HOME, execPath: scratchRoots.EXEC, exists: (path: string) => existsSync(path) };
+    const neutral: NodeJS.ProcessEnv = {};
+    for (const key of ROOT_ENV_KEYS) neutral[key] = scratchRoots[key];
+    return {
+      env: { ...neutral, ...env },
+      home: scratchRoots.HOME,
+      execPath: scratchRoots.EXEC,
+      exists: (path: string) => existsSync(path),
+    };
   }
 
   function inRepo<T>(fn: (repo: string) => T): T {
@@ -473,6 +472,38 @@ describe('pi store resolution (A2: `pi install` must satisfy the resolver)', () 
         rmSync(plant.dir, { recursive: true, force: true });
       }
     });
+  });
+
+  it('reads a bridge under the scratch home .bun root (deps.home is honoured)', () => {
+    isolate(roots => {
+      const pkg = bridgePackage(join(roots.HOME, '.bun', 'install', 'global', 'node_modules'));
+      expect(resolveClaudeBridgeExtensionPath(deps(roots, {}))).toBe(join(pkg, 'src', 'index.ts'));
+    });
+  });
+
+  it('reads a bridge under the scratch interpreter prefix (deps.execPath is honoured)', () => {
+    isolate(roots => {
+      const prefix = dirname(dirname(roots.EXEC)); // <prefix>/bin/node -> <prefix>/lib/node_modules
+      const pkg = bridgePackage(join(prefix, 'lib', 'node_modules'));
+      expect(resolveClaudeBridgeExtensionPath(deps(roots, {}))).toBe(join(pkg, 'src', 'index.ts'));
+    });
+  });
+
+  it('resolves through an injected filesystem: deps.exists and deps.readDir are both honoured', () => {
+    // A virtual filesystem, so this can only pass if BOTH seams are forwarded: `readDir` supplies
+    // the nvm version list and `exists` decides the manifest and entry without touching disk.
+    const home = '/virtual/home';
+    const versionRoot = '/virtual/home/.nvm/versions/node/v24.0.0/lib/node_modules';
+    const pkg = join(versionRoot, 'pi-claude-bridge');
+    const files = new Set([join(pkg, 'package.json'), join(pkg, 'src', 'index.ts')]);
+    const deps = {
+      env: {},
+      home,
+      execPath: '/virtual/bin/node',
+      exists: (path: string) => files.has(path) || path.endsWith('node_modules'),
+      readDir: (path: string) => (path === '/virtual/home/.nvm/versions/node' ? ['v24.0.0'] : []),
+    };
+    expect(resolveClaudeBridgeExtensionPath(deps)).toBe(join(pkg, 'src', 'index.ts'));
   });
 
   it('neutralisation leaves no machine root in the search list', () => {

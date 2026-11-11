@@ -1762,6 +1762,47 @@ function chainHost(opts: {
     });
   });
 
+  it('does not walk fallback_models when an admitted bridged primary fails mid-run (SPECIALISTS-4425)', async () => {
+    // Reproduced on the real host before the fix: a bridged primary that failed at runtime
+    // (connection refused from the Claude Code child) hopped to an API-key model and settled
+    // `completed`, silently moving the run onto a different billing surface.
+    const fallbackSession = scriptSession([{ text: 'must-not-run' }]);
+    const restoreSwitch = withOperatorSwitch(true);
+    const bridge = withBridgeEntry();
+    try {
+      const { host, sink, created } = chainHost({
+        executionExtra: {
+          model: 'claude-bridge/claude-sonnet-5-5',
+          claude_bridge: true,
+          fallback_models: ['fallbackprov/fallback-model'],
+        },
+        sessions: [scriptSession([{ throw: quotaError() }]), fallbackSession],
+      });
+
+      const handle = await start(host);
+      const result = await handle.result;
+
+      expect(result.status).toBe('failed');
+      expect(result.resolvedModel).toBe('claude-bridge/claude-sonnet-5-5');
+      expect(result.fallbackUsed).toBe(false);
+      // No second session: the walk stopped before creating one.
+      expect(created).toHaveLength(1);
+      const step = sink.events.find(e => e.name === 'model_fallback');
+      expect(step?.payload).toMatchObject({
+        from_model: 'claude-bridge/claude-sonnet-5-5',
+        to_model: 'fallbackprov/fallback-model',
+        terminal: true,
+        skipped: true,
+        resolved_model: 'claude-bridge/claude-sonnet-5-5',
+      });
+      expect(String((step?.payload as { note?: string }).note)).toMatch(/fallback skipped/);
+      expect(String((step?.payload as { note?: string }).note)).toContain('Claude Code route');
+    } finally {
+      bridge.restore();
+      restoreSwitch();
+    }
+  });
+
   it('records an intermediate failed leg once and the final failure once (SPECIALISTS-4253)', async () => {
     // Each failed leg used to emit a plain activation_failed, so the channel pushed "failed"
     // while the fallback model was still running and again when it failed too.
