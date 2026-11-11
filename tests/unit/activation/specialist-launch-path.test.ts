@@ -17,7 +17,7 @@ import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import { testWorkItems } from '../../utils/test-work-items.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
-import { snapshotIdentityEnv, type IdentityEnvRun } from '../../../src/pi/identity-env.js';
+import { clearIdentityEnv, snapshotIdentityEnv, type IdentityEnvRun } from '../../../src/pi/identity-env.js';
 
 /**
  * CORE-2524.4 on the NATIVE launch path. #525 gave a native activation its agent
@@ -46,7 +46,7 @@ const BEAD = {
 
 function fakeSession(
   onPrompt?: () => void,
-  options: { wait?: Promise<void>; onResume?: () => void } = {},
+  options: { wait?: Promise<void>; onResume?: () => void; stopReason?: string } = {},
 ): PiAgentSessionLike {
   const listeners: Array<(e: PiAgentSessionEvent) => void> = [];
   const messages: unknown[] = [];
@@ -57,6 +57,9 @@ function fakeSession(
     disposed: false,
     activeTools: ['read', 'grep'],
     async prompt() {
+      // The runtime tells the host the leg started BEFORE any tool runs, and that is
+      // where the host re-asserts identity; captures therefore come after it.
+      listeners.forEach(l => l({ type: 'agent_start' }));
       onPrompt?.();
       if (options.wait) {
         // Hold the turn open so two activations can overlap, and let the caller look
@@ -64,8 +67,7 @@ function fakeSession(
         await options.wait;
         options.onResume?.();
       }
-      listeners.forEach(l => l({ type: 'agent_start' }));
-      messages.push({ role: 'assistant', content: 'done' });
+      messages.push({ role: 'assistant', content: 'done', ...(options.stopReason ? { stopReason: options.stopReason } : {}) });
       listeners.forEach(l => l({ type: 'agent_end', willRetry: false }));
       listeners.forEach(l => l({ type: 'agent_settled' }));
     },
@@ -302,6 +304,146 @@ describe('native launch path — overlapping activations return the env to the p
     await a.result;
     expect(snapshotIdentityEnv(process.env)).toEqual(before);
     expect(holderWhenAResumed).toBe(holderFor(a.activationId));
+  });
+});
+
+/**
+ * N1: identity belongs to the activation's LIFETIME, not to one turn. A fallback leg,
+ * a retry and a background wake all start a new leg from a state where the env may
+ * have been taken or restored, and every one of them must be able to reach git and gh
+ * as its own agent. `agent_start` is the one seam all four legs pass through.
+ */
+describe('native launch path — every leg of an activation runs with its identity (N1)', () => {
+  function makeHost(plan: {
+    stopReason?: string;
+    wait?: Promise<void>;
+    onPrompt?: () => void;
+    throwOnCreate?: boolean;
+  } = {}) {
+    const created: PiAgentSessionLike[] = [];
+    const sdk = {
+      ...makeSdk(fakeSession()),
+      createAgentSession: async (options?: Record<string, unknown>) => {
+        if (plan.throwOnCreate) throw new Error('sdk refused');
+        const session = fakeSession(plan.onPrompt, { wait: plan.wait, stopReason: plan.stopReason });
+        if (Array.isArray(options?.tools)) session.getActiveToolNames = () => options!.tools as string[];
+        created.push(session);
+        return { session };
+      },
+    } as PiSdk;
+    const host = new NativeActivationHost({
+      workItems: testWorkItems({ description: BEAD.description }),
+      loader: { get: async () => ({
+        specialist: {
+          metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },
+          execution: {
+            model: 'testprov/test-model', permission_required: 'READ_ONLY', response_format: 'text',
+            output_type: 'research', bare: false,
+          },
+          prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
+        },
+      }) } as never,
+      loadSdk: async () => sdk,
+      identityEnvRun: () => ({ status: 0, stdout: JSON.stringify({ env: { XTRM_ROLE: 'researcher' } }) }),
+      cwd: process.cwd(),
+    });
+    return { host, created };
+  }
+
+  const dispatch = (host: NativeActivationHost) =>
+    host.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator' });
+  const holderFor = (activationId: string) =>
+    `sp-researcher-${activationId.replace(/[^A-Za-z0-9]/g, '').slice(0, 8)}`;
+  const settleAsync = async (times = 8) => { for (let i = 0; i < times; i += 1) await Promise.resolve(); };
+
+  it('a leg boundary does not strip the identity, and a disturbed env is re-asserted at the next leg', async () => {
+    const before = snapshotIdentityEnv(process.env);
+    let holderAfterIntermediateSettle: string | undefined;
+    let holderOnSecondLeg: string | undefined;
+    const { host, created } = makeHost();
+    const a = await dispatch(host);
+    const session = created[0];
+
+    // A multi-leg shape on ONE session: leg 1 settles, then something outside this
+    // activation takes process.env (another host's restore), then leg 2 starts.
+    holderAfterIntermediateSettle = process.env.SUBSTRATE_HOLDER;
+    clearIdentityEnv(process.env);
+    await session.prompt();
+
+    holderOnSecondLeg = process.env.SUBSTRATE_HOLDER;
+    await a.result;
+
+    expect(holderAfterIntermediateSettle).toBe(holderFor(a.activationId));
+    expect(holderOnSecondLeg).toBe(holderFor(a.activationId));
+    expect(snapshotIdentityEnv(process.env)).toEqual(before);
+  });
+
+  it('a retry leg runs with the identity', async () => {
+    const before = snapshotIdentityEnv(process.env);
+    const holders: Array<string | undefined> = [];
+    const { host } = makeHost({
+      stopReason: 'error',
+      onPrompt: () => { holders.push(process.env.SUBSTRATE_HOLDER); },
+    });
+    const a = await dispatch(host);
+    await a.result;
+
+    const retried = await host.retry(a.activationId, { prompt: 'try again' });
+    await retried.result;
+
+    expect(holders).toHaveLength(2);
+    expect(holders[0]).toBe(holderFor(a.activationId));
+    expect(holders[1]).toBe(holderFor(a.activationId));
+    expect(snapshotIdentityEnv(process.env)).toEqual(before);
+  });
+
+  it('a wake leg after the framed walk re-applies the identity', async () => {
+    const before = snapshotIdentityEnv(process.env);
+    const holders: Array<string | undefined> = [];
+    const { host, created } = makeHost({ onPrompt: () => { holders.push(process.env.SUBSTRATE_HOLDER); } });
+    const a = await dispatch(host);
+    await a.result;
+    expect(snapshotIdentityEnv(process.env)).toEqual(before); // the walk took it off the stack
+
+    await created[0].prompt(); // the model's own wake turn on the settled session
+    await settleAsync();
+
+    expect(holders[1]).toBe(holderFor(a.activationId));
+    expect(snapshotIdentityEnv(process.env)).toEqual(before);
+  });
+
+  it('stop() takes the activation off the stack even though abort() settles nothing', async () => {
+    const before = snapshotIdentityEnv(process.env);
+    let release!: () => void;
+    const wait = new Promise<void>((resolve) => { release = resolve; });
+    const { host } = makeHost({ wait });
+    const a = await dispatch(host);
+    expect(process.env.SUBSTRATE_HOLDER).toBe(holderFor(a.activationId));
+
+    await host.stop(a.activationId, 'test');
+    expect(snapshotIdentityEnv(process.env)).toEqual(before);
+    release();
+  });
+
+  it('a dispatch that throws leaves no identity on the host env', async () => {
+    const before = snapshotIdentityEnv(process.env);
+    const { host } = makeHost({ throwOnCreate: true });
+    const dispatched = await dispatch(host).catch(() => undefined);
+    expect(dispatched).toBeUndefined();
+    expect(snapshotIdentityEnv(process.env)).toEqual(before);
+  });
+
+  it('shutdown() restores the baseline whatever state the activations were in', async () => {
+    const before = snapshotIdentityEnv(process.env);
+    let release!: () => void;
+    const wait = new Promise<void>((resolve) => { release = resolve; });
+    const { host } = makeHost({ wait });
+    await dispatch(host);
+    expect(process.env.SUBSTRATE_HOLDER).not.toBe(before.SUBSTRATE_HOLDER);
+
+    host.shutdown();
+    expect(snapshotIdentityEnv(process.env)).toEqual(before);
+    release();
   });
 });
 

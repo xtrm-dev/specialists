@@ -193,7 +193,10 @@ export function resolveAgentIdentityEnv(input: IdentityEnvInput = {}): Record<st
       timeout: opts.timeoutMs,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    return { status: result.status, stdout: String(result.stdout ?? '') };
+    // N4: spawnSync reports ENOENT and signals in `error`, never by throwing. Dropping
+    // it here made a missing `xt` look like "exited on a signal" — a wrong reason on the
+    // one warning an operator uses to tell a broken install from a failing CLI.
+    return { status: result.status, stdout: String(result.stdout ?? ''), error: result.error };
   });
 
   const warn = input.warn ?? launcherWarning;

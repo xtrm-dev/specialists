@@ -77,6 +77,21 @@ describe('resolveAgentIdentityEnv', () => {
     expect(missing[0]).toContain('returned no env');
   });
 
+  it('classifies a missing xt as "did not run", not as a signal (N4)', () => {
+    const warnings: string[] = [];
+    // The DEFAULT runner, with a PATH that cannot hold xt: spawnSync reports ENOENT in
+    // `error` and leaves status null. Dropping `error` reported "exited on a signal",
+    // which points an operator at the wrong failure.
+    const env = resolveAgentIdentityEnv({
+      holder: 'h',
+      env: { PATH: '/nonexistent-xt-for-this-test' },
+      warn: (message) => warnings.push(message),
+    });
+    expect(env).toEqual({ SUBSTRATE_HOLDER: 'h' });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('lookup did not run (Error ENOENT)');
+  });
+
   it('stays quiet when the lookup succeeds', () => {
     const warnings: string[] = [];
     resolveAgentIdentityEnv({
