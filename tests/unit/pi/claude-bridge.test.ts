@@ -1,7 +1,7 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative as relativePath } from 'node:path';
+import { isAbsolute, join, relative as relativePath } from 'node:path';
 import { readFileSync } from 'node:fs';
 import {
   CLAUDE_BRIDGE_PATH_ENV,
@@ -35,6 +35,21 @@ import { ExecutionSchema } from '../../../src/specialist/schema.js';
  * the flag must be OFF unless a definition says otherwise, and an enabled flag whose extension is
  * missing must be distinguishable from "not enabled" so the host can refuse instead of running.
  */
+
+/**
+ * runtimeWarn is the only signal that a misconfigured root was ignored, so it is spied on rather
+ * than assumed: removing the call must fail a test, not pass silently.
+ */
+const warnings = vi.hoisted(() => [] as string[]);
+vi.mock('../../../src/utils/runtime-diagnostics.js', async importOriginal => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    runtimeWarn: (_tag: string, message: string) => {
+      warnings.push(message);
+    },
+  };
+});
 
 const scratch: string[] = [];
 function tempDir(): string {
@@ -270,15 +285,29 @@ describe('pi store resolution (A2: `pi install` must satisfy the resolver)', () 
     }
   }
 
-  /** Neutralise the machine's real global roots so a test asserts only what it planted. */
-  function withEmptyGlobalRoot<T>(fn: () => T): T {
-    const previous = process.env.PI_NPM_GLOBAL_DIR;
-    process.env.PI_NPM_GLOBAL_DIR = tempDir();
+  /**
+   * Neutralise EVERY root the resolver reads from the environment, not just the one that happened
+   * to break: a test that leaves BUN_INSTALL or an npm prefix pointing at a machine root passes
+   * here and fails on another machine. `execPath`-derived roots cannot be neutralised, which is why
+   * the planted-bridge test below also plants under an absolute root and asserts it is found.
+   */
+  const ROOT_ENV_KEYS = ['PI_NPM_GLOBAL_DIR', 'NPM_CONFIG_PREFIX', 'npm_config_prefix', 'BUN_INSTALL', 'NVM_BIN'] as const;
+  function withNeutralRoots<T>(fn: (roots: Record<string, string>) => T): T {
+    const roots: Record<string, string> = {};
+    const previous: Record<string, string | undefined> = {};
+    for (const key of ROOT_ENV_KEYS) {
+      previous[key] = process.env[key];
+      // A directory that exists but holds nothing is the neutral value for every root.
+      roots[key] = key === 'NVM_BIN' ? join(tempDir(), 'bin') : tempDir();
+      process.env[key] = roots[key];
+    }
     try {
-      return fn();
+      return fn(roots);
     } finally {
-      if (previous === undefined) delete process.env.PI_NPM_GLOBAL_DIR;
-      else process.env.PI_NPM_GLOBAL_DIR = previous;
+      for (const key of ROOT_ENV_KEYS) {
+        if (previous[key] === undefined) delete process.env[key];
+        else process.env[key] = previous[key];
+      }
     }
   }
 
@@ -320,7 +349,7 @@ describe('pi store resolution (A2: `pi install` must satisfy the resolver)', () 
       bridgePackage(join(repo, '.pi', 'npm', 'node_modules'));
       bridgePackage(join(repo, '.pi', 'agent', 'npm', 'node_modules'));
       bridgePackage(join(repo, 'node_modules'));
-      withEmptyGlobalRoot(() => {
+      withNeutralRoots(() => {
         expect(claudeBridgePackageCandidates({}, path => existsSync(path), home)).toEqual([]);
         expect(resolveClaudeBridgeExtensionPath({}, path => existsSync(path), home)).toBeUndefined();
         expect(claudeBridgeSearchPaths({}, home).some(path => path.startsWith(repo))).toBe(false);
@@ -332,7 +361,7 @@ describe('pi store resolution (A2: `pi install` must satisfy the resolver)', () 
     const home = tempDir();
     inRepo(repo => {
       bridgePackage(join(repo, '.pi', 'agent', 'npm', 'node_modules'));
-      withEmptyGlobalRoot(() => {
+      withNeutralRoots(() => {
         expect(claudeBridgeAgentStoreDir({ PI_CODING_AGENT_DIR: '.pi/agent' }, home)).toBe(
           join(home, '.pi', 'agent', 'npm', 'node_modules'),
         );
@@ -393,6 +422,95 @@ describe('pi store resolution (A2: `pi install` must satisfy the resolver)', () 
       if (previous === undefined) delete process.env.PI_NPM_GLOBAL_DIR;
       else process.env.PI_NPM_GLOBAL_DIR = previous;
     }
+  });
+
+  it('treats `~user/x` as relative, because pi expands only `~` and `~/`', () => {
+    const home = tempDir();
+    expect(claudeBridgeAgentDirSource({ PI_CODING_AGENT_DIR: '~' }, home)).toBe('tilde');
+    expect(claudeBridgeAgentDirSource({ PI_CODING_AGENT_DIR: '~/x' }, home)).toBe('tilde');
+    expect(claudeBridgeAgentDirSource({ PI_CODING_AGENT_DIR: '~other/x' }, home)).toBe('ignored-relative');
+    expect(claudeBridgeAgentStoreDir({ PI_CODING_AGENT_DIR: '~other/x' }, home)).toBe(
+      join(home, '.pi', 'agent', 'npm', 'node_modules'),
+    );
+  });
+
+  it('drops a relative root from every environment variable, warning once per value', () => {
+    const home = tempDir();
+    inRepo(repo => {
+      // A relative root is only DANGEROUS when it resolves, so the planted directories must exist:
+      // that is the shape a repository can create under a dispatch cwd.
+      mkdirSync(join(repo, '.pi', 'agent', 'npm', 'node_modules'), { recursive: true });
+      mkdirSync(join(repo, 'lib', 'node_modules'), { recursive: true });
+      mkdirSync(join(repo, 'install', 'global', 'node_modules'), { recursive: true });
+      mkdirSync(join(repo, 'bin'), { recursive: true });
+
+      const cases: Array<[string, string]> = [
+        ['PI_NPM_GLOBAL_DIR', '.pi/agent/npm/node_modules'],
+        ['NPM_CONFIG_PREFIX', '.'],
+        ['npm_config_prefix', '.'],
+        ['BUN_INSTALL', '.'],
+        ['NVM_BIN', './bin'],
+      ];
+      for (const [key, value] of cases) {
+        const env = { [key]: value };
+        const searched = claudeBridgeSearchPaths(env, home);
+        expect(searched.every(path => isAbsolute(path))).toBe(true);
+        expect(searched.some(path => path.startsWith(repo))).toBe(false);
+        expect(resolveClaudeBridgeExtensionPath(env, path => existsSync(path), home)).toBeUndefined();
+      }
+      expect(warnings.some(w => w.includes('package root is not absolute'))).toBe(true);
+      // Per value, not per call: repeating one bad root must not add a warning.
+      const before = warnings.length;
+      for (let i = 0; i < 3; i++) claudeBridgeSearchPaths({ BUN_INSTALL: '.' }, home);
+      expect(warnings.length).toBe(before);
+    });
+  });
+
+  it('reads a bridge planted under each environment root, one root at a time', () => {
+    const home = tempDir();
+    const plants: Array<{ key: string; root: (scratch: string) => string; sub: string[] }> = [
+      { key: 'PI_NPM_GLOBAL_DIR', root: scratch => scratch, sub: [] },
+      { key: 'NPM_CONFIG_PREFIX', root: scratch => scratch, sub: ['lib', 'node_modules'] },
+      { key: 'BUN_INSTALL', root: scratch => scratch, sub: ['install', 'global', 'node_modules'] },
+      { key: 'NVM_BIN', root: scratch => join(scratch, 'bin'), sub: [] },
+    ];
+    for (const plant of plants) {
+      withNeutralRoots(roots => {
+        const scratch = tempDir();
+        const root = plant.sub.length > 0 || plant.key === 'PI_NPM_GLOBAL_DIR'
+          ? join(plant.root(scratch), ...plant.sub)
+          : join(plant.root(scratch), '..', 'lib', 'node_modules');
+        const pkg = bridgePackage(root);
+        // The root under test points at the plant; every other root stays neutral.
+        process.env[plant.key] = plant.key === 'NVM_BIN' ? join(scratch, 'bin') : scratch;
+        expect(resolveClaudeBridgeExtensionPath({}, path => existsSync(path), home)).toBe(join(pkg, 'src', 'index.ts'));
+        void roots;
+      });
+    }
+  });
+
+  it('neutralisation leaves no machine root in the search list', () => {
+    const home = tempDir();
+    withNeutralRoots(() => {
+      const searched = claudeBridgeSearchPaths({}, home);
+      expect(searched.length).toBeGreaterThan(0);
+      // Everything searched must live under the scratch home or a scratch root, never under the
+      // operator's real directories.
+      for (const path of searched) {
+        expect(path.startsWith(home) || path.startsWith('/tmp/')).toBe(true);
+        expect(path.startsWith(process.env.HOME ?? '/nonexistent-home')).toBe(false);
+      }
+    });
+  });
+
+  it('warns once when a relative agent dir is ignored, and never for a blank value', () => {
+    const home = tempDir();
+    const before = warnings.length;
+    claudeBridgeAgentStoreDir({ PI_CODING_AGENT_DIR: 'relative-only-here' }, home);
+    claudeBridgeAgentStoreDir({ PI_CODING_AGENT_DIR: 'relative-only-here' }, home);
+    claudeBridgeAgentStoreDir({ PI_CODING_AGENT_DIR: '   ' }, home);
+    const messages = warnings.slice(before).filter(w => w.includes('PI_CODING_AGENT_DIR is not absolute'));
+    expect(messages).toHaveLength(1);
   });
 
   it('does not let a manifest without a loadable entry shadow a working global install', () => {

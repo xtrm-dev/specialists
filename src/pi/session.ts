@@ -959,16 +959,38 @@ export function claudeBridgePackageCandidates(
   return claudeBridgeCandidateDirs(env, home).filter(candidate => isBridgePackage(candidate, exists));
 }
 
-/** Candidate package directories before any existence test, in precedence order. */
+/**
+ * Candidate package directories before any existence test, in precedence order.
+ *
+ * Every root must be absolute. A relative root (BUN_INSTALL=. , PI_NPM_GLOBAL_DIR=.pi/agent/npm)
+ * would be resolved against whatever cwd the dispatch happens to run in — the same hazard as a
+ * relative PI_CODING_AGENT_DIR, so such a root is dropped and reported once rather than trusted.
+ */
 function claudeBridgeCandidateDirs(env: NodeJS.ProcessEnv, home: string): string[] {
-  const candidates = [
-    join(claudeBridgeAgentStoreDir(env, home), CLAUDE_BRIDGE_PACKAGE),
+  const roots = [
+    claudeBridgeAgentStoreDir(env, home),
     // Explicit entries win over the ambient environment, so a caller (a test, a relocated host)
     // can neutralise a machine's global roots without mutating process.env.
-    ...resolveGlobalNodeModulesDirs({ env: { ...process.env, ...env }, home }).map(root =>
-      join(root, CLAUDE_BRIDGE_PACKAGE)),
+    ...resolveGlobalNodeModulesDirs({ env: { ...process.env, ...env }, home }),
   ];
+  const candidates: string[] = [];
+  for (const root of roots) {
+    if (!isAbsolute(root)) {
+      warnOnce('root', root, 'a package root is not absolute; ignoring it for the Claude Code bridge lookup');
+      continue;
+    }
+    candidates.push(join(root, CLAUDE_BRIDGE_PACKAGE));
+  }
   return [...new Set(candidates)];
+}
+
+/** One warning per distinct bad value: this runs on every dispatch and must not spam a log. */
+const warnedOnce = new Set<string>();
+function warnOnce(kind: string, value: string, message: string): void {
+  const key = `${kind}:${value}`;
+  if (warnedOnce.has(key)) return;
+  warnedOnce.add(key);
+  runtimeWarn('claude-bridge', message, { value });
 }
 
 /**
@@ -999,7 +1021,9 @@ export function claudeBridgeAgentDirSource(
 ): ClaudeBridgeAgentDirSource {
   const configured = env.PI_CODING_AGENT_DIR?.trim();
   if (!configured) return 'default';
-  if (configured.startsWith('~')) return 'tilde';
+  // Pi expands `~` and `~/` only. `~user/x` is NOT a home reference, so it is relative here and
+  // must be ignored like any other relative value rather than silently joined to our home.
+  if (configured === '~' || configured.startsWith('~/')) return 'tilde';
   return isAbsolute(configured) ? 'env' : 'ignored-relative';
 }
 
@@ -1008,14 +1032,10 @@ export function claudeBridgeAgentStoreDir(env: NodeJS.ProcessEnv = process.env, 
   if (source === 'default') return join(home, '.pi', 'agent', 'npm', 'node_modules');
   const configured = env.PI_CODING_AGENT_DIR!.trim();
   if (source === 'ignored-relative') {
-    runtimeWarn(
-      'claude-bridge',
-      'PI_CODING_AGENT_DIR is not absolute; ignoring it for the Claude Code bridge lookup',
-      { configured, using: join(home, '.pi', 'agent', 'npm', 'node_modules') },
-    );
+    warnOnce('agent-dir', configured, 'PI_CODING_AGENT_DIR is not absolute; ignoring it for the Claude Code bridge lookup');
     return join(home, '.pi', 'agent', 'npm', 'node_modules');
   }
-  const agentDir = source === 'tilde' ? join(home, configured.replace(/^~[/\\]?/, '')) : configured;
+  const agentDir = source === 'tilde' ? join(home, configured.replace(/^~\/?/, '')) : configured;
   return join(agentDir, 'npm', 'node_modules');
 }
 

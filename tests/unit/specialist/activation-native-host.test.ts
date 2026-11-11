@@ -2349,6 +2349,10 @@ function chainHost(opts: {
       const refusal = await start(host).catch((caught: unknown) => caught) as DispatchRejectedError;
 
       expect(refusal.reason).toBe('claude_bridge_unavailable');
+      // The note is the shared builder, not an inline string: the host and the legacy argv path
+      // must not drift, and an inline copy must fail here.
+      const { claudeBridgeUnavailableNote } = await import('../../../src/pi/session.js');
+      expect(refusal.detail?.note).toBe(claudeBridgeUnavailableNote());
     } finally {
       restore();
       if (previous === undefined) delete process.env.SPECIALISTS_CLAUDE_BRIDGE_PATH;
