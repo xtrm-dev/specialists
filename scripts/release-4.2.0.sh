@@ -3,29 +3,29 @@
 #
 # The operator runs this. The agent does not.
 #
-# It publishes to npm, so every check runs before anything leaves the machine, and every
-# step stops the script on failure. There is no rollback in here: if the publish fails,
-# nothing was published; if the tag push fails, the tag exists only locally and can be
-# deleted with `git tag -d v4.2.0`. If publish succeeds and a later step fails, the release
-# exists and the fix is forward.
+# Publication happens in GitHub Actions: the tag push triggers `.github/workflows/publish.yml`,
+# which checks the tag against package.json, checks the plugin manifests, rebuilds dist and
+# requires it unchanged, then publishes with npm trusted publishing (OIDC). This script does the
+# local pre-flight, then tags, then watches that run and verifies the registry.
+#
+# Every step stops the script on failure. Steps 1-5 all run BEFORE a tag exists, so a bad tree,
+# a drifted dist or a missing attestation cannot leave a tag behind.
 #
 # Preconditions (checked, not assumed):
-#   * HEAD is the approved release commit, and that commit is on origin/master
+#   * HEAD is the approved release commit, and it is on origin/master
 #   * the working tree is clean, including untracked files
-#   * package.json is 4.2.0 and the two plugin manifests already agree with it
+#   * package.json is 4.2.0 and both plugin manifests already agree with it
 #   * the committed dist rebuilds to itself (the publish workflow's own requirement)
-#   * npm has a login, and 4.2.0 is not already published
+#   * 4.2.0 is not already published
 #   * tag v4.2.0 does not exist, locally or on the remote
-#
-# The published artifact is the attested tarball, by path: a bare `npm publish` would
-# repack from the directory and could ship bytes that were never attested.
+#   * `gh` is authenticated for this repository
 #
 # Usage:
 #   scripts/release-4.2.0.sh <release-commit-sha>
 #   RELEASE_COMMIT=<sha> scripts/release-4.2.0.sh
 #
 # Exit codes: 1 precondition failed, 2 tag or version already taken, 3 build/pack failed,
-#             4 publish failed, 5 published version is not 4.2.0.
+#             4 publish workflow failed, 5 registry does not report 4.2.0.
 
 set -euo pipefail
 
@@ -71,30 +71,13 @@ PACK_DIR="$(mktemp -d -t release-pack-XXXXXX)"
 TARBALL="$PACK_DIR/$(npm pack --silent --pack-destination "$PACK_DIR" | tail -n 1)"
 [ -f "$TARBALL" ] || die "npm pack produced no tarball" 3
 ATTEST="$(mktemp -t release-attestation-XXXXXX.json)"
-# The tarball survives a failed publish so step 8 can be re-run by hand against the same
-# attested bytes; it is removed only when the release actually completed.
-KEEP_TARBALL=0
-PACK_DIR=""
-cleanup() {
-  rm -f "$ATTEST"
-  if [ "$KEEP_TARBALL" = 1 ]; then
-    printf 'kept the attested tarball for a manual retry: %s\n' "$TARBALL"
-  else
-    rm -f "$TARBALL"
-  fi
-  [ -n "$PACK_DIR" ] && rm -rf "$PACK_DIR"
-}
-trap cleanup EXIT
+trap 'rm -f "$TARBALL" "$ATTEST"; [ -n "$PACK_DIR" ] && rm -rf "$PACK_DIR"' EXIT
 npm run --silent release:attest -- "$TARBALL" "$ATTEST" || die "attestation generation failed" 3
 EXPECTED_SOURCE_COMMIT="$HEAD_SHA" npm run --silent release:attest -- --validate "$TARBALL" "$ATTEST" \
   || die "attestation validation failed" 3
-TARBALL_SHA256="$(sha256sum "$TARBALL" | cut -d' ' -f1)"
-printf '   tarball: %s\n   sha256:  %s\n   attest:  %s\n' "$TARBALL" "$TARBALL_SHA256" "$ATTEST"
+printf '   tarball: %s\n   sha256:  %s\n   attest:  %s\n' "$TARBALL" "$(sha256sum "$TARBALL" | cut -d' ' -f1)" "$ATTEST"
 
-step "6/8 npm auth, and ${VERSION} not already published"
-WHOAMI="$(npm whoami)" || die "npm has no login; run npm login before tagging" 2
-[ -n "$WHOAMI" ] || die "npm whoami returned nothing; not logged in" 2
-printf '   npm user: %s\n' "$WHOAMI"
+step "6/8 ${VERSION} is not already published"
 if npm view "${PACKAGE}@${VERSION}" version >/dev/null 2>&1; then
   die "${PACKAGE}@${VERSION} is already published; bump the version instead of republishing" 2
 fi
@@ -106,18 +89,35 @@ if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; t
 fi
 git tag -a "$TAG" -m "Release ${VERSION}: Claude Code route, bridged-fallback fix, Specialist identities"
 git push origin "$TAG" || die "tag push failed; the tag exists locally only (git tag -d ${TAG})"
+printf '   pushed %s; publish.yml runs on the tag\n' "$TAG"
 
-step "8/8 publish the attested tarball and verify"
-printf '   publishing %s (sha256 %s) as %s\n' "$TARBALL" "$TARBALL_SHA256" "$WHOAMI"
-# By path, so the published bytes are the attested ones. If npm asks for an OTP, enter it.
-if ! npm publish "$TARBALL" --access public; then
-  KEEP_TARBALL=1
-  die "npm publish failed (a wrong or cancelled OTP lands here). Tag ${TAG} is already on origin, and nothing was published.
-  Retry the upload by hand with the attested tarball: npm publish \"$TARBALL\" --access public
-  Or remove the tag first and rerun the script: git push origin :refs/tags/${TAG} && git tag -d ${TAG}" 4
+step "8/8 watch the publish workflow, then verify the registry"
+RUN_ID=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  RUN_ID="$(gh run list --workflow=publish.yml --limit 20 --json databaseId,headBranch \
+    --jq "[.[] | select(.headBranch == \"${TAG}\")][0].databaseId" 2>/dev/null || true)"
+  [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ] && break
+  sleep 6
+done
+if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+  die "no publish.yml run appeared for ${TAG} after 60s; check https://github.com/$(gh repo view --json nameWithOwner --jq .nameWithOwner)/actions/workflows/publish.yml" 4
 fi
-PUBLISHED="$(npm view "${PACKAGE}" version)"
-[ "$PUBLISHED" = "$VERSION" ] || die "published version is ${PUBLISHED}, expected ${VERSION}" 5
+RUN_URL="$(gh run view "$RUN_ID" --json url --jq .url)"
+printf '   run: %s\n' "$RUN_URL"
+if ! gh run watch "$RUN_ID" --exit-status; then
+  die "publish workflow failed for ${TAG}. Run URL: ${RUN_URL}
+  Option 1: re-run it for the existing tag: gh workflow run publish.yml -f tag=${TAG}
+  Option 2: remove the tag and start over: git push origin :refs/tags/${TAG} && git tag -d ${TAG}" 4
+fi
 
-printf '\nReleased %s %s at %s\n' "$PACKAGE" "$PUBLISHED" "$HEAD_SHA"
+# The registry can lag a moment behind a successful publish job; retry briefly.
+PUBLISHED=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  PUBLISHED="$(npm view "${PACKAGE}" version 2>/dev/null || true)"
+  [ "$PUBLISHED" = "$VERSION" ] && break
+  sleep 6
+done
+[ "$PUBLISHED" = "$VERSION" ] || die "registry reports ${PUBLISHED:-nothing}, expected ${VERSION} (run: ${RUN_URL})" 5
+
+printf '\nReleased %s %s at %s (workflow %s)\n' "$PACKAGE" "$PUBLISHED" "$HEAD_SHA" "$RUN_URL"
 printf 'Next: A7 installs (PC first; the server stays extension-only, no machine switch).\n'
