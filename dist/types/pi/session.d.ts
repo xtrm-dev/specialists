@@ -321,16 +321,29 @@ export declare function resolveGlobalPackageDir(packageName: string, deps?: Glob
  *    repository layer.
  * 2. An npm/bun global prefix, for a machine that installed it with the package manager instead.
  */
-export declare function resolveClaudeBridgeExtensionPath(env?: NodeJS.ProcessEnv, exists?: (path: string) => boolean, home?: string): string | undefined;
+/**
+ * Resolver dependencies, all injectable.
+ *
+ * `execPath` is here for the same reason as `env` and `home`: the interpreter's own prefix is one of
+ * the global roots, and a test that reads `process.execPath` is only deterministic on this machine.
+ */
+export interface ClaudeBridgeResolverDeps {
+    env?: NodeJS.ProcessEnv;
+    home?: string;
+    execPath?: string;
+    exists?: (path: string) => boolean;
+    readDir?: (path: string) => string[];
+}
+export declare function resolveClaudeBridgeExtensionPath(deps?: ClaudeBridgeResolverDeps): string | undefined;
 /**
  * Every path the resolver searches, highest precedence first, whether or not it exists. Used by the
  * `claude_bridge_unavailable` refusal so an operator sees where we looked instead of guessing.
  * Nothing here is derived from the workspace: a project path would be a place a repository could
  * plant the extension.
  */
-export declare function claudeBridgeSearchPaths(env?: NodeJS.ProcessEnv, home?: string): string[];
+export declare function claudeBridgeSearchPaths(deps?: ClaudeBridgeResolverDeps): string[];
 /** The refusal note, shared by the native host and the legacy argv path so the two cannot drift. */
-export declare function claudeBridgeUnavailableNote(env?: NodeJS.ProcessEnv, home?: string): string;
+export declare function claudeBridgeUnavailableNote(deps?: ClaudeBridgeResolverDeps): string;
 /**
  * Candidate package directories for the bridge, highest precedence first, filtered to those that
  * really hold a package (judged by `package.json`). Separated from the entry resolution so a test
@@ -339,7 +352,7 @@ export declare function claudeBridgeUnavailableNote(env?: NodeJS.ProcessEnv, hom
  * The agent store is checked before the global roots because `pi install` is the documented install
  * path: when both hold a copy, the one pi manages is the one the operator updated.
  */
-export declare function claudeBridgePackageCandidates(env?: NodeJS.ProcessEnv, exists?: (path: string) => boolean, home?: string): string[];
+export declare function claudeBridgePackageCandidates(deps?: ClaudeBridgeResolverDeps): string[];
 /**
  * Pi's managed npm store root, mirroring pi's own `getNpmInstallRoot('user')`.
  * `PI_CODING_AGENT_DIR` is expanded the way pi expands it (`~` included), so a test or a relocated
@@ -352,8 +365,8 @@ export type ClaudeBridgeAgentDirSource = 'default' | 'env' | 'tilde' | 'ignored-
  * ignored, because it would resolve against the dispatch cwd and let a repository plant the
  * extension.
  */
-export declare function claudeBridgeAgentDirSource(env?: NodeJS.ProcessEnv, home?: string): ClaudeBridgeAgentDirSource;
-export declare function claudeBridgeAgentStoreDir(env?: NodeJS.ProcessEnv, home?: string): string;
+export declare function claudeBridgeAgentDirSource(deps?: ClaudeBridgeResolverDeps): ClaudeBridgeAgentDirSource;
+export declare function claudeBridgeAgentStoreDir(deps?: ClaudeBridgeResolverDeps): string;
 export declare function resolveClaudeBridgePackageEntry(packageDir: string, exists: (path: string) => boolean): string | undefined;
 export declare function validateWriteToolPathAgainstBoundary(toolName: string, toolArgs: Record<string, unknown> | undefined, worktreeBoundary: string | undefined): string | undefined;
 export declare class PiAgentSession {

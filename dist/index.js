@@ -4591,12 +4591,14 @@ __export(exports_global_config, {
   GLOBAL_USER_CONFIG_DOC: () => GLOBAL_USER_CONFIG_DOC,
   GlobalSpecialistOverrideSchema: () => GlobalSpecialistOverrideSchema,
   GlobalUserConfigSchema: () => GlobalUserConfigSchema,
+  OverrideExecutionSchema: () => OverrideExecutionSchema,
   SPECIALISTS_SUBDIR: () => SPECIALISTS_SUBDIR,
   analyzeGlobalUserConfigDrift: () => analyzeGlobalUserConfigDrift,
   buildGlobalUserConfigTemplate: () => buildGlobalUserConfigTemplate,
   buildSpecialistOverrideTemplate: () => buildSpecialistOverrideTemplate,
   getGlobalSpecialistOverrideLeafPaths: () => getGlobalSpecialistOverrideLeafPaths,
   getGlobalUserConfigPath: () => getGlobalUserConfigPath,
+  listGlobalSpecialistNames: () => listGlobalSpecialistNames,
   mergeGlobalUserConfig: () => mergeGlobalUserConfig,
   readGlobalUserConfig: () => readGlobalUserConfig,
   readValidatedGlobalUserConfig: () => readValidatedGlobalUserConfig,
@@ -4613,6 +4615,9 @@ import {
 } from "fs";
 import { dirname as dirname3, join as join3 } from "path";
 import { homedir } from "os";
+function listGlobalSpecialistNames(config) {
+  return Object.keys(config).filter((key) => key !== CLAUDE_BRIDGE_SWITCH_KEY && !key.startsWith("_")).sort();
+}
 function getGlobalUserConfigPath() {
   const home = process.env.HOME?.trim() || homedir();
   const xdgConfigHome = process.env.XDG_CONFIG_HOME?.trim();
@@ -4871,6 +4876,7 @@ var init_global_config = __esm(() => {
     thinking_level: enumType(["off", "minimal", "low", "medium", "high", "xhigh"]).nullable(),
     max_retries: numberType().int().min(0).nullable(),
     lease_waiver: booleanType().nullable().optional(),
+    claude_bridge: booleanType().nullable().optional(),
     prompt_limit_bytes: numberType().int().positive().nullable().optional(),
     stdout_limit_bytes: numberType().int().positive().nullable().optional(),
     extensions: OverrideExtensionsSchema.optional()
@@ -21623,6 +21629,21 @@ function claudeBridgeExtensionProviders(routeEnabled) {
 function claudeBridgeSessionOption(execution) {
   return claudeBridgeEnabled(execution) ? { claudeBridge: true } : {};
 }
+function isBridgedModel(model) {
+  return typeof model === "string" && model.startsWith(`${CLAUDE_BRIDGE_PROVIDER}/`);
+}
+function bridgedFallbackSkipEvent(args) {
+  const { fromModel, toModel, errorClass, cause } = args;
+  return {
+    from_model: fromModel,
+    ...toModel ? { to_model: toModel, not_started_model: toModel } : {},
+    error_class: errorClass,
+    terminal: true,
+    skipped: true,
+    note: `fallback skipped: the primary "${fromModel}" is served by the Claude Code route, ` + `so the walk does not continue to another provider (cause: ${cause})`,
+    resolved_model: fromModel
+  };
+}
 var CLAUDE_BRIDGE_PROVIDER = "claude-bridge", CLAUDE_BRIDGE_PACKAGE = "pi-claude-bridge", CLAUDE_BRIDGE_PATH_ENV = "SPECIALISTS_CLAUDE_BRIDGE_PATH";
 var init_claude_bridge = __esm(() => {
   init_global_config();
@@ -22663,32 +22684,48 @@ function resolveGlobalPackageDir(packageName, deps = {}) {
   const exists = deps.exists ?? existsSync17;
   return resolveGlobalNodeModulesDirs(deps).map((root) => join19(root, packageName)).find((dir) => exists(join19(dir, "package.json")));
 }
-function resolveClaudeBridgeExtensionPath(env = process.env, exists = existsSync17, home = homedir4()) {
+function resolverEnv(deps) {
+  return deps.env ?? process.env;
+}
+function resolverExists(deps) {
+  return deps.exists ?? existsSync17;
+}
+function resolveClaudeBridgeExtensionPath(deps = {}) {
+  const env = resolverEnv(deps);
+  const exists = resolverExists(deps);
   const override = env[CLAUDE_BRIDGE_PATH_ENV]?.trim();
   if (override) {
     return isAbsolute2(override) && exists(override) ? override : undefined;
   }
-  for (const packageDir of claudeBridgePackageCandidates(env, exists, home)) {
+  for (const packageDir of claudeBridgePackageCandidates(deps)) {
     const entry = resolveClaudeBridgePackageEntry(packageDir, exists);
     if (entry)
       return entry;
   }
   return;
 }
-function claudeBridgeSearchPaths(env = process.env, home = homedir4()) {
-  return claudeBridgeCandidateDirs(env, home);
+function claudeBridgeSearchPaths(deps = {}) {
+  return claudeBridgeCandidateDirs(deps);
 }
-function claudeBridgeUnavailableNote(env = process.env, home = homedir4()) {
-  const searched = claudeBridgeSearchPaths(env, home).join(", ");
-  return "execution.claude_bridge is enabled but the pi-claude-bridge extension was not found. " + "Install it with `pi install npm:pi-claude-bridge@0.12.0` (pi writes it to <agentDir>/npm, " + `i.e. ${claudeBridgeAgentStoreDir(env, home)}), or set ${CLAUDE_BRIDGE_PATH_ENV} to an ` + `absolute entry. Searched: ${searched}`;
+function claudeBridgeUnavailableNote(deps = {}) {
+  const searched = claudeBridgeSearchPaths(deps).join(", ");
+  return "execution.claude_bridge is enabled but the pi-claude-bridge extension was not found. " + "Install it with `pi install npm:pi-claude-bridge@0.12.0` (pi writes it to <agentDir>/npm, " + `i.e. ${claudeBridgeAgentStoreDir(deps)}), or set ${CLAUDE_BRIDGE_PATH_ENV} to an ` + `absolute entry. Searched: ${searched}`;
 }
-function claudeBridgePackageCandidates(env = process.env, exists = existsSync17, home = homedir4()) {
-  return claudeBridgeCandidateDirs(env, home).filter((candidate) => isBridgePackage(candidate, exists));
+function claudeBridgePackageCandidates(deps = {}) {
+  const exists = resolverExists(deps);
+  return claudeBridgeCandidateDirs(deps).filter((candidate) => isBridgePackage(candidate, exists));
 }
-function claudeBridgeCandidateDirs(env, home) {
+function claudeBridgeCandidateDirs(deps) {
+  const env = { ...process.env, ...resolverEnv(deps) };
   const roots = [
-    claudeBridgeAgentStoreDir(env, home),
-    ...resolveGlobalNodeModulesDirs({ env: { ...process.env, ...env }, home })
+    claudeBridgeAgentStoreDir(deps),
+    ...resolveGlobalNodeModulesDirs({
+      env,
+      home: deps.home ?? homedir4(),
+      execPath: deps.execPath ?? process.execPath,
+      ...deps.exists ? { exists: deps.exists } : {},
+      ...deps.readDir ? { readDir: deps.readDir } : {}
+    })
   ];
   const candidates = [];
   for (const root of roots) {
@@ -22710,19 +22747,20 @@ function warnOnce(kind, value, message) {
 function isBridgePackage(packageDir, exists) {
   return exists(join19(packageDir, "package.json")) && resolveClaudeBridgePackageEntry(packageDir, exists) !== undefined;
 }
-function claudeBridgeAgentDirSource(env = process.env, home = homedir4()) {
-  const configured = env.PI_CODING_AGENT_DIR?.trim();
+function claudeBridgeAgentDirSource(deps = {}) {
+  const configured = resolverEnv(deps).PI_CODING_AGENT_DIR?.trim();
   if (!configured)
     return "default";
   if (configured === "~" || configured.startsWith("~/"))
     return "tilde";
   return isAbsolute2(configured) ? "env" : "ignored-relative";
 }
-function claudeBridgeAgentStoreDir(env = process.env, home = homedir4()) {
-  const source = claudeBridgeAgentDirSource(env, home);
+function claudeBridgeAgentStoreDir(deps = {}) {
+  const home = deps.home ?? homedir4();
+  const source = claudeBridgeAgentDirSource(deps);
   if (source === "default")
     return join19(home, ".pi", "agent", "npm", "node_modules");
-  const configured = env.PI_CODING_AGENT_DIR.trim();
+  const configured = resolverEnv(deps).PI_CODING_AGENT_DIR.trim();
   if (source === "ignored-relative") {
     warnOnce("agent-dir", configured, "PI_CODING_AGENT_DIR is not absolute; ignoring it for the Claude Code bridge lookup");
     return join19(home, ".pi", "agent", "npm", "node_modules");
@@ -28608,6 +28646,27 @@ function classifyFallbackError(error) {
     return "transient";
   return "unknown";
 }
+function emitBridgedFallbackSkip(onEvent, specialist, attemptN, fromModel, toModel, errorClass, cause) {
+  const payload = bridgedFallbackSkipEvent({ fromModel, toModel, errorClass, cause });
+  onEvent?.("model_fallback", {
+    model: fromModel,
+    data: { event: "model_fallback", specialist, ...payload }
+  });
+  onEvent?.("fallback_step", {
+    model: fromModel,
+    data: {
+      event: "fallback_step",
+      specialist,
+      attempt_n: attemptN,
+      model_tried: fromModel,
+      not_started_model: toModel,
+      error_class: errorClass,
+      terminal: true,
+      skipped: true,
+      note: payload.note
+    }
+  });
+}
 function emitFallbackStep(onEvent, specialist, attemptN, modelTried, errorClass, terminal) {
   onEvent?.("fallback_step", {
     model: modelTried,
@@ -28898,6 +28957,10 @@ ${preScripts.map((s) => `    \u2022 ${s.run ?? s.path ?? "<missing>"}${s.inject_
         currentFailureRecorded = false;
         const isTerminalModel = modelIndex === modelChain.length - 1;
         if (!circuitBreaker.isAvailable(currentModel) && !isTerminalModel) {
+          if (isBridgedModel(currentModel)) {
+            emitBridgedFallbackSkip(onEvent, metadata.name, modelIndex + 2, currentModel, modelChain[modelIndex + 1], "transient", "the model is circuit-broken and a bridged primary is not walked");
+            throw new Error(`fallback skipped: the primary "${currentModel}" is served by the Claude Code route, ` + `so the walk does not continue to another provider (the model is circuit-broken)`);
+          }
           emitFallbackStep(onEvent, metadata.name, modelIndex + 2, modelChain[modelIndex + 1], "transient", false);
           continue;
         }
@@ -28964,6 +29027,12 @@ ${preScripts.map((s) => `    \u2022 ${s.run ?? s.path ?? "<missing>"}${s.inject_
             }
             if (!isTransient)
               throw err;
+            const nextModel = modelChain[modelIndex + 1];
+            if (isBridgedModel(currentModel) && nextModel) {
+              emitBridgedFallbackSkip(onEvent, metadata.name, modelIndex + 2, currentModel, nextModel, classifyFallbackError(err), err instanceof Error ? err.message : String(err));
+              circuitBreaker.recordFailure(currentModel);
+              throw err;
+            }
             circuitBreaker.recordFailure(currentModel);
             currentFailureRecorded = true;
             if (isTerminalModel) {
@@ -30000,7 +30069,24 @@ ${mandatoryRulesBlock}`;
       }
       attempts.push(attempt);
       const parsed = classifyAttempt(attempt);
-      if (parsed.retryable && parsed.errorType !== "auth")
+      const retryableHop = parsed.retryable && parsed.errorType !== "auth";
+      const bridgedSkip = retryableHop && isBridgedModel(model);
+      const nextCandidate = modelCandidates[modelCandidates.indexOf(model) + 1];
+      if (bridgedSkip && nextCandidate) {
+        appendTimelineEvent?.({
+          t: Date.now(),
+          type: "model_change",
+          action: "cycle_model",
+          model,
+          previous_model: model,
+          skipped: true,
+          terminal: true,
+          not_started_model: nextCandidate,
+          error_class: parsed.errorType,
+          note: `fallback skipped: the candidate "${model}" is served by the Claude Code route, ` + `so the walk does not continue to another provider`
+        });
+      }
+      if (retryableHop && !bridgedSkip)
         continue;
       const durationMs2 = Date.now() - startedAt;
       if (parsed.kind === "success") {
@@ -30423,6 +30509,7 @@ var init_script_runner = __esm(() => {
   init_permission_guard_extension();
   init_mandatory_rules();
   init_required_platform_rules();
+  init_claude_bridge();
   init_model_chain();
   init_observability_db();
   init_observability_sqlite();
@@ -30594,6 +30681,8 @@ var init_validate = __esm(() => {
 // src/cli/edit.ts
 var exports_edit = {};
 __export(exports_edit, {
+  coerceGlobalValue: () => coerceGlobalValue,
+  resolveGlobalPath: () => resolveGlobalPath,
   run: () => run14
 });
 import { existsSync as existsSync26, mkdirSync as mkdirSync13, readFileSync as readFileSync19, writeFileSync as writeFileSync10 } from "fs";
@@ -31189,7 +31278,7 @@ ${errorList}
   }
   const specialistOverride = existing[resolvedPath.specialistName];
   if (specialistOverride === undefined) {
-    const available = Object.keys(existing).sort().join(", ");
+    const available = listGlobalSpecialistNames(existing).join(", ");
     fail6(`Error: specialist "${resolvedPath.specialistName}" not in global config. Available: ${available || "none"}`);
   }
   if (args.action === "get") {
@@ -42225,6 +42314,12 @@ function formatEventLine(event, options2) {
     }
   } else if (event.type === "tool") {
     detail = formatToolDetail(event);
+  } else if (event.type === "model_change") {
+    if (event.skipped) {
+      detail = yellow10(`fallback skipped${event.not_started_model ? ` (not started: ${event.not_started_model})` : ""}` + `${event.note ? ` (${event.note.replace(/^fallback skipped:\s*/, "")})` : ""}`);
+    } else {
+      detail = dim9(`${event.previous_model ?? "?"} \u2192 ${event.model ?? "?"}`);
+    }
   } else if (event.type === "error") {
     detailParts.push(`source=${event.source}`);
     detailParts.push(`error=${event.error_message}`);
@@ -42364,6 +42459,13 @@ function formatEventInline(event) {
       return yellow10(`[warning] ${event.reason}: ${Math.round(event.silence_ms / 1000)}s silent`);
     case "thinking_level_unavailable":
       return yellow10(`[warning] thinking level "${event.requested_level}" not applied: ${event.note}`);
+    case "model_change": {
+      if (event.skipped) {
+        const notStarted = event.not_started_model ? `, not started: ${event.not_started_model}` : "";
+        return yellow10(`[model] ${event.previous_model ?? event.model ?? "?"} \u2014 fallback skipped${notStarted}`);
+      }
+      return dim9(`[model] ${event.previous_model ?? "?"} \u2192 ${event.model ?? "?"}`);
+    }
     case "control_signal":
       return dim9(`[control] ${event.action}`);
     case "error":
@@ -97593,12 +97695,18 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
         bead_id: event.beadId,
         ...event.payload ?? {}
       }), t);
-    case "model_fallback":
+    case "model_fallback": {
+      const skipped = booleanField2(event.payload?.skipped) === true;
+      const notStarted = stringField2(event.payload?.not_started_model) ?? stringField2(event.payload?.to_model);
+      const ranModel = stringField2(event.payload?.resolved_model) ?? stringField2(event.payload?.from_model);
       return at({
         t,
         type: TIMELINE_EVENT_TYPES.MODEL_CHANGE,
         action: "cycle_model",
-        ...stringField2(event.payload?.to_model) ? { model: stringField2(event.payload?.to_model) } : {},
+        ...skipped && ranModel ? { model: ranModel } : {},
+        ...!skipped && stringField2(event.payload?.to_model) ? { model: stringField2(event.payload?.to_model) } : {},
+        ...skipped ? { skipped: true } : {},
+        ...skipped && notStarted ? { not_started_model: notStarted } : {},
         ...stringField2(event.payload?.from_model) ? { previous_model: stringField2(event.payload?.from_model) } : {},
         ...stringField2(event.payload?.error_class) ? { error_class: stringField2(event.payload?.error_class) } : {},
         ...booleanField2(event.payload?.terminal) !== undefined ? { terminal: booleanField2(event.payload?.terminal) } : {},
@@ -97606,6 +97714,7 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
         ...numberField2(event.payload?.attempt_n) !== undefined ? { attempt_n: numberField2(event.payload?.attempt_n) } : {},
         ...stringField2(event.payload?.resolved_model) ? { resolved_model: stringField2(event.payload?.resolved_model) } : {}
       }, t);
+    }
     case "session_stats_captured": {
       const stats = normalizePiSessionStats(event.payload?.session_stats);
       return stats ? at(createSessionStatsEvent(stats), t) : at(createSessionStatsErrorEvent("session_stats_captured carried no usable snapshot"), t);
@@ -100157,6 +100266,15 @@ class NativeActivationHost {
         break;
       const nextModel = ctx.modelChain[index + 1];
       const fromModel = record5.snapshot.resolvedModel;
+      if (isBridgedModel(fromModel)) {
+        ctx.emit("model_fallback", bridgedFallbackSkipEvent({
+          fromModel,
+          toModel: nextModel,
+          errorClass,
+          cause: detail
+        }));
+        break;
+      }
       const check = await checkModelForRuntime(ctx.sdk, ctx.modelRuntime, nextModel);
       if (!check.ok || !check.model) {
         ctx.emit("model_fallback", {

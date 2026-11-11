@@ -194,6 +194,9 @@
       "path": "config/mandatory-rules/per-turn-handoff-schema.md"
     },
     {
+      "path": "config/mandatory-rules/pr-reviewer-verdict-format.md"
+    },
+    {
       "path": "config/mandatory-rules/README.md"
     },
     {

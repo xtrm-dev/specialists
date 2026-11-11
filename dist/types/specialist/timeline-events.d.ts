@@ -421,6 +421,8 @@ export interface TimelineEventModelChange extends TimelineEventBase {
     note?: string;
     attempt_n?: number;
     resolved_model?: string;
+    skipped?: boolean;
+    not_started_model?: string;
 }
 export interface TimelineEventExtensionError extends TimelineEventBase {
     type: 'extension_error';
