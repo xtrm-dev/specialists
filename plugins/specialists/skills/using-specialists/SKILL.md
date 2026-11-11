@@ -89,9 +89,10 @@ Issue ready (attested)
 - **Every spawned session carries its own holder and role.** The host asks
   `xt identity env --json` with the Specialist name and job, then sets
   `SUBSTRATE_HOLDER` (`sp-<specialist>-<job8>`), `XTRM_ROLE`, the git author keys and
-  `GIT_CONFIG_*` on the session. A missing, failing or slow `xt` leaves the holder and
-  the specialist name only, so a dispatch never blocks; a `pr-reviewer` therefore
-  resolves the reviewer role and its App.
+  `GIT_CONFIG_*` on the session. With that environment a `pr-reviewer` resolves the
+  reviewer role and its App. A missing, failing or slow `xt` leaves the holder and the
+  specialist name only, so a dispatch never blocks; that session then runs as the
+  operator, not as the reviewer.
 - **Control is state-specific.** Asks via `ask_coordinator`/`escalate_to_coordinator`
   are answered by `specialist_reply` on `message_id`; `specialist_stop_activation` is
   the irreversible ordinary disposal path.

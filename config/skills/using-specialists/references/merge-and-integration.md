@@ -30,11 +30,19 @@ remark.
 gh pr review <pr> --repo <owner/repo> --comment|--approve|--request-changes --body-file <findings>
 ```
 
-`PASS` → `--approve`, `PARTIAL` → `--comment`, `FAIL` → `--request-changes`. The reviewer
-model writes findings only; the `gh` shim prepends `Review by <role> (<model>) at head
-<sha12>`, sets `commit_id` to the reviewed head, refuses a head that moved since the review
-was prepared, and refuses a review of the PR the same holder opened. Never author the header
-yourself: attribution is not typed in. Verify the post by reading it back —
-`gh pr view <pr> --repo <owner/repo> --json reviews` must show `<slug>[bot]` and the reviewed
-`commit_id`. The pr-reviewer definition carries the exact body lint; run it before posting.
-A `gh pr comment` is invisible to the merge guard.
+`PASS` → `--approve`, `PARTIAL` → `--comment`, `FAIL` → `--request-changes`.
+
+The reviewer model writes **line 1** exactly as
+`Review by pr-reviewer (<model>) at head <sha12>`, then its findings, then exactly one
+`- Verdict: PASS|PARTIAL|FAIL` line at column 0. The `gh` shim refuses a body without that
+header and verdict, derives the head and model from the text (never a flag), sets
+`commit_id` to the reviewed head, refuses a head that moved since the review was prepared,
+and refuses a review of the PR the same holder opened. The shim adds the attribution the
+model must not type — the visible `Agent <name> · run <id> · Issue <REF>` line and the
+hidden `<!-- agent=… -->` marker — from the process identity. The pr-reviewer definition carries the exact body
+lint; run it before posting.
+
+Verify the post through the REST reviews API:
+`gh api repos/<owner>/<repo>/pulls/<n>/reviews` must show `xtrm-reviewer[bot]` and the
+reviewed `commit_id` (`gh pr view --json reviews` prints the login without the `[bot]`
+suffix). A `gh pr comment` is invisible to the merge guard.

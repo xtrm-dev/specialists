@@ -24,7 +24,7 @@
     },
     {
       "path": "config/skills/using-specialists/references/merge-and-integration.md",
-      "sha256": "1a27b8f456fa8c56ba99023d0295c8e1e4ea79fabfb441660f76a824ab1a9b94"
+      "sha256": "3f186101766d32e604d3e3ff56a786bea3285580b49ecf7d49430b76edf0d6b1"
     },
     {
       "path": "config/skills/using-specialists/references/monitoring.md",
@@ -64,7 +64,7 @@
     },
     {
       "path": "config/skills/using-specialists/SKILL.md",
-      "sha256": "0a8ac257cda48da7d4d0da267bbec80ebc79a9977833de9ebcbcd43095a249dd"
+      "sha256": "31457ae1ba06e8201dcda0bc22e4807d07632e32cb822f76c9fc7a50dbb2e15d"
     }
   ],
   "shipped_specialists": [
