@@ -80,6 +80,13 @@ describe('pi version resolution', () => {
     expect(result.reason).toContain('unavailable');
   });
 
+  it('refuses an override that merely contains a version', () => {
+    for (const value of ['not 1.4.0', 'unavailable 1.0.0', '>=1.4.0', '1.4.0 extra']) {
+      const result = resolvePiVersion({ env: { PI_VERSION: value }, run: () => 'ignored' });
+      expect(result.ok, `expected ${JSON.stringify(value)} to be refused`).toBe(false);
+    }
+  });
+
   it('falls back to pi --version', () => {
     const result = resolvePiVersion({ env: {}, run: (command, args) => `${command} ${args.join(' ')} → 1.4.0` });
     expect(result).toEqual({ ok: true, version: '1.4.0', source: 'pi --version' });
@@ -169,12 +176,14 @@ describe('registry wait', () => {
 describe('host rebuild warning', () => {
   function recorder(responses: Record<string, ExecResult>) {
     const calls: string[] = [];
-    const exec: Exec = (command, args) => {
+    const environments: Array<Record<string, string | undefined> | undefined> = [];
+    const exec: Exec = (command, args, options) => {
       const key = `${command} ${args.join(' ')}`;
       calls.push(key);
+      environments.push(options?.env);
       return responses[key] ?? { status: 0, stdout: '' };
     };
-    return { calls, exec };
+    return { calls, environments, exec };
   }
 
   it('restores tracked and untracked files after a differing build', () => {
@@ -199,14 +208,26 @@ describe('host rebuild warning', () => {
     expect(calls).toContain('git clean -fdq -- dist/');
   });
 
-  it('does not touch the tree when the build matches', () => {
+  it('builds with NODE_ENV=test, like the release does', () => {
+    const { environments, exec } = recorder({
+      'bun run build': { status: 0 },
+      'git diff --quiet -- dist/': { status: 0 },
+    });
+    runDistWarning({ exec, log: () => {} });
+    expect(environments[0]?.NODE_ENV).toBe('test');
+  });
+
+  it('still removes untracked files when the build matches', () => {
+    // A matching build can create untracked output; leaving it behind breaks the clean-tree
+    // check two steps later, far from the cause.
     const { calls, exec } = recorder({
       'bun run build': { status: 0 },
       'git diff --quiet -- dist/': { status: 0 },
     });
     const outcome = runDistWarning({ exec, log: () => {} });
     expect(outcome.differed).toBe(false);
-    expect(calls).not.toContain('git checkout -- dist/');
+    expect(calls).toContain('git checkout -- dist/');
+    expect(calls).toContain('git clean -fdq -- dist/');
   });
 });
 
