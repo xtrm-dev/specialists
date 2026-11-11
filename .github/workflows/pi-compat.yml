@@ -45,10 +45,20 @@ jobs:
           REQUESTED: ${{ inputs.pi_version || '' }}
         run: |
           set -euo pipefail
+          # The dispatch input is the only attacker-controlled value here. It never reaches a shell
+          # through an expression and must be semver before it becomes a matrix row (SPECIALISTS-4438).
+          SEMVER_RE='^(0|[1-9][0-9]*)\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
           if [ -n "$REQUESTED" ]; then
+            if ! [[ "$REQUESTED" =~ $SEMVER_RE ]]; then
+              echo "::error title=pi compat::pi_version must be a semver release (got: ${REQUESTED})"
+              exit 1
+            fi
             printf 'matrix=[{"label":"requested","version":"%s"}]\n' "$REQUESTED" >> "$GITHUB_OUTPUT"
           else
-            printf 'matrix=[{"label":"peer-floor","version":""},{"label":"current","version":"current"}]\n' >> "$GITHUB_OUTPUT"
+            # peer-floor: the lowest version the peer range declares.
+            # pinned: the Dockerfile's default, so the pin is always exercised even after npm moves.
+            # current: whatever npm serves today.
+            printf 'matrix=[{"label":"peer-floor","version":""},{"label":"pinned","version":"pinned"},{"label":"current","version":"current"}]\n' >> "$GITHUB_OUTPUT"
           fi
 
   smoke:
@@ -83,18 +93,34 @@ jobs:
             const match = range.match(/[0-9]+\.[0-9]+\.[0-9]+/);
             process.stdout.write(match ? match[0] : "");
           ')"
-          if [ "$INPUT_PI_VERSION" = "current" ]; then
-            CURRENT_VERSION="$(npm view "$PACKAGE" version 2>/dev/null | tail -n 1)"
-            if [ -z "$CURRENT_VERSION" ]; then
-              echo "::error title=pi compat::could not resolve the current published version of $PACKAGE"
-              exit 1
-            fi
-            VERSION="$CURRENT_VERSION"
-          else
-            VERSION="${INPUT_PI_VERSION:-$DEFAULT_VERSION}"
-          fi
+          PINNED_VERSION="$(grep -oE '^ARG PI_VERSION=[^[:space:]]+' Dockerfile | cut -d= -f2)"
+          case "$INPUT_PI_VERSION" in
+            '') VERSION="$DEFAULT_VERSION" ;;
+            pinned)
+              if [ -z "$PINNED_VERSION" ]; then
+                echo "::error title=pi compat::could not read ARG PI_VERSION from the Dockerfile"
+                exit 1
+              fi
+              VERSION="$PINNED_VERSION"
+              ;;
+            current)
+              VERSION="$(npm view "$PACKAGE" version 2>/dev/null | tail -n 1)"
+              if [ -z "$VERSION" ]; then
+                echo "::error title=pi compat::could not resolve the current published version of $PACKAGE"
+                exit 1
+              fi
+              ;;
+            *) VERSION="$INPUT_PI_VERSION" ;;
+          esac
           if [ -z "$VERSION" ]; then
             echo "::error title=pi compat::no version given and none derivable from the peer range for $PACKAGE"
+            exit 1
+          fi
+          # Every path — dispatch input, Dockerfile ARG, npm tag — lands on the same gate before the
+          # version is used in a command (SPECIALISTS-4438).
+          SEMVER_RE='^(0|[1-9][0-9]*)\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+          if ! [[ "$VERSION" =~ $SEMVER_RE ]]; then
+            echo "::error title=pi compat::refusing a pi version that is not semver: ${VERSION}"
             exit 1
           fi
           echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
@@ -102,8 +128,12 @@ jobs:
           echo "Testing $PACKAGE@$VERSION"
 
       - name: Install pi
+        env:
+          PI_PACKAGE: ${{ steps.pi.outputs.package }}
+          PI_VERSION: ${{ steps.pi.outputs.version }}
         run: |
-          npm install -g "${{ steps.pi.outputs.package }}@${{ steps.pi.outputs.version }}"
+          set -euo pipefail
+          npm install -g "${PI_PACKAGE}@${PI_VERSION}"
           pi --version
 
       - name: Smoke spawn flags (script-runner path)
@@ -164,32 +194,41 @@ jobs:
       # The image default is pinned (SPECIALISTS-4437). Build THROUGH that pin whenever the version
       # under test is the pinned one, so CI exercises the default a consumer actually gets; only an
       # older/newer version under test is passed as a build arg.
+      - name: Pin matches the declared pi
+        run: node scripts/check-pi-pin-sync.mjs
+
       - name: Build image with reviewed pi
+        env:
+          PI_PACKAGE: ${{ steps.pi.outputs.package }}
+          PI_VERSION: ${{ steps.pi.outputs.version }}
         run: |
           set -euo pipefail
           PINNED="$(grep -oE '^ARG PI_VERSION=[^[:space:]]+' Dockerfile | cut -d= -f2)"
           PINNED_PACKAGE="$(grep -oE '^ARG PI_PACKAGE=[^[:space:]]+' Dockerfile | cut -d= -f2)"
-          if [ "${{ steps.pi.outputs.version }}" = "$PINNED" ] && [ "${{ steps.pi.outputs.package }}" = "$PINNED_PACKAGE" ]; then
+          if [ "${PI_VERSION}" = "$PINNED" ] && [ "${PI_PACKAGE}" = "$PINNED_PACKAGE" ]; then
             echo "Building the pinned default: ${PINNED_PACKAGE}@${PINNED}"
             docker build -t specialists-service:ci .
           else
-            echo "Building ${{ steps.pi.outputs.package }}@${{ steps.pi.outputs.version }} over the pinned ${PINNED_PACKAGE}@${PINNED}"
+            echo "Building ${PI_PACKAGE}@${PI_VERSION} over the pinned ${PINNED_PACKAGE}@${PINNED}"
             docker build \
-              --build-arg "PI_PACKAGE=${{ steps.pi.outputs.package }}" \
-              --build-arg "PI_VERSION=${{ steps.pi.outputs.version }}" \
+              --build-arg "PI_PACKAGE=${PI_PACKAGE}" \
+              --build-arg "PI_VERSION=${PI_VERSION}" \
               -t specialists-service:ci .
           fi
 
       - name: Image carries the version under test
+        env:
+          PI_PACKAGE: ${{ steps.pi.outputs.package }}
+          PI_VERSION: ${{ steps.pi.outputs.version }}
         run: |
           set -euo pipefail
           INSTALLED="$(docker run --rm --entrypoint npm specialists-service:ci ls -g --depth=0 \
             | grep -oE 'pi-coding-agent@[0-9]+\.[0-9]+\.[0-9]+' | head -1 | cut -d@ -f2)"
-          if [ "$INSTALLED" != "${{ steps.pi.outputs.version }}" ]; then
-            echo "::error title=pi compat regression::image carries pi ${INSTALLED:-nothing}, expected ${{ steps.pi.outputs.version }}"
+          if [ "$INSTALLED" != "${PI_VERSION}" ]; then
+            echo "::error title=pi compat regression::image carries pi ${INSTALLED:-nothing}, expected ${PI_VERSION}"
             exit 1
           fi
-          echo "Image carries ${{ steps.pi.outputs.package }}@${INSTALLED}."
+          echo "Image carries ${PI_PACKAGE}@${INSTALLED}."
 
       - name: Container boot smoke
         run: |
