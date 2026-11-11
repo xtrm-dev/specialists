@@ -192,6 +192,13 @@ claude plugin install specialists@xtrm
 claude plugin install specialists-ui@xtrm   # optional: teammate-style transcript rows
 ```
 
+The same marketplace also offers `skill-suggest`, built in `xtrm-dev/core`
+(`packages/claude-skill-suggest`): a monitor that suggests one skill per turn while a turn runs.
+
+```bash
+claude plugin install skill-suggest@xtrm
+```
+
 `specialists-ui` draws the rows the `specialists` plugin raises in Claude Code's own style.
 A channel wake becomes a teammate row, `● Specialist @explorer:d65bbed4 completed`, with the
 wake's brief under it: run cost and purpose, the first result lines, the failing model and
