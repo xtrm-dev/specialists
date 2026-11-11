@@ -44,7 +44,10 @@ const BEAD = {
   ].join('\n'),
 };
 
-function fakeSession(onPrompt?: () => void): PiAgentSessionLike {
+function fakeSession(
+  onPrompt?: () => void,
+  options: { wait?: Promise<void>; onResume?: () => void } = {},
+): PiAgentSessionLike {
   const listeners: Array<(e: PiAgentSessionEvent) => void> = [];
   const messages: unknown[] = [];
   const session = {
@@ -55,6 +58,12 @@ function fakeSession(onPrompt?: () => void): PiAgentSessionLike {
     activeTools: ['read', 'grep'],
     async prompt() {
       onPrompt?.();
+      if (options.wait) {
+        // Hold the turn open so two activations can overlap, and let the caller look
+        // at process.env from inside the surviving turn after the other one settles.
+        await options.wait;
+        options.onResume?.();
+      }
       listeners.forEach(l => l({ type: 'agent_start' }));
       messages.push({ role: 'assistant', content: 'done' });
       listeners.forEach(l => l({ type: 'agent_end', willRetry: false }));
@@ -168,6 +177,134 @@ describe('native launch path — the Specialist PATH starts at the gh shim (CORE
  * Concurrent activations still race on `process.env`; that needs a per-session env on
  * the SDK and is not solved in this class.
  */
+/**
+ * The stack (SPECIALISTS-4423 F2, delta review): two overlapping activations in ONE
+ * host, because that is the only shape in which the guard does any work. Every
+ * ordering must end at the state before the OLDEST activation, and the activation
+ * still running must keep ITS identity after the other one settles.
+ */
+describe('native launch path — overlapping activations return the env to the pre-first state', () => {
+  function makeHost(sessions: Array<{ wait?: Promise<void>; onResume?: () => void; onPrompt?: () => void }>) {
+    let index = 0;
+    const sdk = {
+      ...makeSdk(fakeSession()),
+      createAgentSession: async (options?: Record<string, unknown>) => {
+        const plan = sessions[Math.min(index, sessions.length - 1)];
+        index += 1;
+        const session = fakeSession(plan?.onPrompt, { wait: plan?.wait, onResume: plan?.onResume });
+        if (Array.isArray(options?.tools)) session.getActiveToolNames = () => options!.tools as string[];
+        return { session };
+      },
+    } as PiSdk;
+    return new NativeActivationHost({
+      workItems: testWorkItems({ description: BEAD.description }),
+      loader: { get: async () => ({
+        specialist: {
+          metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },
+          execution: {
+            model: 'testprov/test-model', permission_required: 'READ_ONLY', response_format: 'text',
+            output_type: 'research', bare: false,
+          },
+          prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
+        },
+      }) } as never,
+      loadSdk: async () => sdk,
+      identityEnvRun: () => ({ status: 0, stdout: JSON.stringify({ env: { XTRM_ROLE: 'researcher' } }) }),
+      cwd: process.cwd(),
+    });
+  }
+
+  const dispatch = (host: NativeActivationHost) =>
+    host.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator' });
+
+  // The holder the host derives: `sp-<name>-<first 8 of the activation id with
+  // non-alphanumerics removed>` (identity-env specialistHolderName).
+  const holderFor = (activationId: string) =>
+    `sp-researcher-${activationId.replace(/[^A-Za-z0-9]/g, '').slice(0, 8)}`;
+
+  const gate = () => {
+    let release!: () => void;
+    const wait = new Promise<void>((resolve) => { release = resolve; });
+    return { wait, release };
+  };
+
+  it('A then A settles then B then B settles lands on the pre-A state', async () => {
+    const before = snapshotIdentityEnv(process.env);
+    const seen: Array<string | undefined> = [];
+    const host = makeHost([{ onPrompt: () => { seen.push(process.env.SUBSTRATE_HOLDER); } }]);
+
+    const a = await dispatch(host);
+    await a.result;
+    expect(seen).toEqual([holderFor(a.activationId)]);
+    expect(snapshotIdentityEnv(process.env)).toEqual(before);
+
+    const b = await dispatch(host);
+    await b.result;
+    expect(seen.at(-1)).toBe(holderFor(b.activationId));
+    expect(snapshotIdentityEnv(process.env)).toEqual(before);
+  });
+
+  it('A, B, A settles, B settles: B keeps its identity and the end state is pre-A', async () => {
+    const before = snapshotIdentityEnv(process.env);
+    const gateA = gate();
+    const gateB = gate();
+    const host = makeHost([
+      { wait: gateA.wait },
+      { wait: gateB.wait },
+    ]);
+
+    const a = await dispatch(host);
+    const b = await dispatch(host);
+    expect(process.env.SUBSTRATE_HOLDER).toBe(holderFor(b.activationId));
+
+    // A settles while B is live and B is on top: process.env may not change, and B
+    // keeps its identity for the rest of its turn.
+    gateA.release();
+    await a.result;
+    expect(process.env.SUBSTRATE_HOLDER).toBe(holderFor(b.activationId));
+
+    gateB.release();
+    await b.result;
+    expect(snapshotIdentityEnv(process.env)).toEqual(before);
+  });
+
+  it('A, B, B settles, A settles: A takes the env back, then the end state is pre-A', async () => {
+    const before = snapshotIdentityEnv(process.env);
+    const gateA = gate();
+    const gateB = gate();
+    let holderWhenAResumed: string | undefined;
+    const host = makeHost([
+      { wait: gateA.wait, onResume: () => { holderWhenAResumed = process.env.SUBSTRATE_HOLDER; } },
+      { wait: gateB.wait },
+    ]);
+
+    const a = await dispatch(host);
+    const b = await dispatch(host);
+
+    // The swap is operator-visible: settling off the top warns once, ids only.
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    gateB.release();
+    await b.result;
+    const warnings = stderr.mock.calls
+      .map((call) => String(call[0]))
+      .filter((line) => line.includes('identity-env'));
+    stderr.mockRestore();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(`activation ${b.activationId} settled while 1 others are live`);
+    expect(warnings[0]).toContain(`process env now carries ${a.activationId}`);
+    expect(warnings[0]).not.toContain(holderFor(a.activationId));
+
+    // B was on top and A is still running: A's identity must be on the env, not the
+    // baseline — otherwise A's remaining shell commands run as the operator.
+    expect(process.env.SUBSTRATE_HOLDER).toBe(holderFor(a.activationId));
+
+    gateA.release();
+    await a.result;
+    expect(snapshotIdentityEnv(process.env)).toEqual(before);
+    expect(holderWhenAResumed).toBe(holderFor(a.activationId));
+  });
+});
+
 describe('native launch path — the activation owns process.env only while it runs', () => {
   const gitConfigKeys = (): string[] =>
     Object.keys(snapshotIdentityEnv(process.env)).filter((key) => key.startsWith('GIT_CONFIG_'));

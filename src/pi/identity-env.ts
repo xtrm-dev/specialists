@@ -78,9 +78,12 @@ function isAllowed(key: string): boolean {
  * The launcher's warning channel: one prefixed stderr line, the same shape the
  * runner emits for pre-run and output-contract warnings. Never a value.
  */
-function launcherWarning(message: string): void {
+/** One `[specialists] identity-env:` line: the launcher's warning channel, and the only one. */
+export function warnIdentityEnv(message: string): void {
   process.stderr.write(`[specialists] identity-env: ${message}\n`);
 }
+
+const launcherWarning = warnIdentityEnv;
 
 /**
  * Every key one identity env OWNS. PATH is deliberately not here: the launched

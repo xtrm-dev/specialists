@@ -80,6 +80,7 @@ import {
   restoreIdentityEnv,
   snapshotIdentityEnv,
   specialistHolderName,
+  warnIdentityEnv,
   type IdentityEnvRun,
 } from '../pi/identity-env.js';
 import { formatResolvedToolContract, withDiscoveredExtensionTools, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
@@ -1142,14 +1143,20 @@ export class NativeActivationHost {
   /** Guards the once-per-process settlement republish pass (SPECIALISTS-54). */
   private republished = false;
   /**
-   * The identity env the running activation put on `process.env`, and the values it
-   * replaced (SPECIALISTS-4423 F2). One host, one process env: the managed keys are
-   * cleared before each apply, so a smaller answer cannot inherit a bigger one's
-   * GIT_CONFIG index, and the prior values are restored when the activation settles.
-   * Two activations running at the same moment still race here — that needs a
-   * per-session env on the SDK, not a guard in this class.
+   * The identity env live activations have put on `process.env`, in apply order
+   * (SPECIALISTS-4423 F2, stack per the delta review). One host, one process env:
+   * the managed keys are cleared before each apply, so a smaller answer cannot
+   * inherit a bigger one's GIT_CONFIG index, and the stack keeps two facts straight
+   * that a single owner could not — that the LAST live activation owns the env, and
+   * that the state to return to is the one captured before the FIRST of them.
+   *
+   * Still one process env for every activation: this bounds what a settled
+   * activation leaves behind, it does not give two running ones separate identities
+   * (that is SPECIALISTS-4427, via the bash tool's spawnHook).
    */
-  private appliedIdentityEnv: { activationId: string; snapshot: Record<string, string | undefined> } | null = null;
+  private readonly liveIdentityEnv: Array<{ activationId: string; env: Record<string, string> }> = [];
+  /** State before the oldest live activation applied; null whenever the stack is empty. */
+  private identityEnvBaseline: Record<string, string | undefined> | null = null;
   private readonly env: Record<string, string | undefined>;
 
   private readonly registry = new FleetRegistry();
@@ -1258,8 +1265,9 @@ export class NativeActivationHost {
    *
    * The managed keys are cleared FIRST: `xt identity env` answers with a block sized
    * by the role's App, so a later, smaller answer must not leave an earlier one's
-   * GIT_CONFIG index or author behind. The replaced values are remembered so the
-   * settle can put them back.
+   * GIT_CONFIG index or author behind. The baseline is captured only when the stack
+   * goes empty → non-empty, so it is always the state before the OLDEST live
+   * activation — never another activation's identity.
    */
   private applyActivationIdentityEnv(
     activationId: string,
@@ -1273,22 +1281,49 @@ export class NativeActivationHost {
       env: process.env,
       run: this.identityEnvRun,
     });
-    const prior = snapshotIdentityEnv(process.env);
+    const existing = this.liveIdentityEnv.findIndex((entry) => entry.activationId === activationId);
+    if (existing >= 0) this.liveIdentityEnv.splice(existing, 1); // resume re-applies
+    if (this.liveIdentityEnv.length === 0) this.identityEnvBaseline = snapshotIdentityEnv(process.env);
+    this.liveIdentityEnv.push({ activationId, env: launchEnv });
+    this.writeIdentityEnv(launchEnv);
+  }
+
+  /** Clear the managed keys, then apply one activation's env. */
+  private writeIdentityEnv(env: Record<string, string>): void {
     clearIdentityEnv(process.env);
-    Object.assign(process.env, launchEnv);
-    this.appliedIdentityEnv = { activationId, snapshot: prior };
+    Object.assign(process.env, env);
   }
 
   /**
-   * Put `process.env` back when `activationId` settles. A newer activation that
-   * already applied its own identity owns the env: restoring an older snapshot over
-   * it would hand the live activation someone else's holder.
+   * Take a settled activation off the stack (SPECIALISTS-4423 F2).
+   *
+   * Only the activation on TOP owns `process.env`, so only its settle touches it:
+   * the previous top takes the env back (that activation is still running and must
+   * keep ITS identity — leaving the baseline there would run its remaining commands
+   * as the operator, silently), and the bottom-most settle restores the baseline.
+   * A settle from anywhere else in the stack changes nothing in `process.env`.
    */
-  private restoreActivationIdentityEnv(activationId: string): void {
-    if (this.appliedIdentityEnv?.activationId !== activationId) return;
-    const prior = this.appliedIdentityEnv.snapshot;
-    this.appliedIdentityEnv = null;
-    restoreIdentityEnv(prior, process.env);
+  private settleActivationIdentityEnv(activationId: string): void {
+    const index = this.liveIdentityEnv.findIndex((entry) => entry.activationId === activationId);
+    if (index < 0) return;
+    const wasTop = index === this.liveIdentityEnv.length - 1;
+    this.liveIdentityEnv.splice(index, 1);
+    if (!wasTop) return;
+
+    const top = this.liveIdentityEnv[this.liveIdentityEnv.length - 1];
+    if (!top) {
+      const baseline = this.identityEnvBaseline;
+      this.identityEnvBaseline = null;
+      if (baseline) restoreIdentityEnv(baseline, process.env);
+      return;
+    }
+    this.writeIdentityEnv(top.env);
+    // The env is shared, so the swap is money-moving information: an activation that
+    // settles while others run quietly hands the process to another identity. Ids
+    // only — never a holder's value, never a config value.
+    warnIdentityEnv(
+      `activation ${activationId} settled while ${this.liveIdentityEnv.length} others are live; process env now carries ${top.activationId}`,
+    );
   }
 
   async start(request: ActivationRequest): Promise<ActivationHandle> {
@@ -1387,7 +1422,7 @@ export class NativeActivationHost {
 
     const reject = (reason: string, detail: Record<string, unknown> = {}): never => {
       // All first, so no refusal path can forget any of them.
-      this.restoreActivationIdentityEnv(activationId);
+      this.settleActivationIdentityEnv(activationId);
       releaseLeaseOnRefusal();
       releaseClaimForRefusal();
       removeWorkspaceOnRefusal();
@@ -2765,7 +2800,7 @@ export class NativeActivationHost {
         // MEDIUM F2: the identity this activation put on process.env goes back to what
         // the host had. A stale GIT_AUTHOR_*/GIT_CONFIG_* would otherwise author the
         // host's own commits or route its git through a settled role's transport.
-        this.restoreActivationIdentityEnv(snapshot.activationId);
+        this.settleActivationIdentityEnv(snapshot.activationId);
         if (unframedWake) {
           this.wakeDirty.delete(snapshot.activationId);
           const record = this.registry.get(snapshot.activationId);
@@ -3067,7 +3102,7 @@ export class NativeActivationHost {
       snapshot.state = 'failed';
       this.save(snapshot);
       // A throw is a terminal state too: the identity must not outlive it.
-      this.restoreActivationIdentityEnv(snapshot.activationId);
+      this.settleActivationIdentityEnv(snapshot.activationId);
       const message = error instanceof Error ? error.message : String(error);
       // The run failed by THROWING, not by settling: without this the terminal event would be
       // the only record, and a reader could not tell "Pi never reported totals" from "the
@@ -3141,7 +3176,7 @@ export class NativeActivationHost {
       const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
       snapshot.state = 'failed';
       this.save(snapshot);
-      this.restoreActivationIdentityEnv(snapshot.activationId);
+      this.settleActivationIdentityEnv(snapshot.activationId);
       emit('activation_failed', { error: detail, stop_reason: last.stopReason });
       const failedResult: ActivationResult = {
         activationId: snapshot.activationId,
