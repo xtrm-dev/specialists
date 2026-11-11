@@ -4,6 +4,9 @@ permissions:
   contents: read
 
 on:
+  # The release script refuses to tag unless these jobs passed on the exact commit, and a
+  # merge commit has no pull_request run, so the gate needs a way to run them there.
+  workflow_dispatch:
   pull_request:
     paths:
       - package.json
@@ -17,6 +20,8 @@ on:
       - scripts/assert-package-payload.sh
       - scripts/generate-release-attestation.mjs
       - scripts/postprocess-build.mjs
+      - scripts/release-4.2.0.sh
+      - scripts/ci-dist-gate.ts
       - .github/workflows/package-payload.yml
 
 jobs:
@@ -47,11 +52,15 @@ jobs:
               - scripts/assert-package-payload.sh
               - scripts/generate-release-attestation.mjs
               - scripts/postprocess-build.mjs
+              - scripts/release-4.2.0.sh
+              - scripts/ci-dist-gate.ts
               - .github/workflows/package-payload.yml
 
   payload-contract:
     needs: changes
-    if: needs.changes.outputs.package_payload == 'true'
+    # A non-PR event has no base to diff against, so paths-filter sees only the last commit and
+    # would skip these jobs on the dispatch the release gate relies on.
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.package_payload == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -120,7 +129,7 @@ jobs:
 
   packed-smoke:
     needs: changes
-    if: needs.changes.outputs.package_payload == 'true'
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.package_payload == 'true'
     permissions:
       contents: read
     runs-on: ubuntu-latest
