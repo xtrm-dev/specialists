@@ -19,3 +19,22 @@ PR workflow. Stop each activation (`specialist_stop_activation`) once its result
 Use current `xt`, `git`, and repository help/policy for exact commands. If an
 installed merge helper is documented as broken/disabled by current runtime evidence, do
 not use it merely because an older skill version did.
+
+## Review publication: one formal review at the reviewed head
+
+A review is a formal review, never a conversation comment: a comment carries no commit and
+no review state, so nothing can prove which head was reviewed or tell an approval from a
+remark.
+
+```bash
+gh pr review <pr> --repo <owner/repo> --comment|--approve|--request-changes --body-file <findings>
+```
+
+`PASS` → `--approve`, `PARTIAL` → `--comment`, `FAIL` → `--request-changes`. The reviewer
+model writes findings only; the `gh` shim prepends `Review by <role> (<model>) at head
+<sha12>`, sets `commit_id` to the reviewed head, refuses a head that moved since the review
+was prepared, and refuses a review of the PR the same holder opened. Never author the header
+yourself: attribution is not typed in. Verify the post by reading it back —
+`gh pr view <pr> --repo <owner/repo> --json reviews` must show `<slug>[bot]` and the reviewed
+`commit_id`. The pr-reviewer definition carries the exact body lint; run it before posting.
+A `gh pr comment` is invisible to the merge guard.

@@ -8,7 +8,7 @@
     },
     {
       "path": "config/skills/using-specialists/references/claude-code.md",
-      "sha256": "eaa67abe05a9054855a0eaa02b31baf762ef4141fdfad8e32dcce24beec43b45"
+      "sha256": "21c00c5ddab6b4e13b65ff75aa69aad4520f550e5d397f9b3c24a86811a25275"
     },
     {
       "path": "config/skills/using-specialists/references/dispatch-preconditions.md",
@@ -24,7 +24,7 @@
     },
     {
       "path": "config/skills/using-specialists/references/merge-and-integration.md",
-      "sha256": "857c9e31fb678fe66606caff4018399f41ff77ca90007b8e19e117de5c6cd698"
+      "sha256": "1a27b8f456fa8c56ba99023d0295c8e1e4ea79fabfb441660f76a824ab1a9b94"
     },
     {
       "path": "config/skills/using-specialists/references/monitoring.md",
@@ -64,7 +64,7 @@
     },
     {
       "path": "config/skills/using-specialists/SKILL.md",
-      "sha256": "e8d893d6303eed306e4a2ded8e8afeaaa7a2e00462387a784ebe9ed0fb57fb55"
+      "sha256": "0a8ac257cda48da7d4d0da267bbec80ebc79a9977833de9ebcbcd43095a249dd"
     }
   ],
   "shipped_specialists": [

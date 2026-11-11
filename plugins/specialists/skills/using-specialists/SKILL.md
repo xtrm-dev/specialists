@@ -86,6 +86,12 @@ Issue ready (attested)
   `specialist_retry` re-acquire it. A settled activation is resumable, not lease-holding.
   A lease left uncertain by a crash is resolved with `specialist_lease_reconcile`; the
   outcome and basis are stated, never inferred.
+- **Every spawned session carries its own holder and role.** The host asks
+  `xt identity env --json` with the Specialist name and job, then sets
+  `SUBSTRATE_HOLDER` (`sp-<specialist>-<job8>`), `XTRM_ROLE`, the git author keys and
+  `GIT_CONFIG_*` on the session. A missing, failing or slow `xt` leaves the holder and
+  the specialist name only, so a dispatch never blocks; a `pr-reviewer` therefore
+  resolves the reviewer role and its App.
 - **Control is state-specific.** Asks via `ask_coordinator`/`escalate_to_coordinator`
   are answered by `specialist_reply` on `message_id`; `specialist_stop_activation` is
   the irreversible ordinary disposal path.
@@ -141,7 +147,8 @@ Load only the one you need: `references/chain-recipes.md` (role/gate recipes),
 `references/monitoring.md` (wakes, results, failures), `references/merge-and-integration.md`
 (integration/publication), `references/registry-and-locations.md` (registry),
 `references/dispatch-preconditions.md` (git/workspace prerequisites),
-`references/claude-code.md` (Claude Code notes: store resolution, wakes, headless limits). Operator surfaces:
+`references/claude-code.md` (Claude Code notes: store resolution, wakes, headless limits and
+the opt-in Claude Code model route). Operator surfaces:
 `references/kpi.md` (cost/stall analysis), `references/nodes.md` (NodeSupervisor),
 `references/script-class.md` (`sp script`/`sp serve`), `references/specialist-definitions.md`
 (definition authoring; helpers under `scripts/specialist-definitions/`, including when a
