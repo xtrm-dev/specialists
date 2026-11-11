@@ -19,6 +19,10 @@ import { readFileSync } from 'node:fs';
 /** Jobs whose failure means the committed dist is not what CI builds. */
 export const DIST_CHECK_JOBS = ['packed-smoke', 'payload-contract'] as const;
 
+/** GitHub's maximum page size for check runs, and a bound so a broken response cannot loop. */
+export const CHECK_RUNS_PER_PAGE = 100;
+export const MAX_CHECK_RUN_PAGES = 20;
+
 export interface CheckRun {
   name?: string;
   head_sha?: string;
@@ -39,7 +43,9 @@ export type DistGateVerdict = { ok: true } | { ok: false; reason: string };
  */
 export function evaluateDistGate(sha: string, payload: CheckRunsPayload): DistGateVerdict {
   const runs = Array.isArray(payload.check_runs) ? payload.check_runs : [];
-  const forSha = runs.filter((run) => !run.head_sha || run.head_sha === sha);
+  // Strict: a check run without a head_sha is not evidence about this commit. Accepting an
+  // unknown commit is how a green run from somewhere else passes as proof.
+  const forSha = runs.filter((run) => run.head_sha === sha);
   const problems: string[] = [];
 
   for (const job of DIST_CHECK_JOBS) {
@@ -59,13 +65,27 @@ export function evaluateDistGate(sha: string, payload: CheckRunsPayload): DistGa
   return { ok: false, reason: `dist checks are not green on ${sha}: ${problems.join('; ')}` };
 }
 
-function fetchCheckRuns(sha: string): CheckRunsPayload {
-  const out = execFileSync(
-    'gh',
-    ['api', `repos/{owner}/{repo}/commits/${sha}/check-runs?per_page=100`, '--jq', '.'],
-    { encoding: 'utf8' },
-  );
-  return JSON.parse(out) as CheckRunsPayload;
+/**
+ * Read every check run for a commit. A busy commit can exceed one page, and a job that fell on
+ * page two would otherwise read as "did not run".
+ */
+export function fetchCheckRuns(
+  sha: string,
+  request: (page: number) => string = (page) =>
+    execFileSync(
+      'gh',
+      ['api', `repos/{owner}/{repo}/commits/${sha}/check-runs?per_page=100&page=${page}`, '--jq', '.'],
+      { encoding: 'utf8' },
+    ),
+): CheckRunsPayload {
+  const collected: CheckRun[] = [];
+  for (let page = 1; page <= MAX_CHECK_RUN_PAGES; page += 1) {
+    const payload = JSON.parse(request(page)) as CheckRunsPayload;
+    const runs = Array.isArray(payload.check_runs) ? payload.check_runs : [];
+    collected.push(...runs);
+    if (runs.length < CHECK_RUNS_PER_PAGE) break;
+  }
+  return { check_runs: collected };
 }
 
 export function main(argv: string[]): number {

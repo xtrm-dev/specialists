@@ -15,7 +15,7 @@
 #   * HEAD is the approved release commit, and it is on origin/master
 #   * the working tree is clean, including untracked files
 #   * package.json is 4.2.0 and both plugin manifests already agree with it
-#   * the committed dist rebuilds to itself (the publish workflow's own requirement)
+#   * CI's dist checks passed on this exact commit (a host rebuild cannot prove it)
 #   * 4.2.0 is not already published
 #   * tag v4.2.0 does not exist, locally or on the remote
 #   * `gh` is authenticated for this repository
@@ -68,17 +68,15 @@ bun scripts/ci-dist-gate.ts --sha "$HEAD_SHA" \
 
 if [ "${RELEASE_HOST_DIST_WARNING:-0}" = "1" ]; then
   # Print-only. Never a gate: this is exactly the check that cannot hold on a host.
-  NODE_ENV=test bun run build >/dev/null 2>&1 || printf 'WARNING: host rebuild failed\n' >&2
-  if git diff --quiet -- dist/; then
-    printf '   host rebuild matches the committed dist\n'
-  else
-    printf 'WARNING: a host rebuild differs from the committed dist (expected; CI is authoritative):\n' >&2
-    git diff --stat -- dist/ >&2
-  fi
-  git checkout -- dist/
+  bun scripts/release-dist-warning.ts
 fi
 
 step "5/8 pack and attest"
+# The generator refuses without PI_VERSION. Derive it (or take an explicit override) instead of
+# making the release depend on an undocumented variable in someone's shell.
+PI_VERSION_VALUE="$(bun scripts/release-pi-version.ts)" || die "could not determine the pi version for the attestation" 3
+export PI_VERSION="$PI_VERSION_VALUE"
+printf '   pi_runtime: %s\n' "$PI_VERSION" 
 # Pack OUTSIDE the repository: the attestation generator refuses a dirty tree, and a tarball
 # dropped in the checkout is exactly that.
 PACK_DIR="$(mktemp -d -t release-pack-XXXXXX)"
@@ -124,14 +122,11 @@ if ! gh run watch "$RUN_ID" --exit-status; then
   Option 2: remove the tag and start over: git push origin :refs/tags/${TAG} && git tag -d ${TAG}" 4
 fi
 
-# The registry can lag a moment behind a successful publish job; retry briefly.
-PUBLISHED=""
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-  PUBLISHED="$(npm view "${PACKAGE}" version 2>/dev/null || true)"
-  [ "$PUBLISHED" = "$VERSION" ] && break
-  sleep 6
-done
-[ "$PUBLISHED" = "$VERSION" ] || die "registry reports ${PUBLISHED:-nothing}, expected ${VERSION} (run: ${RUN_URL})" 5
+# npm accepts the publish and then processes it, which can take minutes rather than seconds.
+# A short window here reports failure after a successful publish, so wait ten.
+bun scripts/release-registry-wait.ts "$PACKAGE" "$VERSION" \
+  || die "registry does not show ${VERSION} yet (run: ${RUN_URL}). If the publish job is green, the package is still processing; re-check with: npm view ${PACKAGE} version" 5
+PUBLISHED="$VERSION"
 
 printf '\nReleased %s %s at %s (workflow %s)\n' "$PACKAGE" "$PUBLISHED" "$HEAD_SHA" "$RUN_URL"
 printf 'Next: A7 installs (PC first; the server stays extension-only, no machine switch).\n'
