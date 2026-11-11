@@ -9,6 +9,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-11-11
+
+### Added
+- Opt-in Claude Code route for Specialist models: a definition sets `execution.claude_bridge: true`
+  and a `claude-bridge/...` model, and the operator enables it once per machine with
+  `{"claude_bridge":{"enabled":true}}` in `~/.config/specialists/user.json`. Both switches are
+  required; a repository cannot enable it. The extension resolves from the pi package store
+  (`<agentDir>/npm/node_modules/pi-claude-bridge`), with an absolute-only
+  `SPECIALISTS_CLAUDE_BRIDGE_PATH` override, and a refusal names every path searched
+  ([#526](https://github.com/xtrm-dev/specialists/commit/1d864ab1),
+  [#529](https://github.com/xtrm-dev/specialists/commit/70a72b50),
+  [#531](https://github.com/xtrm-dev/specialists/commit/36fc308d),
+  [#534](https://github.com/xtrm-dev/specialists/commit/dc4dec8b)).
+- `docs/claude-bridge.md`, a README opt-in section and an authoring section: the two switches, the
+  resolution order, the single-operator limit, and the billing and permission position with sources
+  ([#532](https://github.com/xtrm-dev/specialists/commit/e7dd7baa),
+  [#533](https://github.com/xtrm-dev/specialists/commit/33843b10)).
+- Each supervised Specialist launches with its own agent identity: the holder and Specialist name are
+  asked of `xt identity env --json`, and only an allowlist is merged — `SUBSTRATE_HOLDER`,
+  `XTRM_ROLE`, the four `GIT_*` identity keys and the `GIT_CONFIG_*` transport keys. The role map
+  stays in xt, so a token or an unrelated process env value cannot ride along. Holders are stable per
+  job (`sp-<specialist>-<job8>`). If `xt identity env` fails, the Specialist still launches with
+  holder and Specialist name only, and the host prints an `[specialists] identity-env:` warning
+  naming the reason. Identity is bound to the activation's lifetime: re-applied at every leg
+  (fallback, retry, wake, resume) and restored to the host's own env when the activation ends
+  ([#525](https://github.com/xtrm-dev/specialists/commit/e4ad163a)).
+- Launched Specialists get a shim-first `PATH` and a working git transport, so a pr-reviewer can mint
+  its App token and post a review
+  ([#525](https://github.com/xtrm-dev/specialists/commit/e4ad163a)).
+- `sp edit --global --set <name>.execution.claude_bridge true` is accepted: the global override
+  schema now lists every field the allowlist advertises, with a test that the two cannot drift
+  ([#534](https://github.com/xtrm-dev/specialists/commit/dc4dec8b)).
+
+### Fixed
+- A run admitted on a bridged model can no longer continue on a metered fallback. The refusal holds
+  at admission and at runtime, on all three walk paths — the native host, the legacy `sp run` runner
+  and the script runner behind `sp script` — through one shared predicate; the skip is durable as
+  `terminal`, `skipped` and `not_started_model`, and the feed renders it as a skipped fallback rather
+  than a model cycle ([#533](https://github.com/xtrm-dev/specialists/commit/33843b10)).
+- `GIT_CONFIG_*` is exported whole or not at all, and the deliberate empty credential-helper reset is
+  kept — previously a launched Specialist could not run git
+  ([#525](https://github.com/xtrm-dev/specialists/commit/e4ad163a)).
+
+### Known limitations and risks
+- Concurrent native activations share `process.env` in one host. While two activations are live, the
+  activation that starts a leg takes the shared env, so the other's tool calls can run under the
+  wrong App identity — never the operator's own. A takeover warning fires at that point. The spawned
+  path is exact. The fix is tracked in SPECIALISTS-4427; until then, run native activations on the
+  Claude Code route sequentially.
+- The route depends on `pi-claude-bridge@0.12.0` staying loadable from its `src/index.ts`; a layout
+  move breaks resolution, loudly, with a refusal that lists the searched paths.
+- Anthropic's billing position for Agent-SDK harnesses on a subscription was announced, paused, and
+  can change again. This route assumes the current position and is one operator, one login.
+
+
 ## [4.1.1] - 2026-10-26
 
 ### Fixed
