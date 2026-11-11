@@ -65,12 +65,16 @@ git diff --exit-code -- dist/ || die "committed dist differs from a fresh build;
 [ -z "$(git status --porcelain --untracked-files=all -- dist/)" ] || die "build left untracked files under dist/" 3
 
 step "5/8 pack and attest"
-TARBALL="$(npm pack --silent | tail -n 1)"
+# Pack OUTSIDE the repository: the attestation generator refuses a dirty tree, and a tarball
+# dropped in the checkout is exactly that.
+PACK_DIR="$(mktemp -d -t release-pack-XXXXXX)"
+TARBALL="$PACK_DIR/$(npm pack --silent --pack-destination "$PACK_DIR" | tail -n 1)"
 [ -f "$TARBALL" ] || die "npm pack produced no tarball" 3
 ATTEST="$(mktemp -t release-attestation-XXXXXX.json)"
 # The tarball survives a failed publish so step 8 can be re-run by hand against the same
 # attested bytes; it is removed only when the release actually completed.
 KEEP_TARBALL=0
+PACK_DIR=""
 cleanup() {
   rm -f "$ATTEST"
   if [ "$KEEP_TARBALL" = 1 ]; then
@@ -78,6 +82,7 @@ cleanup() {
   else
     rm -f "$TARBALL"
   fi
+  [ -n "$PACK_DIR" ] && rm -rf "$PACK_DIR"
 }
 trap cleanup EXIT
 npm run --silent release:attest -- "$TARBALL" "$ATTEST" || die "attestation generation failed" 3
