@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tempDir } from '../../utils/temp-dir.js';
 
 // The extension imports Type from 'typebox' (resolved from pi's own install at
 // runtime). Under vitest the worktree has no typebox, so stub the members the
@@ -122,7 +123,7 @@ function hookSuggestion(): string {
     encoding: 'utf8',
     env: {
       ...process.env,
-      SPECIALISTS_CHAIN_SUGGEST_DIR: `${process.env.TMPDIR ?? '/tmp'}/chain-parity-${process.pid}`,
+      SPECIALISTS_CHAIN_SUGGEST_DIR: tempDir('chain-parity-'),
     },
   });
   return (JSON.parse(result.stdout) as { hookSpecificOutput: { additionalContext: string } })

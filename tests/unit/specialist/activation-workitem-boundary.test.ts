@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { resolveGlobalNodeModulesDirs } from '../../../src/pi/session.js';
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { tempDir } from '../../utils/temp-dir.js';
 import {
   createWorkItemBoundary,
   findMissingSubstrateIssueMethods,
@@ -180,14 +181,14 @@ describe('openWorkItemBoundary package identity', () => {
   });
 
   it('fails closed on a spoof directory with the wrong package name', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'substrate-spoof-'));
+    const dir = tempDir('substrate-spoof-');
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'totally-legit-substrate' }));
     await expect(openWorkItemBoundary({ substrateDir: dir }))
       .rejects.toThrow(/expected @jaggerxtrm\/substrate/);
   });
 
   it('fails closed on a directory without readable package identity', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'substrate-noid-'));
+    const dir = tempDir('substrate-noid-');
     await expect(openWorkItemBoundary({ substrateDir: dir }))
       .rejects.toThrow(/work_item_store_unavailable/);
   });
@@ -205,7 +206,7 @@ describe('openWorkItemBoundary package identity', () => {
     // shadow that, local Substrate changes would be untestable from here — which is
     // the confusion the variable exists to prevent. Proven by the error naming the
     // spoof directory: resolution stopped at the explicit path.
-    const dir = mkdtempSync(join(tmpdir(), 'substrate-explicit-'));
+    const dir = tempDir('substrate-explicit-');
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'not-substrate' }));
     await expect(openWorkItemBoundary({ env: { ...process.env, XTRM_SUBSTRATE_DIR: dir } }))
       .rejects.toThrow(new RegExp(`found "not-substrate"`));
@@ -215,7 +216,7 @@ describe('openWorkItemBoundary package identity', () => {
     // The positive case the absent-only tests could never assert: with nothing in the
     // environment, resolution falls through to the installed package. Proven by the
     // identity check rejecting THIS directory by name.
-    const dir = mkdtempSync(join(tmpdir(), 'substrate-installed-'));
+    const dir = tempDir('substrate-installed-');
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'pretend-installed' }));
     await expect(openWorkItemBoundary({
       env: { ...process.env, XTRM_SUBSTRATE_DIR: '' },
@@ -249,7 +250,7 @@ describe('openWorkItemBoundary package identity', () => {
 // produces (`$HOME/.xtrm/state.db`). Reachable on containers, service accounts, systemd units,
 // sudo with a different HOME — and invisible in CI, whose runner has a real HOME.
 function stubSubstratePackage(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'substrate-stub-'));
+  const dir = tempDir('substrate-stub-');
   const write = (rel: string, body: string): void => {
     mkdirSync(join(dir, dirname(rel)), { recursive: true });
     writeFileSync(join(dir, rel), body);
@@ -299,7 +300,7 @@ describe('store-open refusal normalization (SPECIALISTS-59)', () => {
     // passed explicitly rather than by mutating process.env.HOME, because `resolveWorkItemDbPath`
     // derives the DEFAULT from `os.homedir()` (the real environment) and a test that rewrote HOME
     // for the whole worker would leak into every other suite in the process.
-    const bareHome = mkdtempSync(join(tmpdir(), 'bare-home-'));
+    const bareHome = tempDir('bare-home-');
     const storePath = join(bareHome, '.xtrm', 'state.db');
     let thrown: unknown;
     try {
@@ -319,7 +320,7 @@ describe('store-open refusal normalization (SPECIALISTS-59)', () => {
 
   it('still opens the store it can open', () => {
     // The normalization must not turn a working store into a refusal.
-    const dir = mkdtempSync(join(tmpdir(), 'substrate-open-'));
+    const dir = tempDir('substrate-open-');
     const db = openSubstrateDb(join(dir, 'state.db'));
     expect(db).toBeTruthy();
     (db as unknown as { close(): void }).close();
@@ -333,7 +334,7 @@ describe('store-open refusal normalization (SPECIALISTS-59)', () => {
 // node_modules/@jaggerxtrm/substrate symlink made plain resolution succeed).
 describe('Substrate global-prefix resolution (§3)', () => {
   function syntheticPrefix(): { lib: string; substrate: string } {
-    const root = mkdtempSync(join(tmpdir(), 'sb-prefix-'));
+    const root = tempDir('sb-prefix-');
     const lib = join(root, 'lib');
     const substrate = join(root, 'checkout', 'substrate');
     mkdirSync(join(lib, 'node_modules', '@jaggerxtrm'), { recursive: true });
@@ -350,14 +351,14 @@ describe('Substrate global-prefix resolution (§3)', () => {
   });
 
   it('returns null for a prefix that does not hold the package', () => {
-    const empty = mkdtempSync(join(tmpdir(), 'sb-empty-'));
+    const empty = tempDir('sb-empty-');
     expect(resolveSubstrateFromGlobalPrefix([join(empty, 'lib')])).toBeNull();
   });
 
   it('resolves nothing when the candidate has a package.json under a different name', () => {
     // The name check happens in openWorkItemBoundary, which must be reached so the refusal can
     // name the wrong package. Resolution finding the file is what makes that possible.
-    const root = mkdtempSync(join(tmpdir(), 'sb-wrongname-'));
+    const root = tempDir('sb-wrongname-');
     const lib = join(root, 'lib');
     const impostor = join(root, 'impostor');
     mkdirSync(join(lib, 'node_modules', '@jaggerxtrm'), { recursive: true });
@@ -497,20 +498,20 @@ describe('resolveSubstrateModule layouts', () => {
   const touch = (path: string) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, ''); };
 
   it('prefers the TypeScript source in a checkout', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'substrate-checkout-'));
+    const dir = tempDir('substrate-checkout-');
     touch(join(dir, REL));
     touch(join(dir, 'dist', 'src', 'store', 'migrations', 'runner.js'));
     expect(resolveSubstrateModule(dir, REL)).toBe(join(dir, REL));
   });
 
   it('falls back to dist/src/*.js in a published package', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'substrate-published-'));
+    const dir = tempDir('substrate-published-');
     touch(join(dir, 'dist', 'src', 'store', 'migrations', 'runner.js'));
     expect(resolveSubstrateModule(dir, REL)).toBe(join(dir, 'dist', 'src', 'store', 'migrations', 'runner.js'));
   });
 
   it('returns null when neither layout ships the module', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'substrate-empty-'));
+    const dir = tempDir('substrate-empty-');
     expect(resolveSubstrateModule(dir, REL)).toBeNull();
   });
 });
@@ -615,15 +616,15 @@ describe('required IssueService methods', () => {
     // A package that ships the module but not the method: the skew sp doctor reports.
     // Separate directories because an ESM import is cached by URL — rewriting a file in place
     // would silently re-check yesterday's module.
-    const withoutReader = write(mkdtempSync(join(tmpdir(), 'substrate-methods-')), 'export class IssueService {}\n');
+    const withoutReader = write(tempDir('substrate-methods-'), 'export class IssueService {}\n');
     expect(await findMissingSubstrateIssueMethods(withoutReader)).toEqual(['getResolvedContext']);
 
     const withReader = write(
-      mkdtempSync(join(tmpdir(), 'substrate-methods-')),
+      tempDir('substrate-methods-'),
       'export class IssueService { getResolvedContext() { return { entries: [], hash: "h" }; } }\n',
     );
     expect(await findMissingSubstrateIssueMethods(withReader)).toEqual([]);
     // An absent module is the module list's finding, not this check's, so it states nothing twice.
-    expect(await findMissingSubstrateIssueMethods(mkdtempSync(join(tmpdir(), 'substrate-empty-')))).toEqual([]);
+    expect(await findMissingSubstrateIssueMethods(tempDir('substrate-empty-'))).toEqual([]);
   });
 });

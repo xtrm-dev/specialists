@@ -1,14 +1,13 @@
 // ISSUE: xtrm-wiy5n.4.11 — platform-gated skips are intentional.
 import { appendFileSync, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
-import { mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { tempDir } from '../../utils/temp-dir.js';
 import { describe, expect, it, vi } from 'vitest';
 import { getProbeCanonicalPath, getProbeRunDir, runAgenticFollowthroughProbe } from '../../../src/specialist/model-probes.js';
 import type { ScriptGenerateResult } from '../../../src/specialist/script-runner.js';
 
 async function tempCache(): Promise<string> {
-  return mkdtemp(join(tmpdir(), 'specialists-probes-'));
+  return tempDir('specialists-probes-');
 }
 
 function success(output: string): ScriptGenerateResult {

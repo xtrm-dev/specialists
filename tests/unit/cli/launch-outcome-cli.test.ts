@@ -6,9 +6,9 @@
 // the whitelist projection, mirroring the render-task envelope conventions
 // (stable error codes, JSON out, exit 1 on failure).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempDir } from '../../utils/temp-dir.js';
 
 let stdout: string[] = [];
 let tmp: string;
@@ -43,7 +43,7 @@ async function runVerbFailing(...args: string[]): Promise<Record<string, any>> {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'codex-k4-'));
+  tmp = tempDir('codex-k4-');
   captureStdout();
 });
 

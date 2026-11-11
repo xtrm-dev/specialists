@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { writeFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { tempDir as trackedTempDir } from '../../utils/temp-dir.js';
 
 const packageCanonicalDirs = new Map<string, string | null>();
 
@@ -329,7 +330,7 @@ describe('mandatory rules resolution', () => {
   });
 
   it('resolves canonical mandatory rule by name from package', async () => {
-    const packageDir = await mkdtemp(join(tmpdir(), 'mandatory-rules-package-'));
+    const packageDir = trackedTempDir('mandatory-rules-package-');
     await mkdir(join(packageDir, 'mandatory-rules'), { recursive: true });
     await writeFile(
       join(packageDir, 'mandatory-rules', 'index.json'),
@@ -356,7 +357,7 @@ describe('mandatory rules resolution', () => {
   });
 
   it('prefers user-tier override over package canonical rule', async () => {
-    const packageDir = await mkdtemp(join(tmpdir(), 'mandatory-rules-package-'));
+    const packageDir = trackedTempDir('mandatory-rules-package-');
     await mkdir(join(packageDir, 'mandatory-rules'), { recursive: true });
     await writeFile(
       join(packageDir, 'mandatory-rules', 'index.json'),

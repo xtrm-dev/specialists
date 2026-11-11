@@ -2,11 +2,11 @@
 // Covers `sp init --global` (src/cli/init.ts runGlobal) and the shared
 // global-config helpers (src/specialist/global-config.ts) that C1/C3 import.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { rm, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tempDir } from '../../utils/temp-dir.js';
 import {
   buildGlobalUserConfigTemplate,
   buildSpecialistOverrideTemplate,
@@ -28,7 +28,7 @@ function withHome(home: string) {
 describe('getGlobalUserConfigPath — resolution order', () => {
   let tempHome: string;
   beforeEach(() => {
-    tempHome = mkdtempSync(join(tmpdir(), 'sp-global-path-'));
+    tempHome = tempDir('sp-global-path-');
     withHome(tempHome);
   });
   afterEach(() => {
@@ -248,7 +248,7 @@ describe('init CLI — runGlobal() end-to-end', () => {
   let originalHome: string | undefined;
 
   beforeEach(async () => {
-    tempHome = await mkdtemp(join(tmpdir(), 'sp-init-global-'));
+    tempHome = tempDir('sp-init-global-');
     originalHome = process.env.HOME;
     withHome(tempHome);
     vi.spyOn(console, 'log').mockImplementation(() => {});
