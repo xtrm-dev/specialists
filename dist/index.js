@@ -21609,6 +21609,14 @@ function operatorClaudeBridgeEnabled(location = getGlobalUserConfigPath(), readF
 function claudeBridgeRouteEnabled(execution, operatorEnabled = operatorClaudeBridgeEnabled) {
   return claudeBridgeEnabled(execution) && operatorEnabled();
 }
+function claudeBridgeOffSwitches(execution, operatorEnabled = operatorClaudeBridgeEnabled) {
+  const off = [];
+  if (!claudeBridgeEnabled(execution))
+    off.push("the definition flag execution.claude_bridge");
+  if (!operatorEnabled())
+    off.push(`the operator switch ${CLAUDE_BRIDGE_SWITCH_KEY} in ~/.config/specialists/user.json`);
+  return off;
+}
 function claudeBridgeExtensionProviders(routeEnabled) {
   return routeEnabled ? [CLAUDE_BRIDGE_PROVIDER] : [];
 }
@@ -22655,15 +22663,72 @@ function resolveGlobalPackageDir(packageName, deps = {}) {
   const exists = deps.exists ?? existsSync17;
   return resolveGlobalNodeModulesDirs(deps).map((root) => join19(root, packageName)).find((dir) => exists(join19(dir, "package.json")));
 }
-function resolveClaudeBridgeExtensionPath(env = process.env, exists = existsSync17) {
+function resolveClaudeBridgeExtensionPath(env = process.env, exists = existsSync17, home = homedir4()) {
   const override = env[CLAUDE_BRIDGE_PATH_ENV]?.trim();
   if (override) {
     return isAbsolute2(override) && exists(override) ? override : undefined;
   }
-  const packageDir = resolveGlobalPackageDir(CLAUDE_BRIDGE_PACKAGE);
-  if (!packageDir)
+  for (const packageDir of claudeBridgePackageCandidates(env, exists, home)) {
+    const entry = resolveClaudeBridgePackageEntry(packageDir, exists);
+    if (entry)
+      return entry;
+  }
+  return;
+}
+function claudeBridgeSearchPaths(env = process.env, home = homedir4()) {
+  return claudeBridgeCandidateDirs(env, home);
+}
+function claudeBridgeUnavailableNote(env = process.env, home = homedir4()) {
+  const searched = claudeBridgeSearchPaths(env, home).join(", ");
+  return "execution.claude_bridge is enabled but the pi-claude-bridge extension was not found. " + "Install it with `pi install npm:pi-claude-bridge@0.12.0` (pi writes it to <agentDir>/npm, " + `i.e. ${claudeBridgeAgentStoreDir(env, home)}), or set ${CLAUDE_BRIDGE_PATH_ENV} to an ` + `absolute entry. Searched: ${searched}`;
+}
+function claudeBridgePackageCandidates(env = process.env, exists = existsSync17, home = homedir4()) {
+  return claudeBridgeCandidateDirs(env, home).filter((candidate) => isBridgePackage(candidate, exists));
+}
+function claudeBridgeCandidateDirs(env, home) {
+  const roots = [
+    claudeBridgeAgentStoreDir(env, home),
+    ...resolveGlobalNodeModulesDirs({ env: { ...process.env, ...env }, home })
+  ];
+  const candidates = [];
+  for (const root of roots) {
+    if (!isAbsolute2(root)) {
+      warnOnce("root", root, "a package root is not absolute; ignoring it for the Claude Code bridge lookup");
+      continue;
+    }
+    candidates.push(join19(root, CLAUDE_BRIDGE_PACKAGE));
+  }
+  return [...new Set(candidates)];
+}
+function warnOnce(kind, value, message) {
+  const key = `${kind}:${value}`;
+  if (warnedOnce.has(key))
     return;
-  return resolveClaudeBridgePackageEntry(packageDir, exists) ?? packageDir;
+  warnedOnce.add(key);
+  runtimeWarn("claude-bridge", message, { value });
+}
+function isBridgePackage(packageDir, exists) {
+  return exists(join19(packageDir, "package.json")) && resolveClaudeBridgePackageEntry(packageDir, exists) !== undefined;
+}
+function claudeBridgeAgentDirSource(env = process.env, home = homedir4()) {
+  const configured = env.PI_CODING_AGENT_DIR?.trim();
+  if (!configured)
+    return "default";
+  if (configured === "~" || configured.startsWith("~/"))
+    return "tilde";
+  return isAbsolute2(configured) ? "env" : "ignored-relative";
+}
+function claudeBridgeAgentStoreDir(env = process.env, home = homedir4()) {
+  const source = claudeBridgeAgentDirSource(env, home);
+  if (source === "default")
+    return join19(home, ".pi", "agent", "npm", "node_modules");
+  const configured = env.PI_CODING_AGENT_DIR.trim();
+  if (source === "ignored-relative") {
+    warnOnce("agent-dir", configured, "PI_CODING_AGENT_DIR is not absolute; ignoring it for the Claude Code bridge lookup");
+    return join19(home, ".pi", "agent", "npm", "node_modules");
+  }
+  const agentDir = source === "tilde" ? join19(home, configured.replace(/^~\/?/, "")) : configured;
+  return join19(agentDir, "npm", "node_modules");
 }
 function resolveClaudeBridgePackageEntry(packageDir, exists) {
   let declared;
@@ -23042,7 +23107,7 @@ class PiAgentSession {
       claudeBridge: claudeBridgeActive
     });
     if (claudeBridgeActive && !curatedExtensions.claudeBridgePath) {
-      throw new Error("claude_bridge_unavailable: execution.claude_bridge is enabled but the pi-claude-bridge " + `extension was not found (expected the global package "${CLAUDE_BRIDGE_PACKAGE}" or ` + `${CLAUDE_BRIDGE_PATH_ENV}); install it or clear the flag`);
+      throw new Error(`claude_bridge_unavailable: ${claudeBridgeUnavailableNote()}`);
     }
     for (const extensionPath of curatedExtensions.all) {
       args.push("-e", extensionPath);
@@ -23676,7 +23741,7 @@ ${stderrTail}` : ""}`;
     await this.waitForDone(timeout);
   }
 }
-var SessionKilledError, StallTimeoutError, TEST_COMMAND_STALL_TIMEOUT_MS = 300000, GITNEXUS_IMPACT_STALL_TIMEOUT_MS = 300000, TEST_COMMAND_PATTERNS, RUNTIME_TOOL_CATALOG_ERROR_MESSAGE = "Runtime tool catalog unavailable or invalid; refusing to launch with Pi default tools. Reinstall or rebuild Specialists and verify config/catalog/index.json.", RuntimeToolCatalogResolutionError, BUILTIN_CODEMODE_EXTENSION = "builtin:codemode", cachedPiVersion, piVersionResolved = false, WRITE_BOUNDARY_TOOL_NAMES, WORKTREE_BOUNDARY_ENV_KEY = "SPECIALISTS_WORKTREE_BOUNDARY";
+var SessionKilledError, StallTimeoutError, TEST_COMMAND_STALL_TIMEOUT_MS = 300000, GITNEXUS_IMPACT_STALL_TIMEOUT_MS = 300000, TEST_COMMAND_PATTERNS, RUNTIME_TOOL_CATALOG_ERROR_MESSAGE = "Runtime tool catalog unavailable or invalid; refusing to launch with Pi default tools. Reinstall or rebuild Specialists and verify config/catalog/index.json.", RuntimeToolCatalogResolutionError, BUILTIN_CODEMODE_EXTENSION = "builtin:codemode", cachedPiVersion, piVersionResolved = false, warnedOnce, WRITE_BOUNDARY_TOOL_NAMES, WORKTREE_BOUNDARY_ENV_KEY = "SPECIALISTS_WORKTREE_BOUNDARY";
 var init_session = __esm(() => {
   init_read_line_numbers_extension();
   init_extension_tool_policy_extension();
@@ -23685,6 +23750,7 @@ var init_session = __esm(() => {
   init_claude_bridge();
   init_backendMap();
   init_canonical_asset_resolver();
+  init_runtime_diagnostics();
   init_resolved_tool_contract();
   init_tool_catalog();
   init_session_metrics_contract();
@@ -23717,6 +23783,7 @@ var init_session = __esm(() => {
       this.name = "RuntimeToolCatalogResolutionError";
     }
   };
+  warnedOnce = new Set;
   WRITE_BOUNDARY_TOOL_NAMES = new Set(["edit", "write", "multiEdit", "notebookEdit"]);
 });
 
@@ -95323,7 +95390,7 @@ var init_rejection = __esm(() => {
   ];
   FIX_BY_REASON = {
     unknown_specialist: "Check specialist_list for the exact Specialist name and re-dispatch with a known name.",
-    claude_bridge_unavailable: "The definition enables the Claude Code route but the pi-claude-bridge extension was not found. Install it where pi resolves global packages (or set SPECIALISTS_CLAUDE_BRIDGE_PATH to an absolute entry), or clear execution.claude_bridge and re-dispatch. The operator must also enable the route in ~/.config/specialists/user.json.",
+    claude_bridge_unavailable: "The definition enables the Claude Code route but the pi-claude-bridge extension was not found. Install it with `pi install npm:pi-claude-bridge@0.12.0` (pi writes it to <agentDir>/npm, e.g. ~/.pi/agent/npm), or set SPECIALISTS_CLAUDE_BRIDGE_PATH to an absolute entry, or clear execution.claude_bridge and re-dispatch. The operator must also enable the route in ~/.config/specialists/user.json. The refusal note lists every path searched.",
     work_item_store_unavailable: "The Substrate work boundary could not be opened. Install or upgrade the Substrate package, or set SUBSTRATE_DB (fallback XTRM_STATE_DB) to a writable state file, then re-dispatch.",
     parent_ref_and_ref: "Provide exactly one work locator. parent_ref only parents an Issue created from an inline contract: re-dispatch with contract plus parent_ref, or with issue_ref alone.",
     kind_and_ref: "Provide exactly one work locator. kind only flavours an Issue created from an inline contract: re-dispatch with contract plus kind, or with issue_ref alone.",
@@ -99058,12 +99125,18 @@ class NativeActivationHost {
     const claudeBridgePath = claudeBridge ? resolveClaudeBridgeExtensionPath() : undefined;
     if (claudeBridge && !claudeBridgePath) {
       return reject("claude_bridge_unavailable", {
-        note: "execution.claude_bridge is enabled but the pi-claude-bridge extension was not found " + `(expected the global package "${"pi-claude-bridge"}" or ${"SPECIALISTS_CLAUDE_BRIDGE_PATH"}); ` + "install it or clear the flag"
+        note: claudeBridgeUnavailableNote()
       });
     }
     gateExtensionProviders.set(modelRuntime, claudeBridgeExtensionProviders(claudeBridge));
     let modelIndex = 0;
     let modelCheck = await checkModelForRuntime(sdk, modelRuntime, modelChain[0] ?? "");
+    if (!modelCheck.ok && !claudeBridge && modelChain[0]?.startsWith(`${CLAUDE_BRIDGE_PROVIDER}/`)) {
+      return reject("model_unavailable", {
+        requestedModel: modelChain[0],
+        note: `${modelCheck.reason ?? "No models match"} (the Claude Code route is off: ${claudeBridgeOffSwitches(execution).join(" and ")} is not enabled; not falling back to another provider)`
+      });
+    }
     while ((!modelCheck.ok || !modelCheck.model) && modelIndex < modelChain.length - 1) {
       const skipped = modelChain[modelIndex];
       emit3("model_fallback", {

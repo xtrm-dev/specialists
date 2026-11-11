@@ -41,6 +41,13 @@ export declare function claudeBridgeRouteEnabled(execution: {
     claude_bridge?: unknown;
 } | undefined, operatorEnabled?: () => boolean): boolean;
 /**
+ * Which half of the route is off, named for a refusal note. Never changes what enables the route:
+ * `claudeBridgeRouteEnabled` stays the decision, this only explains a "no".
+ */
+export declare function claudeBridgeOffSwitches(execution: {
+    claude_bridge?: unknown;
+} | undefined, operatorEnabled?: () => boolean): string[];
+/**
  * Providers the gate may treat as supplied-by-an-extension for this activation.
  *
  * Takes the RESOLVED route decision (both halves), not the definition alone: a repository-selected

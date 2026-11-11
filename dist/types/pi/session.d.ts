@@ -311,8 +311,49 @@ export declare function resolveGlobalPackageDir(packageName: string, deps?: Glob
  *
  * `SPECIALISTS_CLAUDE_BRIDGE_PATH` names an entry directly (a source checkout, a non-global
  * install, or a test fixture).
+ *
+ * Two stores are searched, in precedence order (SPECIALISTS-4405 A2):
+ * 1. Pi's own managed package store, user scope — `pi install npm:pi-claude-bridge` writes there
+ *    (`getNpmInstallRoot('user')` = `<agentDir>/npm`), and `agentDir` honours
+ *    `PI_CODING_AGENT_DIR`, so a relocated pi is followed rather than a hardcoded `~/.pi`.
+ *    Project scope (`<cwd>/.pi/npm`) is deliberately NOT searched: a repository must not be able
+ *    to supply this extension, which is the same reason the enable flag cannot live in a
+ *    repository layer.
+ * 2. An npm/bun global prefix, for a machine that installed it with the package manager instead.
  */
-export declare function resolveClaudeBridgeExtensionPath(env?: NodeJS.ProcessEnv, exists?: (path: string) => boolean): string | undefined;
+export declare function resolveClaudeBridgeExtensionPath(env?: NodeJS.ProcessEnv, exists?: (path: string) => boolean, home?: string): string | undefined;
+/**
+ * Every path the resolver searches, highest precedence first, whether or not it exists. Used by the
+ * `claude_bridge_unavailable` refusal so an operator sees where we looked instead of guessing.
+ * Nothing here is derived from the workspace: a project path would be a place a repository could
+ * plant the extension.
+ */
+export declare function claudeBridgeSearchPaths(env?: NodeJS.ProcessEnv, home?: string): string[];
+/** The refusal note, shared by the native host and the legacy argv path so the two cannot drift. */
+export declare function claudeBridgeUnavailableNote(env?: NodeJS.ProcessEnv, home?: string): string;
+/**
+ * Candidate package directories for the bridge, highest precedence first, filtered to those that
+ * really hold a package (judged by `package.json`). Separated from the entry resolution so a test
+ * can assert the store order without building a full package layout.
+ *
+ * The agent store is checked before the global roots because `pi install` is the documented install
+ * path: when both hold a copy, the one pi manages is the one the operator updated.
+ */
+export declare function claudeBridgePackageCandidates(env?: NodeJS.ProcessEnv, exists?: (path: string) => boolean, home?: string): string[];
+/**
+ * Pi's managed npm store root, mirroring pi's own `getNpmInstallRoot('user')`.
+ * `PI_CODING_AGENT_DIR` is expanded the way pi expands it (`~` included), so a test or a relocated
+ * install is followed without reaching into the SDK.
+ */
+export type ClaudeBridgeAgentDirSource = 'default' | 'env' | 'tilde' | 'ignored-relative';
+/**
+ * Where the agent directory came from, so callers and tests can tell "unset" from "unusable".
+ * A blank value is unset (`default`), not a broken path; only a genuinely relative value is
+ * ignored, because it would resolve against the dispatch cwd and let a repository plant the
+ * extension.
+ */
+export declare function claudeBridgeAgentDirSource(env?: NodeJS.ProcessEnv, home?: string): ClaudeBridgeAgentDirSource;
+export declare function claudeBridgeAgentStoreDir(env?: NodeJS.ProcessEnv, home?: string): string;
 export declare function resolveClaudeBridgePackageEntry(packageDir: string, exists: (path: string) => boolean): string | undefined;
 export declare function validateWriteToolPathAgainstBoundary(toolName: string, toolArgs: Record<string, unknown> | undefined, worktreeBoundary: string | undefined): string | undefined;
 export declare class PiAgentSession {
