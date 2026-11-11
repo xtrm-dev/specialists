@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,7 +50,7 @@ describe('hook scripts resolve identically to the runtime', () => {
   const dir = join(dirname(fileURLToPath(import.meta.url)), '../../../plugins/specialists/scripts');
 
   it.each(scripts)('%s prefers SUBSTRATE_DB over XTRM_STATE_DB', (name) => {
-    const src = execFileSync('cat', [join(dir, `${name}.mjs`)], { encoding: 'utf-8' });
+    const src = readFileSync(join(dir, `${name}.mjs`), 'utf-8');
     const sub = src.indexOf('SUBSTRATE_DB');
     const legacy = src.indexOf('XTRM_STATE_DB ??');
     expect(sub, `${name}.mjs must read SUBSTRATE_DB`).toBeGreaterThan(-1);

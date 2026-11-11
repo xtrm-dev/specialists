@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -143,7 +143,7 @@ describe('coordinator lease warning hook (SPECIALISTS-23)', () => {
 
   it('registers on the PreToolUse edit surface with a bounded timeout', () => {
     const hooks = JSON.parse(
-      execFileSync('cat', [fileURLToPath(new URL('../../../plugins/specialists/hooks/hooks.json', import.meta.url))], { encoding: 'utf8' }),
+      readFileSync(fileURLToPath(new URL('../../../plugins/specialists/hooks/hooks.json', import.meta.url)), 'utf8'),
     ) as { hooks: Record<string, Array<{ matcher: string; hooks: Array<{ command: string; timeout: number }> }>> };
     const preToolUse = hooks.hooks.PreToolUse;
     expect(preToolUse).toBeDefined();
