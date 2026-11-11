@@ -7,7 +7,8 @@ let lastInput: { onSubmit?: (text: string) => void } | undefined;
 
 vi.mock('@earendil-works/pi-tui', () => {
   class FakeTerminal { stop() {} }
-  class FakeTUI {
+  // pi-tui 1.x: the concrete class is TuiMainScreen; `TUI` is only a type.
+  class FakeTuiMainScreen {
     addChild() {}
     setFocus() {}
     start() { listener?.('ctrl-c'); }
@@ -25,7 +26,7 @@ vi.mock('@earendil-works/pi-tui', () => {
     setValue() {}
   }
   return {
-    TUI: FakeTUI,
+    TuiMainScreen: FakeTuiMainScreen,
     ProcessTerminal: FakeTerminal,
     Container: FakeContainer,
     Input: FakeInput,

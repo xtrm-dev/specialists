@@ -31,7 +31,33 @@ on:
         required: false
 
 jobs:
+  # Which pi versions to exercise. Without a dispatch input this runs the peer floor the extension
+  # declares AND the current published pi, because the floor alone stayed green while production
+  # moved from 0.99 to 1.5 (SPECIALISTS-4431).
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Choose the versions to test
+        id: plan
+        env:
+          REQUESTED: ${{ inputs.pi_version || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$REQUESTED" ]; then
+            printf 'matrix=[{"label":"requested","version":"%s"}]\n' "$REQUESTED" >> "$GITHUB_OUTPUT"
+          else
+            printf 'matrix=[{"label":"peer-floor","version":""},{"label":"current","version":"current"}]\n' >> "$GITHUB_OUTPUT"
+          fi
+
   smoke:
+    name: smoke (${{ matrix.label }})
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.matrix) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -42,8 +68,8 @@ jobs:
         id: pi
         env:
           # Empty means "use the peer range the extension declares", so the default moves with the
-          # line instead of being a second pin to forget.
-          INPUT_PI_VERSION: ${{ inputs.pi_version || '' }}
+          # line instead of being a second pin to forget. "current" means the published latest.
+          INPUT_PI_VERSION: ${{ matrix.version }}
         run: |
           set -euo pipefail
           PACKAGE="$(grep -oE "PI_SDK_PACKAGE = '[^']+'" src/activation/pi-sdk.ts | sed "s/.*'\(.*\)'/\1/")"
@@ -57,7 +83,16 @@ jobs:
             const match = range.match(/[0-9]+\.[0-9]+\.[0-9]+/);
             process.stdout.write(match ? match[0] : "");
           ')"
-          VERSION="${INPUT_PI_VERSION:-$DEFAULT_VERSION}"
+          if [ "$INPUT_PI_VERSION" = "current" ]; then
+            CURRENT_VERSION="$(npm view "$PACKAGE" version 2>/dev/null | tail -n 1)"
+            if [ -z "$CURRENT_VERSION" ]; then
+              echo "::error title=pi compat::could not resolve the current published version of $PACKAGE"
+              exit 1
+            fi
+            VERSION="$CURRENT_VERSION"
+          else
+            VERSION="${INPUT_PI_VERSION:-$DEFAULT_VERSION}"
+          fi
           if [ -z "$VERSION" ]; then
             echo "::error title=pi compat::no version given and none derivable from the peer range for $PACKAGE"
             exit 1

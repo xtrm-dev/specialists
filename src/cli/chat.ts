@@ -62,12 +62,12 @@ export async function run(): Promise<void> {
   dbg('specialist loaded', { name: args.name });
 
   const piTui = (await import('@earendil-works/pi-tui')) as PiTuiModule;
-  dbg('pi-tui imported', { hasTUI: !!(piTui as any).TUI, hasInput: !!(piTui as any).Input, hasMatchesKey: !!(piTui as any).matchesKey });
-  const { TUI, ProcessTerminal, Container, Input, matchesKey, Key } = piTui as any;
+  dbg('pi-tui imported', { hasTuiMainScreen: !!(piTui as any).TuiMainScreen, hasInput: !!(piTui as any).Input, hasMatchesKey: !!(piTui as any).matchesKey });
+  const { TuiMainScreen, ProcessTerminal, Container, Input, matchesKey, Key } = piTui as any;
 
   const terminal = new ProcessTerminal();
   dbg('ProcessTerminal constructed');
-  const tui = new TUI(terminal);
+  const tui = new TuiMainScreen(terminal);
   dbg('TUI constructed', { hasAddInputListener: typeof tui.addInputListener === 'function', hasSetFocus: typeof tui.setFocus === 'function' });
   const feed = new ChatFeed();
   const status = new ChatStatus(tui, { pollIntervalMs: DEFAULT_POLL_INTERVAL_MS });

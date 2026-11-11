@@ -1,10 +1,12 @@
-import { Container, ProcessTerminal, TUI } from '@earendil-works/pi-tui';
+import { Container, ProcessTerminal, TuiMainScreen } from '@earendil-works/pi-tui';
 import { ConsoleApp } from './console/components.js';
 import { createRuntimeClient } from './console/runtime.js';
 
 export async function run(): Promise<void> {
   const terminal = new ProcessTerminal();
-  const tui = new TUI(terminal);
+  // pi-tui 1.x replaced the concrete `TUI` class with two implementations; this console renders
+  // into the main screen and scrollback, which is TuiMainScreen's mode.
+  const tui = new TuiMainScreen(terminal);
   const root = new Container();
   let resolveExit: (() => void) | null = null;
   const exit = new Promise<void>((resolve) => { resolveExit = resolve; });
