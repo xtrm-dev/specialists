@@ -625,6 +625,18 @@ describe('mandatory rules budget compiler', () => {
       'per-turn-handoff-schema',
       'issue-ref-verbatim',
     ]],
+    ['pr-reviewer', [
+      'core-session-boundary',
+      'git-workflow-safe',
+      'test-canon',
+      'reviewer-verdict-format',
+      'code-quality-defaults',
+      'gitnexus-required',
+      'exact-citation-contract',
+      'per-turn-handoff-schema',
+      'issue-ref-verbatim',
+      'pr-reviewer-verdict-format',
+    ]],
   ] as const)('retains the complete %s governance set under the production budget', async (name, expectedIds) => {
     const config = JSON.parse(await readFile(join(process.cwd(), 'config', 'specialists', `${name}.specialist.json`), 'utf-8'));
     const result = buildMandatoryRulesInjection({ cwd: process.cwd(), specialist: config.specialist }, 2400);

@@ -48,6 +48,36 @@ describe('pr-reviewer package specialist', () => {
     expect(system).not.toContain('Never run `gh pr review`');
   });
 
+  it('binds each verdict to exactly one gh pr review flag', async () => {
+    const system = (await loadPrReviewer()).specialist.prompt.system ?? '';
+
+    // The prompt is the only place that decides which flag carries which verdict,
+    // and the shim refuses a flag that disagrees with the body. One assertion over
+    // the post instruction binds the three pairs in order: a swap
+    // (--approve for PARTIAL, --comment for PASS), a substitution (--reject) or a
+    // dropped binding changes this mapping.
+    const start = system.indexOf('Then post with exactly one verdict flag:');
+    const end = system.indexOf('The shim prints the review', start);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const post = system.slice(start, end);
+
+    const bindings = [...post.matchAll(/(--comment|--approve|--request-changes)[^,]*?for (PASS|PARTIAL|FAIL)/g)]
+      .map((match) => [match[1], match[2]]);
+    expect(bindings).toEqual([
+      ['--comment', 'PARTIAL'],
+      ['--approve', 'PASS'],
+      ['--request-changes', 'FAIL'],
+    ]);
+  });
+
+  it('says the review is one formal GitHub review, not a review comment', async () => {
+    const task = (await loadPrReviewer()).specialist.prompt.task_template;
+
+    expect(task).toContain('formal GitHub review');
+    expect(task).not.toContain('review comment');
+  });
+
   it('emits one verdict format with the PASS, PARTIAL or FAIL enum', async () => {
     const system = (await loadPrReviewer()).specialist.prompt.system ?? '';
 
@@ -124,6 +154,16 @@ describe('pr-reviewer package specialist', () => {
       expect(run('big.md', `${good}${'x'.repeat(60000)}\n`).status).not.toBe(0);
       // The section clause fails on its own: drop the grep and this body passes.
       expect(run('no-section.md', `${header}\n\n- Verdict: PARTIAL\n`).status).not.toBe(0);
+      // Line 1 is pinned, not merely prefix-matched: another role, an 11-hex or a
+      // 13-hex head, trailing text after the head, and a model that starts with
+      // whitespace all fail. Each case is a mutant killer — widening pr-reviewer
+      // to [a-z-]+, {12} to {3}, dropping the trailing $, or [^)]* opening to a
+      // leading space must turn one of these red.
+      expect(run('other-role.md', 'Review by other-role (Muse Spark) at head 0123456789ab\n\n## PR Review Verdict\n- Verdict: PASS\n').status, 'another role must fail line 1').not.toBe(0);
+      expect(run('short-head.md', 'Review by pr-reviewer (Muse Spark) at head 0123456789a\n\n## PR Review Verdict\n- Verdict: PASS\n').status, 'an 11-hex head must fail line 1').not.toBe(0);
+      expect(run('long-head.md', 'Review by pr-reviewer (Muse Spark) at head 0123456789abc\n\n## PR Review Verdict\n- Verdict: PASS\n').status, 'a 13-hex head must fail line 1').not.toBe(0);
+      expect(run('trailing-text.md', 'Review by pr-reviewer (Muse Spark) at head 0123456789ab (delta from 0123456789ab)\n\n## PR Review Verdict\n- Verdict: PASS\n').status, 'trailing text after the head must fail line 1').not.toBe(0);
+      expect(run('leading-space-model.md', 'Review by pr-reviewer ( Muse Spark) at head 0123456789ab\n\n## PR Review Verdict\n- Verdict: PASS\n').status, 'a model name starting with whitespace must fail line 1').not.toBe(0);
       // Parity with the shim: a verdict line must start at column 0, so an
       // indented one fails the lint instead of reaching the shim and being
       // refused there.
