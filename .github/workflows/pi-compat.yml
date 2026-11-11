@@ -195,7 +195,7 @@ jobs:
       # under test is the pinned one, so CI exercises the default a consumer actually gets; only an
       # older/newer version under test is passed as a build arg.
       - name: Pin matches the declared pi
-        run: bun scripts/check-pi-pin-sync.ts
+        run: node scripts/check-pi-pin-sync.mjs
 
       - name: Build image with reviewed pi
         env:

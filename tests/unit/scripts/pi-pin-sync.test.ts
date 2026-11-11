@@ -4,7 +4,7 @@ import {
   checkPinSync,
   compareVersions,
   satisfies,
-} from '../../../scripts/check-pi-pin-sync.js';
+} from '../../../scripts/check-pi-pin-sync.mjs';
 
 describe('pi pin sync (SPECIALISTS-4438)', () => {
   it('accepts a pin that matches the declared version inside the peer range', () => {

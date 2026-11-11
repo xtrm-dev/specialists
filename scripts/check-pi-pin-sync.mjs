@@ -8,27 +8,30 @@
  * sources declared `^0.99.0`, so the image could ship a pi the sources never claimed.
  *
  * Usage:
- *   bun scripts/check-pi-pin-sync.ts
+ *   node scripts/check-pi-pin-sync.mjs
  */
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-export interface PinSyncInputs {
-  readonly dockerfilePin: string | undefined;
-  readonly declaredVersion: string | undefined;
-  readonly peerRange: string | undefined;
-}
+/**
+ * @typedef {object} PinSyncInputs
+ * @property {string | undefined} dockerfilePin
+ * @property {string | undefined} declaredVersion
+ * @property {string | undefined} peerRange
+ */
 
-export interface PinSyncResult {
-  readonly ok: boolean;
-  readonly errors: readonly string[];
-}
+/**
+ * @typedef {object} PinSyncResult
+ * @property {boolean} ok
+ * @property {readonly string[]} errors
+ */
 
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 /** Compare two release cores; returns <0, 0, >0. Prerelease/build metadata is ignored on purpose. */
-export function compareVersions(a: string, b: string): number {
+/** @param {string} a @param {string} b @returns {number} */
+export function compareVersions(a, b) {
   const left = SEMVER.exec(a);
   const right = SEMVER.exec(b);
   if (!left || !right) return Number.NaN;
@@ -44,14 +47,15 @@ export function compareVersions(a: string, b: string): number {
  * and `>=x.y.z <x.y.z`. Anything else is reported as unsupported rather than silently accepted,
  * because a range we cannot read cannot prove anything.
  */
-export function satisfies(version: string, range: string): boolean | undefined {
+/** @param {string} version @param {string} range @returns {boolean | undefined} */
+export function satisfies(version, range) {
   const trimmed = range.trim();
   if (trimmed === '' || trimmed === '*' || trimmed === 'latest') return true;
   if (SEMVER.test(trimmed)) return compareVersions(version, trimmed) === 0;
 
   const caret = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(trimmed);
   if (caret) {
-    const [, major, minor, patch] = caret.map(Number) as unknown as number[];
+    const [, major, minor, patch] = caret.map(Number);
     const lower = `${major}.${minor}.${patch}`;
     const upper = major > 0 ? `${major + 1}.0.0` : `0.${minor + 1}.0`;
     return compareVersions(version, lower) >= 0 && compareVersions(version, upper) < 0;
@@ -65,8 +69,13 @@ export function satisfies(version: string, range: string): boolean | undefined {
   return undefined;
 }
 
-export function checkPinSync(inputs: PinSyncInputs): PinSyncResult {
-  const errors: string[] = [];
+/**
+ * @param {PinSyncInputs} inputs
+ * @returns {PinSyncResult}
+ */
+export function checkPinSync(inputs) {
+  /** @type {string[]} */
+  const errors = [];
   if (!inputs.dockerfilePin) {
     errors.push('Dockerfile has no ARG PI_VERSION');
   } else if (!SEMVER.test(inputs.dockerfilePin)) {
@@ -100,18 +109,22 @@ export function checkPinSync(inputs: PinSyncInputs): PinSyncResult {
   return { ok: errors.length === 0, errors };
 }
 
-function readJson(path: string): Record<string, unknown> {
-  return JSON.parse(readFileSync(path, 'utf-8')) as Record<string, unknown>;
+/**
+ * @param {string} path
+ * @returns {Record<string, unknown>}
+ */
+function readJson(path) {
+  return JSON.parse(readFileSync(path, 'utf-8'));
 }
 
-function main(): void {
+function main() {
   const root = process.cwd();
   const dockerfile = readFileSync(join(root, 'Dockerfile'), 'utf-8');
   const pin = /^ARG PI_VERSION=([^\s#]+)/m.exec(dockerfile)?.[1];
   const pkg = readJson(join(root, 'package.json'));
-  const dependencies = (pkg.dependencies ?? {}) as Record<string, string>;
+  const dependencies = /** @type {Record<string, string>} */ (pkg.dependencies ?? {});
   const extension = readJson(join(root, 'config/pi-extensions/native-specialists/package.json'));
-  const peers = (extension.peerDependencies ?? {}) as Record<string, string>;
+  const peers = /** @type {Record<string, string>} */ (extension.peerDependencies ?? {});
 
   const result = checkPinSync({
     dockerfilePin: pin,
