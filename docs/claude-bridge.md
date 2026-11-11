@@ -33,9 +33,10 @@ the home layer. Nothing inside a repository can write the operator switch.
    { "specialist": { "execution": { "claude_bridge": true, "model": "claude-bridge/claude-sonnet-5-5" } } }
    ```
 
-   ```bash
-   sb specialist override <name> execution.claude_bridge=true
-   ```
+   Put that in a Specialist spec layer — `~/.specialists/user/<name>.specialist.json` (home) or
+   `.specialists/user/<name>.specialist.json` (project) — not in a shipped definition.
+   `sp edit --global` rejects the field today (the global override schema does not list it), so edit
+   the layer directly until that mismatch is fixed.
 
 Requirements:
 
@@ -54,6 +55,31 @@ Requirements:
    agent never logs in and never reads credentials;
 3. a model whose provider is `claude-bridge`. Do not use `anthropic/...` for this route: that is
    Pi's own API-key provider and does not go through Claude Code.
+
+### Where the extension is resolved from
+
+The host resolves the bridge itself; the operator does not pass `-e`. Search order:
+
+1. `SPECIALISTS_CLAUDE_BRIDGE_PATH`, when set. Absolute only — a relative value would be resolved
+   against whatever directory the dispatch happens to run in.
+2. Pi's own package store, user scope: `<agentDir>/npm/node_modules/pi-claude-bridge`, where
+   `agentDir` is `PI_CODING_AGENT_DIR` (with `~` and `~/` expanded) or `~/.pi/agent`. This is where
+   `pi install npm:pi-claude-bridge@0.12.0` writes, so the documented install needs no environment
+   variable.
+3. npm/bun global prefixes: `PI_NPM_GLOBAL_DIR`, `NPM_CONFIG_PREFIX` / `npm_config_prefix`
+   (+ `lib/node_modules`), `NVM_BIN` (+ sibling `lib/node_modules`), `BUN_INSTALL`
+   (`install/global/node_modules`), `~/.bun/install/global/node_modules`, the running interpreter's
+   own `<prefix>/lib/node_modules`, and `~/.nvm/versions/node/<version>/lib/node_modules`.
+   Roots that do not exist are skipped; only the ones that exist are candidates.
+
+Every root must be absolute; a relative one (`BUN_INSTALL=.`) is dropped and reported once, because
+it would let a checkout supply the extension. `SPECIALISTS_CLAUDE_BRIDGE_PATH` is **exclusive**: when
+it is set but not an absolute existing entry, resolution returns nothing and does not fall through to
+the stores, so a typo there looks like "not installed" rather than silently using a different copy. **Project scope is never searched** (`<cwd>/.pi/npm`,
+`<cwd>/.pi/agent/npm`, `<cwd>/node_modules`). A candidate counts as the bridge only when it has both
+a `package.json` and a loadable entry (`src/index.ts` for the published package, which ships neither
+`main` nor `exports`); a half-finished install therefore falls through to the next store instead of
+shadowing a working one.
 
 Either switch off: the extension is not loaded, and a dispatch whose primary model is
 `claude-bridge/...` is refused with `model_unavailable` **before any session exists** — it is never
@@ -96,6 +122,47 @@ switch as an operator consent record, not as a sandbox boundary.
   SDK bills against subscription plans (June 2026). Nothing in this repository can compensate for
   such a change: expect the route to need re-approval, or to fail, if billing or OAuth policy moves.
   The sanctioned alternative is Pi's built-in `anthropic` provider with an API key.
+
+## Operating it
+
+- **The bridge speaks for Claude Code, not for Pi.** Claude Code runs with no tools of its own
+  (`tools: []`, `bypassPermissions`); tool calls come back to Pi over a local MCP bridge, which is
+  why tiers and the READ_ONLY bubblewrap guard still apply. Steering reaches the model at the next
+  tool boundary, and bash calls gain Claude Code's 120-second default timeout where Pi would have
+  none.
+- **Session history is per Pi session.** The bridge keeps its own session pointers under
+  `<agentDir>/claude-bridge/sessions/`. Its README states that running the same Pi session in two
+  bridge processes is unsupported, and that its integration tests need write access to `~/.claude`
+  for `--resume` — both are the bridge's own statements, quoted, not guarantees we enforce.
+  Observed in our runs, not guaranteed by any contract: one Claude Code child per query and no queue
+  or lock, so N concurrent activations mean N children. Treat the route as one or two sequential
+  runs, not a fan-out backend.
+- **Inherited Anthropic variables win.** An exported `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY` or
+  `ANTHROPIC_AUTH_TOKEN` redirects the Claude Code child and every turn fails with its auth error
+  (upstream issue #107). Unset them for the host process.
+- **Usage arrives as provider usage.** A bridged run reports `usage_source: provider_usage` in
+  `specialist_job_metrics` because the provider payload carries usage, which the host normalises
+  (`asProviderUsage` in `src/specialist/session-metrics-contract.ts`). The host does not read the
+  bridge's `anthropic-ratelimit-unified-*` headers, so no quota display comes from them here.
+- **This repository runs `dist/`.** `sp`, the `specialists` MCP server and the Pi extension execute
+  the built bundle, so a source change to the route reaches a running host only after `dist/` is
+  rebuilt and the checkout pulled.
+
+## Troubleshooting
+
+`claude_bridge_unavailable` is emitted only when **both** switches are on and the extension lookup
+then fails; a route that is merely off never produces it (it refuses with `model_unavailable`). The
+refusal note names `SPECIALISTS_CLAUDE_BRIDGE_PATH`, the install command, the store it lands in, and
+lists every path searched. The common
+causes are a bridge installed into a project directory (never searched), a `pi install` that landed
+in a different `agentDir`, or a relative `SPECIALISTS_CLAUDE_BRIDGE_PATH`.
+
+`model_unavailable` with "No models match pattern" means the route is off on this machine, or the
+model id is not in the bridge's catalogue. Run `pi --list-models` with the extension loaded to see
+the exact ids; a dated snapshot id (for example `claude-sonnet-4-5-20250929`) is not listed.
+
+`model_unavailable` with "did not register" means the extension loaded but its provider never bound
+to the session; the session is disposed rather than allowed to run on the gate's placeholder.
 
 ## How the gate admits a bridged model
 
