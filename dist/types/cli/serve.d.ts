@@ -43,6 +43,14 @@ export declare function evaluateReadiness(opts: ReadinessCheckOptions): Promise<
     reason: ReadinessReason;
 }>;
 export declare function checkPiHelpForFlags(flags?: string[]): ReadinessReason | undefined;
+/**
+ * Rebuild a response body without stack traces. Errors become `{ name, message }`, plain objects
+ * lose stack-bearing keys, and exotic values (Date, Buffer) are left for JSON.stringify so their
+ * existing encoding does not change.
+ */
+export declare function toWireValue(value: unknown, seen?: WeakSet<object>, depth?: number): unknown;
+/** JSON for the wire, with stack traces removed. */
+export declare function serializeForWire(body: unknown): string;
 export declare function startServe(argv?: string[]): Promise<{
     server: import("node:http").Server<typeof IncomingMessage, typeof ServerResponse>;
     args: ServeArgs;

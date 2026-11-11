@@ -437,6 +437,40 @@ export function coerceFieldValue(path: string, rawInput: string): CoerceResult {
   }
 }
 
+/**
+ * Segments that would walk (or replace) an object's prototype chain. They are never legitimate
+ * field names in a specialist definition, and allowing them turned a dotted edit path into a
+ * prototype-pollution primitive (CodeQL #21).
+ */
+const FORBIDDEN_PATH_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype']);
+
+export class UnsafeFieldPathError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnsafeFieldPathError';
+  }
+}
+
+/** Split a dotted edit path, refusing empty and prototype-walking segments. */
+export function safeFieldPathSegments(path: string): string[] {
+  const parts = path.split('.').map((part) => part.trim());
+  if (parts.length === 0 || parts.some((part) => part.length === 0)) {
+    throw new UnsafeFieldPathError(`invalid field path "${path}": empty segment`);
+  }
+  const forbidden = parts.find((part) => FORBIDDEN_PATH_SEGMENTS.has(part));
+  if (forbidden) {
+    throw new UnsafeFieldPathError(`refusing field path "${path}": "${forbidden}" is not a field name`);
+  }
+  return parts;
+}
+
+function assertSafeSpecialistName(specialist: string): string {
+  if (!specialist || FORBIDDEN_PATH_SEGMENTS.has(specialist)) {
+    throw new UnsafeFieldPathError(`refusing specialist key "${specialist}"`);
+  }
+  return specialist;
+}
+
 export function applyFieldEdit(
   raw: Record<string, unknown>,
   specialist: string,
@@ -444,8 +478,9 @@ export function applyFieldEdit(
   value: unknown,
 ): Record<string, unknown> {
   const clone: Record<string, unknown> = structuredClone(raw);
-  const top = (clone[specialist] as Record<string, unknown> | undefined) ?? {};
-  const parts = path.split('.');
+  const name = assertSafeSpecialistName(specialist);
+  const top = (clone[name] as Record<string, unknown> | undefined) ?? {};
+  const parts = safeFieldPathSegments(path);
   let cursor: Record<string, unknown> = top;
   for (let i = 0; i < parts.length - 1; i += 1) {
     const key = parts[i]!;
@@ -459,7 +494,7 @@ export function applyFieldEdit(
     }
   }
   cursor[parts[parts.length - 1]!] = value;
-  clone[specialist] = top;
+  clone[name] = top;
   return clone;
 }
 

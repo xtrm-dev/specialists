@@ -203,9 +203,43 @@ export function checkPiHelpForFlags(flags: string[] = DEFAULT_REQUIRED_PI_FLAGS)
   return missing ? 'pi_flag_missing' : undefined;
 }
 
+/** Keys that carry stack traces. They never belong on the wire (CodeQL #23). */
+const STACK_KEYS = new Set(['stack', 'stackTrace', 'stacktrace', 'stack_trace']);
+const MAX_WIRE_DEPTH = 12;
+
+/**
+ * Rebuild a response body without stack traces. Errors become `{ name, message }`, plain objects
+ * lose stack-bearing keys, and exotic values (Date, Buffer) are left for JSON.stringify so their
+ * existing encoding does not change.
+ */
+export function toWireValue(value: unknown, seen: WeakSet<object> = new WeakSet(), depth = 0): unknown {
+  if (value === null || typeof value !== 'object') return value;
+  if (value instanceof Error) return { name: value.name, message: value.message };
+  if (depth >= MAX_WIRE_DEPTH) return '[truncated]';
+  if (seen.has(value)) return '[circular]';
+  seen.add(value);
+
+  if (Array.isArray(value)) return value.map((entry) => toWireValue(entry, seen, depth + 1));
+
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return value;
+
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (STACK_KEYS.has(key)) continue;
+    out[key] = toWireValue(entry, seen, depth + 1);
+  }
+  return out;
+}
+
+/** JSON for the wire, with stack traces removed. */
+export function serializeForWire(body: unknown): string {
+  return JSON.stringify(toWireValue(body)) ?? 'null';
+}
+
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
   res.writeHead(statusCode, { 'content-type': 'application/json' });
-  res.end(JSON.stringify(body));
+  res.end(serializeForWire(body));
 }
 
 function parseFeedEventsRequest(url: string | undefined): { jobId: string; eventFamily?: string; eventName?: string; sinceMs?: number; limit?: number } | null {
