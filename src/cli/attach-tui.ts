@@ -39,9 +39,9 @@ const ALWAYS_READ_ONLY_MESSAGE = 'input unavailable in terminal job; /show or /q
 
 export async function run(target: AttachTarget, deps: AttachRuntimeDeps = {}): Promise<void> {
   const piTui = (await import('@earendil-works/pi-tui')) as PiTuiModule;
-  const { TUI, ProcessTerminal, Container, Input, matchesKey, Key } = piTui;
+  const { TuiMainScreen, ProcessTerminal, Container, Input, matchesKey, Key } = piTui;
   const terminal = new ProcessTerminal();
-  const tui = new TUI(terminal) as TuiInstance;
+  const tui = new TuiMainScreen(terminal) as TuiInstance;
   const feed = new ChatFeed();
   const statusBar = new ChatStatus(tui, { pollIntervalMs: 500 });
   statusBar.setJobId(target.id);

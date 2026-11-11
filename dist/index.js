@@ -31960,12 +31960,1372 @@ var init_launch = __esm(() => {
   init_runner();
   init_observability_sqlite();
 });
-// node_modules/@earendil-works/pi-tui/dist/autocomplete.js
-var PATH_DELIMITERS;
-var init_autocomplete = __esm(() => {
-  PATH_DELIMITERS = new Set([" ", "\t", '"', "'", "="]);
-});
 
+// node_modules/marked/lib/marked.esm.js
+function A() {
+  return { async: false, breaks: false, extensions: null, gfm: true, hooks: null, pedantic: false, renderer: null, silent: false, tokenizer: null, walkTokens: null };
+}
+function j(l) {
+  R = l;
+}
+function I(l) {
+  let e = [];
+  return (t) => {
+    let n = Math.max(0, Math.min(3, t - 1)), s = e[n];
+    return s || (s = l(n), e[n] = s), s;
+  };
+}
+function k(l, e = "") {
+  let t = typeof l == "string" ? l : l.source, n = { replace: (s, r) => {
+    let i = typeof r == "string" ? r : r.source;
+    return i = i.replace(m.caret, "$1"), t = t.replace(s, i), n;
+  }, getRegex: () => new RegExp(t, e) };
+  return n;
+}
+function T(l, e) {
+  if (e) {
+    if (m.escapeTest.test(l))
+      return l.replace(m.escapeReplace, ge);
+  } else if (m.escapeTestNoEncode.test(l))
+    return l.replace(m.escapeReplaceNoEncode, ge);
+  return l;
+}
+function Y(l) {
+  try {
+    l = encodeURI(l).replace(m.percentDecode, "%");
+  } catch {
+    return null;
+  }
+  return l;
+}
+function ee(l, e) {
+  let t = l.replace(m.findPipe, (r, i, o) => {
+    let u = false, a = i;
+    for (;--a >= 0 && o[a] === "\\"; )
+      u = !u;
+    return u ? "|" : " |";
+  }), n = t.split(m.splitPipe), s = 0;
+  if (n[0].trim() || n.shift(), n.length > 0 && !n.at(-1)?.trim() && n.pop(), e)
+    if (n.length > e)
+      n.splice(e);
+    else
+      for (;n.length < e; )
+        n.push("");
+  for (;s < n.length; s++)
+    n[s] = n[s].trim().replace(m.slashPipe, "|");
+  return n;
+}
+function $(l, e, t) {
+  let n = l.length;
+  if (n === 0)
+    return "";
+  let s = 0;
+  for (;s < n; ) {
+    let r = l.charAt(n - s - 1);
+    if (r === e && !t)
+      s++;
+    else if (r !== e && t)
+      s++;
+    else
+      break;
+  }
+  return l.slice(0, n - s);
+}
+function te(l) {
+  let e = l.split(`
+`), t = e.length - 1;
+  for (;t >= 0 && m.blankLine.test(e[t]); )
+    t--;
+  return e.length - t <= 2 ? l : e.slice(0, t + 1).join(`
+`);
+}
+function fe(l, e) {
+  if (l.indexOf(e[1]) === -1)
+    return -1;
+  let t = 0;
+  for (let n = 0;n < l.length; n++)
+    if (l[n] === "\\")
+      n++;
+    else if (l[n] === e[0])
+      t++;
+    else if (l[n] === e[1] && (t--, t < 0))
+      return n;
+  return t > 0 ? -2 : -1;
+}
+function me(l, e = 0) {
+  let t = e, n = "";
+  for (let s of l)
+    if (s === "\t") {
+      let r = 4 - t % 4;
+      n += " ".repeat(r), t += r;
+    } else
+      n += s, t++;
+  return n;
+}
+function xe(l, e, t, n, s) {
+  let r = e.href, i = e.title || null, o = l[1].replace(s.other.outputLinkReplace, "$1"), u = l[0].charAt(0) === "!";
+  n.state.inLink = true;
+  let a = n.state.linkEmitted, p = n.state.inRawBlock;
+  n.state.linkEmitted = false;
+  let c = n.inlineTokens(o), h = n.state.linkEmitted;
+  if (n.state.linkEmitted = a, n.state.inLink = false, !u) {
+    if (h) {
+      n.state.inRawBlock = p;
+      return;
+    }
+    n.state.linkEmitted = true;
+  }
+  return { type: u ? "image" : "link", raw: t, href: r, title: i, text: o, tokens: c };
+}
+function kt(l, e, t) {
+  let n = l.match(t.other.indentCodeCompensation);
+  if (n === null)
+    return e;
+  let s = n[1];
+  return e.split(`
+`).map((r) => {
+    let i = r.match(t.other.beginningSpace);
+    if (i === null)
+      return r;
+    let [o] = i;
+    return o.length >= s.length ? r.slice(s.length) : r;
+  }).join(`
+`);
+}
+function f(l, e) {
+  return M.parse(l, e);
+}
+function dt(...l) {
+  return M.use(...l), f.defaults = M.defaults, j(f.defaults), f;
+}
+var R, z, Oe, m, Te, we, ye, q, Pe, U, oe, ae, Se, K, _e, W, $e, Le, Q = "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul", X, Ee, le = (l) => k(K).replace("hr", q).replace("heading", " {0,3}#{1,6}(?:\\s|$)").replace("|lheading", "").replace("|table", "").replace("blockquote", " {0,3}>").replace("fences", " {0,3}(?:`{3,}(?=[^`\\n]*(?:\\n|$))|~~~)[^\\n]*(?:\\n|$)").replace("list", l).replace("html", "</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag", Q).getRegex(), ze, Me, Ae, J, se, Ie, Ce, Be, De, ue, qe, _, C, v, ve, He, pe, Ze, Ge, Qe, ce, Ne, je, Fe, Ue, he = "^[^_*]*?__[^_*]*?\\*[^_*]*?(?=__)|[^*]+(?=[^*])|(?!\\*)punct(\\*+)(?=[\\s]|$)|notPunctSpace(\\*+)(?!\\*)(?=punctSpace|$)|(?!\\*)punctSpace(\\*+)(?=notPunctSpace)|[\\s](\\*+)(?!\\*)(?=punct)|(?!\\*)punct(\\*+)(?!\\*)(?=punct)|notPunctSpace(\\*+)(?=notPunctSpace)", Ke, We, Xe = "^[^_*]*?__[^_*]*?\\*[^_*]*?(?=__)|[^*]+(?=[^*])|(?!\\*)punct(\\*+)(?=[\\s]|$)|notPunctSpace(\\*+)(?!\\*)(?=punctSpace|$)|(?!\\*)[\\s](\\*+)(?=notPunctSpace)|[\\s](\\*+)(?!\\*)(?=punct)|(?!\\*)punct(\\*+)(?!\\*)(?=punct)|(?:(?!\\*)punct|notPunctSpace)(\\*+)(?!\\*)(?=notPunctSpace)", Je, Ve, Ye = "^[^_*]*?\\*\\*[^_*]*?_[^_*]*?(?=\\*\\*)|[^_]+(?=[^_])|(?!_)punct(_+)(?=[\\s]|$)|notPunctSpace(_+)(?!_)(?=punctSpace|$)|(?!_)[\\s](_+)(?=notPunctSpace)|[\\s](_+)(?!_)(?=punct)|(?!_)punct(_+)(?!_)(?=punct)|(?:(?!_)punct|notPunctSpace)(_+)(?!_)(?=notPunctSpace)", et, tt, nt = "^[^~]+(?=[^~])|(?!~)punct(~~?)(?=[\\s]|$)|notPunctSpace(~~?)(?!~)(?=punctSpace|$)|(?!~)punctSpace(~~?)(?=notPunctSpace)|[\\s](~~?)(?!~)(?=punct)|(?!~)punct(~~?)(?!~)(?=punct)|notPunctSpace(~~?)(?=notPunctSpace)", rt, st, it, ot, at, G, lt, ke, de, ut, ie, V, pt, F, ct, H, B, ht, ge = (l) => ht[l], y = class {
+  options;
+  rules;
+  lexer;
+  constructor(e) {
+    this.options = e || R;
+  }
+  space(e) {
+    let t = this.rules.block.newline.exec(e);
+    if (t && t[0].length > 0)
+      return { type: "space", raw: t[0] };
+  }
+  code(e) {
+    let t = this.rules.block.code.exec(e);
+    if (t) {
+      let n = this.options.pedantic ? t[0] : te(t[0]), s = n.replace(this.rules.other.codeRemoveIndent, "");
+      return { type: "code", raw: n, codeBlockStyle: "indented", text: s };
+    }
+  }
+  fences(e) {
+    let t = this.rules.block.fences.exec(e);
+    if (t) {
+      let n = t[0], s = kt(n, t[3] || "", this.rules);
+      return { type: "code", raw: n, lang: t[2] ? t[2].trim().replace(this.rules.inline.anyPunctuation, "$1") : t[2], text: s };
+    }
+  }
+  heading(e) {
+    let t = this.rules.block.heading.exec(e);
+    if (t) {
+      let n = t[2].trim();
+      if (this.rules.other.endingHash.test(n)) {
+        let s = $(n, "#");
+        (this.options.pedantic || !s || this.rules.other.endingSpaceChar.test(s)) && (n = s.trim());
+      }
+      return { type: "heading", raw: $(t[0], `
+`), depth: t[1].length, text: n, tokens: this.lexer.inline(n) };
+    }
+  }
+  hr(e) {
+    let t = this.rules.block.hr.exec(e);
+    if (t)
+      return { type: "hr", raw: $(t[0], `
+`) };
+  }
+  blockquote(e) {
+    let t = this.rules.block.blockquote.exec(e);
+    if (t) {
+      let n = $(t[0], `
+`).split(`
+`), s = "", r = "", i = [];
+      for (;n.length > 0; ) {
+        let o = false, u = [], a;
+        for (a = 0;a < n.length; a++)
+          if (this.rules.other.blockquoteStart.test(n[a]))
+            u.push(n[a]), o = true;
+          else if (!o)
+            u.push(n[a]);
+          else
+            break;
+        n = n.slice(a);
+        let p = u.join(`
+`), c = p.replace(this.rules.other.blockquoteSetextReplace, `
+    $1`).replace(this.rules.other.blockquoteSetextReplace2, "");
+        s = s ? `${s}
+${p}` : p, r = r ? `${r}
+${c}` : c;
+        let h = this.lexer.state.top;
+        if (this.lexer.state.top = true, this.lexer.blockTokens(c, i, true), this.lexer.state.top = h, n.length === 0)
+          break;
+        let d = i.at(-1);
+        if (d?.type === "code")
+          break;
+        if (d?.type === "blockquote") {
+          let O = d, g = n.join(`
+`), w = O.raw + `
+` + g.replace(this.rules.other.blockquoteSetextReplace2, ""), E = this.blockquote(w);
+          i[i.length - 1] = E, s = `${s}
+${g}`, r = r.substring(0, r.length - O.text.length) + E.text;
+          break;
+        } else if (d?.type === "list") {
+          let O = d, g = O.raw + `
+` + n.join(`
+`), w = this.list(g);
+          i[i.length - 1] = w, s = s.substring(0, s.length - d.raw.length) + w.raw, r = r.substring(0, r.length - O.raw.length) + w.raw, n = g.substring(i.at(-1).raw.length).split(`
+`);
+          continue;
+        }
+      }
+      return { type: "blockquote", raw: s, tokens: i, text: r };
+    }
+  }
+  list(e) {
+    let t = this.rules.block.list.exec(e);
+    if (t) {
+      let n = t[1].trim(), s = n.length > 1, r = { type: "list", raw: "", ordered: s, start: s ? +n.slice(0, -1) : "", loose: false, items: [] };
+      n = s ? `\\d{1,9}\\${n.slice(-1)}` : `\\${n}`, this.options.pedantic && (n = s ? n : "[*+-]");
+      let i = this.rules.other.listItemRegex(n), o = false;
+      for (;e; ) {
+        let a = false, p = "", c = "";
+        if (!(t = i.exec(e)) || this.rules.block.hr.test(e))
+          break;
+        p = t[0], e = e.substring(p.length);
+        let h = me(t[2].split(`
+`, 1)[0], t[1].length), d = e.split(`
+`, 1)[0], O = !h.trim(), g = 0;
+        if (this.options.pedantic ? (g = 2, c = h.trimStart()) : O ? g = t[1].length + 1 : (g = h.search(this.rules.other.nonSpaceChar), g = g > 4 ? 1 : g, c = h.slice(g), g += t[1].length), O && this.rules.other.blankLine.test(d) && (p += d + `
+`, e = e.substring(d.length + 1), a = true), !a) {
+          let w = this.rules.other.nextBulletRegex(g), E = this.rules.other.hrRegex(g), ne = this.rules.other.fencesBeginRegex(g), re = this.rules.other.headingBeginRegex(g), be = this.rules.other.htmlBeginRegex(g), Re = this.rules.other.blockquoteBeginRegex(g);
+          for (;e; ) {
+            let N = e.split(`
+`, 1)[0], D;
+            if (d = N, this.options.pedantic ? (d = d.replace(this.rules.other.listReplaceNesting, "  "), D = d) : D = d.replace(this.rules.other.tabCharGlobal, "    "), ne.test(d) || re.test(d) || be.test(d) || Re.test(d) || w.test(d) || E.test(d))
+              break;
+            if (D.search(this.rules.other.nonSpaceChar) >= g || !d.trim())
+              c += `
+` + D.slice(g);
+            else {
+              if (O || h.replace(this.rules.other.tabCharGlobal, "    ").search(this.rules.other.nonSpaceChar) >= 4 || ne.test(h) || re.test(h) || E.test(h))
+                break;
+              c += `
+` + d;
+            }
+            O = !d.trim(), p += N + `
+`, e = e.substring(N.length + 1), h = D.slice(g);
+          }
+        }
+        r.loose || (o ? r.loose = true : this.rules.other.doubleBlankLine.test(p) && (o = true)), r.items.push({ type: "list_item", raw: p, task: !!this.options.gfm && this.rules.other.listIsTask.test(c), loose: false, text: c, tokens: [] }), r.raw += p;
+      }
+      let u = r.items.at(-1);
+      if (u)
+        u.raw = u.raw.trimEnd(), u.text = u.text.trimEnd();
+      else
+        return;
+      r.raw = r.raw.trimEnd();
+      for (let a of r.items)
+        if (this.lexer.state.top = false, a.tokens = this.lexer.blockTokens(a.text, []), !r.loose) {
+          let p = a.tokens.filter((h) => h.type === "space"), c = p.length > 0 && p.some((h) => this.rules.other.anyLine.test(h.raw));
+          r.loose = c;
+        }
+      for (let a of r.items) {
+        let p = a.tokens[0];
+        if (a.task && (p?.type === "text" || p?.type === "paragraph")) {
+          a.text = a.text.replace(this.rules.other.listReplaceTask, ""), p.raw = p.raw.replace(this.rules.other.listReplaceTask, ""), p.text = p.text.replace(this.rules.other.listReplaceTask, "");
+          for (let h = this.lexer.inlineQueue.length - 1;h >= 0; h--)
+            if (this.rules.other.listIsTask.test(this.lexer.inlineQueue[h].src)) {
+              this.lexer.inlineQueue[h].src = this.lexer.inlineQueue[h].src.replace(this.rules.other.listReplaceTask, "");
+              break;
+            }
+          let c = this.rules.other.listTaskCheckbox.exec(a.raw);
+          if (c) {
+            let h = { type: "checkbox", raw: c[0] + " ", checked: c[0] !== "[ ]" };
+            a.checked = h.checked, r.loose ? a.tokens[0] && ["paragraph", "text"].includes(a.tokens[0].type) && "tokens" in a.tokens[0] && a.tokens[0].tokens ? (a.tokens[0].raw = h.raw + a.tokens[0].raw, a.tokens[0].text = h.raw + a.tokens[0].text, a.tokens[0].tokens.unshift(h)) : a.tokens.unshift({ type: "paragraph", raw: h.raw, text: h.raw, tokens: [h] }) : a.tokens.unshift(h);
+          }
+        } else
+          a.task && (a.task = false);
+      }
+      if (r.loose)
+        for (let a of r.items) {
+          a.loose = true;
+          for (let p of a.tokens)
+            p.type === "text" && (p.type = "paragraph");
+        }
+      return r;
+    }
+  }
+  html(e) {
+    let t = this.rules.block.html.exec(e);
+    if (t) {
+      let n = te(t[0]);
+      return { type: "html", block: true, raw: n, pre: t[1] === "pre" || t[1] === "script" || t[1] === "style", text: n };
+    }
+  }
+  def(e) {
+    let t = this.rules.block.def.exec(e);
+    if (t) {
+      let n = t[1].toLowerCase().replace(this.rules.other.multipleSpaceGlobal, " "), s = t[2] ? t[2].replace(this.rules.other.hrefBrackets, "$1").replace(this.rules.inline.anyPunctuation, "$1") : "", r = t[3] ? t[3].substring(1, t[3].length - 1).replace(this.rules.inline.anyPunctuation, "$1") : t[3];
+      return { type: "def", tag: n, raw: $(t[0], `
+`), href: s, title: r };
+    }
+  }
+  table(e) {
+    let t = this.rules.block.table.exec(e);
+    if (!t || !this.rules.other.tableDelimiter.test(t[2]))
+      return;
+    let n = ee(t[1]), s = t[2].replace(this.rules.other.tableAlignChars, "").split("|"), r = t[3]?.trim() ? t[3].replace(this.rules.other.tableRowBlankLine, "").split(`
+`) : [], i = { type: "table", raw: $(t[0], `
+`), header: [], align: [], rows: [] };
+    if (n.length === s.length) {
+      for (let o of s)
+        this.rules.other.tableAlignRight.test(o) ? i.align.push("right") : this.rules.other.tableAlignCenter.test(o) ? i.align.push("center") : this.rules.other.tableAlignLeft.test(o) ? i.align.push("left") : i.align.push(null);
+      for (let o = 0;o < n.length; o++)
+        i.header.push({ text: n[o], tokens: this.lexer.inline(n[o]), header: true, align: i.align[o] });
+      for (let o of r)
+        i.rows.push(ee(o, i.header.length).map((u, a) => ({ text: u, tokens: this.lexer.inline(u), header: false, align: i.align[a] })));
+      return i;
+    }
+  }
+  lheading(e) {
+    let t = this.rules.block.lheading.exec(e);
+    if (t) {
+      let n = t[1].trim();
+      return { type: "heading", raw: $(t[0], `
+`), depth: t[2].charAt(0) === "=" ? 1 : 2, text: n, tokens: this.lexer.inline(n) };
+    }
+  }
+  paragraph(e) {
+    let t = this.rules.block.paragraph.exec(e);
+    if (t) {
+      let n = t[1].charAt(t[1].length - 1) === `
+` ? t[1].slice(0, -1) : t[1];
+      return { type: "paragraph", raw: t[0], text: n, tokens: this.lexer.inline(n) };
+    }
+  }
+  text(e) {
+    let t = this.rules.block.text.exec(e);
+    if (t)
+      return { type: "text", raw: t[0], text: t[0], tokens: this.lexer.inline(t[0]) };
+  }
+  escape(e) {
+    let t = this.rules.inline.escape.exec(e);
+    if (t)
+      return { type: "escape", raw: t[0], text: t[1] };
+  }
+  tag(e) {
+    let t = this.rules.inline.tag.exec(e);
+    if (t)
+      return !this.lexer.state.inLink && this.rules.other.startATag.test(t[0]) ? this.lexer.state.inLink = true : this.lexer.state.inLink && this.rules.other.endATag.test(t[0]) && (this.lexer.state.inLink = false), !this.lexer.state.inRawBlock && this.rules.other.startPreScriptTag.test(t[0]) ? this.lexer.state.inRawBlock = true : this.lexer.state.inRawBlock && this.rules.other.endPreScriptTag.test(t[0]) && (this.lexer.state.inRawBlock = false), { type: "html", raw: t[0], inLink: this.lexer.state.inLink, inRawBlock: this.lexer.state.inRawBlock, block: false, text: t[0] };
+  }
+  link(e) {
+    let t = this.rules.inline.link.exec(e);
+    if (t) {
+      let n = t[2].trim();
+      if (!this.options.pedantic && this.rules.other.startAngleBracket.test(n)) {
+        if (!this.rules.other.endAngleBracket.test(n))
+          return;
+        let i = $(n.slice(0, -1), "\\");
+        if ((n.length - i.length) % 2 === 0)
+          return;
+      } else {
+        let i = fe(t[2], "()");
+        if (i === -2)
+          return;
+        if (i > -1) {
+          let u = (t[0].indexOf("!") === 0 ? 5 : 4) + t[1].length + i;
+          t[2] = t[2].substring(0, i), t[0] = t[0].substring(0, u).trim(), t[3] = "";
+        }
+      }
+      let s = t[2], r = "";
+      if (this.options.pedantic) {
+        let i = this.rules.other.pedanticHrefTitle.exec(s);
+        i && (s = i[1], r = i[3]);
+      } else
+        r = t[3] ? t[3].slice(1, -1) : "";
+      return s = s.trim(), this.rules.other.startAngleBracket.test(s) && (this.options.pedantic && !this.rules.other.endAngleBracket.test(n) ? s = s.slice(1) : s = s.slice(1, -1)), xe(t, { href: s && s.replace(this.rules.inline.anyPunctuation, "$1"), title: r && r.replace(this.rules.inline.anyPunctuation, "$1") }, t[0], this.lexer, this.rules);
+    }
+  }
+  reflink(e, t) {
+    let n;
+    if ((n = this.rules.inline.reflink.exec(e)) || (n = this.rules.inline.nolink.exec(e))) {
+      let s = (n[2] || n[1]).replace(this.rules.other.multipleSpaceGlobal, " "), r = t[s.toLowerCase()];
+      if (!r) {
+        let i = n[0].charAt(0);
+        return { type: "text", raw: i, text: i };
+      }
+      return xe(n, r, n[0], this.lexer, this.rules);
+    }
+  }
+  emStrong(e, t, n = "") {
+    let s = this.rules.inline.emStrongLDelim.exec(e);
+    if (!s || !s[1] && !s[2] && !s[3] && !s[4] || s[4] && n.match(this.rules.other.unicodeAlphaNumeric))
+      return;
+    if (!(s[1] || s[3] || "") || !n || this.rules.inline.punctuation.exec(n)) {
+      let i = [...s[0]].length - 1, o, u, a = i, p = 0, c = s[0][0], h = n === c, d = c === "*" ? this.rules.inline.emStrongRDelimAst : this.rules.inline.emStrongRDelimUnd;
+      for (d.lastIndex = 0, t = t.slice(-1 * e.length + i);(s = d.exec(t)) !== null; ) {
+        if (o = s[1] || s[2] || s[3] || s[4] || s[5] || s[6], !o)
+          continue;
+        if (u = [...o].length, s[3] || s[4]) {
+          a += u;
+          continue;
+        } else if (s[5] || s[6]) {
+          if (i % 3 && !((i + u) % 3)) {
+            p += u;
+            continue;
+          }
+          if (h)
+            break;
+        }
+        if (a -= u, a > 0)
+          continue;
+        u = Math.min(u, u + a + p);
+        let O = [...s[0]][0].length, g = e.slice(0, i + s.index + O + u);
+        if (Math.min(i, u) % 2) {
+          let E = g.slice(1, -1);
+          return { type: "em", raw: g, text: E, tokens: this.lexer.inlineTokens(E) };
+        }
+        let w = g.slice(2, -2);
+        return { type: "strong", raw: g, text: w, tokens: this.lexer.inlineTokens(w) };
+      }
+    }
+  }
+  codespan(e) {
+    let t = this.rules.inline.code.exec(e);
+    if (t) {
+      let n = t[2].replace(this.rules.other.newLineCharGlobal, " "), s = this.rules.other.nonSpaceChar.test(n), r = this.rules.other.startingSpaceChar.test(n) && this.rules.other.endingSpaceChar.test(n);
+      return s && r && (n = n.substring(1, n.length - 1)), { type: "codespan", raw: t[0], text: n };
+    }
+  }
+  br(e) {
+    let t = this.rules.inline.br.exec(e);
+    if (t)
+      return { type: "br", raw: t[0] };
+  }
+  del(e, t, n = "") {
+    let s = this.rules.inline.delLDelim.exec(e);
+    if (!s)
+      return;
+    if (!(s[1] || "") || !n || this.rules.inline.punctuation.exec(n)) {
+      let i = [...s[0]].length - 1, o, u, a = i, p = this.rules.inline.delRDelim;
+      for (p.lastIndex = 0, t = t.slice(-1 * e.length + i);(s = p.exec(t)) !== null; ) {
+        if (o = s[1] || s[2] || s[3] || s[4] || s[5] || s[6], !o || (u = [...o].length, u !== i))
+          continue;
+        if (s[3] || s[4]) {
+          a += u;
+          continue;
+        }
+        if (a -= u, a > 0)
+          continue;
+        u = Math.min(u, u + a);
+        let c = [...s[0]][0].length, h = e.slice(0, i + s.index + c + u), d = h.slice(i, -i);
+        return { type: "del", raw: h, text: d, tokens: this.lexer.inlineTokens(d) };
+      }
+    }
+  }
+  autolink(e) {
+    let t = this.rules.inline.autolink.exec(e);
+    if (t) {
+      let n, s;
+      return t[2] === "@" ? (n = t[1], s = "mailto:" + n) : (n = t[1], s = n), { type: "link", raw: t[0], text: n, href: s, tokens: [{ type: "text", raw: n, text: n }] };
+    }
+  }
+  url(e) {
+    let t;
+    if (t = this.rules.inline.url.exec(e)) {
+      let n, s;
+      if (t[2] === "@")
+        n = t[0], s = "mailto:" + n;
+      else {
+        let r;
+        do
+          r = t[0], t[0] = this.rules.inline._backpedal.exec(t[0])?.[0] ?? "";
+        while (r !== t[0]);
+        n = t[0], t[1] === "www." ? s = "http://" + t[0] : s = t[0];
+      }
+      return { type: "link", raw: t[0], text: n, href: s, tokens: [{ type: "text", raw: n, text: n }] };
+    }
+  }
+  inlineText(e) {
+    let t = this.rules.inline.text.exec(e);
+    if (t) {
+      let n = this.lexer.state.inRawBlock;
+      return { type: "text", raw: t[0], text: t[0], escaped: n };
+    }
+  }
+}, x = class l {
+  tokens;
+  options;
+  state;
+  inlineQueue;
+  tokenizer;
+  constructor(e) {
+    this.tokens = [], this.tokens.links = Object.create(null), this.options = e || R, this.options.tokenizer = this.options.tokenizer || new y, this.tokenizer = this.options.tokenizer, this.tokenizer.options = this.options, this.tokenizer.lexer = this, this.inlineQueue = [], this.state = { inLink: false, inRawBlock: false, linkEmitted: false, top: true };
+    let t = { other: m, block: H.normal, inline: B.normal };
+    this.options.pedantic ? (t.block = H.pedantic, t.inline = B.pedantic) : this.options.gfm && (t.block = H.gfm, this.options.breaks ? t.inline = B.breaks : t.inline = B.gfm), this.tokenizer.rules = t;
+  }
+  static get rules() {
+    return { block: H, inline: B };
+  }
+  static lex(e, t) {
+    return new l(t).lex(e);
+  }
+  static lexInline(e, t) {
+    return new l(t).inlineTokens(e);
+  }
+  lex(e) {
+    e = e.replace(m.carriageReturn, `
+`), this.blockTokens(e, this.tokens);
+    for (let t = 0;t < this.inlineQueue.length; t++) {
+      let n = this.inlineQueue[t];
+      this.inlineTokens(n.src, n.tokens);
+    }
+    return this.inlineQueue = [], this.tokens;
+  }
+  blockTokens(e, t = [], n = false) {
+    this.tokenizer.lexer = this, this.options.pedantic && (e = e.replace(m.tabCharGlobal, "    ").replace(m.spaceLine, ""));
+    let s = 1 / 0;
+    for (;e; ) {
+      if (e.length < s)
+        s = e.length;
+      else {
+        this.infiniteLoopError(e.charCodeAt(0));
+        break;
+      }
+      let r;
+      if (this.options.extensions?.block?.some((o) => (r = o.call({ lexer: this }, e, t)) ? (e = e.substring(r.raw.length), t.push(r), true) : false))
+        continue;
+      if (r = this.tokenizer.space(e)) {
+        e = e.substring(r.raw.length);
+        let o = t.at(-1);
+        r.raw.length === 1 && o !== undefined ? o.raw += `
+` : t.push(r);
+        continue;
+      }
+      if (r = this.tokenizer.code(e)) {
+        e = e.substring(r.raw.length);
+        let o = t.at(-1);
+        o?.type === "paragraph" || o?.type === "text" ? (o.raw += (o.raw.endsWith(`
+`) ? "" : `
+`) + r.raw, o.text += `
+` + r.text, this.inlineQueue.at(-1).src = o.text) : t.push(r);
+        continue;
+      }
+      if (r = this.tokenizer.fences(e)) {
+        e = e.substring(r.raw.length), t.push(r);
+        continue;
+      }
+      if (r = this.tokenizer.heading(e)) {
+        e = e.substring(r.raw.length), t.push(r);
+        continue;
+      }
+      if (r = this.tokenizer.hr(e)) {
+        e = e.substring(r.raw.length), t.push(r);
+        continue;
+      }
+      if (r = this.tokenizer.blockquote(e)) {
+        e = e.substring(r.raw.length), t.push(r);
+        continue;
+      }
+      if (r = this.tokenizer.list(e)) {
+        e = e.substring(r.raw.length), t.push(r);
+        continue;
+      }
+      if (r = this.tokenizer.html(e)) {
+        e = e.substring(r.raw.length), t.push(r);
+        continue;
+      }
+      if (r = this.tokenizer.def(e)) {
+        e = e.substring(r.raw.length);
+        let o = t.at(-1);
+        o?.type === "paragraph" || o?.type === "text" ? (o.raw += (o.raw.endsWith(`
+`) ? "" : `
+`) + r.raw, o.text += `
+` + r.raw, this.inlineQueue.at(-1).src = o.text) : this.tokens.links[r.tag] || (this.tokens.links[r.tag] = { href: r.href, title: r.title }, t.push(r));
+        continue;
+      }
+      if (r = this.tokenizer.table(e)) {
+        e = e.substring(r.raw.length), t.push(r);
+        continue;
+      }
+      if (r = this.tokenizer.lheading(e)) {
+        e = e.substring(r.raw.length), t.push(r);
+        continue;
+      }
+      let i = e;
+      if (this.options.extensions?.startBlock) {
+        let o = 1 / 0, u = e.slice(1), a;
+        this.options.extensions.startBlock.forEach((p) => {
+          a = p.call({ lexer: this }, u), typeof a == "number" && a >= 0 && (o = Math.min(o, a));
+        }), o < 1 / 0 && o >= 0 && (i = e.substring(0, o + 1));
+      }
+      if (this.state.top && (r = this.tokenizer.paragraph(i))) {
+        let o = t.at(-1);
+        n && o?.type === "paragraph" ? (o.raw += (o.raw.endsWith(`
+`) ? "" : `
+`) + r.raw, o.text += `
+` + r.text, this.inlineQueue.pop(), this.inlineQueue.at(-1).src = o.text) : t.push(r), n = i.length !== e.length, e = e.substring(r.raw.length);
+        continue;
+      }
+      if (r = this.tokenizer.text(e)) {
+        e = e.substring(r.raw.length);
+        let o = t.at(-1);
+        o?.type === "text" ? (o.raw += (o.raw.endsWith(`
+`) ? "" : `
+`) + r.raw, o.text += `
+` + r.text, this.inlineQueue.pop(), this.inlineQueue.at(-1).src = o.text) : t.push(r);
+        continue;
+      }
+      if (e) {
+        this.infiniteLoopError(e.charCodeAt(0));
+        break;
+      }
+    }
+    return this.state.top = true, t;
+  }
+  inline(e, t = []) {
+    return this.inlineQueue.push({ src: e, tokens: t }), t;
+  }
+  linkInText(e) {
+    if (!e.includes("["))
+      return false;
+    let t = this.tokenizer.rules.inline.link;
+    for (let n of e.matchAll(this.tokenizer.rules.inline.blockSkip))
+      if (t.test(n[0]) && e.charAt(n.index - 1) !== "!")
+        return true;
+    for (let n of e.matchAll(this.tokenizer.rules.inline.reflinkSearch)) {
+      let s = n[0], r = s.lastIndexOf("[");
+      if (!(s.charAt(0) === "!" || !Object.hasOwn(this.tokens.links, s.slice(r + 1, -1))) && !(r > 1 && this.linkInText(s.slice(1, r - 1))))
+        return true;
+    }
+    return false;
+  }
+  inlineTokens(e, t = []) {
+    this.tokenizer.lexer = this;
+    let n = e;
+    if (this.tokens.links && e.includes("[")) {
+      let o = this.tokenizer.rules.inline.reflinkSearch, u = (a) => {
+        let p = a.lastIndexOf("[");
+        if (!Object.hasOwn(this.tokens.links, a.slice(p + 1, -1)))
+          return a;
+        if (p > 1 && a.charAt(0) !== "!") {
+          let c = a.slice(1, p - 1);
+          if (this.linkInText(c))
+            return "[" + c.replace(o, u) + "][" + "a".repeat(a.length - p - 2) + "]";
+        }
+        return "[" + "a".repeat(a.length - 2) + "]";
+      };
+      n = n.replace(o, u);
+    }
+    n = n.replace(this.tokenizer.rules.inline.anyPunctuation, (o) => "+".repeat(o.length)), n = n.replace(this.tokenizer.rules.inline.blockSkip, (o, u, a) => {
+      let p = a ? a.length : 0;
+      return o.slice(0, p) + "[" + "a".repeat(o.length - p - 2) + "]";
+    }), n = this.options.hooks?.emStrongMask?.call({ lexer: this }, n) ?? n;
+    let s = false, r = "", i = 1 / 0;
+    for (;e; ) {
+      if (e.length < i)
+        i = e.length;
+      else {
+        this.infiniteLoopError(e.charCodeAt(0));
+        break;
+      }
+      s || (r = ""), s = false;
+      let o;
+      if (this.options.extensions?.inline?.some((a) => (o = a.call({ lexer: this }, e, t)) ? (e = e.substring(o.raw.length), t.push(o), true) : false))
+        continue;
+      if (o = this.tokenizer.escape(e)) {
+        e = e.substring(o.raw.length), t.push(o);
+        continue;
+      }
+      if (o = this.tokenizer.tag(e)) {
+        e = e.substring(o.raw.length), t.push(o);
+        continue;
+      }
+      if (o = this.tokenizer.link(e)) {
+        e = e.substring(o.raw.length), t.push(o);
+        continue;
+      }
+      if (o = this.tokenizer.reflink(e, this.tokens.links)) {
+        e = e.substring(o.raw.length);
+        let a = t.at(-1);
+        o.type === "text" && a?.type === "text" ? (a.raw += o.raw, a.text += o.text) : t.push(o);
+        continue;
+      }
+      if (o = this.tokenizer.emStrong(e, n, r)) {
+        e = e.substring(o.raw.length), t.push(o);
+        continue;
+      }
+      if (o = this.tokenizer.codespan(e)) {
+        e = e.substring(o.raw.length), t.push(o);
+        continue;
+      }
+      if (o = this.tokenizer.br(e)) {
+        e = e.substring(o.raw.length), t.push(o);
+        continue;
+      }
+      if (o = this.tokenizer.del(e, n, r)) {
+        e = e.substring(o.raw.length), t.push(o);
+        continue;
+      }
+      if (o = this.tokenizer.autolink(e)) {
+        e = e.substring(o.raw.length), t.push(o);
+        continue;
+      }
+      if (!this.state.inLink && (o = this.tokenizer.url(e))) {
+        e = e.substring(o.raw.length), t.push(o);
+        continue;
+      }
+      let u = e;
+      if (this.options.extensions?.startInline) {
+        let a = 1 / 0, p = e.slice(1), c;
+        this.options.extensions.startInline.forEach((h) => {
+          c = h.call({ lexer: this }, p), typeof c == "number" && c >= 0 && (a = Math.min(a, c));
+        }), a < 1 / 0 && a >= 0 && (u = e.substring(0, a + 1));
+      }
+      if (o = this.tokenizer.inlineText(u)) {
+        e = e.substring(o.raw.length), o.raw.slice(-1) !== "_" && (r = o.raw.slice(-1)), s = true;
+        let a = t.at(-1);
+        a?.type === "text" ? (a.raw += o.raw, a.text += o.text) : t.push(o);
+        continue;
+      }
+      if (e) {
+        this.infiniteLoopError(e.charCodeAt(0));
+        break;
+      }
+    }
+    return t;
+  }
+  infiniteLoopError(e) {
+    let t = "Infinite loop on byte: " + e;
+    if (this.options.silent)
+      console.error(t);
+    else
+      throw new Error(t);
+  }
+}, P = class {
+  options;
+  parser;
+  constructor(e) {
+    this.options = e || R;
+  }
+  space(e) {
+    return "";
+  }
+  code({ text: e, lang: t, escaped: n }) {
+    let s = (t || "").match(m.notSpaceStart)?.[0], r = e.replace(m.endingNewline, "") + `
+`;
+    return s ? '<pre><code class="language-' + T(s) + '">' + (n ? r : T(r, true)) + `</code></pre>
+` : "<pre><code>" + (n ? r : T(r, true)) + `</code></pre>
+`;
+  }
+  blockquote({ tokens: e }) {
+    return `<blockquote>
+${this.parser.parse(e)}</blockquote>
+`;
+  }
+  html({ text: e }) {
+    return e;
+  }
+  def(e) {
+    return "";
+  }
+  heading({ tokens: e, depth: t }) {
+    return `<h${t}>${this.parser.parseInline(e)}</h${t}>
+`;
+  }
+  hr(e) {
+    return `<hr>
+`;
+  }
+  list(e) {
+    let { ordered: t, start: n } = e, s = "";
+    for (let o = 0;o < e.items.length; o++) {
+      let u = e.items[o];
+      s += this.listitem(u);
+    }
+    let r = t ? "ol" : "ul", i = t && n !== 1 ? ' start="' + n + '"' : "";
+    return "<" + r + i + `>
+` + s + "</" + r + `>
+`;
+  }
+  listitem(e) {
+    return `<li>${this.parser.parse(e.tokens)}</li>
+`;
+  }
+  checkbox({ checked: e }) {
+    return "<input " + (e ? 'checked="" ' : "") + 'disabled="" type="checkbox"> ';
+  }
+  paragraph({ tokens: e }) {
+    return `<p>${this.parser.parseInline(e)}</p>
+`;
+  }
+  table(e) {
+    let t = "", n = "";
+    for (let r = 0;r < e.header.length; r++)
+      n += this.tablecell(e.header[r]);
+    t += this.tablerow({ text: n });
+    let s = "";
+    for (let r = 0;r < e.rows.length; r++) {
+      let i = e.rows[r];
+      n = "";
+      for (let o = 0;o < i.length; o++)
+        n += this.tablecell(i[o]);
+      s += this.tablerow({ text: n });
+    }
+    return s && (s = `<tbody>${s}</tbody>`), `<table>
+<thead>
+` + t + `</thead>
+` + s + `</table>
+`;
+  }
+  tablerow({ text: e }) {
+    return `<tr>
+${e}</tr>
+`;
+  }
+  tablecell(e) {
+    let t = this.parser.parseInline(e.tokens), n = e.header ? "th" : "td";
+    return (e.align ? `<${n} align="${e.align}">` : `<${n}>`) + t + `</${n}>
+`;
+  }
+  strong({ tokens: e }) {
+    return `<strong>${this.parser.parseInline(e)}</strong>`;
+  }
+  em({ tokens: e }) {
+    return `<em>${this.parser.parseInline(e)}</em>`;
+  }
+  codespan({ text: e }) {
+    return `<code>${T(e, true)}</code>`;
+  }
+  br(e) {
+    return "<br>";
+  }
+  del({ tokens: e }) {
+    return `<del>${this.parser.parseInline(e)}</del>`;
+  }
+  link({ href: e, title: t, tokens: n }) {
+    let s = this.parser.parseInline(n), r = Y(e);
+    if (r === null)
+      return s;
+    e = r;
+    let i = '<a href="' + e + '"';
+    return t && (i += ' title="' + T(t) + '"'), i += ">" + s + "</a>", i;
+  }
+  image({ href: e, title: t, text: n, tokens: s }) {
+    s && (n = this.parser.parseInline(s, this.parser.textRenderer));
+    let r = Y(e);
+    if (r === null)
+      return T(n);
+    e = r;
+    let i = `<img src="${e}" alt="${T(n)}"`;
+    return t && (i += ` title="${T(t)}"`), i += ">", i;
+  }
+  text(e) {
+    return "tokens" in e && e.tokens ? this.parser.parseInline(e.tokens) : ("escaped" in e) && e.escaped ? e.text : T(e.text);
+  }
+}, L = class {
+  strong({ text: e }) {
+    return e;
+  }
+  em({ text: e }) {
+    return e;
+  }
+  codespan({ text: e }) {
+    return e;
+  }
+  del({ text: e }) {
+    return e;
+  }
+  html({ text: e }) {
+    return e;
+  }
+  text({ text: e }) {
+    return e;
+  }
+  link({ text: e }) {
+    return "" + e;
+  }
+  image({ text: e }) {
+    return "" + e;
+  }
+  br() {
+    return "";
+  }
+  checkbox({ raw: e }) {
+    return e;
+  }
+}, b = class l {
+  options;
+  renderer;
+  textRenderer;
+  constructor(e) {
+    this.options = e || R, this.options.renderer = this.options.renderer || new P, this.renderer = this.options.renderer, this.renderer.options = this.options, this.renderer.parser = this, this.textRenderer = new L;
+  }
+  static parse(e, t) {
+    return new l(t).parse(e);
+  }
+  static parseInline(e, t) {
+    return new l(t).parseInline(e);
+  }
+  parse(e) {
+    this.renderer.parser = this;
+    let t = "";
+    for (let n = 0;n < e.length; n++) {
+      let s = e[n];
+      if (this.options.extensions?.renderers?.[s.type]) {
+        let i = s, o = this.options.extensions.renderers[i.type].call({ parser: this }, i);
+        if (o !== false || !["space", "hr", "heading", "code", "table", "blockquote", "list", "checkbox", "html", "def", "paragraph", "text"].includes(i.type)) {
+          t += o || "";
+          continue;
+        }
+      }
+      let r = s;
+      switch (r.type) {
+        case "space": {
+          t += this.renderer.space(r);
+          break;
+        }
+        case "hr": {
+          t += this.renderer.hr(r);
+          break;
+        }
+        case "heading": {
+          t += this.renderer.heading(r);
+          break;
+        }
+        case "code": {
+          t += this.renderer.code(r);
+          break;
+        }
+        case "table": {
+          t += this.renderer.table(r);
+          break;
+        }
+        case "blockquote": {
+          t += this.renderer.blockquote(r);
+          break;
+        }
+        case "list": {
+          t += this.renderer.list(r);
+          break;
+        }
+        case "checkbox": {
+          t += this.renderer.checkbox(r);
+          break;
+        }
+        case "html": {
+          t += this.renderer.html(r);
+          break;
+        }
+        case "def": {
+          t += this.renderer.def(r);
+          break;
+        }
+        case "paragraph": {
+          t += this.renderer.paragraph(r);
+          break;
+        }
+        case "text": {
+          t += this.renderer.text(r);
+          break;
+        }
+        default: {
+          let i = 'Token with "' + r.type + '" type was not found.';
+          if (this.options.silent)
+            return console.error(i), "";
+          throw new Error(i);
+        }
+      }
+    }
+    return t;
+  }
+  parseInline(e, t = this.renderer) {
+    this.renderer.parser = this;
+    let n = "";
+    for (let s = 0;s < e.length; s++) {
+      let r = e[s];
+      if (this.options.extensions?.renderers?.[r.type]) {
+        let o = this.options.extensions.renderers[r.type].call({ parser: this }, r);
+        if (o !== false || !["escape", "html", "link", "image", "checkbox", "strong", "em", "codespan", "br", "del", "text"].includes(r.type)) {
+          n += o || "";
+          continue;
+        }
+      }
+      let i = r;
+      switch (i.type) {
+        case "escape": {
+          n += t.text(i);
+          break;
+        }
+        case "html": {
+          n += t.html(i);
+          break;
+        }
+        case "link": {
+          n += t.link(i);
+          break;
+        }
+        case "image": {
+          n += t.image(i);
+          break;
+        }
+        case "checkbox": {
+          n += t.checkbox(i);
+          break;
+        }
+        case "strong": {
+          n += t.strong(i);
+          break;
+        }
+        case "em": {
+          n += t.em(i);
+          break;
+        }
+        case "codespan": {
+          n += t.codespan(i);
+          break;
+        }
+        case "br": {
+          n += t.br(i);
+          break;
+        }
+        case "del": {
+          n += t.del(i);
+          break;
+        }
+        case "text": {
+          n += t.text(i);
+          break;
+        }
+        default: {
+          let o = 'Token with "' + i.type + '" type was not found.';
+          if (this.options.silent)
+            return console.error(o), "";
+          throw new Error(o);
+        }
+      }
+    }
+    return n;
+  }
+}, S, Z = class {
+  defaults = A();
+  options = this.setOptions;
+  parse = this.parseMarkdown(true);
+  parseInline = this.parseMarkdown(false);
+  Parser = b;
+  Renderer = P;
+  TextRenderer = L;
+  Lexer = x;
+  Tokenizer = y;
+  Hooks = S;
+  constructor(...e) {
+    this.use(...e);
+  }
+  walkTokens(e, t) {
+    let n = [];
+    for (let s of e)
+      switch (n = n.concat(t.call(this, s)), s.type) {
+        case "table": {
+          let r = s;
+          for (let i of r.header)
+            n = n.concat(this.walkTokens(i.tokens, t));
+          for (let i of r.rows)
+            for (let o of i)
+              n = n.concat(this.walkTokens(o.tokens, t));
+          break;
+        }
+        case "list": {
+          let r = s;
+          n = n.concat(this.walkTokens(r.items, t));
+          break;
+        }
+        default: {
+          let r = s;
+          this.defaults.extensions?.childTokens?.[r.type] ? this.defaults.extensions.childTokens[r.type].forEach((i) => {
+            let o = r[i].flat(1 / 0);
+            n = n.concat(this.walkTokens(o, t));
+          }) : r.tokens && (n = n.concat(this.walkTokens(r.tokens, t)));
+        }
+      }
+    return n;
+  }
+  use(...e) {
+    let t = this.defaults.extensions || { renderers: {}, childTokens: {} };
+    return e.forEach((n) => {
+      let s = { ...n };
+      if (s.async = this.defaults.async || s.async || false, n.extensions && (n.extensions.forEach((r) => {
+        if (!r.name)
+          throw new Error("extension name required");
+        if ("renderer" in r) {
+          let i = t.renderers[r.name];
+          i ? t.renderers[r.name] = function(...o) {
+            let u = r.renderer.apply(this, o);
+            return u === false && (u = i.apply(this, o)), u;
+          } : t.renderers[r.name] = r.renderer;
+        }
+        if ("tokenizer" in r) {
+          if (!r.level || r.level !== "block" && r.level !== "inline")
+            throw new Error("extension level must be 'block' or 'inline'");
+          let i = t[r.level];
+          i ? i.unshift(r.tokenizer) : t[r.level] = [r.tokenizer], r.start && (r.level === "block" ? t.startBlock ? t.startBlock.push(r.start) : t.startBlock = [r.start] : r.level === "inline" && (t.startInline ? t.startInline.push(r.start) : t.startInline = [r.start]));
+        }
+        "childTokens" in r && r.childTokens && (t.childTokens[r.name] = r.childTokens);
+      }), s.extensions = t), n.renderer) {
+        let r = this.defaults.renderer || new P(this.defaults);
+        for (let i in n.renderer) {
+          if (!(i in r))
+            throw new Error(`renderer '${i}' does not exist`);
+          if (["options", "parser"].includes(i))
+            continue;
+          let o = i, u = n.renderer[o], a = r[o];
+          r[o] = (...p) => {
+            let c = u.apply(r, p);
+            return c === false && (c = a.apply(r, p)), c || "";
+          };
+        }
+        s.renderer = r;
+      }
+      if (n.tokenizer) {
+        let r = this.defaults.tokenizer || new y(this.defaults);
+        for (let i in n.tokenizer) {
+          if (!(i in r))
+            throw new Error(`tokenizer '${i}' does not exist`);
+          if (["options", "rules", "lexer"].includes(i))
+            continue;
+          let o = i, u = n.tokenizer[o], a = r[o];
+          r[o] = (...p) => {
+            let c = u.apply(r, p);
+            return c === false && (c = a.apply(r, p)), c;
+          };
+        }
+        s.tokenizer = r;
+      }
+      if (n.hooks) {
+        let r = this.defaults.hooks || new S;
+        for (let i in n.hooks) {
+          if (!(i in r))
+            throw new Error(`hook '${i}' does not exist`);
+          if (["options", "block"].includes(i))
+            continue;
+          let o = i, u = n.hooks[o], a = r[o];
+          S.passThroughHooks.has(i) ? r[o] = (p) => {
+            if (this.defaults.async && S.passThroughHooksRespectAsync.has(i))
+              return (async () => {
+                let h = await u.call(r, p);
+                return a.call(r, h);
+              })();
+            let c = u.call(r, p);
+            return a.call(r, c);
+          } : r[o] = (...p) => {
+            if (this.defaults.async)
+              return (async () => {
+                let h = await u.apply(r, p);
+                return h === false && (h = await a.apply(r, p)), h;
+              })();
+            let c = u.apply(r, p);
+            return c === false && (c = a.apply(r, p)), c;
+          };
+        }
+        s.hooks = r;
+      }
+      if (n.walkTokens) {
+        let r = this.defaults.walkTokens, i = n.walkTokens;
+        s.walkTokens = function(o) {
+          let u = [];
+          return u.push(i.call(this, o)), r && (u = u.concat(r.call(this, o))), u;
+        };
+      }
+      this.defaults = { ...this.defaults, ...s };
+    }), this;
+  }
+  setOptions(e) {
+    return this.defaults = { ...this.defaults, ...e }, this;
+  }
+  lexer(e, t) {
+    return x.lex(e, t ?? this.defaults);
+  }
+  parser(e, t) {
+    return b.parse(e, t ?? this.defaults);
+  }
+  parseMarkdown(e) {
+    return (n, s) => {
+      let r = { ...s }, i = { ...this.defaults, ...r }, o = this.onError(!!i.silent, !!i.async);
+      if (this.defaults.async === true && r.async === false)
+        return o(new Error("marked(): The async option was set to true by an extension. Remove async: false from the parse options object to return a Promise."));
+      if (typeof n > "u" || n === null)
+        return o(new Error("marked(): input parameter is undefined or null"));
+      if (typeof n != "string")
+        return o(new Error("marked(): input parameter is of type " + Object.prototype.toString.call(n) + ", string expected"));
+      if (i.hooks && (i.hooks.options = i, i.hooks.block = e), i.async)
+        return (async () => {
+          let u = i.hooks ? await i.hooks.preprocess(n) : n, p = await (i.hooks ? await i.hooks.provideLexer(e) : e ? x.lex : x.lexInline)(u, i), c = i.hooks ? await i.hooks.processAllTokens(p) : p;
+          i.walkTokens && await Promise.all(this.walkTokens(c, i.walkTokens));
+          let d = await (i.hooks ? await i.hooks.provideParser(e) : e ? b.parse : b.parseInline)(c, i);
+          return i.hooks ? await i.hooks.postprocess(d) : d;
+        })().catch(o);
+      try {
+        i.hooks && (n = i.hooks.preprocess(n));
+        let a = (i.hooks ? i.hooks.provideLexer(e) : e ? x.lex : x.lexInline)(n, i);
+        i.hooks && (a = i.hooks.processAllTokens(a)), i.walkTokens && this.walkTokens(a, i.walkTokens);
+        let c = (i.hooks ? i.hooks.provideParser(e) : e ? b.parse : b.parseInline)(a, i);
+        return i.hooks && (c = i.hooks.postprocess(c)), c;
+      } catch (u) {
+        return o(u);
+      }
+    };
+  }
+  onError(e, t) {
+    return (n) => {
+      if (n.message += `
+Please report this to https://github.com/markedjs/marked.`, e) {
+        let s = "<p>An error occurred:</p><pre>" + T(n.message + "", true) + "</pre>";
+        return t ? Promise.resolve(s) : s;
+      }
+      if (t)
+        return Promise.reject(n);
+      throw n;
+    };
+  }
+}, M, nn, rn, sn, on, ln, un;
+var init_marked_esm = __esm(() => {
+  R = A();
+  z = { exec: () => null };
+  Oe = ((l = "") => {
+    try {
+      return !!new RegExp("(?<=1)(?<!1)" + l);
+    } catch {
+      return false;
+    }
+  })();
+  m = { codeRemoveIndent: /^(?: {1,4}| {0,3}\t)/gm, outputLinkReplace: /\\([\[\]])/g, indentCodeCompensation: /^(\s+)(?:```)/, beginningSpace: /^\s+/, endingHash: /#$/, startingSpaceChar: /^ /, endingSpaceChar: / $/, nonSpaceChar: /[^ ]/, newLineCharGlobal: /\n/g, tabCharGlobal: /\t/g, multipleSpaceGlobal: /\s+/g, blankLine: /^[ \t]*$/, doubleBlankLine: /\n[ \t]*\n[ \t]*$/, blockquoteStart: /^ {0,3}>/, blockquoteSetextReplace: /\n {0,3}((?:=+|-+) *)(?=\n|$)/g, blockquoteSetextReplace2: /^ {0,3}>[ \t]?/gm, listReplaceNesting: /^ {1,4}(?=( {4})*[^ ])/g, listIsTask: /^\[[ xX]\] +\S/, listReplaceTask: /^\[[ xX]\] +/, listTaskCheckbox: /\[[ xX]\]/, anyLine: /\n.*\n/, hrefBrackets: /^<(.*)>$/, tableDelimiter: /[:|]/, tableAlignChars: /^\||\| *$/g, tableRowBlankLine: /\n[ \t]*$/, tableAlignRight: /^ *-+: *$/, tableAlignCenter: /^ *:-+: *$/, tableAlignLeft: /^ *:-+ *$/, startATag: /^<a /i, endATag: /^<\/a>/i, startPreScriptTag: /^<(pre|code|kbd|script)(\s|>)/i, endPreScriptTag: /^<\/(pre|code|kbd|script)(\s|>)/i, startAngleBracket: /^</, endAngleBracket: />$/, pedanticHrefTitle: /^([^'"]*[^\s])\s+(['"])(.*)\2/, unicodeAlphaNumeric: /[\p{L}\p{N}]/u, escapeTest: /[&<>"']/, escapeReplace: /[&<>"']/g, escapeTestNoEncode: /[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/, escapeReplaceNoEncode: /[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/g, caret: /(^|[^\[])\^/g, percentDecode: /%25/g, findPipe: /\|/g, splitPipe: / \|/, slashPipe: /\\\|/g, carriageReturn: /\r\n|\r/g, spaceLine: /^ +$/gm, notSpaceStart: /^\S*/, endingNewline: /\n$/, listItemRegex: (l) => new RegExp(`^( {0,3}${l})((?:[	 ][^\\n]*)?(?:\\n|$))`), nextBulletRegex: I((l) => new RegExp(`^ {0,${l}}(?:[*+-]|\\d{1,9}[.)])((?:[ 	][^\\n]*)?(?:\\n|$))`)), hrRegex: I((l) => new RegExp(`^ {0,${l}}((?:- *){3,}|(?:_ *){3,}|(?:\\* *){3,})(?:\\n+|$)`)), fencesBeginRegex: I((l) => new RegExp(`^ {0,${l}}(?:\`\`\`|~~~)`)), headingBeginRegex: I((l) => new RegExp(`^ {0,${l}}#`)), htmlBeginRegex: I((l) => new RegExp(`^ {0,${l}}<(?:[a-z].*>|!--)`, "i")), blockquoteBeginRegex: I((l) => new RegExp(`^ {0,${l}}>`)) };
+  Te = /^(?:[ \t]*(?:\n|$))+/;
+  we = /^((?: {4}| {0,3}\t)[^\n]+(?:\n(?:[ \t]*(?:\n|$))*)?)+/;
+  ye = /^ {0,3}(`{3,}(?=[^`\n]*(?:\n|$))|~{3,})([^\n]*)(?:\n|$)(?:|([\s\S]*?)(?:\n|$))(?: {0,3}\1[~`]* *(?=\n|$)|$)/;
+  q = /^ {0,3}((?:-[\t ]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})(?:\n+|$)/;
+  Pe = /^ {0,3}(#{1,6})(?=\s|$)(.*)(?:\n+|$)/;
+  U = / {0,3}(?:[*+-]|\d{1,9}[.)])/;
+  oe = /^(?!bull |blockCode|fences|blockquote|heading|html|table)((?:.|\n(?!\s*?\n|bull |blockCode|fences|blockquote|heading|html|table))+?)\n {0,3}(=+|-+) *(?:\n+|$)/;
+  ae = k(oe).replace(/bull/g, U).replace(/blockCode/g, /(?: {4}| {0,3}\t)/).replace(/fences/g, / {0,3}(?:`{3,}|~{3,})/).replace(/blockquote/g, / {0,3}>/).replace(/heading/g, / {0,3}#{1,6}(?:\s|$)/).replace(/html/g, / {0,3}<[^\n>]+>\n/).replace(/\|table/g, "").getRegex();
+  Se = k(oe).replace(/bull/g, U).replace(/blockCode/g, /(?: {4}| {0,3}\t)/).replace(/fences/g, / {0,3}(?:`{3,}|~{3,})/).replace(/blockquote/g, / {0,3}>/).replace(/heading/g, / {0,3}#{1,6}(?:\s|$)/).replace(/html/g, / {0,3}<[^\n>]+>\n/).replace(/table/g, / {0,3}\|?(?:[:\- ]*\|)+[\:\- ]*\n/).getRegex();
+  K = /^([^\n]+(?:\n(?!hr|heading|lheading|blockquote|fences|list|html|table|[ \t]+\n)[^\n]+)*)/;
+  _e = /^[^\n]+/;
+  W = /(?!\s*\])(?:\\[\s\S]|[^\[\]\\])+/;
+  $e = k(/^ {0,3}\[(label)\]: *(?:\n[ \t]*)?([^<\s][^\s]*|<.*?>)(?:(?: +(?:\n[ \t]*)?| *\n[ \t]*)(title))? *(?:\n+|$)/).replace("label", W).replace("title", /(?:"(?:\\"?|[^"\\])*"|'[^'\n]*(?:\n[^'\n]+)*\n?'|\([^()]*\))/).getRegex();
+  Le = k(/^(bull)([ \t][^\n]*?)?(?:\n|$)/).replace(/bull/g, U).getRegex();
+  X = /<!--(?:-?>|[\s\S]*?(?:-->|$))/;
+  Ee = k("^ {0,3}(?:<(script|pre|style|textarea)[\\s>][\\s\\S]*?(?:</\\1>[^\\n]*\\n*|$)|comment[^\\n]*(\\n+|$)|<\\?[\\s\\S]*?(?:\\?>[^\\n]*\\n*|$)|<![A-Z][\\s\\S]*?(?:>[^\\n]*\\n*|$)|<!\\[CDATA\\[[\\s\\S]*?(?:\\]\\]>[^\\n]*\\n*|$)|</?(tag)(?: +|\\n|/?>)[\\s\\S]*?(?:(?:\\n[ \t]*)+\\n|$)|<(?!script|pre|style|textarea)([a-z][\\w-]*)(?:attribute)*? */?>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:(?:\\n[ \t]*)+\\n|$)|</(?!script|pre|style|textarea)[a-z][\\w-]*\\s*>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:(?:\\n[ \t]*)+\\n|$))", "i").replace("comment", X).replace("tag", Q).replace("attribute", / +[a-zA-Z:_][\w.:-]*(?: *= *"[^"\n]*"| *= *'[^'\n]*'| *= *[^\s"'=<>`]+)?/).getRegex();
+  ze = le(/ {0,3}(?:[*+-]|1[.)])[ \t]+[^ \t\n]/);
+  Me = le(/ {0,3}(?:[*+-]|\d{1,9}[.)])(?:[ \t]|\n|$)/);
+  Ae = k(/^( {0,3}> ?(paragraph|[^\n]*)(?:\n|$))+/).replace("paragraph", Me).getRegex();
+  J = { blockquote: Ae, code: we, def: $e, fences: ye, heading: Pe, hr: q, html: Ee, lheading: ae, list: Le, newline: Te, paragraph: ze, table: z, text: _e };
+  se = k("^ *([^\\n ].*)\\n {0,3}((?:\\| *)?:?-+:? *(?:\\| *:?-+:? *)*(?:\\| *)?)(?:\\n((?:(?! *\\n|hr|heading|blockquote|code|fences|list|html).*(?:\\n|$))*)\\n*|$)").replace("hr", q).replace("heading", " {0,3}#{1,6}(?:\\s|$)").replace("blockquote", " {0,3}>").replace("code", "(?: {4}| {0,3}\t)[^\\n]").replace("fences", " {0,3}(?:`{3,}(?=[^`\\n]*(?:\\n|$))|~~~)[^\\n]*(?:\\n|$)").replace("list", " {0,3}(?:[*+-]|1[.)])[ \\t]").replace("html", "</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag", Q).getRegex();
+  Ie = { ...J, lheading: Se, table: se, paragraph: k(K).replace("hr", q).replace("heading", " {0,3}#{1,6}(?:\\s|$)").replace("|lheading", "").replace("table", se).replace("blockquote", " {0,3}>").replace("fences", " {0,3}(?:`{3,}(?=[^`\\n]*(?:\\n|$))|~~~)[^\\n]*(?:\\n|$)").replace("list", " {0,3}(?:[*+-]|1[.)])[ \\t]+[^ \\t\\n]").replace("html", "</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag", Q).getRegex() };
+  Ce = { ...J, html: k(`^ *(?:comment *(?:\\n|\\s*$)|<(tag)[\\s\\S]+?</\\1> *(?:\\n{2,}|\\s*$)|<tag(?:"[^"]*"|'[^']*'|\\s[^'"/>\\s]*)*?/?> *(?:\\n{2,}|\\s*$))`).replace("comment", X).replace(/tag/g, "(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\\b)\\w+(?!:|[^\\w\\s@]*@)\\b").getRegex(), def: /^ *\[([^\]]+)\]: *<?([^\s>]+)>?(?: +(["(][^\n]+[")]))? *(?:\n+|$)/, heading: /^(#{1,6})(.*)(?:\n+|$)/, fences: z, lheading: /^(.+?)\n {0,3}(=+|-+) *(?:\n+|$)/, paragraph: k(K).replace("hr", q).replace("heading", ` *#{1,6} *[^
+]`).replace("lheading", ae).replace("|table", "").replace("blockquote", " {0,3}>").replace("|fences", "").replace("|list", "").replace("|html", "").replace("|tag", "").getRegex() };
+  Be = /^\\([!"#$%&'()*+,\-./:;<=>?@\[\]\\^_`{|}~])/;
+  De = /^(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/;
+  ue = /^( {2,}|\\)\n(?!\s*$)/;
+  qe = /^(`+|[^`])(?:(?= {2,}\n)|[\s\S]*?(?:(?=[\\<!\[`*_]|\b_|$)|[^ ](?= {2,}\n)))/;
+  _ = /[\p{P}\p{S}]/u;
+  C = /[\s\p{P}\p{S}]/u;
+  v = /[^\s\p{P}\p{S}]/u;
+  ve = k(/^((?![*_])punctSpace)/, "u").replace(/punctSpace/g, C).getRegex();
+  He = /[\p{Pi}\p{Ps}"']/u;
+  pe = /(?!~)[\p{P}\p{S}]/u;
+  Ze = /(?!~)[\s\p{P}\p{S}]/u;
+  Ge = /(?:[^\s\p{P}\p{S}]|~)/u;
+  Qe = k(/link|precode-code|html/, "g").replace("link", /\[(?:[^\[\]`]|(?<a>`+)[^`]+\k<a>(?!`))*?\]\((?:\\[\s\S]|[^\\\(\)]|\((?:\\[\s\S]|[^\\\(\)])*\))*\)/).replace("precode-", Oe ? "(?<!`)()" : "(^^|[^`])").replace("code", /(?<b>`+)[^`]+\k<b>(?!`)/).replace("html", /<(?! )[^<>]*?>/).getRegex();
+  ce = /^(?:\*+(?:((?!\*)punct)|([^\s*]))?)|^_+(?:((?!_)punct)|([^\s_]))?/;
+  Ne = k(ce, "u").replace(/punct/g, _).getRegex();
+  je = k(ce, "u").replace(/punct/g, pe).getRegex();
+  Fe = /^(?:\*+(?:((?!\*)(?!openQuote)punct)|([^\s*]))?)|^_+(?:((?!_)(?!openQuote)punct)|([^\s_]))?/;
+  Ue = k(Fe, "u").replace(/openQuote/g, He).replace(/punct/g, _).getRegex();
+  Ke = k(he, "gu").replace(/notPunctSpace/g, v).replace(/punctSpace/g, C).replace(/punct/g, _).getRegex();
+  We = k(he, "gu").replace(/notPunctSpace/g, Ge).replace(/punctSpace/g, Ze).replace(/punct/g, pe).getRegex();
+  Je = k(Xe, "gu").replace(/notPunctSpace/g, v).replace(/punctSpace/g, C).replace(/punct/g, _).getRegex();
+  Ve = k("^[^_*]*?\\*\\*[^_*]*?_[^_*]*?(?=\\*\\*)|[^_]+(?=[^_])|(?!_)punct(_+)(?=[\\s]|$)|notPunctSpace(_+)(?!_)(?=punctSpace|$)|(?!_)punctSpace(_+)(?=notPunctSpace)|[\\s](_+)(?!_)(?=punct)|(?!_)punct(_+)(?!_)(?=punct)", "gu").replace(/notPunctSpace/g, v).replace(/punctSpace/g, C).replace(/punct/g, _).getRegex();
+  et = k(Ye, "gu").replace(/notPunctSpace/g, v).replace(/punctSpace/g, C).replace(/punct/g, _).getRegex();
+  tt = k(/^~~?(?:((?!~)punct)|[^\s~])/, "u").replace(/punct/g, _).getRegex();
+  rt = k(nt, "gu").replace(/notPunctSpace/g, v).replace(/punctSpace/g, C).replace(/punct/g, _).getRegex();
+  st = k(/\\(punct)/, "gu").replace(/punct/g, _).getRegex();
+  it = k(/^<(scheme:[^\s\x00-\x1f<>]*|email)>/).replace("scheme", /[a-zA-Z][a-zA-Z0-9+.-]{1,31}/).replace("email", /[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+(@)[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+(?![-_])/).getRegex();
+  ot = k(X).replace("(?:-->|$)", "-->").getRegex();
+  at = k("^comment|^</[a-zA-Z][\\w:-]*\\s*>|^<[a-zA-Z][\\w-]*(?:attribute)*?\\s*/?>|^<\\?[\\s\\S]*?\\?>|^<![a-zA-Z]+\\s[\\s\\S]*?>|^<!\\[CDATA\\[[\\s\\S]*?\\]\\]>").replace("comment", ot).replace("attribute", /\s+[a-zA-Z:_][\w.:-]*(?:\s*=\s*"[^"]*"|\s*=\s*'[^']*'|\s*=\s*[^\s"'=<>`]+)?/).getRegex();
+  G = /(?:\[(?:\\[\s\S]|[^\[\]\\])*\]|\\[\s\S]|`+(?!`)[^`]*?`+(?!`)|``+(?=\])|[^\[\]\\`])*?/;
+  lt = k(/^!?\[(label)\]\(\s*(href)(?:(?:[ \t]+(?:\n[ \t]*)?|\n[ \t]*)(title))?\s*\)/).replace("label", G).replace("href", /<(?:\\.|[^\n<>\\])+>|[^ \t\n\x00-\x1f]+|(?=\))/).replace("title", /"(?:\\"?|[^"\\])*"|'(?:\\'?|[^'\\])*'|\((?:\\\)?|[^)\\])*\)/).getRegex();
+  ke = k(/^!?\[(label)\]\[(ref)\]/).replace("label", G).replace("ref", W).getRegex();
+  de = k(/^!?\[(ref)\](?:\[\])?/).replace("ref", W).getRegex();
+  ut = k("reflink|nolink(?!\\()", "g").replace("reflink", ke).replace("nolink", de).getRegex();
+  ie = /[hH][tT][tT][pP][sS]?|[fF][tT][pP]/;
+  V = { _backpedal: z, anyPunctuation: st, autolink: it, blockSkip: Qe, br: ue, code: De, del: z, delLDelim: z, delRDelim: z, emStrongLDelim: Ne, emStrongRDelimAst: Ke, emStrongRDelimUnd: Ve, escape: Be, link: lt, nolink: de, punctuation: ve, reflink: ke, reflinkSearch: ut, tag: at, text: qe, url: z };
+  pt = { ...V, emStrongLDelim: Ue, emStrongRDelimAst: Je, emStrongRDelimUnd: et, link: k(/^!?\[(label)\]\((.*?)\)/).replace("label", G).getRegex(), reflink: k(/^!?\[(label)\]\s*\[([^\]]*)\]/).replace("label", G).getRegex() };
+  F = { ...V, emStrongRDelimAst: We, emStrongLDelim: je, delLDelim: tt, delRDelim: rt, url: k(/^((?:protocol):\/\/|www\.)(?:[a-zA-Z0-9\-]+\.?)+[^\s<]*|^email/).replace("protocol", ie).replace("email", /[A-Za-z0-9._+-]+(@)[a-zA-Z0-9-_]+(?:\.[a-zA-Z0-9-_]*[a-zA-Z0-9])+(?![-_])/).getRegex(), _backpedal: /(?:[^?!.,:;*_'"~()&]+|\([^)]*\)|&(?![a-zA-Z0-9]+;$)|[?!.,:;*_'"~)]+(?!$))+/, del: /^(~~?)(?=[^\s~])((?:\\[\s\S]|[^\\])*?(?:\\[\s\S]|[^\s~\\]))\1(?=[^~]|$)/, text: k(/^(`+|~+|[^`~])(?:(?=[`~])|(?= {2,}\n)|(?=[a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-]+@)|[\s\S]*?(?:(?=[\\<!\[`*~_]|\b_|protocol:\/\/|www\.|$)|[^ ](?= {2,}\n)|[^a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-](?=[a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-]+@)))/).replace("protocol", ie).getRegex() };
+  ct = { ...F, br: k(ue).replace("{2,}", "*").getRegex(), text: k(F.text).replace("\\b_", "\\b_| {2,}\\n").replace(/\{2,\}/g, "*").getRegex() };
+  H = { normal: J, gfm: Ie, pedantic: Ce };
+  B = { normal: V, gfm: F, breaks: ct, pedantic: pt };
+  ht = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  S = class {
+    options;
+    block;
+    constructor(e) {
+      this.options = e || R;
+    }
+    static passThroughHooks = new Set(["preprocess", "postprocess", "processAllTokens", "emStrongMask"]);
+    static passThroughHooksRespectAsync = new Set(["preprocess", "postprocess", "processAllTokens"]);
+    preprocess(e) {
+      return e;
+    }
+    postprocess(e) {
+      return e;
+    }
+    processAllTokens(e) {
+      return e;
+    }
+    emStrongMask(e) {
+      return e;
+    }
+    provideLexer(e = this.block) {
+      return e ? x.lex : x.lexInline;
+    }
+    provideParser(e = this.block) {
+      return e ? b.parse : b.parseInline;
+    }
+  };
+  M = new Z;
+  f.options = f.setOptions = function(l) {
+    return M.setOptions(l), f.defaults = M.defaults, j(f.defaults), f;
+  };
+  f.getDefaults = A;
+  f.defaults = R;
+  f.use = dt;
+  f.walkTokens = function(l, e) {
+    return M.walkTokens(l, e);
+  };
+  f.parseInline = M.parseInline;
+  f.Parser = b;
+  f.parser = b.parse;
+  f.Renderer = P;
+  f.TextRenderer = L;
+  f.Lexer = x;
+  f.lexer = x.lex;
+  f.Tokenizer = y;
+  f.Hooks = S;
+  f.parse = f;
+  nn = f.options;
+  rn = f.setOptions;
+  sn = f.walkTokens;
+  on = f.parseInline;
+  ln = b.parse;
+  un = x.lex;
+});
 // node_modules/get-east-asian-width/lookup-data.js
 var ambiguousMinimalCodePoint = 161, ambiguousMaximumCodePoint = 1114109, ambiguousRanges, fullwidthMinimalCodePoint = 12288, fullwidthMaximumCodePoint = 65510, fullwidthRanges, wideMinimalCodePoint = 4352, wideMaximumCodePoint = 262141, wideRanges;
 var init_lookup_data = __esm(() => {
@@ -32051,8 +33411,11 @@ var init_get_east_asian_width = __esm(() => {
 });
 
 // node_modules/@earendil-works/pi-tui/dist/utils.js
-function getSegmenter() {
-  return segmenter;
+function getGraphemeSegmenter() {
+  return graphemeSegmenter;
+}
+function getWordSegmenter() {
+  return wordSegmenter;
 }
 function couldBeEmoji(segment) {
   const cp = segment.codePointAt(0);
@@ -32080,7 +33443,7 @@ function truncateFragmentToWidth(text, maxWidth) {
   if (!hasAnsi && !hasTabs) {
     let result = "";
     let width = 0;
-    for (const { segment } of segmenter.segment(text)) {
+    for (const { segment } of graphemeSegmenter.segment(text)) {
       const w = graphemeWidth(segment);
       if (width + w > maxWidth) {
         break;
@@ -32122,7 +33485,7 @@ function truncateFragmentToWidth(text, maxWidth) {
       }
       end++;
     }
-    for (const { segment } of segmenter.segment(text.slice(i, end))) {
+    for (const { segment } of graphemeSegmenter.segment(text.slice(i, end))) {
       const w = graphemeWidth(segment);
       if (width + w > maxWidth) {
         return { text: result, width };
@@ -32140,16 +33503,27 @@ function truncateFragmentToWidth(text, maxWidth) {
 }
 function finalizeTruncatedResult(prefix, prefixWidth, ellipsis, ellipsisWidth, maxWidth, pad) {
   const reset = "\x1B[0m";
+  const hyperlinkClose = getActiveOsc8Close(prefix);
   const visibleWidth = prefixWidth + ellipsisWidth;
   let result;
   if (ellipsis.length > 0) {
-    result = `${prefix}${reset}${ellipsis}${reset}`;
+    result = `${prefix}${hyperlinkClose}${reset}${ellipsis}${reset}`;
   } else {
-    result = `${prefix}${reset}`;
+    result = `${prefix}${hyperlinkClose}${reset}`;
   }
   return pad ? result + " ".repeat(Math.max(0, maxWidth - visibleWidth)) : result;
 }
 function graphemeWidth(segment) {
+  if (segment.length === 1) {
+    const code = segment.charCodeAt(0);
+    if (code >= 32 && code <= 126)
+      return 1;
+    if (code === 9)
+      return 3;
+  }
+  if (terminalSpacingMarkRegex.test(segment)) {
+    return [...segment].length;
+  }
   if (zeroWidthRegex.test(segment)) {
     return 0;
   }
@@ -32165,14 +33539,22 @@ function graphemeWidth(segment) {
     return 2;
   }
   let width = eastAsianWidth(cp);
-  if (segment.length > 1) {
-    for (const char of segment.slice(1)) {
+  let followsMark = false;
+  const chars = [...base];
+  for (const char of chars.slice(1)) {
+    if (terminalSpacingMarkRegex.test(char)) {
+      width += 1;
+      followsMark = false;
+    } else if (markCharRegex.test(char)) {
+      followsMark = true;
+    } else if (!nonPrintingCharRegex.test(char)) {
       const c = char.codePointAt(0);
-      if (c >= 65280 && c <= 65519) {
+      if (followsMark || c >= 65280 && c <= 65519) {
         width += eastAsianWidth(c);
       } else if (c === 3635 || c === 3763) {
         width += 1;
       }
+      followsMark = false;
     }
   }
   return width;
@@ -32181,8 +33563,9 @@ function visibleWidth(str) {
   if (str.length === 0) {
     return 0;
   }
-  if (isPrintableAscii(str)) {
-    return str.length;
+  const asciiWidth = asciiVisibleWidth(str);
+  if (asciiWidth !== -1) {
+    return asciiWidth;
   }
   const cached = widthCache.get(str);
   if (cached !== undefined) {
@@ -32192,22 +33575,25 @@ function visibleWidth(str) {
   if (str.includes("\t")) {
     clean = clean.replace(/\t/g, "   ");
   }
-  if (clean.includes("\x1B")) {
+  let escapeIndex = clean.indexOf("\x1B");
+  if (escapeIndex !== -1) {
     let stripped = "";
-    let i = 0;
-    while (i < clean.length) {
-      const ansi = extractAnsiCode(clean, i);
-      if (ansi) {
-        i += ansi.length;
-        continue;
+    let copyFrom = 0;
+    while (escapeIndex !== -1) {
+      const length = ansiCodeLength(clean, escapeIndex);
+      if (length > 0) {
+        stripped += clean.slice(copyFrom, escapeIndex);
+        escapeIndex += length;
+        copyFrom = escapeIndex;
+      } else {
+        escapeIndex++;
       }
-      stripped += clean[i];
-      i++;
+      escapeIndex = clean.indexOf("\x1B", escapeIndex);
     }
-    clean = stripped;
+    clean = stripped + clean.slice(copyFrom);
   }
   let width = 0;
-  for (const { segment } of segmenter.segment(clean)) {
+  for (const { segment } of graphemeSegmenter.segment(clean)) {
     width += graphemeWidth(segment);
   }
   if (widthCache.size >= WIDTH_CACHE_SIZE) {
@@ -32219,46 +33605,113 @@ function visibleWidth(str) {
   widthCache.set(str, width);
   return width;
 }
+function extractAnsiCodes(str) {
+  let result = "";
+  let i = str.indexOf("\x1B");
+  while (i !== -1) {
+    const length = ansiCodeLength(str, i);
+    if (length > 0) {
+      result += str.substring(i, i + length);
+      i += length;
+    } else {
+      i++;
+    }
+    i = str.indexOf("\x1B", i);
+  }
+  return result;
+}
+function isWhitespaceToken(token) {
+  let i = 0;
+  while (i < token.length) {
+    const code = token.charCodeAt(i);
+    if (code === 27) {
+      const length = ansiCodeLength(token, i);
+      if (length === 0)
+        return false;
+      i += length;
+    } else if (code === 32 || code >= 9 && code <= 13) {
+      i++;
+    } else if (code < 128 || !WHITESPACE_REGEX.test(token[i])) {
+      return false;
+    } else {
+      i++;
+    }
+  }
+  return true;
+}
+function replaceControlCharacters(str) {
+  return str.replace(CONTROL_CHARACTERS, " ");
+}
 function normalizeTerminalOutput(str) {
-  if (!THAI_LAO_AM_REGEX.test(str))
-    return str;
-  return str.replace(THAI_LAO_AM_GLOBAL_REGEX, (char) => char === "\u0E33" ? "\u0E4D\u0E32" : "\u0ECD\u0EB2");
+  let normalized = str;
+  if (THAI_LAO_AM_REGEX.test(normalized)) {
+    normalized = normalized.replace(THAI_LAO_AM_GLOBAL_REGEX, (char) => char === "\u0E33" ? "\u0E4D\u0E32" : "\u0ECD\u0EB2");
+  }
+  if (!normalized.includes("\t"))
+    return normalized;
+  let result = "";
+  let i = 0;
+  while (i < normalized.length) {
+    const ansi = extractAnsiCode(normalized, i);
+    if (ansi) {
+      result += ansi.code;
+      i += ansi.length;
+      continue;
+    }
+    result += normalized[i] === "\t" ? "   " : normalized[i];
+    i++;
+  }
+  return result;
 }
 function extractAnsiCode(str, pos) {
-  if (pos >= str.length || str[pos] !== "\x1B")
-    return null;
+  const length = ansiCodeLength(str, pos);
+  return length > 0 ? { code: str.substring(pos, pos + length), length } : null;
+}
+function asciiVisibleWidth(str) {
+  let width = 0;
+  let i = 0;
+  while (i < str.length) {
+    const code = str.charCodeAt(i);
+    if (code >= 32 && code <= 126) {
+      width++;
+      i++;
+    } else if (code === 9) {
+      width += 3;
+      i++;
+    } else if (code === 27) {
+      const length = ansiCodeLength(str, i);
+      if (length === 0)
+        return -1;
+      i += length;
+    } else {
+      return -1;
+    }
+  }
+  return width;
+}
+function ansiCodeLength(str, pos) {
+  if (pos >= str.length || str.charCodeAt(pos) !== 27)
+    return 0;
   const next = str[pos + 1];
   if (next === "[") {
-    let j = pos + 2;
-    while (j < str.length && !/[mGKHJ]/.test(str[j]))
-      j++;
-    if (j < str.length)
-      return { code: str.substring(pos, j + 1), length: j + 1 - pos };
-    return null;
-  }
-  if (next === "]") {
-    let j = pos + 2;
-    while (j < str.length) {
-      if (str[j] === "\x07")
-        return { code: str.substring(pos, j + 1), length: j + 1 - pos };
-      if (str[j] === "\x1B" && str[j + 1] === "\\")
-        return { code: str.substring(pos, j + 2), length: j + 2 - pos };
-      j++;
+    for (let j = pos + 2;j < str.length; j++) {
+      const c = str.charCodeAt(j);
+      if (c === 109 || c === 71 || c === 75 || c === 72 || c === 74)
+        return j + 1 - pos;
     }
-    return null;
+    return 0;
   }
-  if (next === "_") {
-    let j = pos + 2;
-    while (j < str.length) {
-      if (str[j] === "\x07")
-        return { code: str.substring(pos, j + 1), length: j + 1 - pos };
-      if (str[j] === "\x1B" && str[j + 1] === "\\")
-        return { code: str.substring(pos, j + 2), length: j + 2 - pos };
-      j++;
+  if (next === "]" || next === "_") {
+    for (let j = pos + 2;j < str.length; j++) {
+      const c = str.charCodeAt(j);
+      if (c === 7)
+        return j + 1 - pos;
+      if (c === 27 && str[j + 1] === "\\")
+        return j + 2 - pos;
     }
-    return null;
+    return 0;
   }
-  return null;
+  return 0;
 }
 function parseOsc8Hyperlink(ansiCode) {
   if (!ansiCode.startsWith("\x1B]8;")) {
@@ -32282,6 +33735,26 @@ function formatOsc8Hyperlink(hyperlink) {
 }
 function formatOsc8Close(terminator) {
   return `\x1B]8;;${terminator}`;
+}
+function getActiveOsc8Close(prefix) {
+  if (!prefix.includes("\x1B]8;")) {
+    return "";
+  }
+  let activeHyperlink = null;
+  let i = 0;
+  while (i < prefix.length) {
+    const ansi = extractAnsiCode(prefix, i);
+    if (ansi) {
+      const hyperlink = parseOsc8Hyperlink(ansi.code);
+      if (hyperlink !== undefined) {
+        activeHyperlink = hyperlink;
+      }
+      i += ansi.length;
+    } else {
+      i++;
+    }
+  }
+  return activeHyperlink ? formatOsc8Close(activeHyperlink.terminator) : "";
 }
 
 class AnsiCodeTracker {
@@ -32452,6 +33925,9 @@ class AnsiCodeTracker {
     }
     return result;
   }
+  getActiveBackgroundCode() {
+    return this.bgColor ? `\x1B[${this.bgColor}m` : "";
+  }
   hasActiveCodes() {
     return this.bold || this.dim || this.italic || this.underline || this.blink || this.inverse || this.hidden || this.strikethrough || this.fgColor !== null || this.bgColor !== null || this.activeHyperlink !== null;
   }
@@ -32460,6 +33936,9 @@ class AnsiCodeTracker {
     if (this.underline) {
       result += "\x1B[24m";
     }
+    if (this.strikethrough) {
+      result += "\x1B[29m";
+    }
     if (this.activeHyperlink) {
       result += formatOsc8Close(this.activeHyperlink.terminator);
     }
@@ -32467,23 +33946,36 @@ class AnsiCodeTracker {
   }
 }
 function updateTrackerFromText(text, tracker) {
-  let i = 0;
-  while (i < text.length) {
-    const ansiResult = extractAnsiCode(text, i);
-    if (ansiResult) {
-      tracker.process(ansiResult.code);
-      i += ansiResult.length;
+  let i = text.indexOf("\x1B");
+  while (i !== -1) {
+    const length = ansiCodeLength(text, i);
+    if (length > 0) {
+      tracker.process(text.substring(i, i + length));
+      i += length;
     } else {
       i++;
     }
+    i = text.indexOf("\x1B", i);
   }
+}
+function* graphemeSegments(text) {
+  for (const { segment } of graphemeSegmenter.segment(text))
+    yield segment;
 }
 function splitIntoTokensWithAnsi(text) {
   const tokens = [];
   let current = "";
   let pendingAnsi = "";
-  let inWhitespace = false;
+  let currentKind = null;
   let i = 0;
+  const flushCurrent = () => {
+    if (!current) {
+      return;
+    }
+    tokens.push(current);
+    current = "";
+    currentKind = null;
+  };
   while (i < text.length) {
     const ansiResult = extractAnsiCode(text, i);
     if (ansiResult) {
@@ -32491,22 +33983,44 @@ function splitIntoTokensWithAnsi(text) {
       i += ansiResult.length;
       continue;
     }
-    const char = text[i];
-    const charIsSpace = char === " ";
-    if (charIsSpace !== inWhitespace && current) {
-      tokens.push(current);
-      current = "";
+    let end = text.indexOf("\x1B", i + 1);
+    while (end !== -1 && ansiCodeLength(text, end) === 0) {
+      end = text.indexOf("\x1B", end + 1);
     }
-    if (pendingAnsi) {
-      current += pendingAnsi;
-      pendingAnsi = "";
+    if (end === -1)
+      end = text.length;
+    const chunk = text.slice(i, end);
+    const ascii = isPrintableAscii(chunk);
+    for (const segment of ascii ? chunk : graphemeSegments(chunk)) {
+      const segmentIsSpace = segment === " ";
+      if (!ascii && !segmentIsSpace && cjkBreakRegex.test(segment)) {
+        flushCurrent();
+        const token = pendingAnsi + segment;
+        pendingAnsi = "";
+        tokens.push(token);
+        continue;
+      }
+      const segmentKind = segmentIsSpace ? "space" : "word";
+      if (current && currentKind !== segmentKind) {
+        flushCurrent();
+      }
+      if (pendingAnsi) {
+        current += pendingAnsi;
+        pendingAnsi = "";
+      }
+      currentKind = segmentKind;
+      current += segment;
     }
-    inWhitespace = charIsSpace;
-    current += char;
-    i++;
+    i = end;
   }
   if (pendingAnsi) {
-    current += pendingAnsi;
+    if (current) {
+      current += pendingAnsi;
+    } else if (tokens.length > 0) {
+      tokens[tokens.length - 1] += pendingAnsi;
+    } else {
+      current = pendingAnsi;
+    }
   }
   if (current) {
     tokens.push(current);
@@ -32517,13 +34031,15 @@ function wrapTextWithAnsi(text, width) {
   if (!text) {
     return [""];
   }
-  const inputLines = text.split(`
-`);
+  const inputLines = text.split(/\r\n|\r|\n/);
   const result = [];
   const tracker = new AnsiCodeTracker;
   for (const inputLine of inputLines) {
     const prefix = result.length > 0 ? tracker.getActiveCodes() : "";
-    result.push(...wrapSingleLine(prefix + inputLine, width));
+    const wrappedLines = wrapSingleLine(prefix + inputLine, width);
+    for (const wrappedLine of wrappedLines) {
+      result.push(wrappedLine);
+    }
     updateTrackerFromText(inputLine, tracker);
   }
   return result.length > 0 ? result : [""];
@@ -32543,9 +34059,10 @@ function wrapSingleLine(line, width) {
   let currentVisibleLength = 0;
   for (const token of tokens) {
     const tokenVisibleLength = visibleWidth(token);
-    const isWhitespace = token.trim() === "";
+    const isWhitespace = isWhitespaceToken(token);
     if (tokenVisibleLength > width && !isWhitespace) {
       if (currentLine) {
+        currentLine = currentLine.trimEnd();
         const lineEndReset = tracker.getLineEndReset();
         if (lineEndReset) {
           currentLine += lineEndReset;
@@ -32555,7 +34072,9 @@ function wrapSingleLine(line, width) {
         currentVisibleLength = 0;
       }
       const broken = breakLongWord(token, width, tracker);
-      wrapped.push(...broken.slice(0, -1));
+      for (let i = 0;i < broken.length - 1; i++) {
+        wrapped.push(broken[i]);
+      }
       currentLine = broken[broken.length - 1];
       currentVisibleLength = visibleWidth(currentLine);
       continue;
@@ -32563,6 +34082,10 @@ function wrapSingleLine(line, width) {
     const totalNeeded = currentVisibleLength + tokenVisibleLength;
     if (totalNeeded > width && currentVisibleLength > 0) {
       let lineToWrap = currentLine.trimEnd();
+      if (isWhitespace) {
+        lineToWrap += extractAnsiCodes(token);
+        updateTrackerFromText(token, tracker);
+      }
       const lineEndReset = tracker.getLineEndReset();
       if (lineEndReset) {
         lineToWrap += lineEndReset;
@@ -32571,10 +34094,12 @@ function wrapSingleLine(line, width) {
       if (isWhitespace) {
         currentLine = tracker.getActiveCodes();
         currentVisibleLength = 0;
-      } else {
-        currentLine = tracker.getActiveCodes() + token;
-        currentVisibleLength = tokenVisibleLength;
+        continue;
       }
+      currentLine = tracker.getActiveCodes() + token;
+      currentVisibleLength = tokenVisibleLength;
+    } else if (isWhitespace && totalNeeded > width && token.includes("\x1B")) {
+      currentLine += extractAnsiCodes(token);
     } else {
       currentLine += token;
       currentVisibleLength += tokenVisibleLength;
@@ -32588,9 +34113,6 @@ function wrapSingleLine(line, width) {
 }
 function isWhitespaceChar(char) {
   return /\s/.test(char);
-}
-function isPunctuationChar(char) {
-  return PUNCTUATION_REGEX.test(char);
 }
 function breakLongWord(word, width, tracker) {
   const lines = [];
@@ -32612,7 +34134,7 @@ function breakLongWord(word, width, tracker) {
         end++;
       }
       const textPortion = word.slice(i, end);
-      for (const seg of segmenter.segment(textPortion)) {
+      for (const seg of graphemeSegmenter.segment(textPortion)) {
         segments.push({ type: "grapheme", value: seg.segment });
       }
       i = end;
@@ -32682,7 +34204,7 @@ function truncateToWidth(text, maxWidth, ellipsis = "...", pad = false) {
   const hasAnsi = text.includes("\x1B");
   const hasTabs = text.includes("\t");
   if (!hasAnsi && !hasTabs) {
-    for (const { segment } of segmenter.segment(text)) {
+    for (const { segment } of graphemeSegmenter.segment(text)) {
       const width = graphemeWidth(segment);
       if (keepContiguousPrefix && keptWidth + width <= targetWidth) {
         result += segment;
@@ -32734,7 +34256,7 @@ function truncateToWidth(text, maxWidth, ellipsis = "...", pad = false) {
         }
         end++;
       }
-      for (const { segment } of segmenter.segment(text.slice(i, end))) {
+      for (const { segment } of graphemeSegmenter.segment(text.slice(i, end))) {
         const width = graphemeWidth(segment);
         if (keepContiguousPrefix && keptWidth + width <= targetWidth) {
           if (pendingAnsi) {
@@ -32776,9 +34298,10 @@ function sliceWithWidth(line, startCol, length, strict = false) {
   while (i < line.length) {
     const ansi = extractAnsiCode(line, i);
     if (ansi) {
-      if (currentCol >= startCol && currentCol < endCol)
-        result += ansi.code;
-      else if (currentCol < startCol)
+      if (currentCol >= startCol && currentCol < endCol) {
+        result += pendingAnsi + ansi.code;
+        pendingAnsi = "";
+      } else if (currentCol < startCol && !ansi.code.startsWith("\x1B_"))
         pendingAnsi += ansi.code;
       i += ansi.length;
       continue;
@@ -32786,7 +34309,7 @@ function sliceWithWidth(line, startCol, length, strict = false) {
     let textEnd = i;
     while (textEnd < line.length && !extractAnsiCode(line, textEnd))
       textEnd++;
-    for (const { segment } of segmenter.segment(line.slice(i, textEnd))) {
+    for (const { segment } of graphemeSegmenter.segment(line.slice(i, textEnd))) {
       const w = graphemeWidth(segment);
       const inRange = currentCol >= startCol && currentCol < endCol;
       const fits = !strict || currentCol + w <= endCol;
@@ -32821,7 +34344,7 @@ function extractSegments(line, beforeEnd, afterStart, afterLen, strictAfter = fa
       pooledStyleTracker.process(ansi.code);
       if (currentCol < beforeEnd) {
         pendingAnsiBefore += ansi.code;
-      } else if (currentCol >= afterStart && currentCol < afterEnd && afterStarted) {
+      } else if (currentCol >= afterStart && currentCol < afterEnd && (afterStarted || ansi.code.startsWith("\x1B_"))) {
         after += ansi.code;
       }
       i += ansi.length;
@@ -32830,9 +34353,9 @@ function extractSegments(line, beforeEnd, afterStart, afterLen, strictAfter = fa
     let textEnd = i;
     while (textEnd < line.length && !extractAnsiCode(line, textEnd))
       textEnd++;
-    for (const { segment } of segmenter.segment(line.slice(i, textEnd))) {
+    for (const { segment } of graphemeSegmenter.segment(line.slice(i, textEnd))) {
       const w = graphemeWidth(segment);
-      if (currentCol < beforeEnd) {
+      if (currentCol < beforeEnd && currentCol + w <= beforeEnd) {
         if (pendingAnsiBefore) {
           before += pendingAnsiBefore;
           pendingAnsiBefore = "";
@@ -32860,23 +34383,52 @@ function extractSegments(line, beforeEnd, afterStart, afterLen, strictAfter = fa
   }
   return { before, beforeWidth, after, afterWidth };
 }
-var segmenter, zeroWidthRegex, leadingNonPrintingRegex, rgiEmojiRegex, WIDTH_CACHE_SIZE = 512, widthCache, THAI_LAO_AM_REGEX, THAI_LAO_AM_GLOBAL_REGEX, PUNCTUATION_REGEX, pooledStyleTracker;
+var graphemeSegmenter, wordSegmenter, zeroWidthRegex, leadingNonPrintingRegex, nonPrintingCharRegex, markCharRegex, terminalSpacingMarkRegex, rgiEmojiRegex, WIDTH_CACHE_SIZE = 512, widthCache, cjkBreakRegex, cjkPunctuationRegex, autocompleteSeparatorRegex, autocompleteBoundaryRegex, WHITESPACE_REGEX, CONTROL_CHARACTERS, THAI_LAO_AM_REGEX, THAI_LAO_AM_GLOBAL_REGEX, PUNCTUATION_REGEX, pooledStyleTracker;
 var init_utils = __esm(() => {
   init_get_east_asian_width();
-  segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  wordSegmenter = new Intl.Segmenter(undefined, { granularity: "word" });
   zeroWidthRegex = /^(?:\p{Default_Ignorable_Code_Point}|\p{Control}|\p{Mark}|\p{Surrogate})+$/v;
   leadingNonPrintingRegex = /^[\p{Default_Ignorable_Code_Point}\p{Control}\p{Format}\p{Mark}\p{Surrogate}]+/v;
+  nonPrintingCharRegex = /^(?:\p{Default_Ignorable_Code_Point}|\p{Control}|\p{Format}|\p{Mark}|\p{Surrogate})$/v;
+  markCharRegex = /^\p{Mark}$/v;
+  terminalSpacingMarkRegex = /^(?:[\p{Spacing_Mark}--[\u1734\u302E\u302F]]|[\u065F\u0F7F\u102B\u102C\u1031\u1033-\u1035\u1038\u103A-\u103E])+$/v;
   rgiEmojiRegex = /^\p{RGI_Emoji}$/v;
   widthCache = new Map;
+  cjkBreakRegex = /[\p{Script_Extensions=Han}\p{Script_Extensions=Hiragana}\p{Script_Extensions=Katakana}\p{Script_Extensions=Hangul}\p{Script_Extensions=Bopomofo}]/u;
+  cjkPunctuationRegex = new RegExp(`(?:(?=\\p{Punctuation})${cjkBreakRegex.source}|[\uFF0C\uFF0E\uFF1A\uFF1B\uFF01\uFF1F\uFF08\uFF09\uFF3B\uFF3D\uFF5B\uFF5D\u201C\u201D\u2018\u2019\u2026\u2014])`, "u");
+  autocompleteSeparatorRegex = new RegExp(`(?:\\s|${cjkPunctuationRegex.source})`, "u");
+  autocompleteBoundaryRegex = new RegExp(`(?:^|${autocompleteSeparatorRegex.source})`, "u");
+  WHITESPACE_REGEX = /\s/;
+  CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]+/g;
   THAI_LAO_AM_REGEX = /[\u0e33\u0eb3]/;
   THAI_LAO_AM_GLOBAL_REGEX = /[\u0e33\u0eb3]/g;
   PUNCTUATION_REGEX = /[(){}[\]<>.,;:'"!?+\-=*/\\|&%^$#@~`]/;
   pooledStyleTracker = new AnsiCodeTracker;
 });
 
-// node_modules/@earendil-works/pi-tui/dist/components/box.js
-var init_box = __esm(() => {
+// node_modules/@earendil-works/pi-tui/dist/autocomplete.js
+var PATH_DELIMITERS, tokenStartRegex;
+var init_autocomplete = __esm(() => {
   init_utils();
+  PATH_DELIMITERS = new Set([" ", "\t", '"', "'", "="]);
+  tokenStartRegex = new RegExp(`${autocompleteBoundaryRegex.source}$`, "u");
+});
+
+// node_modules/@earendil-works/pi-tui/dist/oklab.js
+var K1 = 0.206, K2 = 0.03, K3;
+var init_oklab = __esm(() => {
+  K3 = (1 + K1) / (1 + K2);
+});
+
+// node_modules/@earendil-works/pi-tui/dist/colors.js
+var NUMBER_PATTERN, OKLCH_PATTERN, OKHSL_PATTERN, GRAY_VALUES;
+var init_colors = __esm(() => {
+  init_oklab();
+  NUMBER_PATTERN = String.raw`[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?`;
+  OKLCH_PATTERN = new RegExp(`^oklch\\(\\s*(${NUMBER_PATTERN})(%)?\\s+(${NUMBER_PATTERN})\\s+(${NUMBER_PATTERN})(?:deg)?\\s*\\)$`, "i");
+  OKHSL_PATTERN = new RegExp(`^okhsl\\(\\s*(${NUMBER_PATTERN})(?:deg)?\\s+(${NUMBER_PATTERN})(%)?\\s+(${NUMBER_PATTERN})(%)?\\s*\\)$`, "i");
+  GRAY_VALUES = Array.from({ length: 24 }, (_, index) => 8 + index * 10);
 });
 
 // node_modules/@earendil-works/pi-tui/dist/keys.js
@@ -32893,11 +34445,19 @@ function normalizeShiftedLetterIdentityCodepoint(codepoint, modifier) {
   }
   return codepoint;
 }
+function getLogicalShiftedSymbolCandidate(codepoint, modifier, allowedSymbols) {
+  if (codepoint === undefined || (modifier & MODIFIERS.shift) === 0)
+    return;
+  const normalizedCodepoint = normalizeKittyFunctionalCodepoint(codepoint);
+  if (!allowedSymbols.has(String.fromCharCode(normalizedCodepoint)))
+    return;
+  return { codepoint: normalizedCodepoint, modifier: modifier & ~MODIFIERS.shift };
+}
 function isKeyRelease(data) {
   if (data.includes("\x1B[200~")) {
     return false;
   }
-  if (data.includes(":3u") || data.includes(":3~") || data.includes(":3A") || data.includes(":3B") || data.includes(":3C") || data.includes(":3D") || data.includes(":3H") || data.includes(":3F")) {
+  if (data.includes(":3u") || data.includes(":3~") || data.includes(":3A") || data.includes(":3B") || data.includes(":3C") || data.includes(":3D") || data.includes(":3H") || data.includes(":3F") || data.includes(":3P") || data.includes(":3Q") || data.includes(":3S")) {
     return true;
   }
   return false;
@@ -32942,7 +34502,19 @@ function parseKittySequence(data) {
       5: FUNCTIONAL_CODEPOINTS.pageUp,
       6: FUNCTIONAL_CODEPOINTS.pageDown,
       7: FUNCTIONAL_CODEPOINTS.home,
-      8: FUNCTIONAL_CODEPOINTS.end
+      8: FUNCTIONAL_CODEPOINTS.end,
+      11: FUNCTIONAL_CODEPOINTS.f1,
+      12: FUNCTIONAL_CODEPOINTS.f2,
+      13: FUNCTIONAL_CODEPOINTS.f3,
+      14: FUNCTIONAL_CODEPOINTS.f4,
+      15: FUNCTIONAL_CODEPOINTS.f5,
+      17: FUNCTIONAL_CODEPOINTS.f6,
+      18: FUNCTIONAL_CODEPOINTS.f7,
+      19: FUNCTIONAL_CODEPOINTS.f8,
+      20: FUNCTIONAL_CODEPOINTS.f9,
+      21: FUNCTIONAL_CODEPOINTS.f10,
+      23: FUNCTIONAL_CODEPOINTS.f11,
+      24: FUNCTIONAL_CODEPOINTS.f12
     };
     const codepoint = funcCodes[keyNum];
     if (codepoint !== undefined) {
@@ -32958,6 +34530,18 @@ function parseKittySequence(data) {
     _lastEventType = eventType;
     return { codepoint, modifier: modValue - 1, eventType };
   }
+  const fKeyMatch = data.match(/^\x1b\[(?:1;(\d+)(?::(\d+))?)?([PQS])$/);
+  if (fKeyMatch) {
+    const modValue = fKeyMatch[1] ? parseInt(fKeyMatch[1], 10) : 1;
+    const eventType = parseEventType(fKeyMatch[2]);
+    const fKeyCodes = {
+      P: FUNCTIONAL_CODEPOINTS.f1,
+      Q: FUNCTIONAL_CODEPOINTS.f2,
+      S: FUNCTIONAL_CODEPOINTS.f4
+    };
+    _lastEventType = eventType;
+    return { codepoint: fKeyCodes[fKeyMatch[3]], modifier: modValue - 1, eventType };
+  }
   return null;
 }
 function matchesKittySequence(data, expectedCodepoint, expectedModifier) {
@@ -32966,12 +34550,16 @@ function matchesKittySequence(data, expectedCodepoint, expectedModifier) {
     return false;
   const actualMod = parsed.modifier & ~LOCK_MASK;
   const expectedMod = expectedModifier & ~LOCK_MASK;
-  if (actualMod !== expectedMod)
-    return false;
   const normalizedCodepoint = normalizeShiftedLetterIdentityCodepoint(normalizeKittyFunctionalCodepoint(parsed.codepoint), parsed.modifier);
   const normalizedExpectedCodepoint = normalizeShiftedLetterIdentityCodepoint(normalizeKittyFunctionalCodepoint(expectedCodepoint), expectedModifier);
-  if (normalizedCodepoint === normalizedExpectedCodepoint)
+  if (actualMod === expectedMod && normalizedCodepoint === normalizedExpectedCodepoint)
     return true;
+  const logicalShiftedSymbol = getLogicalShiftedSymbolCandidate(parsed.shiftedKey, actualMod, SYMBOL_KEYS);
+  if (logicalShiftedSymbol && (logicalShiftedSymbol.modifier & ~LOCK_MASK) === expectedMod && logicalShiftedSymbol.codepoint === normalizeKittyFunctionalCodepoint(expectedCodepoint)) {
+    return true;
+  }
+  if (actualMod !== expectedMod)
+    return false;
   if (parsed.baseLayoutKey !== undefined && parsed.baseLayoutKey === expectedCodepoint) {
     const cp = normalizedCodepoint;
     const isLatinLetter = cp >= 97 && cp <= 122;
@@ -33020,24 +34608,35 @@ function isDigitKey(key) {
   return key >= "0" && key <= "9";
 }
 function matchesPrintableModifyOtherKeys(data, expectedKeycode, expectedModifier) {
-  if (expectedModifier === 0)
-    return false;
   const parsed = parseModifyOtherKeysSequence(data);
-  if (!parsed || parsed.modifier !== expectedModifier)
+  if (!parsed)
     return false;
-  return normalizeShiftedLetterIdentityCodepoint(parsed.codepoint, parsed.modifier) === normalizeShiftedLetterIdentityCodepoint(expectedKeycode, expectedModifier);
+  const physicalMatch = parsed.modifier === expectedModifier && normalizeShiftedLetterIdentityCodepoint(parsed.codepoint, parsed.modifier) === normalizeShiftedLetterIdentityCodepoint(expectedKeycode, expectedModifier);
+  if (physicalMatch)
+    return true;
+  const logicalShiftedSymbol = getLogicalShiftedSymbolCandidate(parsed.codepoint, parsed.modifier, SHIFTED_SYMBOL_KEYS);
+  return logicalShiftedSymbol?.modifier === expectedModifier && logicalShiftedSymbol.codepoint === expectedKeycode;
 }
 function parseKeyId(keyId) {
-  const parts = keyId.toLowerCase().split("+");
-  const key = parts[parts.length - 1];
-  if (!key)
+  let key = keyId.toLowerCase();
+  const modifiers = new Set;
+  while (true) {
+    const modifier = MODIFIER_NAMES.find((name) => key.startsWith(`${name}+`));
+    if (!modifier)
+      break;
+    if (modifiers.has(modifier))
+      return null;
+    modifiers.add(modifier);
+    key = key.slice(modifier.length + 1);
+  }
+  if (!key || key.includes("+") && key !== "+")
     return null;
   return {
     key,
-    ctrl: parts.includes("ctrl"),
-    shift: parts.includes("shift"),
-    alt: parts.includes("alt"),
-    super: parts.includes("super")
+    ctrl: modifiers.has("ctrl"),
+    shift: modifiers.has("shift"),
+    alt: modifiers.has("alt"),
+    super: modifiers.has("super")
   };
 }
 function matchesKey(data, keyId) {
@@ -33244,11 +34843,11 @@ function matchesKey(data, keyId) {
     case "f10":
     case "f11":
     case "f12": {
-      if (modifier !== 0) {
-        return false;
-      }
       const functionKey = key;
-      return matchesLegacySequence(data, LEGACY_KEY_SEQUENCES[functionKey]);
+      if (modifier === 0 && matchesLegacySequence(data, LEGACY_KEY_SEQUENCES[functionKey])) {
+        return true;
+      }
+      return matchesKittySequence(data, FUNCTIONAL_CODEPOINTS[functionKey], modifier);
     }
   }
   if (key.length === 1 && (key >= "a" && key <= "z" || isDigitKey(key) || SYMBOL_KEYS.has(key))) {
@@ -33260,7 +34859,7 @@ function matchesKey(data, keyId) {
       if (data === `\x1B${rawCtrl}`)
         return true;
     }
-    if (modifier === MODIFIERS.alt && !_kittyProtocolActive && (isLetter || isDigit)) {
+    if (modifier === MODIFIERS.alt && !_kittyProtocolActive && (isLetter || isDigit || SYMBOL_KEYS.has(key))) {
       if (data === `\x1B${key}`)
         return true;
     }
@@ -33280,7 +34879,7 @@ function matchesKey(data, keyId) {
     if (modifier !== 0) {
       return matchesKittySequence(data, codepoint, modifier) || matchesPrintableModifyOtherKeys(data, codepoint, modifier);
     }
-    return data === key || matchesKittySequence(data, codepoint, 0);
+    return data === key || matchesKittySequence(data, codepoint, 0) || matchesPrintableModifyOtherKeys(data, codepoint, 0);
   }
   return false;
 }
@@ -33305,13 +34904,16 @@ function decodeKittyPrintable(data) {
   effectiveCodepoint = normalizeKittyFunctionalCodepoint(effectiveCodepoint);
   if (!Number.isFinite(effectiveCodepoint) || effectiveCodepoint < 32)
     return;
+  if (effectiveCodepoint >= KITTY_FUNCTIONAL_PUA_START && effectiveCodepoint <= KITTY_FUNCTIONAL_PUA_END) {
+    return;
+  }
   try {
     return String.fromCodePoint(effectiveCodepoint);
   } catch {
     return;
   }
 }
-var _kittyProtocolActive = false, Key, SYMBOL_KEYS, MODIFIERS, LOCK_MASK, CODEPOINTS, ARROW_CODEPOINTS, FUNCTIONAL_CODEPOINTS, KITTY_FUNCTIONAL_KEY_EQUIVALENTS, LEGACY_KEY_SEQUENCES, LEGACY_SHIFT_SEQUENCES, LEGACY_CTRL_SEQUENCES, matchesLegacySequence = (data, sequences) => sequences.includes(data), matchesLegacyModifierSequence = (data, key, modifier) => {
+var _kittyProtocolActive = false, Key, SYMBOL_KEYS, SHIFTED_SYMBOL_KEYS, MODIFIER_NAMES, MODIFIERS, LOCK_MASK, CODEPOINTS, ARROW_CODEPOINTS, FUNCTIONAL_CODEPOINTS, KITTY_FUNCTIONAL_PUA_START = 57344, KITTY_FUNCTIONAL_PUA_END = 63743, KITTY_FUNCTIONAL_KEY_EQUIVALENTS, LEGACY_KEY_SEQUENCES, LEGACY_SHIFT_SEQUENCES, LEGACY_CTRL_SEQUENCES, matchesLegacySequence = (data, sequences) => sequences.includes(data), matchesLegacyModifierSequence = (data, key, modifier) => {
   if (modifier === MODIFIERS.shift) {
     return matchesLegacySequence(data, LEGACY_SHIFT_SEQUENCES[key]);
   }
@@ -33435,6 +35037,8 @@ var init_keys = __esm(() => {
     ">",
     "?"
   ]);
+  SHIFTED_SYMBOL_KEYS = new Set("~!@#$%^&*()_+|{}:<>?");
+  MODIFIER_NAMES = ["shift", "alt", "ctrl", "super"];
   MODIFIERS = {
     shift: 1,
     alt: 2,
@@ -33462,7 +35066,19 @@ var init_keys = __esm(() => {
     pageUp: -12,
     pageDown: -13,
     home: -14,
-    end: -15
+    end: -15,
+    f1: -21,
+    f2: -22,
+    f3: -23,
+    f4: -24,
+    f5: -25,
+    f6: -26,
+    f7: -27,
+    f8: -28,
+    f9: -29,
+    f10: -30,
+    f11: -31,
+    f12: -32
   };
   KITTY_FUNCTIONAL_KEY_EQUIVALENTS = new Map([
     [57399, 48],
@@ -33548,236 +35164,108 @@ var init_keys = __esm(() => {
   KITTY_PRINTABLE_ALLOWED_MODIFIERS = MODIFIERS.shift | LOCK_MASK;
 });
 
-// node_modules/@earendil-works/pi-tui/dist/keybindings.js
-function normalizeKeys(keys) {
-  if (keys === undefined)
-    return [];
-  const keyList = Array.isArray(keys) ? keys : [keys];
-  const seen = new Set;
-  const result = [];
-  for (const key of keyList) {
-    if (!seen.has(key)) {
-      seen.add(key);
-      result.push(key);
-    }
-  }
-  return result;
+// node_modules/@earendil-works/pi-tui/dist/terminal-colors.js
+function hexToRgb(hex) {
+  const normalized = hex.startsWith("#") ? hex.slice(1) : hex;
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+  return { r, g, b };
 }
-
-class KeybindingsManager {
-  definitions;
-  userBindings;
-  keysById = new Map;
-  conflicts = [];
-  constructor(definitions, userBindings = {}) {
-    this.definitions = definitions;
-    this.userBindings = userBindings;
-    this.rebuild();
+function parseOscHexChannel(channel) {
+  if (!/^[0-9a-f]+$/i.test(channel)) {
+    return;
   }
-  rebuild() {
-    this.keysById.clear();
-    this.conflicts = [];
-    const userClaims = new Map;
-    for (const [keybinding, keys] of Object.entries(this.userBindings)) {
-      if (!(keybinding in this.definitions))
-        continue;
-      for (const key of normalizeKeys(keys)) {
-        const claimants = userClaims.get(key) ?? new Set;
-        claimants.add(keybinding);
-        userClaims.set(key, claimants);
-      }
-    }
-    for (const [key, keybindings] of userClaims) {
-      if (keybindings.size > 1) {
-        this.conflicts.push({ key, keybindings: [...keybindings] });
-      }
-    }
-    for (const [id, definition] of Object.entries(this.definitions)) {
-      const userKeys = this.userBindings[id];
-      const keys = userKeys === undefined ? normalizeKeys(definition.defaultKeys) : normalizeKeys(userKeys);
-      this.keysById.set(id, keys);
-    }
+  const max = 16 ** channel.length - 1;
+  if (max <= 0) {
+    return;
   }
-  matches(data, keybinding) {
-    const keys = this.keysById.get(keybinding) ?? [];
-    for (const key of keys) {
-      if (matchesKey(data, key))
-        return true;
-    }
-    return false;
-  }
-  getKeys(keybinding) {
-    return [...this.keysById.get(keybinding) ?? []];
-  }
-  getDefinition(keybinding) {
-    return this.definitions[keybinding];
-  }
-  getConflicts() {
-    return this.conflicts.map((conflict) => ({ ...conflict, keybindings: [...conflict.keybindings] }));
-  }
-  setUserBindings(userBindings) {
-    this.userBindings = userBindings;
-    this.rebuild();
-  }
-  getUserBindings() {
-    return { ...this.userBindings };
-  }
-  getResolvedBindings() {
-    const resolved = {};
-    for (const id of Object.keys(this.definitions)) {
-      const keys = this.keysById.get(id) ?? [];
-      resolved[id] = keys.length === 1 ? keys[0] : [...keys];
-    }
-    return resolved;
-  }
+  return Math.round(parseInt(channel, 16) / max * 255);
 }
-function getKeybindings() {
-  if (!globalKeybindings) {
-    globalKeybindings = new KeybindingsManager(TUI_KEYBINDINGS);
+function parseOscColorResponse(data) {
+  const match = data.match(OSC_COLOR_RESPONSE_PATTERN);
+  if (!match) {
+    return;
   }
-  return globalKeybindings;
+  const target = match[1] === "10" ? "foreground" : match[1] === "11" ? "background" : Number.parseInt(match[2], 10);
+  return { target, rgb: parseOscColorValue(match[3]) };
 }
-var TUI_KEYBINDINGS, globalKeybindings = null;
-var init_keybindings = __esm(() => {
-  init_keys();
-  TUI_KEYBINDINGS = {
-    "tui.editor.cursorUp": { defaultKeys: "up", description: "Move cursor up" },
-    "tui.editor.cursorDown": { defaultKeys: "down", description: "Move cursor down" },
-    "tui.editor.cursorLeft": {
-      defaultKeys: ["left", "ctrl+b"],
-      description: "Move cursor left"
-    },
-    "tui.editor.cursorRight": {
-      defaultKeys: ["right", "ctrl+f"],
-      description: "Move cursor right"
-    },
-    "tui.editor.cursorWordLeft": {
-      defaultKeys: ["alt+left", "ctrl+left", "alt+b"],
-      description: "Move cursor word left"
-    },
-    "tui.editor.cursorWordRight": {
-      defaultKeys: ["alt+right", "ctrl+right", "alt+f"],
-      description: "Move cursor word right"
-    },
-    "tui.editor.cursorLineStart": {
-      defaultKeys: ["home", "ctrl+a"],
-      description: "Move to line start"
-    },
-    "tui.editor.cursorLineEnd": {
-      defaultKeys: ["end", "ctrl+e"],
-      description: "Move to line end"
-    },
-    "tui.editor.jumpForward": {
-      defaultKeys: "ctrl+]",
-      description: "Jump forward to character"
-    },
-    "tui.editor.jumpBackward": {
-      defaultKeys: "ctrl+alt+]",
-      description: "Jump backward to character"
-    },
-    "tui.editor.pageUp": { defaultKeys: "pageUp", description: "Page up" },
-    "tui.editor.pageDown": { defaultKeys: "pageDown", description: "Page down" },
-    "tui.editor.deleteCharBackward": {
-      defaultKeys: "backspace",
-      description: "Delete character backward"
-    },
-    "tui.editor.deleteCharForward": {
-      defaultKeys: ["delete", "ctrl+d"],
-      description: "Delete character forward"
-    },
-    "tui.editor.deleteWordBackward": {
-      defaultKeys: ["ctrl+w", "alt+backspace"],
-      description: "Delete word backward"
-    },
-    "tui.editor.deleteWordForward": {
-      defaultKeys: ["alt+d", "alt+delete"],
-      description: "Delete word forward"
-    },
-    "tui.editor.deleteToLineStart": {
-      defaultKeys: "ctrl+u",
-      description: "Delete to line start"
-    },
-    "tui.editor.deleteToLineEnd": {
-      defaultKeys: "ctrl+k",
-      description: "Delete to line end"
-    },
-    "tui.editor.yank": { defaultKeys: "ctrl+y", description: "Yank" },
-    "tui.editor.yankPop": { defaultKeys: "alt+y", description: "Yank pop" },
-    "tui.editor.undo": { defaultKeys: "ctrl+-", description: "Undo" },
-    "tui.input.newLine": { defaultKeys: "shift+enter", description: "Insert newline" },
-    "tui.input.submit": { defaultKeys: "enter", description: "Submit input" },
-    "tui.input.tab": { defaultKeys: "tab", description: "Tab / autocomplete" },
-    "tui.input.copy": { defaultKeys: "ctrl+c", description: "Copy selection" },
-    "tui.select.up": { defaultKeys: "up", description: "Move selection up" },
-    "tui.select.down": { defaultKeys: "down", description: "Move selection down" },
-    "tui.select.pageUp": { defaultKeys: "pageUp", description: "Selection page up" },
-    "tui.select.pageDown": {
-      defaultKeys: "pageDown",
-      description: "Selection page down"
-    },
-    "tui.select.confirm": { defaultKeys: "enter", description: "Confirm selection" },
-    "tui.select.cancel": {
-      defaultKeys: ["escape", "ctrl+c"],
-      description: "Cancel selection"
+function parseOscColorValue(rawValue) {
+  const value = rawValue.trim();
+  if (value.startsWith("#")) {
+    const hex = value.slice(1);
+    if (/^[0-9a-f]{6}$/i.test(hex)) {
+      return hexToRgb(value);
     }
-  };
-});
-
-// node_modules/@earendil-works/pi-tui/dist/components/text.js
-var init_text = __esm(() => {
-  init_utils();
-});
-
-// node_modules/@earendil-works/pi-tui/dist/components/loader.js
-var init_loader2 = __esm(() => {
-  init_text();
-});
-
-// node_modules/@earendil-works/pi-tui/dist/components/cancellable-loader.js
-var init_cancellable_loader = __esm(() => {
-  init_keybindings();
-  init_loader2();
-});
-
-// node_modules/@earendil-works/pi-tui/dist/kill-ring.js
-class KillRing {
-  ring = [];
-  push(text, opts) {
-    if (!text)
-      return;
-    if (opts.accumulate && this.ring.length > 0) {
-      const last = this.ring.pop();
-      this.ring.push(opts.prepend ? text + last : last + text);
-    } else {
-      this.ring.push(text);
+    if (/^[0-9a-f]{12}$/i.test(hex)) {
+      const r = parseOscHexChannel(hex.slice(0, 4));
+      const g = parseOscHexChannel(hex.slice(4, 8));
+      const b = parseOscHexChannel(hex.slice(8, 12));
+      return r !== undefined && g !== undefined && b !== undefined ? { r, g, b } : undefined;
     }
+    return;
   }
-  peek() {
-    return this.ring.length > 0 ? this.ring[this.ring.length - 1] : undefined;
+  const rgbValue = value.replace(/^rgba?:/i, "");
+  const [red, green, blue] = rgbValue.split("/");
+  if (red === undefined || green === undefined || blue === undefined) {
+    return;
   }
-  rotate() {
-    if (this.ring.length > 1) {
-      const last = this.ring.pop();
-      this.ring.unshift(last);
-    }
-  }
-  get length() {
-    return this.ring.length;
-  }
+  const r = parseOscHexChannel(red);
+  const g = parseOscHexChannel(green);
+  const b = parseOscHexChannel(blue);
+  return r !== undefined && g !== undefined && b !== undefined ? { r, g, b } : undefined;
 }
+function parseTerminalColorSchemeReport(data) {
+  const match = data.match(COLOR_SCHEME_REPORT_PATTERN);
+  if (!match) {
+    return;
+  }
+  return match[1] === "2" ? "light" : "dark";
+}
+var OSC_COLOR_RESPONSE_PATTERN, COLOR_SCHEME_REPORT_PATTERN;
+var init_terminal_colors = __esm(() => {
+  OSC_COLOR_RESPONSE_PATTERN = /^\x1b\](?:(1[01])|4;(\d{1,3}));([^\x07\x1b]*)(?:\x07|\x1b\\)$/i;
+  COLOR_SCHEME_REPORT_PATTERN = /^(?:\x1b\[\?997;(1|2)n)+$/;
+});
 
 // node_modules/@earendil-works/pi-tui/dist/terminal-image.js
+import { execSync as execSync5 } from "child_process";
 function setCellDimensions(dims) {
   cellDimensions = dims;
 }
-function detectCapabilities() {
+function probeTmuxHyperlinks() {
+  try {
+    const termfeatures = execSync5("tmux display-message -p '#{client_termfeatures}'", {
+      encoding: "utf8",
+      timeout: 250,
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+    return termfeatures.split(",").map((feature) => feature.trim()).includes("hyperlinks");
+  } catch {
+    return false;
+  }
+}
+function detectCapabilitiesFromEnvironment(tmuxForwardsHyperlink) {
   const termProgram = process.env.TERM_PROGRAM?.toLowerCase() || "";
+  const terminalEmulator = process.env.TERMINAL_EMULATOR?.toLowerCase() || "";
   const term = process.env.TERM?.toLowerCase() || "";
   const colorTerm = process.env.COLORTERM?.toLowerCase() || "";
-  const hasTrueColorHint = colorTerm === "truecolor" || colorTerm === "24bit";
-  const inTmuxOrScreen = !!process.env.TMUX || term.startsWith("tmux") || term.startsWith("screen");
-  if (inTmuxOrScreen) {
+  const hasTrueColorHint = colorTerm === "truecolor" || colorTerm === "24bit" || term.endsWith("-direct");
+  const isWindowsConsole = process.platform === "win32";
+  if (process.env.TMUX || term.startsWith("tmux")) {
+    return { images: null, trueColor: hasTrueColorHint, hyperlinks: tmuxForwardsHyperlink() };
+  }
+  if (term.startsWith("screen")) {
     return { images: null, trueColor: hasTrueColorHint, hyperlinks: false };
+  }
+  if (termProgram === "herdr") {
+    return { images: "kitty", trueColor: hasTrueColorHint, hyperlinks: true };
+  }
+  if (termProgram === "rex") {
+    return { images: "kitty", trueColor: true, hyperlinks: true };
+  }
+  if (termProgram === "orca" && process.env.ORCA_IMAGE_PROTOCOL === "kitty") {
+    return { images: "kitty", trueColor: true, hyperlinks: true };
   }
   if (process.env.KITTY_WINDOW_ID || termProgram === "kitty") {
     return { images: "kitty", trueColor: true, hyperlinks: true };
@@ -33788,20 +35276,50 @@ function detectCapabilities() {
   if (process.env.WEZTERM_PANE || termProgram === "wezterm") {
     return { images: "kitty", trueColor: true, hyperlinks: true };
   }
+  if (termProgram === "warpterminal" || process.env.WARP_SESSION_ID || process.env.WARP_TERMINAL_SESSION_UUID) {
+    return { images: "kitty", trueColor: true, hyperlinks: true };
+  }
   if (process.env.ITERM_SESSION_ID || termProgram === "iterm.app") {
     return { images: "iterm2", trueColor: true, hyperlinks: true };
   }
-  if (termProgram === "vscode") {
+  if (process.env.WT_SESSION) {
     return { images: null, trueColor: true, hyperlinks: true };
   }
-  if (termProgram === "alacritty") {
+  const isAlacritty = termProgram === "alacritty" || term.startsWith("alacritty") || process.env.ALACRITTY_WINDOW_ID;
+  if (isAlacritty || termProgram === "vscode" || termProgram === "zed") {
     return { images: null, trueColor: true, hyperlinks: true };
   }
-  return { images: null, trueColor: hasTrueColorHint || !!process.env.WT_SESSION, hyperlinks: false };
+  if (terminalEmulator === "jetbrains-jediterm") {
+    return { images: null, trueColor: true, hyperlinks: false };
+  }
+  if (isWindowsConsole) {
+    return { images: null, trueColor: true, hyperlinks: false };
+  }
+  return { images: null, trueColor: hasTrueColorHint, hyperlinks: false };
+}
+function parseBooleanCapabilityOverride(value) {
+  return value === "1" ? true : value === "0" ? false : undefined;
+}
+function detectCapabilities(tmuxForwardsHyperlink = probeTmuxHyperlinks) {
+  const hyperlinks = parseBooleanCapabilityOverride(process.env.PI_HYPERLINKS);
+  const detected = detectCapabilitiesFromEnvironment(hyperlinks === undefined ? tmuxForwardsHyperlink : () => hyperlinks);
+  const imageProtocol = process.env.PI_IMAGE_PROTOCOL?.toLowerCase();
+  const images = imageProtocol === "kitty" || imageProtocol === "iterm2" ? imageProtocol : imageProtocol === "none" || imageProtocol === "0" ? null : undefined;
+  const trueColor = parseBooleanCapabilityOverride(process.env.PI_TRUE_COLOR);
+  return {
+    ...detected,
+    ...images !== undefined ? { images } : {},
+    ...trueColor !== undefined ? { trueColor } : {},
+    ...hyperlinks !== undefined ? { hyperlinks } : {}
+  };
 }
 function getCapabilities() {
   if (!cachedCapabilities) {
-    cachedCapabilities = detectCapabilities();
+    const hyperlinks = capabilityOverrides.hyperlinks;
+    cachedCapabilities = {
+      ...detectCapabilities(hyperlinks === undefined ? undefined : () => hyperlinks),
+      ...capabilityOverrides
+    };
   }
   return cachedCapabilities;
 }
@@ -33814,38 +35332,62 @@ function isImageLine(line) {
 function deleteKittyImage(imageId) {
   return `\x1B_Ga=d,d=I,i=${imageId},q=2\x1B\\`;
 }
-var cachedCapabilities = null, cellDimensions, KITTY_PREFIX = "\x1B_G", ITERM2_PREFIX = "\x1B]1337;File=";
+var cachedCapabilities = null, capabilityOverrides, cellDimensions, KITTY_PREFIX = "\x1B_G", ITERM2_PREFIX = "\x1B]1337;File=", kittyImageMetadata, KITTY_PLACEMENT_CONTROL_KEYS;
 var init_terminal_image = __esm(() => {
+  capabilityOverrides = {};
   cellDimensions = { widthPx: 9, heightPx: 18 };
+  kittyImageMetadata = new Map;
+  KITTY_PLACEMENT_CONTROL_KEYS = new Set([
+    "i",
+    "p",
+    "x",
+    "y",
+    "w",
+    "h",
+    "X",
+    "Y",
+    "c",
+    "r",
+    "C",
+    "U",
+    "z",
+    "P",
+    "Q",
+    "H",
+    "V"
+  ]);
 });
 
 // node_modules/@earendil-works/pi-tui/dist/tui.js
-import * as fs from "fs";
-import * as os2 from "os";
-import * as path2 from "path";
 import { performance as performance2 } from "perf_hooks";
-function extractKittyImageIds(line) {
-  const sequenceStart = line.indexOf(KITTY_SEQUENCE_PREFIX);
-  if (sequenceStart === -1)
-    return [];
-  const paramsStart = sequenceStart + KITTY_SEQUENCE_PREFIX.length;
-  const paramsEnd = line.indexOf(";", paramsStart);
-  if (paramsEnd === -1)
-    return [];
-  const params = line.slice(paramsStart, paramsEnd);
-  for (const param of params.split(",")) {
-    const [key, value] = param.split("=", 2);
-    if (key !== "i" || value === undefined)
-      continue;
-    const id = Number(value);
-    if (Number.isInteger(id) && id > 0 && id <= 4294967295) {
-      return [id];
-    }
+function dispatchMouseEvent(component, event) {
+  const result = component.handleMouse?.(event);
+  if (!result)
+    return;
+  if ("target" in result) {
+    const forwarded = result;
+    return forwarded.focus && component.handleInput ? { ...forwarded, focusTarget: component } : forwarded;
   }
-  return [];
+  if (!result.handled && !result.capture && !result.focus)
+    return;
+  return {
+    ...result,
+    handled: true,
+    ...result.focus ? { focusTarget: component } : {},
+    target: {
+      component,
+      originX: event.screenX - event.x,
+      originY: event.screenY - event.y,
+      width: event.width,
+      height: event.height
+    }
+  };
 }
 function isFocusable(component) {
   return component !== null && "focused" in component;
+}
+function renderFakeCursor(text) {
+  return `${FAKE_CURSOR_START}${text}${FAKE_CURSOR_END}`;
 }
 function parseSizeValue(value, referenceSize) {
   if (value === undefined)
@@ -33858,12 +35400,10 @@ function parseSizeValue(value, referenceSize) {
   }
   return;
 }
-function isTermuxSession() {
-  return Boolean(process.env.TERMUX_VERSION);
-}
 
 class Container {
   children = [];
+  mouseLayout;
   addChild(component) {
     this.children.push(component);
   }
@@ -33881,52 +35421,117 @@ class Container {
       child.invalidate?.();
     }
   }
+  handleMouse(event) {
+    if (event.y < 0 || event.y >= event.height)
+      return;
+    const mouseChildren = this.mouseLayout?.width === event.width ? this.mouseLayout.children : this.children.map((component) => ({ component, height: component.render(event.width).length }));
+    let childY = 0;
+    for (const { component: child, height: childHeight } of mouseChildren) {
+      if (event.y >= childY && event.y < childY + childHeight) {
+        const result = dispatchMouseEvent(child, {
+          ...event,
+          y: event.y - childY,
+          height: childHeight
+        });
+        if (result?.focus && this.handleInput)
+          return { ...result, focusTarget: this };
+        return result;
+      }
+      childY += childHeight;
+    }
+    return;
+  }
   render(width) {
     const lines = [];
+    const mouseChildren = [];
     for (const child of this.children) {
       const childLines = child.render(width);
+      mouseChildren.push({ component: child, height: childLines.length });
       for (const line of childLines) {
         lines.push(line);
       }
     }
+    this.mouseLayout = { width, children: mouseChildren };
     return lines;
   }
 }
-var KITTY_SEQUENCE_PREFIX = "\x1B_G", CURSOR_MARKER = "\x1B_pi:c\x07", TUI;
+function compositeTuiLine(baseLine, overlayLine, startCol, overlayWidth, totalWidth) {
+  if (isImageLine(baseLine))
+    return baseLine;
+  const afterStart = startCol + overlayWidth;
+  const base = extractSegments(baseLine, startCol, afterStart, totalWidth - afterStart, true);
+  const overlay = sliceWithWidth(overlayLine, 0, overlayWidth, true);
+  const beforePad = Math.max(0, startCol - base.beforeWidth);
+  const overlayPad = Math.max(0, overlayWidth - overlay.width);
+  const actualBeforeWidth = Math.max(startCol, base.beforeWidth);
+  const actualOverlayWidth = Math.max(overlayWidth, overlay.width);
+  const afterTarget = Math.max(0, totalWidth - actualBeforeWidth - actualOverlayWidth);
+  const afterPad = Math.max(0, afterTarget - base.afterWidth);
+  const result = base.before + " ".repeat(beforePad) + SEGMENT_RESET + overlay.text + " ".repeat(overlayPad) + SEGMENT_RESET + base.after + " ".repeat(afterPad);
+  return visibleWidth(result) <= totalWidth ? result : sliceByColumn(result, 0, totalWidth, true);
+}
+var TERMINAL_PALETTE_SIZE = 16, TERMINAL_COLOR_REPLY_COUNT, TERMINAL_COLOR_QUERY, DEVICE_ATTRIBUTES_RESPONSE_PATTERN, CURSOR_MARKER = "\x1B_pi:c\x07", FAKE_CURSOR_START = "\x1B_pi:fc\x07", FAKE_CURSOR_END = "\x1B_pi:/fc\x07", FOCUSED_FAKE_CURSOR, SEGMENT_RESET = "\x1B[0m\x1B]8;;\x07", VIEWPORT_TUI, TuiBase;
 var init_tui = __esm(() => {
   init_keys();
+  init_terminal_colors();
   init_terminal_image();
   init_utils();
-  TUI = class TUI extends Container {
+  TERMINAL_COLOR_REPLY_COUNT = 2 + TERMINAL_PALETTE_SIZE;
+  TERMINAL_COLOR_QUERY = `\x1B]10;?\x07\x1B]11;?\x07${Array.from({ length: TERMINAL_PALETTE_SIZE }, (_, index) => `\x1B]4;${index};?\x07`).join("")}\x1B[c`;
+  DEVICE_ATTRIBUTES_RESPONSE_PATTERN = /^\x1b\[\?[\d;]*c$/;
+  FOCUSED_FAKE_CURSOR = /(\x1b_pi:c\x07)\x1b_pi:fc\x07(.*?)(?:\x1b_pi:\/fc\x07|$)/s;
+  VIEWPORT_TUI = Symbol.for("@earendil-works/pi-tui/viewport");
+  TuiBase = class TuiBase extends Container {
     terminal;
-    previousLines = [];
-    previousKittyImageIds = new Set;
-    previousWidth = 0;
-    previousHeight = 0;
     focusedComponent = null;
     inputListeners = new Set;
     onDebug;
     renderRequested = false;
+    immediateRenderScheduled = false;
     renderTimer;
     lastRenderAt = 0;
     static MIN_RENDER_INTERVAL_MS = 16;
-    cursorRow = 0;
-    hardwareCursorRow = 0;
-    showHardwareCursor = process.env.PI_HARDWARE_CURSOR === "1";
-    clearOnShrink = process.env.PI_CLEAR_ON_SHRINK === "1";
-    maxLinesRendered = 0;
-    previousViewportTop = 0;
+    showHardwareCursor = false;
+    clearOnShrink = false;
     fullRedrawCount = 0;
     stopped = false;
+    pendingTerminalColorQueries = [];
+    terminalColorSchemeListeners = new Set;
+    terminalColorSchemeNotificationsEnabled = false;
+    logDirectory;
     focusOrderCounter = 0;
     overlayStack = [];
-    constructor(terminal, showHardwareCursor) {
+    renderedOverlayLayouts = [];
+    get hasOverlayEntries() {
+      return this.overlayStack.length > 0;
+    }
+    overlayFocusRestore = { status: "inactive" };
+    constructor(terminal, showHardwareCursor, logDirectory) {
       super();
       this.terminal = terminal;
+      this.logDirectory = logDirectory;
       if (showHardwareCursor !== undefined) {
         this.showHardwareCursor = showHardwareCursor;
       }
     }
+    resetRenderState() {}
+    beforeTerminalStart() {}
+    afterTerminalStart() {}
+    beforeTerminalStop(_options) {}
+    afterTerminalStop(_options) {}
+    getExitRestorePrefix() {
+      return `${this.terminalColorSchemeNotificationsEnabled ? "\x1B[?2031l" : ""}\x1B[?25h`;
+    }
+    getExitRestoreSuffix() {
+      return "";
+    }
+    exitRestoreHandler = () => {
+      if (this.stopped)
+        return;
+      try {
+        this.terminal.restoreOnExit?.(this.getExitRestorePrefix(), this.getExitRestoreSuffix());
+      } catch {}
+    };
     get fullRedraws() {
       return this.fullRedrawCount;
     }
@@ -33938,7 +35543,7 @@ var init_tui = __esm(() => {
         return;
       this.showHardwareCursor = enabled;
       if (!enabled) {
-        this.terminal.hideCursor();
+        this.hideTerminalCursor();
       }
       this.requestRender();
     }
@@ -33948,19 +35553,115 @@ var init_tui = __esm(() => {
     setClearOnShrink(enabled) {
       this.clearOnShrink = enabled;
     }
+    getFocusedComponent() {
+      return this.focusedComponent;
+    }
     setFocus(component) {
+      this.setFocusInternal({ component, overlayFocusRestore: "clear" });
+    }
+    setFocusInternal({ component, overlayFocusRestore }) {
+      const previousFocus = this.focusedComponent;
+      let nextFocus = component;
+      const previousFocusedOverlay = previousFocus ? this.overlayStack.find((entry) => entry.component === previousFocus && this.isOverlayVisible(entry)) : undefined;
+      const nextFocusIsOverlay = nextFocus ? this.overlayStack.some((entry) => entry.component === nextFocus) : false;
+      const restoreState = this.getVisibleOverlayFocusRestore();
+      if (nextFocus && !nextFocusIsOverlay) {
+        if (restoreState.status === "blocked" && restoreState.blockedBy === previousFocus) {
+          if (restoreState.resume.status === "focus-target" || !this.isComponentMounted(restoreState.blockedBy)) {
+            nextFocus = this.resolveBlockedOverlayFocusResume(restoreState);
+          } else {
+            this.overlayFocusRestore = {
+              status: "blocked",
+              overlay: restoreState.overlay,
+              blockedBy: nextFocus,
+              resume: restoreState.resume
+            };
+          }
+        } else if (previousFocusedOverlay && restoreState.status !== "inactive" && restoreState.overlay === previousFocusedOverlay && !this.isOverlayFocusAncestor(previousFocusedOverlay, nextFocus)) {
+          this.overlayFocusRestore = {
+            status: "blocked",
+            overlay: previousFocusedOverlay,
+            blockedBy: nextFocus,
+            resume: { status: "restore-overlay" }
+          };
+        }
+      } else if (nextFocus === null) {
+        if (restoreState.status === "blocked" && restoreState.blockedBy === previousFocus) {
+          nextFocus = this.resolveBlockedOverlayFocusResume(restoreState);
+        } else if (overlayFocusRestore === "clear") {
+          this.clearOverlayFocusRestore();
+        }
+      }
       if (isFocusable(this.focusedComponent)) {
         this.focusedComponent.focused = false;
       }
-      this.focusedComponent = component;
-      if (isFocusable(component)) {
-        component.focused = true;
+      this.focusedComponent = nextFocus;
+      if (isFocusable(nextFocus)) {
+        nextFocus.focused = true;
       }
+      const focusedOverlay = nextFocus ? this.overlayStack.find((entry) => entry.component === nextFocus && this.isOverlayVisible(entry)) : undefined;
+      if (focusedOverlay) {
+        this.overlayFocusRestore = { status: "eligible", overlay: focusedOverlay };
+      }
+    }
+    clearOverlayFocusRestore() {
+      this.overlayFocusRestore = { status: "inactive" };
+    }
+    clearOverlayFocusRestoreFor(overlay) {
+      if (this.overlayFocusRestore.status !== "inactive" && this.overlayFocusRestore.overlay === overlay) {
+        this.clearOverlayFocusRestore();
+      }
+    }
+    resolveBlockedOverlayFocusResume(restoreState) {
+      if (restoreState.resume.status === "restore-overlay")
+        return restoreState.overlay.component;
+      this.clearOverlayFocusRestore();
+      return restoreState.resume.target;
+    }
+    getVisibleOverlayFocusRestore() {
+      const restoreState = this.overlayFocusRestore;
+      if (restoreState.status === "inactive")
+        return restoreState;
+      if (!this.overlayStack.includes(restoreState.overlay) || !this.isOverlayVisible(restoreState.overlay)) {
+        return { status: "inactive" };
+      }
+      return restoreState;
+    }
+    isOverlayFocusAncestor(entry, component) {
+      const visited = new Set;
+      let current = entry.preFocus;
+      while (current && !visited.has(current)) {
+        visited.add(current);
+        if (current === component)
+          return true;
+        current = this.overlayStack.find((overlay) => overlay.component === current)?.preFocus ?? null;
+      }
+      return false;
+    }
+    retargetOverlayPreFocus(removed) {
+      for (const overlay of this.overlayStack) {
+        if (overlay !== removed && overlay.preFocus === removed.component) {
+          overlay.preFocus = removed.preFocus;
+        }
+      }
+    }
+    getMountedRoots() {
+      return this.children;
+    }
+    isComponentMounted(component) {
+      return this.getMountedRoots().some((child) => this.containsComponent(child, component));
+    }
+    containsComponent(root, target) {
+      if (root === target)
+        return true;
+      if (!(root instanceof Container))
+        return false;
+      return root.children.some((child) => this.containsComponent(child, target));
     }
     showOverlay(component, options) {
       const entry = {
         component,
-        options,
+        ...options === undefined ? {} : { options },
         preFocus: this.focusedComponent,
         hidden: false,
         focusOrder: ++this.focusOrderCounter
@@ -33969,19 +35670,21 @@ var init_tui = __esm(() => {
       if (!options?.nonCapturing && this.isOverlayVisible(entry)) {
         this.setFocus(component);
       }
-      this.terminal.hideCursor();
+      this.hideTerminalCursor();
       this.requestRender();
       return {
         hide: () => {
           const index = this.overlayStack.indexOf(entry);
           if (index !== -1) {
+            this.clearOverlayFocusRestoreFor(entry);
+            this.retargetOverlayPreFocus(entry);
             this.overlayStack.splice(index, 1);
             if (this.focusedComponent === component) {
               const topVisible = this.getTopmostVisibleOverlay();
               this.setFocus(topVisible?.component ?? entry.preFocus);
             }
             if (this.overlayStack.length === 0)
-              this.terminal.hideCursor();
+              this.hideTerminalCursor();
             this.requestRender();
           }
         },
@@ -33990,6 +35693,7 @@ var init_tui = __esm(() => {
             return;
           entry.hidden = hidden;
           if (hidden) {
+            this.clearOverlayFocusRestoreFor(entry);
             if (this.focusedComponent === component) {
               const topVisible = this.getTopmostVisibleOverlay();
               this.setFocus(topVisible?.component ?? entry.preFocus);
@@ -34006,36 +35710,99 @@ var init_tui = __esm(() => {
         focus: () => {
           if (!this.overlayStack.includes(entry) || !this.isOverlayVisible(entry))
             return;
-          if (this.focusedComponent !== component) {
-            this.setFocus(component);
-          }
           entry.focusOrder = ++this.focusOrderCounter;
+          this.setFocus(component);
           this.requestRender();
         },
-        unfocus: () => {
-          if (this.focusedComponent !== component)
+        unfocus: (unfocusOptions) => {
+          const isFocused = this.focusedComponent === component;
+          const restoreState = this.overlayFocusRestore;
+          const hasPendingRestore = restoreState.status !== "inactive" && restoreState.overlay === entry;
+          if (!isFocused && !hasPendingRestore)
             return;
-          const topVisible = this.getTopmostVisibleOverlay();
-          this.setFocus(topVisible && topVisible !== entry ? topVisible.component : entry.preFocus);
+          if (restoreState.status === "blocked" && restoreState.overlay === entry && this.focusedComponent === restoreState.blockedBy) {
+            if (unfocusOptions) {
+              this.overlayFocusRestore = {
+                status: "blocked",
+                overlay: entry,
+                blockedBy: restoreState.blockedBy,
+                resume: { status: "focus-target", target: unfocusOptions.target }
+              };
+            } else {
+              this.clearOverlayFocusRestore();
+            }
+            this.requestRender();
+            return;
+          }
+          this.clearOverlayFocusRestoreFor(entry);
+          if (isFocused || unfocusOptions) {
+            const topVisible = this.getTopmostVisibleOverlay();
+            const fallbackTarget = topVisible && topVisible !== entry ? topVisible.component : entry.preFocus;
+            this.setFocus(unfocusOptions ? unfocusOptions.target : fallbackTarget);
+          }
           this.requestRender();
         },
-        isFocused: () => this.focusedComponent === component
+        isFocused: () => this.focusedComponent === component,
+        getBounds: () => {
+          if (!this.overlayStack.includes(entry) || !this.isOverlayVisible(entry) || !entry.bounds)
+            return;
+          return { ...entry.bounds };
+        }
       };
     }
     hideOverlay() {
-      const overlay = this.overlayStack.pop();
+      const overlay = this.overlayStack[this.overlayStack.length - 1];
       if (!overlay)
         return;
+      this.clearOverlayFocusRestoreFor(overlay);
+      this.retargetOverlayPreFocus(overlay);
+      this.overlayStack.pop();
       if (this.focusedComponent === overlay.component) {
         const topVisible = this.getTopmostVisibleOverlay();
         this.setFocus(topVisible?.component ?? overlay.preFocus);
       }
       if (this.overlayStack.length === 0)
-        this.terminal.hideCursor();
+        this.hideTerminalCursor();
       this.requestRender();
+    }
+    hideTerminalCursor() {
+      if (!this.stopped)
+        this.terminal.hideCursor();
     }
     hasOverlay() {
       return this.overlayStack.some((o) => this.isOverlayVisible(o));
+    }
+    isOverlayFocused() {
+      return this.overlayStack.some((entry) => entry.component === this.focusedComponent && this.isOverlayVisible(entry));
+    }
+    resolveMouseFocusTarget(component) {
+      for (let index = this.overlayStack.length - 1;index >= 0; index--) {
+        const overlay = this.overlayStack[index];
+        if (this.isOverlayVisible(overlay) && this.containsComponent(overlay.component, component)) {
+          return overlay.component;
+        }
+      }
+      return component;
+    }
+    dispatchMouseToOverlay(event) {
+      for (let index = this.renderedOverlayLayouts.length - 1;index >= 0; index--) {
+        const layout = this.renderedOverlayLayouts[index];
+        if (event.screenX < layout.col || event.screenX >= layout.col + layout.width || event.screenY < layout.row || event.screenY >= layout.row + layout.height) {
+          continue;
+        }
+        const result = dispatchMouseEvent(layout.entry.component, {
+          ...event,
+          x: event.screenX - layout.col,
+          y: event.screenY - layout.row,
+          width: layout.width,
+          height: layout.height
+        });
+        return result ? {
+          hit: true,
+          result: result.focus ? { ...result, focusTarget: layout.entry.component } : result
+        } : { hit: true };
+      }
+      return { hit: false };
     }
     isOverlayVisible(entry) {
       if (entry.hidden)
@@ -34046,24 +35813,33 @@ var init_tui = __esm(() => {
       return true;
     }
     getTopmostVisibleOverlay() {
-      for (let i = this.overlayStack.length - 1;i >= 0; i--) {
-        if (this.overlayStack[i].options?.nonCapturing)
+      let topmost;
+      for (const overlay of this.overlayStack) {
+        if (overlay.options?.nonCapturing || !this.isOverlayVisible(overlay))
           continue;
-        if (this.isOverlayVisible(this.overlayStack[i])) {
-          return this.overlayStack[i];
+        if (!topmost || overlay.focusOrder > topmost.focusOrder) {
+          topmost = overlay;
         }
       }
-      return;
+      return topmost;
     }
     invalidate() {
-      super.invalidate();
+      for (const root of this.getMountedRoots())
+        root.invalidate();
       for (const overlay of this.overlayStack)
-        overlay.component.invalidate?.();
+        overlay.component.invalidate();
     }
     start() {
       this.stopped = false;
-      this.terminal.start((data) => this.handleInput(data), () => this.requestRender());
+      process.off("exit", this.exitRestoreHandler);
+      process.on("exit", this.exitRestoreHandler);
+      this.beforeTerminalStart();
+      this.terminal.start((data) => this.handleTerminalInput(data), () => this.requestRender());
+      this.afterTerminalStart();
       this.terminal.hideCursor();
+      if (this.terminalColorSchemeNotificationsEnabled) {
+        this.terminal.write("\x1B[?2031h");
+      }
       this.queryCellSize();
       this.requestRender();
     }
@@ -34076,54 +35852,51 @@ var init_tui = __esm(() => {
     removeInputListener(listener) {
       this.inputListeners.delete(listener);
     }
+    onTerminalColorSchemeChange(listener) {
+      this.terminalColorSchemeListeners.add(listener);
+      return () => {
+        this.terminalColorSchemeListeners.delete(listener);
+      };
+    }
+    setTerminalColorSchemeNotifications(enabled) {
+      if (this.terminalColorSchemeNotificationsEnabled === enabled) {
+        return;
+      }
+      this.terminalColorSchemeNotificationsEnabled = enabled;
+      if (!this.stopped) {
+        this.terminal.write(enabled ? "\x1B[?2031h" : "\x1B[?2031l");
+      }
+    }
     queryCellSize() {
       if (!getCapabilities().images) {
         return;
       }
       this.terminal.write("\x1B[16t");
     }
-    stop() {
+    stop(options = {}) {
       this.stopped = true;
-      if (this.renderTimer) {
-        clearTimeout(this.renderTimer);
-        this.renderTimer = undefined;
+      process.off("exit", this.exitRestoreHandler);
+      this.cancelRenderTimer();
+      if (this.terminalColorSchemeNotificationsEnabled) {
+        this.terminal.write("\x1B[?2031l");
       }
-      if (this.previousLines.length > 0) {
-        const targetRow = this.previousLines.length;
-        const lineDiff = targetRow - this.hardwareCursorRow;
-        if (lineDiff > 0) {
-          this.terminal.write(`\x1B[${lineDiff}B`);
-        } else if (lineDiff < 0) {
-          this.terminal.write(`\x1B[${-lineDiff}A`);
-        }
-        this.terminal.write(`\r
-`);
-      }
+      this.beforeTerminalStop(options);
       this.terminal.showCursor();
       this.terminal.stop();
+      this.afterTerminalStop(options);
+    }
+    renderNow(force = false) {
+      if (force)
+        this.resetRenderState();
+      this.renderRequested = false;
+      this.cancelRenderTimer();
+      this.lastRenderAt = performance2.now();
+      this.doRender();
     }
     requestRender(force = false) {
       if (force) {
-        this.previousLines = [];
-        this.previousWidth = -1;
-        this.previousHeight = -1;
-        this.cursorRow = 0;
-        this.hardwareCursorRow = 0;
-        this.maxLinesRendered = 0;
-        this.previousViewportTop = 0;
-        if (this.renderTimer) {
-          clearTimeout(this.renderTimer);
-          this.renderTimer = undefined;
-        }
-        this.renderRequested = true;
-        process.nextTick(() => {
-          if (this.stopped || !this.renderRequested) {
-            return;
-          }
-          this.renderRequested = false;
-          this.lastRenderAt = performance2.now();
-          this.doRender();
-        });
+        this.resetRenderState();
+        this.requestImmediateRender();
         return;
       }
       if (this.renderRequested)
@@ -34131,12 +35904,34 @@ var init_tui = __esm(() => {
       this.renderRequested = true;
       process.nextTick(() => this.scheduleRender());
     }
+    requestImmediateRender() {
+      this.cancelRenderTimer();
+      this.renderRequested = true;
+      if (this.immediateRenderScheduled)
+        return;
+      this.immediateRenderScheduled = true;
+      process.nextTick(() => {
+        this.immediateRenderScheduled = false;
+        if (this.stopped || !this.renderRequested)
+          return;
+        this.cancelRenderTimer();
+        this.renderRequested = false;
+        this.lastRenderAt = performance2.now();
+        this.doRender();
+      });
+    }
+    cancelRenderTimer() {
+      if (!this.renderTimer)
+        return;
+      clearTimeout(this.renderTimer);
+      this.renderTimer = undefined;
+    }
     scheduleRender() {
       if (this.stopped || this.renderTimer || !this.renderRequested) {
         return;
       }
       const elapsed = performance2.now() - this.lastRenderAt;
-      const delay = Math.max(0, TUI.MIN_RENDER_INTERVAL_MS - elapsed);
+      const delay = Math.max(0, TuiBase.MIN_RENDER_INTERVAL_MS - elapsed);
       this.renderTimer = setTimeout(() => {
         this.renderTimer = undefined;
         if (this.stopped || !this.renderRequested) {
@@ -34150,7 +35945,13 @@ var init_tui = __esm(() => {
         }
       }, delay);
     }
-    handleInput(data) {
+    handleTerminalInput(data) {
+      if (this.consumeTerminalColorResponse(data)) {
+        return;
+      }
+      if (this.consumeTerminalColorSchemeReport(data)) {
+        return;
+      }
       if (this.inputListeners.size > 0) {
         let current = data;
         for (const listener of this.inputListeners) {
@@ -34180,7 +35981,21 @@ var init_tui = __esm(() => {
         if (topVisible) {
           this.setFocus(topVisible.component);
         } else {
-          this.setFocus(focusedOverlay.preFocus);
+          this.setFocusInternal({ component: focusedOverlay.preFocus, overlayFocusRestore: "preserve" });
+        }
+      }
+      const focusIsOverlay = this.overlayStack.some((o) => o.component === this.focusedComponent);
+      if (!focusIsOverlay) {
+        const restoreState = this.getVisibleOverlayFocusRestore();
+        if (restoreState.status === "eligible") {
+          this.setFocus(restoreState.overlay.component);
+        } else if (restoreState.status === "blocked" && restoreState.blockedBy !== this.focusedComponent) {
+          if (restoreState.resume.status === "restore-overlay") {
+            this.setFocus(restoreState.overlay.component);
+          } else {
+            this.clearOverlayFocusRestore();
+            this.setFocus(restoreState.resume.target);
+          }
         }
       }
       if (this.focusedComponent?.handleInput) {
@@ -34188,8 +36003,60 @@ var init_tui = __esm(() => {
           return;
         }
         this.focusedComponent.handleInput(data);
-        this.requestRender();
+        this.requestImmediateRender();
       }
+    }
+    consumeTerminalColorResponse(data) {
+      const query = this.pendingTerminalColorQueries[0];
+      if (!query) {
+        return false;
+      }
+      if (DEVICE_ATTRIBUTES_RESPONSE_PATTERN.test(data)) {
+        this.pendingTerminalColorQueries.shift();
+        this.completeTerminalColorQuery(query);
+        return true;
+      }
+      const response = parseOscColorResponse(data);
+      if (!response) {
+        return false;
+      }
+      const { target, rgb } = response;
+      const key = String(target);
+      if (!query.deliver || query.replied.has(key)) {
+        return true;
+      }
+      query.replied.add(key);
+      if (target === "foreground") {
+        query.foreground = rgb;
+      } else if (target === "background") {
+        query.background = rgb;
+      } else if (target < TERMINAL_PALETTE_SIZE) {
+        query.palette[target] = rgb;
+      }
+      if (query.replied.size === TERMINAL_COLOR_REPLY_COUNT) {
+        this.completeTerminalColorQuery(query);
+      }
+      return true;
+    }
+    terminalColorQueryResult(query) {
+      const palette = query.palette.every((color) => color !== undefined) ? query.palette : undefined;
+      return { foreground: query.foreground, background: query.background, palette };
+    }
+    completeTerminalColorQuery(query) {
+      const deliver = query.deliver;
+      query.deliver = undefined;
+      clearTimeout(query.timer);
+      deliver?.(this.terminalColorQueryResult(query));
+    }
+    consumeTerminalColorSchemeReport(data) {
+      const scheme = parseTerminalColorSchemeReport(data);
+      if (!scheme) {
+        return false;
+      }
+      for (const listener of this.terminalColorSchemeListeners) {
+        listener(scheme);
+      }
+      return true;
     }
     consumeCellSizeResponse(data) {
       const match = data.match(/^\x1b\[6;(\d+);(\d+)t$/);
@@ -34302,9 +36169,13 @@ var init_tui = __esm(() => {
       }
     }
     compositeOverlays(lines, termWidth, termHeight) {
-      if (this.overlayStack.length === 0)
+      if (this.overlayStack.length === 0) {
+        this.renderedOverlayLayouts = [];
         return lines;
+      }
       const result = [...lines];
+      for (const entry of this.overlayStack)
+        entry.bounds = undefined;
       const rendered = [];
       let minLinesNeeded = result.length;
       const visibleEntries = this.overlayStack.filter((e) => this.isOverlayVisible(e));
@@ -34312,14 +36183,22 @@ var init_tui = __esm(() => {
       for (const entry of visibleEntries) {
         const { component, options } = entry;
         const { width, maxHeight } = this.resolveOverlayLayout(options, 0, termWidth, termHeight);
-        let overlayLines = component.render(width);
+        let overlayLines = this.resolveFakeCursors(component.render(width));
         if (maxHeight !== undefined && overlayLines.length > maxHeight) {
           overlayLines = overlayLines.slice(0, maxHeight);
         }
         const { row, col } = this.resolveOverlayLayout(options, overlayLines.length, termWidth, termHeight);
-        rendered.push({ overlayLines, row, col, w: width });
+        entry.bounds = { row, col, width, height: overlayLines.length };
+        rendered.push({ entry, overlayLines, row, col, w: width });
         minLinesNeeded = Math.max(minLinesNeeded, row + overlayLines.length);
       }
+      this.renderedOverlayLayouts = rendered.map(({ entry, row, col, w, overlayLines }) => ({
+        entry,
+        row,
+        col,
+        width: w,
+        height: overlayLines.length
+      }));
       const workingHeight = Math.max(result.length, termHeight, minLinesNeeded);
       while (result.length < workingHeight) {
         result.push("");
@@ -34336,73 +36215,18 @@ var init_tui = __esm(() => {
       }
       return result;
     }
-    static SEGMENT_RESET = "\x1B[0m\x1B]8;;\x07";
     applyLineResets(lines) {
-      const reset = TUI.SEGMENT_RESET;
+      const reset = SEGMENT_RESET;
       for (let i = 0;i < lines.length; i++) {
         const line = lines[i];
         if (!isImageLine(line)) {
-          lines[i] = normalizeTerminalOutput(line) + reset;
+          lines[i] = normalizeTerminalOutput(line.replaceAll(CURSOR_MARKER, "")) + reset;
         }
       }
       return lines;
     }
-    collectKittyImageIds(lines) {
-      const ids = new Set;
-      for (const line of lines) {
-        for (const id of extractKittyImageIds(line)) {
-          ids.add(id);
-        }
-      }
-      return ids;
-    }
-    deleteKittyImages(ids) {
-      let buffer = "";
-      for (const id of ids) {
-        buffer += deleteKittyImage(id);
-      }
-      return buffer;
-    }
-    expandLastChangedForKittyImages(firstChanged, lastChanged) {
-      let expandedLastChanged = lastChanged;
-      for (let i = firstChanged;i < this.previousLines.length; i++) {
-        if (extractKittyImageIds(this.previousLines[i]).length > 0) {
-          expandedLastChanged = Math.max(expandedLastChanged, i);
-        }
-      }
-      return expandedLastChanged;
-    }
-    deleteChangedKittyImages(firstChanged, lastChanged) {
-      if (firstChanged < 0 || lastChanged < firstChanged)
-        return "";
-      const ids = new Set;
-      const maxLine = Math.min(lastChanged, this.previousLines.length - 1);
-      for (let i = firstChanged;i <= maxLine; i++) {
-        for (const id of extractKittyImageIds(this.previousLines[i] ?? "")) {
-          ids.add(id);
-        }
-      }
-      return this.deleteKittyImages(ids);
-    }
     compositeLineAt(baseLine, overlayLine, startCol, overlayWidth, totalWidth) {
-      if (isImageLine(baseLine))
-        return baseLine;
-      const afterStart = startCol + overlayWidth;
-      const base = extractSegments(baseLine, startCol, afterStart, totalWidth - afterStart, true);
-      const overlay = sliceWithWidth(overlayLine, 0, overlayWidth, true);
-      const beforePad = Math.max(0, startCol - base.beforeWidth);
-      const overlayPad = Math.max(0, overlayWidth - overlay.width);
-      const actualBeforeWidth = Math.max(startCol, base.beforeWidth);
-      const actualOverlayWidth = Math.max(overlayWidth, overlay.width);
-      const afterTarget = Math.max(0, totalWidth - actualBeforeWidth - actualOverlayWidth);
-      const afterPad = Math.max(0, afterTarget - base.afterWidth);
-      const r = TUI.SEGMENT_RESET;
-      const result = base.before + " ".repeat(beforePad) + r + overlay.text + " ".repeat(overlayPad) + r + base.after + " ".repeat(afterPad);
-      const resultWidth = visibleWidth(result);
-      if (resultWidth <= totalWidth) {
-        return result;
-      }
-      return sliceByColumn(result, 0, totalWidth, true);
+      return compositeTuiLine(baseLine, overlayLine, startCol, overlayWidth, totalWidth);
     }
     extractCursorPosition(lines, height) {
       const viewportTop = Math.max(0, lines.length - height);
@@ -34412,317 +36236,322 @@ var init_tui = __esm(() => {
         if (markerIndex !== -1) {
           const beforeMarker = line.slice(0, markerIndex);
           const col = visibleWidth(beforeMarker);
-          lines[row] = line.slice(0, markerIndex) + line.slice(markerIndex + CURSOR_MARKER.length);
+          lines[row] = line.replaceAll(CURSOR_MARKER, "");
           return { row, col };
         }
       }
       return null;
     }
-    doRender() {
-      if (this.stopped)
-        return;
-      const width = this.terminal.columns;
-      const height = this.terminal.rows;
-      const widthChanged = this.previousWidth !== 0 && this.previousWidth !== width;
-      const heightChanged = this.previousHeight !== 0 && this.previousHeight !== height;
-      const previousBufferLength = this.previousHeight > 0 ? this.previousViewportTop + this.previousHeight : height;
-      let prevViewportTop = heightChanged ? Math.max(0, previousBufferLength - height) : this.previousViewportTop;
-      let viewportTop = prevViewportTop;
-      let hardwareCursorRow = this.hardwareCursorRow;
-      const computeLineDiff = (targetRow) => {
-        const currentScreenRow = hardwareCursorRow - prevViewportTop;
-        const targetScreenRow = targetRow - viewportTop;
-        return targetScreenRow - currentScreenRow;
-      };
-      let newLines = this.render(width);
-      if (this.overlayStack.length > 0) {
-        newLines = this.compositeOverlays(newLines, width, height);
-      }
-      const cursorPos = this.extractCursorPosition(newLines, height);
-      newLines = this.applyLineResets(newLines);
-      const fullRender = (clear) => {
-        this.fullRedrawCount += 1;
-        let buffer = "\x1B[?2026h";
-        if (clear) {
-          buffer += this.deleteKittyImages(this.previousKittyImageIds);
-          buffer += "\x1B[2J\x1B[H\x1B[3J";
-        }
-        for (let i = 0;i < newLines.length; i++) {
-          if (i > 0)
-            buffer += `\r
-`;
-          buffer += newLines[i];
-        }
-        buffer += "\x1B[?2026l";
-        this.terminal.write(buffer);
-        this.cursorRow = Math.max(0, newLines.length - 1);
-        this.hardwareCursorRow = this.cursorRow;
-        if (clear) {
-          this.maxLinesRendered = newLines.length;
-        } else {
-          this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
-        }
-        const bufferLength = Math.max(height, newLines.length);
-        this.previousViewportTop = Math.max(0, bufferLength - height);
-        this.positionHardwareCursor(cursorPos, newLines.length);
-        this.previousLines = newLines;
-        this.previousKittyImageIds = this.collectKittyImageIds(newLines);
-        this.previousWidth = width;
-        this.previousHeight = height;
-      };
-      const debugRedraw = process.env.PI_DEBUG_REDRAW === "1";
-      const logRedraw = (reason) => {
-        if (!debugRedraw)
-          return;
-        const logPath = path2.join(os2.homedir(), ".pi", "agent", "pi-debug.log");
-        const msg = `[${new Date().toISOString()}] fullRender: ${reason} (prev=${this.previousLines.length}, new=${newLines.length}, height=${height})
-`;
-        fs.appendFileSync(logPath, msg);
-      };
-      if (this.previousLines.length === 0 && !widthChanged && !heightChanged) {
-        logRedraw("first render");
-        fullRender(false);
-        return;
-      }
-      if (widthChanged) {
-        logRedraw(`terminal width changed (${this.previousWidth} -> ${width})`);
-        fullRender(true);
-        return;
-      }
-      if (heightChanged && !isTermuxSession()) {
-        logRedraw(`terminal height changed (${this.previousHeight} -> ${height})`);
-        fullRender(true);
-        return;
-      }
-      if (this.clearOnShrink && newLines.length < this.maxLinesRendered && this.overlayStack.length === 0) {
-        logRedraw(`clearOnShrink (maxLinesRendered=${this.maxLinesRendered})`);
-        fullRender(true);
-        return;
-      }
-      let firstChanged = -1;
-      let lastChanged = -1;
-      const maxLines = Math.max(newLines.length, this.previousLines.length);
-      for (let i = 0;i < maxLines; i++) {
-        const oldLine = i < this.previousLines.length ? this.previousLines[i] : "";
-        const newLine = i < newLines.length ? newLines[i] : "";
-        if (oldLine !== newLine) {
-          if (firstChanged === -1) {
-            firstChanged = i;
-          }
-          lastChanged = i;
-        }
-      }
-      const appendedLines = newLines.length > this.previousLines.length;
-      if (appendedLines) {
-        if (firstChanged === -1) {
-          firstChanged = this.previousLines.length;
-        }
-        lastChanged = newLines.length - 1;
-      }
-      if (firstChanged !== -1) {
-        lastChanged = this.expandLastChangedForKittyImages(firstChanged, lastChanged);
-      }
-      const appendStart = appendedLines && firstChanged === this.previousLines.length && firstChanged > 0;
-      if (firstChanged === -1) {
-        this.positionHardwareCursor(cursorPos, newLines.length);
-        this.previousViewportTop = prevViewportTop;
-        this.previousHeight = height;
-        return;
-      }
-      if (firstChanged >= newLines.length) {
-        if (this.previousLines.length > newLines.length) {
-          let buffer = "\x1B[?2026h";
-          buffer += this.deleteChangedKittyImages(firstChanged, lastChanged);
-          const targetRow = Math.max(0, newLines.length - 1);
-          if (targetRow < prevViewportTop) {
-            logRedraw(`deleted lines moved viewport up (${targetRow} < ${prevViewportTop})`);
-            fullRender(true);
-            return;
-          }
-          const lineDiff = computeLineDiff(targetRow);
-          if (lineDiff > 0)
-            buffer += `\x1B[${lineDiff}B`;
-          else if (lineDiff < 0)
-            buffer += `\x1B[${-lineDiff}A`;
-          buffer += "\r";
-          const extraLines = this.previousLines.length - newLines.length;
-          if (extraLines > height) {
-            logRedraw(`extraLines > height (${extraLines} > ${height})`);
-            fullRender(true);
-            return;
-          }
-          if (extraLines > 0) {
-            buffer += "\x1B[1B";
-          }
-          for (let i = 0;i < extraLines; i++) {
-            buffer += "\r\x1B[2K";
-            if (i < extraLines - 1)
-              buffer += "\x1B[1B";
-          }
-          if (extraLines > 0) {
-            buffer += `\x1B[${extraLines}A`;
-          }
-          buffer += "\x1B[?2026l";
-          this.terminal.write(buffer);
-          this.cursorRow = targetRow;
-          this.hardwareCursorRow = targetRow;
-        }
-        this.positionHardwareCursor(cursorPos, newLines.length);
-        this.previousLines = newLines;
-        this.previousKittyImageIds = this.collectKittyImageIds(newLines);
-        this.previousWidth = width;
-        this.previousHeight = height;
-        this.previousViewportTop = prevViewportTop;
-        return;
-      }
-      if (firstChanged < prevViewportTop) {
-        logRedraw(`firstChanged < viewportTop (${firstChanged} < ${prevViewportTop})`);
-        fullRender(true);
-        return;
-      }
-      let buffer = "\x1B[?2026h";
-      buffer += this.deleteChangedKittyImages(firstChanged, lastChanged);
-      const prevViewportBottom = prevViewportTop + height - 1;
-      const moveTargetRow = appendStart ? firstChanged - 1 : firstChanged;
-      if (moveTargetRow > prevViewportBottom) {
-        const currentScreenRow = Math.max(0, Math.min(height - 1, hardwareCursorRow - prevViewportTop));
-        const moveToBottom = height - 1 - currentScreenRow;
-        if (moveToBottom > 0) {
-          buffer += `\x1B[${moveToBottom}B`;
-        }
-        const scroll = moveTargetRow - prevViewportBottom;
-        buffer += `\r
-`.repeat(scroll);
-        prevViewportTop += scroll;
-        viewportTop += scroll;
-        hardwareCursorRow = moveTargetRow;
-      }
-      const lineDiff = computeLineDiff(moveTargetRow);
-      if (lineDiff > 0) {
-        buffer += `\x1B[${lineDiff}B`;
-      } else if (lineDiff < 0) {
-        buffer += `\x1B[${-lineDiff}A`;
-      }
-      buffer += appendStart ? `\r
-` : "\r";
-      const renderEnd = Math.min(lastChanged, newLines.length - 1);
-      for (let i = firstChanged;i <= renderEnd; i++) {
-        if (i > firstChanged)
-          buffer += `\r
-`;
-        buffer += "\x1B[2K";
-        const line = newLines[i];
-        const isImage = isImageLine(line);
-        if (!isImage && visibleWidth(line) > width) {
-          const crashLogPath = path2.join(os2.homedir(), ".pi", "agent", "pi-crash.log");
-          const crashData = [
-            `Crash at ${new Date().toISOString()}`,
-            `Terminal width: ${width}`,
-            `Line ${i} visible width: ${visibleWidth(line)}`,
-            "",
-            "=== All rendered lines ===",
-            ...newLines.map((l, idx) => `[${idx}] (w=${visibleWidth(l)}) ${l}`),
-            ""
-          ].join(`
-`);
-          fs.mkdirSync(path2.dirname(crashLogPath), { recursive: true });
-          fs.writeFileSync(crashLogPath, crashData);
-          this.stop();
-          const errorMsg = [
-            `Rendered line ${i} exceeds terminal width (${visibleWidth(line)} > ${width}).`,
-            "",
-            "This is likely caused by a custom TUI component not truncating its output.",
-            "Use visibleWidth() to measure and truncateToWidth() to truncate lines.",
-            "",
-            `Debug log written to: ${crashLogPath}`
-          ].join(`
-`);
-          throw new Error(errorMsg);
-        }
-        buffer += line;
-      }
-      let finalCursorRow = renderEnd;
-      if (this.previousLines.length > newLines.length) {
-        if (renderEnd < newLines.length - 1) {
-          const moveDown = newLines.length - 1 - renderEnd;
-          buffer += `\x1B[${moveDown}B`;
-          finalCursorRow = newLines.length - 1;
-        }
-        const extraLines = this.previousLines.length - newLines.length;
-        for (let i = newLines.length;i < this.previousLines.length; i++) {
-          buffer += `\r
-\x1B[2K`;
-        }
-        buffer += `\x1B[${extraLines}A`;
-      }
-      buffer += "\x1B[?2026l";
-      if (process.env.PI_TUI_DEBUG === "1") {
-        const debugDir = "/tmp/tui";
-        fs.mkdirSync(debugDir, { recursive: true });
-        const debugPath = path2.join(debugDir, `render-${Date.now()}-${Math.random().toString(36).slice(2)}.log`);
-        const debugData = [
-          `firstChanged: ${firstChanged}`,
-          `viewportTop: ${viewportTop}`,
-          `cursorRow: ${this.cursorRow}`,
-          `height: ${height}`,
-          `lineDiff: ${lineDiff}`,
-          `hardwareCursorRow: ${hardwareCursorRow}`,
-          `renderEnd: ${renderEnd}`,
-          `finalCursorRow: ${finalCursorRow}`,
-          `cursorPos: ${JSON.stringify(cursorPos)}`,
-          `newLines.length: ${newLines.length}`,
-          `previousLines.length: ${this.previousLines.length}`,
-          "",
-          "=== newLines ===",
-          JSON.stringify(newLines, null, 2),
-          "",
-          "=== previousLines ===",
-          JSON.stringify(this.previousLines, null, 2),
-          "",
-          "=== buffer ===",
-          JSON.stringify(buffer)
-        ].join(`
-`);
-        fs.writeFileSync(debugPath, debugData);
-      }
-      this.terminal.write(buffer);
-      this.cursorRow = Math.max(0, newLines.length - 1);
-      this.hardwareCursorRow = finalCursorRow;
-      this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
-      this.previousViewportTop = Math.max(prevViewportTop, finalCursorRow - height + 1);
-      this.positionHardwareCursor(cursorPos, newLines.length);
-      this.previousLines = newLines;
-      this.previousKittyImageIds = this.collectKittyImageIds(newLines);
-      this.previousWidth = width;
-      this.previousHeight = height;
+    resolveFakeCursors(lines) {
+      return lines.map((line) => {
+        if (!line.includes(FAKE_CURSOR_START))
+          return line;
+        const resolved = this.showHardwareCursor ? line.replace(FOCUSED_FAKE_CURSOR, "$1$2") : line;
+        return resolved.replaceAll(FAKE_CURSOR_START, "\x1B[7m").replaceAll(FAKE_CURSOR_END, "\x1B[27m");
+      });
     }
-    positionHardwareCursor(cursorPos, totalLines) {
-      if (!cursorPos || totalLines <= 0) {
-        this.terminal.hideCursor();
-        return;
-      }
-      const targetRow = Math.max(0, Math.min(cursorPos.row, totalLines - 1));
-      const targetCol = Math.max(0, cursorPos.col);
-      const rowDelta = targetRow - this.hardwareCursorRow;
-      let buffer = "";
-      if (rowDelta > 0) {
-        buffer += `\x1B[${rowDelta}B`;
-      } else if (rowDelta < 0) {
-        buffer += `\x1B[${-rowDelta}A`;
-      }
-      buffer += `\x1B[${targetCol + 1}G`;
-      if (buffer) {
-        this.terminal.write(buffer);
-      }
-      this.hardwareCursorRow = targetRow;
-      if (this.showHardwareCursor) {
-        this.terminal.showCursor();
-      } else {
-        this.terminal.hideCursor();
-      }
+    queryTerminalColors({ timeoutMs, onLateReply }) {
+      return new Promise((resolve) => {
+        const query = {
+          palette: Array.from({ length: TERMINAL_PALETTE_SIZE }, () => {
+            return;
+          }),
+          replied: new Set,
+          deliver: resolve,
+          timer: undefined
+        };
+        query.timer = setTimeout(() => {
+          query.deliver = onLateReply;
+          resolve(this.terminalColorQueryResult(query));
+        }, timeoutMs);
+        this.pendingTerminalColorQueries.push(query);
+        this.terminal.write(TERMINAL_COLOR_QUERY);
+      });
     }
   };
 });
+
+// node_modules/@earendil-works/pi-tui/dist/components/box.js
+var init_box = __esm(() => {
+  init_tui();
+  init_utils();
+});
+
+// node_modules/@earendil-works/pi-tui/dist/keybindings.js
+function normalizeKeys(keys) {
+  if (keys === undefined)
+    return [];
+  const keyList = Array.isArray(keys) ? keys : [keys];
+  const seen = new Set;
+  const result = [];
+  for (const key of keyList) {
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(key);
+    }
+  }
+  return result;
+}
+
+class KeybindingsManager {
+  definitions;
+  userBindings;
+  keysById = new Map;
+  conflicts = [];
+  constructor(definitions, userBindings = {}) {
+    this.definitions = definitions;
+    this.userBindings = userBindings;
+    this.rebuild();
+  }
+  rebuild() {
+    this.keysById.clear();
+    this.conflicts = [];
+    const userClaims = new Map;
+    for (const [keybinding, keys] of Object.entries(this.userBindings)) {
+      if (!(keybinding in this.definitions))
+        continue;
+      for (const key of normalizeKeys(keys)) {
+        const claimants = userClaims.get(key) ?? new Set;
+        claimants.add(keybinding);
+        userClaims.set(key, claimants);
+      }
+    }
+    for (const [key, keybindings] of userClaims) {
+      if (keybindings.size > 1) {
+        this.conflicts.push({ key, keybindings: [...keybindings] });
+      }
+    }
+    for (const [id, definition] of Object.entries(this.definitions)) {
+      const userKeys = this.userBindings[id];
+      const keys = userKeys === undefined ? normalizeKeys(definition.defaultKeys) : normalizeKeys(userKeys);
+      this.keysById.set(id, keys);
+    }
+  }
+  matches(data, keybinding) {
+    const keys = this.keysById.get(keybinding) ?? [];
+    for (const key of keys) {
+      if (matchesKey(data, key))
+        return true;
+    }
+    return false;
+  }
+  getKeys(keybinding) {
+    return [...this.keysById.get(keybinding) ?? []];
+  }
+  getDefinition(keybinding) {
+    return this.definitions[keybinding];
+  }
+  getConflicts() {
+    return this.conflicts.map((conflict) => ({ ...conflict, keybindings: [...conflict.keybindings] }));
+  }
+  setUserBindings(userBindings) {
+    this.userBindings = userBindings;
+    this.rebuild();
+  }
+  getUserBindings() {
+    return { ...this.userBindings };
+  }
+  getResolvedBindings() {
+    const resolved = {};
+    for (const id of Object.keys(this.definitions)) {
+      const keys = this.keysById.get(id) ?? [];
+      resolved[id] = keys.length === 1 ? keys[0] : [...keys];
+    }
+    return resolved;
+  }
+}
+function getKeybindings() {
+  if (!globalKeybindings) {
+    globalKeybindings = new KeybindingsManager(TUI_KEYBINDINGS);
+  }
+  return globalKeybindings;
+}
+var TUI_KEYBINDINGS, globalKeybindings = null;
+var init_keybindings = __esm(() => {
+  init_keys();
+  TUI_KEYBINDINGS = {
+    "tui.editor.cursorUp": { defaultKeys: "up", description: "Move cursor up" },
+    "tui.editor.cursorDown": { defaultKeys: "down", description: "Move cursor down" },
+    "tui.editor.historyPrevious": {
+      defaultKeys: [],
+      description: "Select previous prompt history entry"
+    },
+    "tui.editor.historyNext": {
+      defaultKeys: [],
+      description: "Select next prompt history entry"
+    },
+    "tui.editor.cursorLeft": {
+      defaultKeys: ["left", "ctrl+b"],
+      description: "Move cursor left"
+    },
+    "tui.editor.cursorRight": {
+      defaultKeys: ["right", "ctrl+f"],
+      description: "Move cursor right"
+    },
+    "tui.editor.cursorWordLeft": {
+      defaultKeys: ["alt+left", "ctrl+left", "alt+b"],
+      description: "Move cursor word left"
+    },
+    "tui.editor.cursorWordRight": {
+      defaultKeys: ["alt+right", "ctrl+right", "alt+f"],
+      description: "Move cursor word right"
+    },
+    "tui.editor.cursorLineStart": {
+      defaultKeys: ["home", "ctrl+a"],
+      description: "Move to line start"
+    },
+    "tui.editor.cursorLineEnd": {
+      defaultKeys: ["end", "ctrl+e"],
+      description: "Move to line end"
+    },
+    "tui.editor.jumpForward": {
+      defaultKeys: "ctrl+]",
+      description: "Jump forward to character"
+    },
+    "tui.editor.jumpBackward": {
+      defaultKeys: "ctrl+alt+]",
+      description: "Jump backward to character"
+    },
+    "tui.editor.pageUp": { defaultKeys: ["pageUp", "ctrl+pageUp"], description: "Page up" },
+    "tui.editor.pageDown": { defaultKeys: ["pageDown", "ctrl+pageDown"], description: "Page down" },
+    "tui.editor.deleteCharBackward": {
+      defaultKeys: "backspace",
+      description: "Delete character backward"
+    },
+    "tui.editor.deleteCharForward": {
+      defaultKeys: ["delete", "ctrl+d"],
+      description: "Delete character forward"
+    },
+    "tui.editor.deleteWordBackward": {
+      defaultKeys: ["ctrl+w", "alt+backspace"],
+      description: "Delete word backward"
+    },
+    "tui.editor.deleteWordForward": {
+      defaultKeys: ["alt+d", "alt+delete"],
+      description: "Delete word forward"
+    },
+    "tui.editor.deleteToLineStart": {
+      defaultKeys: "ctrl+u",
+      description: "Delete to line start"
+    },
+    "tui.editor.deleteToLineEnd": {
+      defaultKeys: "ctrl+k",
+      description: "Delete to line end"
+    },
+    "tui.editor.yank": { defaultKeys: "ctrl+y", description: "Yank" },
+    "tui.editor.yankPop": { defaultKeys: "alt+y", description: "Yank pop" },
+    "tui.editor.undo": { defaultKeys: "ctrl+-", description: "Undo" },
+    "tui.input.newLine": { defaultKeys: ["shift+enter", "ctrl+j"], description: "Insert newline" },
+    "tui.input.submit": { defaultKeys: "enter", description: "Submit input" },
+    "tui.input.tab": { defaultKeys: "tab", description: "Tab / autocomplete" },
+    "tui.input.copy": { defaultKeys: "ctrl+c", description: "Copy selection" },
+    "tui.select.up": { defaultKeys: "up", description: "Move selection up" },
+    "tui.select.down": { defaultKeys: "down", description: "Move selection down" },
+    "tui.select.pageUp": { defaultKeys: "pageUp", description: "Selection page up" },
+    "tui.select.pageDown": {
+      defaultKeys: "pageDown",
+      description: "Selection page down"
+    },
+    "tui.select.confirm": { defaultKeys: "enter", description: "Confirm selection" },
+    "tui.select.cancel": {
+      defaultKeys: ["escape", "ctrl+c"],
+      description: "Cancel selection"
+    },
+    "tui.altScreen.pageUp": {
+      defaultKeys: "pageUp",
+      description: "Scroll viewport up one page"
+    },
+    "tui.altScreen.pageDown": {
+      defaultKeys: "pageDown",
+      description: "Scroll viewport down one page"
+    },
+    "tui.altScreen.halfPageUp": {
+      defaultKeys: [],
+      description: "Scroll viewport up half a page"
+    },
+    "tui.altScreen.halfPageDown": {
+      defaultKeys: [],
+      description: "Scroll viewport down half a page"
+    },
+    "tui.altScreen.lineUp": {
+      defaultKeys: [],
+      description: "Scroll viewport up one line"
+    },
+    "tui.altScreen.lineDown": {
+      defaultKeys: [],
+      description: "Scroll viewport down one line"
+    },
+    "tui.altScreen.previousPrompt": {
+      defaultKeys: ["ctrl+shift+up", "ctrl+up"],
+      description: "Jump to previous semantic prompt"
+    },
+    "tui.altScreen.nextPrompt": {
+      defaultKeys: ["ctrl+shift+down", "ctrl+down"],
+      description: "Jump to next semantic prompt"
+    },
+    "tui.altScreen.search": {
+      defaultKeys: "ctrl+shift+f",
+      description: "Search the primary scroll view"
+    },
+    "tui.altScreen.searchNext": {
+      defaultKeys: ["enter", "ctrl+g"],
+      description: "Select the next search match"
+    },
+    "tui.altScreen.searchPrevious": {
+      defaultKeys: ["shift+enter", "ctrl+shift+g"],
+      description: "Select the previous search match"
+    },
+    "tui.altScreen.searchClose": {
+      defaultKeys: "escape",
+      description: "Close transcript search"
+    },
+    "tui.altScreen.top": { defaultKeys: "ctrl+home", description: "Scroll viewport to top" },
+    "tui.altScreen.bottom": { defaultKeys: "ctrl+end", description: "Scroll viewport to bottom" }
+  };
+});
+
+// node_modules/@earendil-works/pi-tui/dist/components/text.js
+var init_text = __esm(() => {
+  init_utils();
+});
+
+// node_modules/@earendil-works/pi-tui/dist/components/loader.js
+var init_loader2 = __esm(() => {
+  init_text();
+});
+
+// node_modules/@earendil-works/pi-tui/dist/components/cancellable-loader.js
+var init_cancellable_loader = __esm(() => {
+  init_keybindings();
+  init_loader2();
+});
+
+// node_modules/@earendil-works/pi-tui/dist/kill-ring.js
+class KillRing {
+  ring = [];
+  push(text, opts) {
+    if (!text)
+      return;
+    if (opts.accumulate && this.ring.length > 0) {
+      const last = this.ring.pop();
+      this.ring.push(opts.prepend ? text + last : last + text);
+    } else {
+      this.ring.push(text);
+    }
+  }
+  peek() {
+    return this.ring.length > 0 ? this.ring[this.ring.length - 1] : undefined;
+  }
+  rotate() {
+    if (this.ring.length > 1) {
+      const last = this.ring.pop();
+      this.ring.unshift(last);
+    }
+  }
+  get length() {
+    return this.ring.length;
+  }
+}
 
 // node_modules/@earendil-works/pi-tui/dist/undo-stack.js
 class UndoStack {
@@ -34741,6 +36570,73 @@ class UndoStack {
   }
 }
 
+// node_modules/@earendil-works/pi-tui/dist/word-navigation.js
+function findWordBackward(text, cursor, options) {
+  if (cursor <= 0)
+    return 0;
+  const textBeforeCursor = text.slice(0, cursor);
+  const segmentFn = options?.segment;
+  const isAtomic = options?.isAtomicSegment;
+  const segments = segmentFn ? [...segmentFn(textBeforeCursor)] : [...wordSegmenter2.segment(textBeforeCursor)];
+  let newCursor = cursor;
+  while (segments.length > 0 && !isAtomic?.(segments[segments.length - 1]?.segment || "") && isWhitespaceChar(segments[segments.length - 1]?.segment || "")) {
+    newCursor -= segments.pop()?.segment.length || 0;
+  }
+  if (segments.length === 0)
+    return newCursor;
+  const last = segments[segments.length - 1];
+  if (isAtomic?.(last.segment)) {
+    newCursor -= last.segment.length;
+  } else if (last.isWordLike) {
+    const segment = last.segment;
+    const matches = [...segment.matchAll(new RegExp(PUNCTUATION_REGEX, "g"))];
+    if (matches.length <= 0) {
+      newCursor -= segment.length;
+    } else {
+      const lastMatch = matches[matches.length - 1];
+      newCursor -= segment.length - (lastMatch.index + lastMatch[0].length);
+    }
+  } else {
+    while (segments.length > 0 && !isAtomic?.(segments[segments.length - 1]?.segment || "") && !segments[segments.length - 1]?.isWordLike && !isWhitespaceChar(segments[segments.length - 1]?.segment || "")) {
+      newCursor -= segments.pop()?.segment.length || 0;
+    }
+  }
+  return newCursor;
+}
+function findWordForward(text, cursor, options) {
+  if (cursor >= text.length)
+    return text.length;
+  const textAfterCursor = text.slice(cursor);
+  const segmentFn = options?.segment;
+  const isAtomic = options?.isAtomicSegment;
+  const segments = segmentFn ? segmentFn(textAfterCursor) : wordSegmenter2.segment(textAfterCursor);
+  const iterator = segments[Symbol.iterator]();
+  let next = iterator.next();
+  let newCursor = cursor;
+  while (!next.done && !isAtomic?.(next.value.segment) && isWhitespaceChar(next.value.segment)) {
+    newCursor += next.value.segment.length;
+    next = iterator.next();
+  }
+  if (next.done)
+    return newCursor;
+  if (isAtomic?.(next.value.segment)) {
+    newCursor += next.value.segment.length;
+  } else if (next.value.isWordLike) {
+    newCursor += PUNCTUATION_REGEX.exec(next.value.segment)?.index ?? next.value.segment.length;
+  } else {
+    while (!next.done && !isAtomic?.(next.value.segment) && !next.value.isWordLike && !isWhitespaceChar(next.value.segment)) {
+      newCursor += next.value.segment.length;
+      next = iterator.next();
+    }
+  }
+  return newCursor;
+}
+var wordSegmenter2;
+var init_word_navigation = __esm(() => {
+  init_utils();
+  wordSegmenter2 = getWordSegmenter();
+});
+
 // node_modules/@earendil-works/pi-tui/dist/components/select-list.js
 var init_select_list = __esm(() => {
   init_keybindings();
@@ -34748,25 +36644,55 @@ var init_select_list = __esm(() => {
 });
 
 // node_modules/@earendil-works/pi-tui/dist/components/editor.js
-var baseSegmenter;
+var graphemeSegmenter2, wordSegmenter3, unquotedAutocompleteSuffixRegex, autocompleteTokenStartSource;
 var init_editor = __esm(() => {
   init_keybindings();
   init_keys();
   init_tui();
   init_utils();
+  init_word_navigation();
   init_select_list();
-  baseSegmenter = getSegmenter();
+  graphemeSegmenter2 = getGraphemeSegmenter();
+  wordSegmenter3 = getWordSegmenter();
+  unquotedAutocompleteSuffixRegex = new RegExp(`(?:(?!${autocompleteSeparatorRegex.source}).)*`, "u");
+  autocompleteTokenStartSource = `${autocompleteBoundaryRegex.source}[([{<\`]*`;
+});
+
+// node_modules/@earendil-works/pi-tui/dist/layout-node.js
+var LAYOUT_NODE;
+var init_layout_node = __esm(() => {
+  LAYOUT_NODE = Symbol.for("@earendil-works/pi-tui/layout-node");
+});
+
+// node_modules/@earendil-works/pi-tui/dist/components/stack.js
+var init_stack = __esm(() => {
+  init_layout_node();
+  init_tui();
+});
+
+// node_modules/@earendil-works/pi-tui/dist/components/h-stack.js
+var init_h_stack = __esm(() => {
+  init_tui();
+  init_utils();
+  init_stack();
 });
 
 // node_modules/@earendil-works/pi-tui/dist/components/image.js
+var pngCache;
 var init_image = __esm(() => {
   init_terminal_image();
+  init_utils();
+  pngCache = new Map;
 });
 
 // node_modules/@earendil-works/pi-tui/dist/components/input.js
 class Input {
   value = "";
   cursor = 0;
+  prompt;
+  placeholder;
+  placeholderStyle;
+  renderedStartColumn = 0;
   onSubmit;
   onEscape;
   focused = false;
@@ -34775,6 +36701,11 @@ class Input {
   killRing = new KillRing;
   lastAction = null;
   undoStack = new UndoStack;
+  constructor(options = {}) {
+    this.prompt = options.prompt ?? "> ";
+    this.placeholder = options.placeholder ?? "";
+    this.placeholderStyle = options.placeholderStyle ?? ((text) => text);
+  }
   getValue() {
     return this.value;
   }
@@ -34855,7 +36786,7 @@ class Input {
       this.lastAction = null;
       if (this.cursor > 0) {
         const beforeCursor = this.value.slice(0, this.cursor);
-        const graphemes = [...segmenter2.segment(beforeCursor)];
+        const graphemes = [...segmenter.segment(beforeCursor)];
         const lastGrapheme = graphemes[graphemes.length - 1];
         this.cursor -= lastGrapheme ? lastGrapheme.segment.length : 1;
       }
@@ -34865,7 +36796,7 @@ class Input {
       this.lastAction = null;
       if (this.cursor < this.value.length) {
         const afterCursor = this.value.slice(this.cursor);
-        const graphemes = [...segmenter2.segment(afterCursor)];
+        const graphemes = [...segmenter.segment(afterCursor)];
         const firstGrapheme = graphemes[0];
         this.cursor += firstGrapheme ? firstGrapheme.segment.length : 1;
       }
@@ -34902,6 +36833,24 @@ class Input {
       this.insertCharacter(data);
     }
   }
+  handleMouse(event) {
+    if (event.type !== "press" || event.button !== "left" || event.y !== 0)
+      return;
+    const visibleColumn = Math.max(0, event.x - 2);
+    const targetColumn = this.renderedStartColumn + visibleColumn;
+    let currentColumn = 0;
+    this.cursor = this.value.length;
+    for (const grapheme of segmenter.segment(this.value)) {
+      const nextColumn = currentColumn + visibleWidth(grapheme.segment);
+      if (targetColumn < nextColumn) {
+        this.cursor = grapheme.index;
+        break;
+      }
+      currentColumn = nextColumn;
+    }
+    this.lastAction = null;
+    return { handled: true, focus: true };
+  }
   insertCharacter(char) {
     if (isWhitespaceChar(char) || this.lastAction !== "type-word") {
       this.pushUndo();
@@ -34915,7 +36864,7 @@ class Input {
     if (this.cursor > 0) {
       this.pushUndo();
       const beforeCursor = this.value.slice(0, this.cursor);
-      const graphemes = [...segmenter2.segment(beforeCursor)];
+      const graphemes = [...segmenter.segment(beforeCursor)];
       const lastGrapheme = graphemes[graphemes.length - 1];
       const graphemeLength = lastGrapheme ? lastGrapheme.segment.length : 1;
       this.value = this.value.slice(0, this.cursor - graphemeLength) + this.value.slice(this.cursor);
@@ -34927,7 +36876,7 @@ class Input {
     if (this.cursor < this.value.length) {
       this.pushUndo();
       const afterCursor = this.value.slice(this.cursor);
-      const graphemes = [...segmenter2.segment(afterCursor)];
+      const graphemes = [...segmenter.segment(afterCursor)];
       const firstGrapheme = graphemes[0];
       const graphemeLength = firstGrapheme ? firstGrapheme.segment.length : 1;
       this.value = this.value.slice(0, this.cursor) + this.value.slice(this.cursor + graphemeLength);
@@ -35015,55 +36964,16 @@ class Input {
     this.lastAction = null;
   }
   moveWordBackwards() {
-    if (this.cursor === 0) {
+    if (this.cursor === 0)
       return;
-    }
     this.lastAction = null;
-    const textBeforeCursor = this.value.slice(0, this.cursor);
-    const graphemes = [...segmenter2.segment(textBeforeCursor)];
-    while (graphemes.length > 0 && isWhitespaceChar(graphemes[graphemes.length - 1]?.segment || "")) {
-      this.cursor -= graphemes.pop()?.segment.length || 0;
-    }
-    if (graphemes.length > 0) {
-      const lastGrapheme = graphemes[graphemes.length - 1]?.segment || "";
-      if (isPunctuationChar(lastGrapheme)) {
-        while (graphemes.length > 0 && isPunctuationChar(graphemes[graphemes.length - 1]?.segment || "")) {
-          this.cursor -= graphemes.pop()?.segment.length || 0;
-        }
-      } else {
-        while (graphemes.length > 0 && !isWhitespaceChar(graphemes[graphemes.length - 1]?.segment || "") && !isPunctuationChar(graphemes[graphemes.length - 1]?.segment || "")) {
-          this.cursor -= graphemes.pop()?.segment.length || 0;
-        }
-      }
-    }
+    this.cursor = findWordBackward(this.value, this.cursor);
   }
   moveWordForwards() {
-    if (this.cursor >= this.value.length) {
+    if (this.cursor >= this.value.length)
       return;
-    }
     this.lastAction = null;
-    const textAfterCursor = this.value.slice(this.cursor);
-    const segments = segmenter2.segment(textAfterCursor);
-    const iterator = segments[Symbol.iterator]();
-    let next = iterator.next();
-    while (!next.done && isWhitespaceChar(next.value.segment)) {
-      this.cursor += next.value.segment.length;
-      next = iterator.next();
-    }
-    if (!next.done) {
-      const firstGrapheme = next.value.segment;
-      if (isPunctuationChar(firstGrapheme)) {
-        while (!next.done && isPunctuationChar(next.value.segment)) {
-          this.cursor += next.value.segment.length;
-          next = iterator.next();
-        }
-      } else {
-        while (!next.done && !isWhitespaceChar(next.value.segment) && !isPunctuationChar(next.value.segment)) {
-          this.cursor += next.value.segment.length;
-          next = iterator.next();
-        }
-      }
-    }
+    this.cursor = findWordForward(this.value, this.cursor);
   }
   handlePaste(pastedText) {
     this.lastAction = null;
@@ -35074,13 +36984,24 @@ class Input {
   }
   invalidate() {}
   render(width) {
-    const prompt = "> ";
-    const availableWidth = width - prompt.length;
+    const availableWidth = width - visibleWidth(this.prompt);
     if (availableWidth <= 0) {
-      return [prompt];
+      return [truncateToWidth(this.prompt, width, "")];
+    }
+    if (this.value.length === 0 && this.placeholder) {
+      const placeholder = truncateToWidth(this.placeholder, availableWidth, "");
+      const graphemes = [...segmenter.segment(placeholder)];
+      const atCursor = graphemes[0]?.segment ?? " ";
+      const afterCursor = placeholder.slice(atCursor.length);
+      const marker = this.focused ? CURSOR_MARKER : "";
+      const cursorChar = renderFakeCursor(this.placeholderStyle(atCursor));
+      const textWithCursor = marker + cursorChar + this.placeholderStyle(afterCursor);
+      const padding = " ".repeat(Math.max(0, availableWidth - visibleWidth(textWithCursor)));
+      return [this.prompt + textWithCursor + padding];
     }
     let visibleText = "";
     let cursorDisplay = this.cursor;
+    this.renderedStartColumn = 0;
     const totalWidth = visibleWidth(this.value);
     if (totalWidth < availableWidth) {
       visibleText = this.value;
@@ -35097,6 +37018,7 @@ class Input {
         } else {
           startCol = Math.max(0, cursorCol - halfWidth);
         }
+        this.renderedStartColumn = startCol;
         visibleText = sliceByColumn(this.value, startCol, scrollWidth, true);
         const beforeCursor = sliceByColumn(this.value, startCol, Math.max(0, cursorCol - startCol), true);
         cursorDisplay = beforeCursor.length;
@@ -35105,2153 +37027,558 @@ class Input {
         cursorDisplay = 0;
       }
     }
-    const graphemes = [...segmenter2.segment(visibleText.slice(cursorDisplay))];
+    const graphemes = [...segmenter.segment(visibleText.slice(cursorDisplay))];
     const cursorGrapheme = graphemes[0];
     const beforeCursor = visibleText.slice(0, cursorDisplay);
     const atCursor = cursorGrapheme?.segment ?? " ";
     const afterCursor = visibleText.slice(cursorDisplay + atCursor.length);
     const marker = this.focused ? CURSOR_MARKER : "";
-    const cursorChar = `\x1B[7m${atCursor}\x1B[27m`;
+    const cursorChar = renderFakeCursor(atCursor);
     const textWithCursor = beforeCursor + marker + cursorChar + afterCursor;
     const visualLength = visibleWidth(textWithCursor);
     const padding = " ".repeat(Math.max(0, availableWidth - visualLength));
-    const line = prompt + textWithCursor + padding;
+    const line = this.prompt + textWithCursor + padding;
     return [line];
   }
 }
-var segmenter2;
+var segmenter;
 var init_input = __esm(() => {
   init_keybindings();
   init_keys();
   init_tui();
   init_utils();
-  segmenter2 = getSegmenter();
+  init_word_navigation();
+  segmenter = getGraphemeSegmenter();
 });
 
-// node_modules/marked/lib/marked.esm.js
-function _getDefaults() {
-  return {
-    async: false,
-    breaks: false,
-    extensions: null,
-    gfm: true,
-    hooks: null,
-    pedantic: false,
-    renderer: null,
-    silent: false,
-    tokenizer: null,
-    walkTokens: null
-  };
+// node_modules/marked-cjk-friendly/dist/index.js
+function buildRDelimAst(punct, punctSpace, notPunctSpace) {
+  return new RegExp(`^[^_*]*?__[^_*]*?\\*[^_*]*?(?=__)|[^*]+(?=[^*])|(?!\\*)${punct}(\\*+)(?=[\\s]|$)|${notPunctSpace}(\\*+)(?!\\*)(?=${punctSpace}|$)|(?!\\*)${punctSpace}(\\*+)(?=${notPunctSpace})|[\\s](\\*+)(?!\\*)(?=${punct})|(?!\\*)${punct}(\\*+)(?!\\*)(?=${punct})|${notPunctSpace}(\\*+)(?=${notPunctSpace})`, "gu");
 }
-function changeDefaults(newDefaults) {
-  _defaults = newDefaults;
+function buildRDelimUnd(punct, punctSpace, notPunctSpace) {
+  return new RegExp(`^[^_*]*?\\*\\*[^_*]*?_[^_*]*?(?=\\*\\*)|[^_]+(?=[^_])|(?!_)${punct}(_+)(?=[\\s]|$)|${notPunctSpace}(_+)(?!_)(?=${punctSpace}|$)|(?!_)${punctSpace}(_+)(?=${notPunctSpace})|[\\s](_+)(?!_)(?=${punct})|(?!_)${punct}(_+)(?!_)(?=${punct})`, "gu");
 }
-function edit(regex, opt = "") {
-  let source = typeof regex === "string" ? regex : regex.source;
-  const obj = {
-    replace: (name, val) => {
-      let valSource = typeof val === "string" ? val : val.source;
-      valSource = valSource.replace(other.caret, "$1");
-      source = source.replace(name, valSource);
-      return obj;
-    },
-    getRegex: () => {
-      return new RegExp(source, opt);
-    }
-  };
-  return obj;
+function buildRDelimDel(punct, punctSpace, notPunctSpace) {
+  return new RegExp(`^[^~]+(?=[^~])|(?!~)${punct}(~~?)(?=[\\s]|$)|${notPunctSpace}(~~?)(?!~)(?=${punctSpace}|$)|(?!~)${punctSpace}(~~?)(?=${notPunctSpace})|[\\s](~~?)(?!~)(?=${punct})|(?!~)${punct}(~~?)(?!~)(?=${punct})|${notPunctSpace}(~~?)(?=${notPunctSpace})`, "gu");
 }
-function escape22(html2, encode) {
-  if (encode) {
-    if (other.escapeTest.test(html2)) {
-      return html2.replace(other.escapeReplace, getEscapeReplacement);
-    }
-  } else {
-    if (other.escapeTestNoEncode.test(html2)) {
-      return html2.replace(other.escapeReplaceNoEncode, getEscapeReplacement);
-    }
-  }
-  return html2;
-}
-function cleanUrl(href) {
-  try {
-    href = encodeURI(href).replace(other.percentDecode, "%");
-  } catch {
-    return null;
-  }
-  return href;
-}
-function splitCells(tableRow, count) {
-  const row = tableRow.replace(other.findPipe, (match, offset, str) => {
-    let escaped = false;
-    let curr = offset;
-    while (--curr >= 0 && str[curr] === "\\")
-      escaped = !escaped;
-    if (escaped) {
-      return "|";
-    } else {
-      return " |";
-    }
-  }), cells = row.split(other.splitPipe);
-  let i = 0;
-  if (!cells[0].trim()) {
-    cells.shift();
-  }
-  if (cells.length > 0 && !cells.at(-1)?.trim()) {
-    cells.pop();
-  }
-  if (count) {
-    if (cells.length > count) {
-      cells.splice(count);
-    } else {
-      while (cells.length < count)
-        cells.push("");
-    }
-  }
-  for (;i < cells.length; i++) {
-    cells[i] = cells[i].trim().replace(other.slashPipe, "|");
-  }
-  return cells;
-}
-function rtrim(str, c, invert) {
-  const l = str.length;
-  if (l === 0) {
-    return "";
-  }
-  let suffLen = 0;
-  while (suffLen < l) {
-    const currChar = str.charAt(l - suffLen - 1);
-    if (currChar === c && !invert) {
-      suffLen++;
-    } else if (currChar !== c && invert) {
-      suffLen++;
-    } else {
-      break;
-    }
-  }
-  return str.slice(0, l - suffLen);
-}
-function findClosingBracket(str, b) {
-  if (str.indexOf(b[1]) === -1) {
-    return -1;
-  }
-  let level = 0;
-  for (let i = 0;i < str.length; i++) {
-    if (str[i] === "\\") {
-      i++;
-    } else if (str[i] === b[0]) {
-      level++;
-    } else if (str[i] === b[1]) {
-      level--;
-      if (level < 0) {
-        return i;
+function isPrevCharCjk(prevChar, maskedSrc, src) {
+  let prevIsCjk = punctuationCjk.test(prevChar);
+  if (!prevIsCjk && prevChar) {
+    const prevIdx = maskedSrc.length - src.length;
+    if (prevIdx >= 1) {
+      let idx = prevIdx - 1;
+      let code = maskedSrc.charCodeAt(idx);
+      if (code >= 65024 && code <= 65038 && idx >= 1) {
+        idx--;
+        code = maskedSrc.charCodeAt(idx);
       }
+      if ((code & 64512) === 56320 && idx >= 1) {
+        const cp = maskedSrc.codePointAt(idx - 1);
+        if (cp !== undefined && cp > 65535) {
+          if (cp >= 917760 && cp <= 917999)
+            prevIsCjk = true;
+          else
+            prevIsCjk = cjkTest.test(String.fromCodePoint(cp));
+        }
+      } else
+        prevIsCjk = cjkTest.test(String.fromCharCode(code));
     }
   }
-  if (level > 0) {
-    return -2;
-  }
-  return -1;
+  return prevIsCjk;
 }
-function outputLink(cap, link2, raw, lexer2, rules) {
-  const href = link2.href;
-  const title = link2.title || null;
-  const text = cap[1].replace(rules.other.outputLinkReplace, "$1");
-  lexer2.state.inLink = true;
-  const token = {
-    type: cap[0].charAt(0) === "!" ? "image" : "link",
-    raw,
-    href,
-    title,
-    text,
-    tokens: lexer2.inlineTokens(text)
-  };
-  lexer2.state.inLink = false;
-  return token;
+function isCjkAdjacentToDelimiter(rightMatch, clippedMaskedSrc) {
+  if (!(rightMatch[1] || rightMatch[2] || rightMatch[3] || rightMatch[4]))
+    return false;
+  const charBefore = String.fromCodePoint(rightMatch[0].codePointAt(0));
+  const afterPos = rightMatch.index + rightMatch[0].length;
+  const charAfter = afterPos < clippedMaskedSrc.length ? String.fromCodePoint(clippedMaskedSrc.codePointAt(afterPos)) : "";
+  return cjkTest.test(charBefore) || cjkTest.test(charAfter);
 }
-function indentCodeCompensation(raw, text, rules) {
-  const matchIndentToCode = raw.match(rules.other.indentCodeCompensation);
-  if (matchIndentToCode === null) {
-    return text;
-  }
-  const indentToCode = matchIndentToCode[1];
-  return text.split(`
-`).map((node) => {
-    const matchIndentInNode = node.match(rules.other.beginningSpace);
-    if (matchIndentInNode === null) {
-      return node;
-    }
-    const [indentInNode] = matchIndentInNode;
-    if (indentInNode.length >= indentToCode.length) {
-      return node.slice(indentToCode.length);
-    }
-    return node;
-  }).join(`
-`);
+function usesModernEmStrongLayout(match) {
+  return match.length >= 5;
 }
-function marked(src, opt) {
-  return markedInstance.parse(src, opt);
+function hasEmStrongLeadContent(match) {
+  return Boolean(match[1] || match[2] || match[3] || match[4]);
 }
-var _defaults, noopTest, other, newline, blockCode, fences, hr, heading, bullet, lheadingCore, lheading, lheadingGfm, _paragraph, blockText, _blockLabel, def, list, _tag = "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul", _comment, html, paragraph, blockquote, blockNormal, gfmTable, blockGfm, blockPedantic, escape2, inlineCode, br, inlineText, _punctuation, _punctuationOrSpace, _notPunctuationOrSpace, punctuation, _punctuationGfmStrongEm, _punctuationOrSpaceGfmStrongEm, _notPunctuationOrSpaceGfmStrongEm, blockSkip, emStrongLDelimCore, emStrongLDelim, emStrongLDelimGfm, emStrongRDelimAstCore = "^[^_*]*?__[^_*]*?\\*[^_*]*?(?=__)|[^*]+(?=[^*])|(?!\\*)punct(\\*+)(?=[\\s]|$)|notPunctSpace(\\*+)(?!\\*)(?=punctSpace|$)|(?!\\*)punctSpace(\\*+)(?=notPunctSpace)|[\\s](\\*+)(?!\\*)(?=punct)|(?!\\*)punct(\\*+)(?!\\*)(?=punct)|notPunctSpace(\\*+)(?=notPunctSpace)", emStrongRDelimAst, emStrongRDelimAstGfm, emStrongRDelimUnd, anyPunctuation, autolink, _inlineComment, tag, _inlineLabel, link, reflink, nolink, reflinkSearch, inlineNormal, inlinePedantic, inlineGfm, inlineBreaks, block, inline, escapeReplacements, getEscapeReplacement = (ch) => escapeReplacements[ch], _Tokenizer = class {
-  options;
-  rules;
-  lexer;
-  constructor(options2) {
-    this.options = options2 || _defaults;
-  }
-  space(src) {
-    const cap = this.rules.block.newline.exec(src);
-    if (cap && cap[0].length > 0) {
-      return {
-        type: "space",
-        raw: cap[0]
-      };
-    }
-  }
-  code(src) {
-    const cap = this.rules.block.code.exec(src);
-    if (cap) {
-      const text = cap[0].replace(this.rules.other.codeRemoveIndent, "");
-      return {
-        type: "code",
-        raw: cap[0],
-        codeBlockStyle: "indented",
-        text: !this.options.pedantic ? rtrim(text, `
-`) : text
-      };
-    }
-  }
-  fences(src) {
-    const cap = this.rules.block.fences.exec(src);
-    if (cap) {
-      const raw = cap[0];
-      const text = indentCodeCompensation(raw, cap[3] || "", this.rules);
-      return {
-        type: "code",
-        raw,
-        lang: cap[2] ? cap[2].trim().replace(this.rules.inline.anyPunctuation, "$1") : cap[2],
-        text
-      };
-    }
-  }
-  heading(src) {
-    const cap = this.rules.block.heading.exec(src);
-    if (cap) {
-      let text = cap[2].trim();
-      if (this.rules.other.endingHash.test(text)) {
-        const trimmed = rtrim(text, "#");
-        if (this.options.pedantic) {
-          text = trimmed.trim();
-        } else if (!trimmed || this.rules.other.endingSpaceChar.test(trimmed)) {
-          text = trimmed.trim();
-        }
-      }
-      return {
-        type: "heading",
-        raw: cap[0],
-        depth: cap[1].length,
-        text,
-        tokens: this.lexer.inline(text)
-      };
-    }
-  }
-  hr(src) {
-    const cap = this.rules.block.hr.exec(src);
-    if (cap) {
-      return {
-        type: "hr",
-        raw: rtrim(cap[0], `
-`)
-      };
-    }
-  }
-  blockquote(src) {
-    const cap = this.rules.block.blockquote.exec(src);
-    if (cap) {
-      let lines = rtrim(cap[0], `
-`).split(`
-`);
-      let raw = "";
-      let text = "";
-      const tokens = [];
-      while (lines.length > 0) {
-        let inBlockquote = false;
-        const currentLines = [];
-        let i;
-        for (i = 0;i < lines.length; i++) {
-          if (this.rules.other.blockquoteStart.test(lines[i])) {
-            currentLines.push(lines[i]);
-            inBlockquote = true;
-          } else if (!inBlockquote) {
-            currentLines.push(lines[i]);
-          } else {
-            break;
-          }
-        }
-        lines = lines.slice(i);
-        const currentRaw = currentLines.join(`
-`);
-        const currentText = currentRaw.replace(this.rules.other.blockquoteSetextReplace, `
-    $1`).replace(this.rules.other.blockquoteSetextReplace2, "");
-        raw = raw ? `${raw}
-${currentRaw}` : currentRaw;
-        text = text ? `${text}
-${currentText}` : currentText;
-        const top = this.lexer.state.top;
-        this.lexer.state.top = true;
-        this.lexer.blockTokens(currentText, tokens, true);
-        this.lexer.state.top = top;
-        if (lines.length === 0) {
-          break;
-        }
-        const lastToken = tokens.at(-1);
-        if (lastToken?.type === "code") {
-          break;
-        } else if (lastToken?.type === "blockquote") {
-          const oldToken = lastToken;
-          const newText = oldToken.raw + `
-` + lines.join(`
-`);
-          const newToken = this.blockquote(newText);
-          tokens[tokens.length - 1] = newToken;
-          raw = raw.substring(0, raw.length - oldToken.raw.length) + newToken.raw;
-          text = text.substring(0, text.length - oldToken.text.length) + newToken.text;
-          break;
-        } else if (lastToken?.type === "list") {
-          const oldToken = lastToken;
-          const newText = oldToken.raw + `
-` + lines.join(`
-`);
-          const newToken = this.list(newText);
-          tokens[tokens.length - 1] = newToken;
-          raw = raw.substring(0, raw.length - lastToken.raw.length) + newToken.raw;
-          text = text.substring(0, text.length - oldToken.raw.length) + newToken.raw;
-          lines = newText.substring(tokens.at(-1).raw.length).split(`
-`);
-          continue;
-        }
-      }
-      return {
-        type: "blockquote",
-        raw,
-        tokens,
-        text
-      };
-    }
-  }
-  list(src) {
-    let cap = this.rules.block.list.exec(src);
-    if (cap) {
-      let bull = cap[1].trim();
-      const isordered = bull.length > 1;
-      const list2 = {
-        type: "list",
-        raw: "",
-        ordered: isordered,
-        start: isordered ? +bull.slice(0, -1) : "",
-        loose: false,
-        items: []
-      };
-      bull = isordered ? `\\d{1,9}\\${bull.slice(-1)}` : `\\${bull}`;
-      if (this.options.pedantic) {
-        bull = isordered ? bull : "[*+-]";
-      }
-      const itemRegex = this.rules.other.listItemRegex(bull);
-      let endsWithBlankLine = false;
-      while (src) {
-        let endEarly = false;
-        let raw = "";
-        let itemContents = "";
-        if (!(cap = itemRegex.exec(src))) {
-          break;
-        }
-        if (this.rules.block.hr.test(src)) {
-          break;
-        }
-        raw = cap[0];
-        src = src.substring(raw.length);
-        let line = cap[2].split(`
-`, 1)[0].replace(this.rules.other.listReplaceTabs, (t) => " ".repeat(3 * t.length));
-        let nextLine = src.split(`
-`, 1)[0];
-        let blankLine = !line.trim();
-        let indent = 0;
-        if (this.options.pedantic) {
-          indent = 2;
-          itemContents = line.trimStart();
-        } else if (blankLine) {
-          indent = cap[1].length + 1;
-        } else {
-          indent = cap[2].search(this.rules.other.nonSpaceChar);
-          indent = indent > 4 ? 1 : indent;
-          itemContents = line.slice(indent);
-          indent += cap[1].length;
-        }
-        if (blankLine && this.rules.other.blankLine.test(nextLine)) {
-          raw += nextLine + `
-`;
-          src = src.substring(nextLine.length + 1);
-          endEarly = true;
-        }
-        if (!endEarly) {
-          const nextBulletRegex = this.rules.other.nextBulletRegex(indent);
-          const hrRegex = this.rules.other.hrRegex(indent);
-          const fencesBeginRegex = this.rules.other.fencesBeginRegex(indent);
-          const headingBeginRegex = this.rules.other.headingBeginRegex(indent);
-          const htmlBeginRegex = this.rules.other.htmlBeginRegex(indent);
-          while (src) {
-            const rawLine = src.split(`
-`, 1)[0];
-            let nextLineWithoutTabs;
-            nextLine = rawLine;
-            if (this.options.pedantic) {
-              nextLine = nextLine.replace(this.rules.other.listReplaceNesting, "  ");
-              nextLineWithoutTabs = nextLine;
-            } else {
-              nextLineWithoutTabs = nextLine.replace(this.rules.other.tabCharGlobal, "    ");
-            }
-            if (fencesBeginRegex.test(nextLine)) {
-              break;
-            }
-            if (headingBeginRegex.test(nextLine)) {
-              break;
-            }
-            if (htmlBeginRegex.test(nextLine)) {
-              break;
-            }
-            if (nextBulletRegex.test(nextLine)) {
-              break;
-            }
-            if (hrRegex.test(nextLine)) {
-              break;
-            }
-            if (nextLineWithoutTabs.search(this.rules.other.nonSpaceChar) >= indent || !nextLine.trim()) {
-              itemContents += `
-` + nextLineWithoutTabs.slice(indent);
-            } else {
-              if (blankLine) {
-                break;
-              }
-              if (line.replace(this.rules.other.tabCharGlobal, "    ").search(this.rules.other.nonSpaceChar) >= 4) {
-                break;
-              }
-              if (fencesBeginRegex.test(line)) {
-                break;
-              }
-              if (headingBeginRegex.test(line)) {
-                break;
-              }
-              if (hrRegex.test(line)) {
-                break;
-              }
-              itemContents += `
-` + nextLine;
-            }
-            if (!blankLine && !nextLine.trim()) {
-              blankLine = true;
-            }
-            raw += rawLine + `
-`;
-            src = src.substring(rawLine.length + 1);
-            line = nextLineWithoutTabs.slice(indent);
-          }
-        }
-        if (!list2.loose) {
-          if (endsWithBlankLine) {
-            list2.loose = true;
-          } else if (this.rules.other.doubleBlankLine.test(raw)) {
-            endsWithBlankLine = true;
-          }
-        }
-        let istask = null;
-        let ischecked;
-        if (this.options.gfm) {
-          istask = this.rules.other.listIsTask.exec(itemContents);
-          if (istask) {
-            ischecked = istask[0] !== "[ ] ";
-            itemContents = itemContents.replace(this.rules.other.listReplaceTask, "");
-          }
-        }
-        list2.items.push({
-          type: "list_item",
-          raw,
-          task: !!istask,
-          checked: ischecked,
-          loose: false,
-          text: itemContents,
-          tokens: []
-        });
-        list2.raw += raw;
-      }
-      const lastItem = list2.items.at(-1);
-      if (lastItem) {
-        lastItem.raw = lastItem.raw.trimEnd();
-        lastItem.text = lastItem.text.trimEnd();
-      } else {
+function isEmStrongUnderscoreWordChar(match) {
+  return usesModernEmStrongLayout(match) ? Boolean(match[4]) : Boolean(match[3]);
+}
+function getEmStrongOpeningPunctuation(match) {
+  if (usesModernEmStrongLayout(match))
+    return match[1] || match[3] || "";
+  return match[1] || match[2] || "";
+}
+function markedCjkFriendly() {
+  return { tokenizer: {
+    emStrong(src, maskedSrc, prevChar = "") {
+      const { rules } = this;
+      const match = rules.inline.emStrongLDelim.exec(src);
+      if (!match)
+        return false;
+      const modernEmStrongLayout = usesModernEmStrongLayout(match);
+      if (modernEmStrongLayout && !hasEmStrongLeadContent(match))
         return;
-      }
-      list2.raw = list2.raw.trimEnd();
-      for (let i = 0;i < list2.items.length; i++) {
-        this.lexer.state.top = false;
-        list2.items[i].tokens = this.lexer.blockTokens(list2.items[i].text, []);
-        if (!list2.loose) {
-          const spacers = list2.items[i].tokens.filter((t) => t.type === "space");
-          const hasMultipleLineBreaks = spacers.length > 0 && spacers.some((t) => this.rules.other.anyLine.test(t.raw));
-          list2.loose = hasMultipleLineBreaks;
-        }
-      }
-      if (list2.loose) {
-        for (let i = 0;i < list2.items.length; i++) {
-          list2.items[i].loose = true;
-        }
-      }
-      return list2;
-    }
-  }
-  html(src) {
-    const cap = this.rules.block.html.exec(src);
-    if (cap) {
-      const token = {
-        type: "html",
-        block: true,
-        raw: cap[0],
-        pre: cap[1] === "pre" || cap[1] === "script" || cap[1] === "style",
-        text: cap[0]
-      };
-      return token;
-    }
-  }
-  def(src) {
-    const cap = this.rules.block.def.exec(src);
-    if (cap) {
-      const tag2 = cap[1].toLowerCase().replace(this.rules.other.multipleSpaceGlobal, " ");
-      const href = cap[2] ? cap[2].replace(this.rules.other.hrefBrackets, "$1").replace(this.rules.inline.anyPunctuation, "$1") : "";
-      const title = cap[3] ? cap[3].substring(1, cap[3].length - 1).replace(this.rules.inline.anyPunctuation, "$1") : cap[3];
-      return {
-        type: "def",
-        tag: tag2,
-        raw: cap[0],
-        href,
-        title
-      };
-    }
-  }
-  table(src) {
-    const cap = this.rules.block.table.exec(src);
-    if (!cap) {
-      return;
-    }
-    if (!this.rules.other.tableDelimiter.test(cap[2])) {
-      return;
-    }
-    const headers = splitCells(cap[1]);
-    const aligns = cap[2].replace(this.rules.other.tableAlignChars, "").split("|");
-    const rows = cap[3]?.trim() ? cap[3].replace(this.rules.other.tableRowBlankLine, "").split(`
-`) : [];
-    const item = {
-      type: "table",
-      raw: cap[0],
-      header: [],
-      align: [],
-      rows: []
-    };
-    if (headers.length !== aligns.length) {
-      return;
-    }
-    for (const align of aligns) {
-      if (this.rules.other.tableAlignRight.test(align)) {
-        item.align.push("right");
-      } else if (this.rules.other.tableAlignCenter.test(align)) {
-        item.align.push("center");
-      } else if (this.rules.other.tableAlignLeft.test(align)) {
-        item.align.push("left");
-      } else {
-        item.align.push(null);
-      }
-    }
-    for (let i = 0;i < headers.length; i++) {
-      item.header.push({
-        text: headers[i],
-        tokens: this.lexer.inline(headers[i]),
-        header: true,
-        align: item.align[i]
-      });
-    }
-    for (const row of rows) {
-      item.rows.push(splitCells(row, item.header.length).map((cell, i) => {
-        return {
-          text: cell,
-          tokens: this.lexer.inline(cell),
-          header: false,
-          align: item.align[i]
-        };
-      }));
-    }
-    return item;
-  }
-  lheading(src) {
-    const cap = this.rules.block.lheading.exec(src);
-    if (cap) {
-      return {
-        type: "heading",
-        raw: cap[0],
-        depth: cap[2].charAt(0) === "=" ? 1 : 2,
-        text: cap[1],
-        tokens: this.lexer.inline(cap[1])
-      };
-    }
-  }
-  paragraph(src) {
-    const cap = this.rules.block.paragraph.exec(src);
-    if (cap) {
-      const text = cap[1].charAt(cap[1].length - 1) === `
-` ? cap[1].slice(0, -1) : cap[1];
-      return {
-        type: "paragraph",
-        raw: cap[0],
-        text,
-        tokens: this.lexer.inline(text)
-      };
-    }
-  }
-  text(src) {
-    const cap = this.rules.block.text.exec(src);
-    if (cap) {
-      return {
-        type: "text",
-        raw: cap[0],
-        text: cap[0],
-        tokens: this.lexer.inline(cap[0])
-      };
-    }
-  }
-  escape(src) {
-    const cap = this.rules.inline.escape.exec(src);
-    if (cap) {
-      return {
-        type: "escape",
-        raw: cap[0],
-        text: cap[1]
-      };
-    }
-  }
-  tag(src) {
-    const cap = this.rules.inline.tag.exec(src);
-    if (cap) {
-      if (!this.lexer.state.inLink && this.rules.other.startATag.test(cap[0])) {
-        this.lexer.state.inLink = true;
-      } else if (this.lexer.state.inLink && this.rules.other.endATag.test(cap[0])) {
-        this.lexer.state.inLink = false;
-      }
-      if (!this.lexer.state.inRawBlock && this.rules.other.startPreScriptTag.test(cap[0])) {
-        this.lexer.state.inRawBlock = true;
-      } else if (this.lexer.state.inRawBlock && this.rules.other.endPreScriptTag.test(cap[0])) {
-        this.lexer.state.inRawBlock = false;
-      }
-      return {
-        type: "html",
-        raw: cap[0],
-        inLink: this.lexer.state.inLink,
-        inRawBlock: this.lexer.state.inRawBlock,
-        block: false,
-        text: cap[0]
-      };
-    }
-  }
-  link(src) {
-    const cap = this.rules.inline.link.exec(src);
-    if (cap) {
-      const trimmedUrl = cap[2].trim();
-      if (!this.options.pedantic && this.rules.other.startAngleBracket.test(trimmedUrl)) {
-        if (!this.rules.other.endAngleBracket.test(trimmedUrl)) {
-          return;
-        }
-        const rtrimSlash = rtrim(trimmedUrl.slice(0, -1), "\\");
-        if ((trimmedUrl.length - rtrimSlash.length) % 2 === 0) {
-          return;
-        }
-      } else {
-        const lastParenIndex = findClosingBracket(cap[2], "()");
-        if (lastParenIndex === -2) {
-          return;
-        }
-        if (lastParenIndex > -1) {
-          const start = cap[0].indexOf("!") === 0 ? 5 : 4;
-          const linkLen = start + cap[1].length + lastParenIndex;
-          cap[2] = cap[2].substring(0, lastParenIndex);
-          cap[0] = cap[0].substring(0, linkLen).trim();
-          cap[3] = "";
-        }
-      }
-      let href = cap[2];
-      let title = "";
-      if (this.options.pedantic) {
-        const link2 = this.rules.other.pedanticHrefTitle.exec(href);
-        if (link2) {
-          href = link2[1];
-          title = link2[3];
-        }
-      } else {
-        title = cap[3] ? cap[3].slice(1, -1) : "";
-      }
-      href = href.trim();
-      if (this.rules.other.startAngleBracket.test(href)) {
-        if (this.options.pedantic && !this.rules.other.endAngleBracket.test(trimmedUrl)) {
-          href = href.slice(1);
-        } else {
-          href = href.slice(1, -1);
-        }
-      }
-      return outputLink(cap, {
-        href: href ? href.replace(this.rules.inline.anyPunctuation, "$1") : href,
-        title: title ? title.replace(this.rules.inline.anyPunctuation, "$1") : title
-      }, cap[0], this.lexer, this.rules);
-    }
-  }
-  reflink(src, links) {
-    let cap;
-    if ((cap = this.rules.inline.reflink.exec(src)) || (cap = this.rules.inline.nolink.exec(src))) {
-      const linkString = (cap[2] || cap[1]).replace(this.rules.other.multipleSpaceGlobal, " ");
-      const link2 = links[linkString.toLowerCase()];
-      if (!link2) {
-        const text = cap[0].charAt(0);
-        return {
-          type: "text",
-          raw: text,
-          text
-        };
-      }
-      return outputLink(cap, link2, cap[0], this.lexer, this.rules);
-    }
-  }
-  emStrong(src, maskedSrc, prevChar = "") {
-    let match = this.rules.inline.emStrongLDelim.exec(src);
-    if (!match)
-      return;
-    if (match[3] && prevChar.match(this.rules.other.unicodeAlphaNumeric))
-      return;
-    const nextChar = match[1] || match[2] || "";
-    if (!nextChar || !prevChar || this.rules.inline.punctuation.exec(prevChar)) {
-      const lLength = [...match[0]].length - 1;
-      let rDelim, rLength, delimTotal = lLength, midDelimTotal = 0;
-      const endReg = match[0][0] === "*" ? this.rules.inline.emStrongRDelimAst : this.rules.inline.emStrongRDelimUnd;
-      endReg.lastIndex = 0;
-      maskedSrc = maskedSrc.slice(-1 * src.length + lLength);
-      while ((match = endReg.exec(maskedSrc)) != null) {
-        rDelim = match[1] || match[2] || match[3] || match[4] || match[5] || match[6];
-        if (!rDelim)
-          continue;
-        rLength = [...rDelim].length;
-        if (match[3] || match[4]) {
-          delimTotal += rLength;
-          continue;
-        } else if (match[5] || match[6]) {
-          if (lLength % 3 && !((lLength + rLength) % 3)) {
-            midDelimTotal += rLength;
+      if (isEmStrongUnderscoreWordChar(match) && prevChar.match(rules.other.unicodeAlphaNumeric))
+        return false;
+      const nextChar = getEmStrongOpeningPunctuation(match);
+      const prevIsCjk = isPrevCharCjk(prevChar, maskedSrc, src);
+      if (!nextChar || !prevChar || rules.inline.punctuation.exec(prevChar) || prevIsCjk || cjkTest.test(nextChar)) {
+        const lLength = [...match[0]].length - 1;
+        let rDelim;
+        let rLength;
+        let delimTotal = lLength;
+        let midDelimTotal = 0;
+        const prevCharIsSameDelimiter = modernEmStrongLayout && prevChar === match[0][0];
+        const isGfm = rules.inline.emStrongRDelimAst.source.includes("(?!~)");
+        let endReg;
+        if (match[0][0] === "*")
+          endReg = isGfm ? emStrongRDelimAstCjkGfm : emStrongRDelimAstCjk;
+        else
+          endReg = emStrongRDelimUndCjk;
+        endReg.lastIndex = 0;
+        const clippedMaskedSrc = maskedSrc.slice(-1 * src.length + lLength);
+        let rMatch;
+        while ((rMatch = endReg.exec(clippedMaskedSrc)) != null) {
+          rDelim = rMatch[1] || rMatch[2] || rMatch[3] || rMatch[4] || rMatch[5] || rMatch[6];
+          if (!rDelim)
+            continue;
+          rLength = [...rDelim].length;
+          const isCjkAdjacent = isCjkAdjacentToDelimiter(rMatch, clippedMaskedSrc);
+          const isLeftOnly = Boolean(rMatch[3] || rMatch[4]);
+          const isBoth = Boolean(rMatch[5] || rMatch[6]);
+          if (isLeftOnly && !isCjkAdjacent) {
+            delimTotal += rLength;
             continue;
           }
-        }
-        delimTotal -= rLength;
-        if (delimTotal > 0)
-          continue;
-        rLength = Math.min(rLength, rLength + delimTotal + midDelimTotal);
-        const lastCharLength = [...match[0]][0].length;
-        const raw = src.slice(0, lLength + match.index + lastCharLength + rLength);
-        if (Math.min(lLength, rLength) % 2) {
-          const text2 = raw.slice(1, -1);
+          if (isBoth || isCjkAdjacent) {
+            if (lLength % 3 && !((lLength + rLength) % 3)) {
+              midDelimTotal += rLength;
+              continue;
+            }
+            if (prevCharIsSameDelimiter && isBoth)
+              break;
+          }
+          delimTotal -= rLength;
+          if (delimTotal > 0)
+            continue;
+          rLength = Math.min(rLength, rLength + delimTotal + midDelimTotal);
+          const lastCharLength = rMatch[0].codePointAt(0) > 65535 ? 2 : 1;
+          const raw = src.slice(0, lLength + rMatch.index + lastCharLength + rLength);
+          if (Math.min(lLength, rLength) % 2) {
+            const text = raw.slice(1, -1);
+            return {
+              type: "em",
+              raw,
+              text,
+              tokens: this.lexer.inlineTokens(text)
+            };
+          }
+          const text = raw.slice(2, -2);
           return {
-            type: "em",
+            type: "strong",
             raw,
-            text: text2,
-            tokens: this.lexer.inlineTokens(text2)
+            text,
+            tokens: this.lexer.inlineTokens(text)
           };
         }
-        const text = raw.slice(2, -2);
-        return {
-          type: "strong",
-          raw,
-          text,
-          tokens: this.lexer.inlineTokens(text)
-        };
       }
-    }
-  }
-  codespan(src) {
-    const cap = this.rules.inline.code.exec(src);
-    if (cap) {
-      let text = cap[2].replace(this.rules.other.newLineCharGlobal, " ");
-      const hasNonSpaceChars = this.rules.other.nonSpaceChar.test(text);
-      const hasSpaceCharsOnBothEnds = this.rules.other.startingSpaceChar.test(text) && this.rules.other.endingSpaceChar.test(text);
-      if (hasNonSpaceChars && hasSpaceCharsOnBothEnds) {
-        text = text.substring(1, text.length - 1);
-      }
-      return {
-        type: "codespan",
-        raw: cap[0],
-        text
-      };
-    }
-  }
-  br(src) {
-    const cap = this.rules.inline.br.exec(src);
-    if (cap) {
-      return {
-        type: "br",
-        raw: cap[0]
-      };
-    }
-  }
-  del(src) {
-    const cap = this.rules.inline.del.exec(src);
-    if (cap) {
-      return {
-        type: "del",
-        raw: cap[0],
-        text: cap[2],
-        tokens: this.lexer.inlineTokens(cap[2])
-      };
-    }
-  }
-  autolink(src) {
-    const cap = this.rules.inline.autolink.exec(src);
-    if (cap) {
-      let text, href;
-      if (cap[2] === "@") {
-        text = cap[1];
-        href = "mailto:" + text;
-      } else {
-        text = cap[1];
-        href = text;
-      }
-      return {
-        type: "link",
-        raw: cap[0],
-        text,
-        href,
-        tokens: [
-          {
-            type: "text",
-            raw: text,
-            text
-          }
-        ]
-      };
-    }
-  }
-  url(src) {
-    let cap;
-    if (cap = this.rules.inline.url.exec(src)) {
-      let text, href;
-      if (cap[2] === "@") {
-        text = cap[0];
-        href = "mailto:" + text;
-      } else {
-        let prevCapZero;
-        do {
-          prevCapZero = cap[0];
-          cap[0] = this.rules.inline._backpedal.exec(cap[0])?.[0] ?? "";
-        } while (prevCapZero !== cap[0]);
-        text = cap[0];
-        if (cap[1] === "www.") {
-          href = "http://" + cap[0];
-        } else {
-          href = cap[0];
-        }
-      }
-      return {
-        type: "link",
-        raw: cap[0],
-        text,
-        href,
-        tokens: [
-          {
-            type: "text",
-            raw: text,
-            text
-          }
-        ]
-      };
-    }
-  }
-  inlineText(src) {
-    const cap = this.rules.inline.text.exec(src);
-    if (cap) {
-      const escaped = this.lexer.state.inRawBlock;
-      return {
-        type: "text",
-        raw: cap[0],
-        text: cap[0],
-        escaped
-      };
-    }
-  }
-}, _Lexer = class __Lexer {
-  tokens;
-  options;
-  state;
-  tokenizer;
-  inlineQueue;
-  constructor(options2) {
-    this.tokens = [];
-    this.tokens.links = /* @__PURE__ */ Object.create(null);
-    this.options = options2 || _defaults;
-    this.options.tokenizer = this.options.tokenizer || new _Tokenizer;
-    this.tokenizer = this.options.tokenizer;
-    this.tokenizer.options = this.options;
-    this.tokenizer.lexer = this;
-    this.inlineQueue = [];
-    this.state = {
-      inLink: false,
-      inRawBlock: false,
-      top: true
-    };
-    const rules = {
-      other,
-      block: block.normal,
-      inline: inline.normal
-    };
-    if (this.options.pedantic) {
-      rules.block = block.pedantic;
-      rules.inline = inline.pedantic;
-    } else if (this.options.gfm) {
-      rules.block = block.gfm;
-      if (this.options.breaks) {
-        rules.inline = inline.breaks;
-      } else {
-        rules.inline = inline.gfm;
-      }
-    }
-    this.tokenizer.rules = rules;
-  }
-  static get rules() {
-    return {
-      block,
-      inline
-    };
-  }
-  static lex(src, options2) {
-    const lexer2 = new __Lexer(options2);
-    return lexer2.lex(src);
-  }
-  static lexInline(src, options2) {
-    const lexer2 = new __Lexer(options2);
-    return lexer2.inlineTokens(src);
-  }
-  lex(src) {
-    src = src.replace(other.carriageReturn, `
-`);
-    this.blockTokens(src, this.tokens);
-    for (let i = 0;i < this.inlineQueue.length; i++) {
-      const next = this.inlineQueue[i];
-      this.inlineTokens(next.src, next.tokens);
-    }
-    this.inlineQueue = [];
-    return this.tokens;
-  }
-  blockTokens(src, tokens = [], lastParagraphClipped = false) {
-    if (this.options.pedantic) {
-      src = src.replace(other.tabCharGlobal, "    ").replace(other.spaceLine, "");
-    }
-    while (src) {
-      let token;
-      if (this.options.extensions?.block?.some((extTokenizer) => {
-        if (token = extTokenizer.call({ lexer: this }, src, tokens)) {
-          src = src.substring(token.raw.length);
-          tokens.push(token);
-          return true;
-        }
+    },
+    del(src, maskedSrc, prevChar = "") {
+      const { rules } = this;
+      const match = rules.inline.delLDelim.exec(src);
+      if (!match)
         return false;
-      })) {
-        continue;
-      }
-      if (token = this.tokenizer.space(src)) {
-        src = src.substring(token.raw.length);
-        const lastToken = tokens.at(-1);
-        if (token.raw.length === 1 && lastToken !== undefined) {
-          lastToken.raw += `
-`;
-        } else {
-          tokens.push(token);
-        }
-        continue;
-      }
-      if (token = this.tokenizer.code(src)) {
-        src = src.substring(token.raw.length);
-        const lastToken = tokens.at(-1);
-        if (lastToken?.type === "paragraph" || lastToken?.type === "text") {
-          lastToken.raw += `
-` + token.raw;
-          lastToken.text += `
-` + token.text;
-          this.inlineQueue.at(-1).src = lastToken.text;
-        } else {
-          tokens.push(token);
-        }
-        continue;
-      }
-      if (token = this.tokenizer.fences(src)) {
-        src = src.substring(token.raw.length);
-        tokens.push(token);
-        continue;
-      }
-      if (token = this.tokenizer.heading(src)) {
-        src = src.substring(token.raw.length);
-        tokens.push(token);
-        continue;
-      }
-      if (token = this.tokenizer.hr(src)) {
-        src = src.substring(token.raw.length);
-        tokens.push(token);
-        continue;
-      }
-      if (token = this.tokenizer.blockquote(src)) {
-        src = src.substring(token.raw.length);
-        tokens.push(token);
-        continue;
-      }
-      if (token = this.tokenizer.list(src)) {
-        src = src.substring(token.raw.length);
-        tokens.push(token);
-        continue;
-      }
-      if (token = this.tokenizer.html(src)) {
-        src = src.substring(token.raw.length);
-        tokens.push(token);
-        continue;
-      }
-      if (token = this.tokenizer.def(src)) {
-        src = src.substring(token.raw.length);
-        const lastToken = tokens.at(-1);
-        if (lastToken?.type === "paragraph" || lastToken?.type === "text") {
-          lastToken.raw += `
-` + token.raw;
-          lastToken.text += `
-` + token.raw;
-          this.inlineQueue.at(-1).src = lastToken.text;
-        } else if (!this.tokens.links[token.tag]) {
-          this.tokens.links[token.tag] = {
-            href: token.href,
-            title: token.title
-          };
-        }
-        continue;
-      }
-      if (token = this.tokenizer.table(src)) {
-        src = src.substring(token.raw.length);
-        tokens.push(token);
-        continue;
-      }
-      if (token = this.tokenizer.lheading(src)) {
-        src = src.substring(token.raw.length);
-        tokens.push(token);
-        continue;
-      }
-      let cutSrc = src;
-      if (this.options.extensions?.startBlock) {
-        let startIndex = Infinity;
-        const tempSrc = src.slice(1);
-        let tempStart;
-        this.options.extensions.startBlock.forEach((getStartIndex) => {
-          tempStart = getStartIndex.call({ lexer: this }, tempSrc);
-          if (typeof tempStart === "number" && tempStart >= 0) {
-            startIndex = Math.min(startIndex, tempStart);
-          }
-        });
-        if (startIndex < Infinity && startIndex >= 0) {
-          cutSrc = src.substring(0, startIndex + 1);
-        }
-      }
-      if (this.state.top && (token = this.tokenizer.paragraph(cutSrc))) {
-        const lastToken = tokens.at(-1);
-        if (lastParagraphClipped && lastToken?.type === "paragraph") {
-          lastToken.raw += `
-` + token.raw;
-          lastToken.text += `
-` + token.text;
-          this.inlineQueue.pop();
-          this.inlineQueue.at(-1).src = lastToken.text;
-        } else {
-          tokens.push(token);
-        }
-        lastParagraphClipped = cutSrc.length !== src.length;
-        src = src.substring(token.raw.length);
-        continue;
-      }
-      if (token = this.tokenizer.text(src)) {
-        src = src.substring(token.raw.length);
-        const lastToken = tokens.at(-1);
-        if (lastToken?.type === "text") {
-          lastToken.raw += `
-` + token.raw;
-          lastToken.text += `
-` + token.text;
-          this.inlineQueue.pop();
-          this.inlineQueue.at(-1).src = lastToken.text;
-        } else {
-          tokens.push(token);
-        }
-        continue;
-      }
-      if (src) {
-        const errMsg = "Infinite loop on byte: " + src.charCodeAt(0);
-        if (this.options.silent) {
-          console.error(errMsg);
-          break;
-        } else {
-          throw new Error(errMsg);
-        }
-      }
-    }
-    this.state.top = true;
-    return tokens;
-  }
-  inline(src, tokens = []) {
-    this.inlineQueue.push({ src, tokens });
-    return tokens;
-  }
-  inlineTokens(src, tokens = []) {
-    let maskedSrc = src;
-    let match = null;
-    if (this.tokens.links) {
-      const links = Object.keys(this.tokens.links);
-      if (links.length > 0) {
-        while ((match = this.tokenizer.rules.inline.reflinkSearch.exec(maskedSrc)) != null) {
-          if (links.includes(match[0].slice(match[0].lastIndexOf("[") + 1, -1))) {
-            maskedSrc = maskedSrc.slice(0, match.index) + "[" + "a".repeat(match[0].length - 2) + "]" + maskedSrc.slice(this.tokenizer.rules.inline.reflinkSearch.lastIndex);
-          }
-        }
-      }
-    }
-    while ((match = this.tokenizer.rules.inline.anyPunctuation.exec(maskedSrc)) != null) {
-      maskedSrc = maskedSrc.slice(0, match.index) + "++" + maskedSrc.slice(this.tokenizer.rules.inline.anyPunctuation.lastIndex);
-    }
-    while ((match = this.tokenizer.rules.inline.blockSkip.exec(maskedSrc)) != null) {
-      maskedSrc = maskedSrc.slice(0, match.index) + "[" + "a".repeat(match[0].length - 2) + "]" + maskedSrc.slice(this.tokenizer.rules.inline.blockSkip.lastIndex);
-    }
-    let keepPrevChar = false;
-    let prevChar = "";
-    while (src) {
-      if (!keepPrevChar) {
-        prevChar = "";
-      }
-      keepPrevChar = false;
-      let token;
-      if (this.options.extensions?.inline?.some((extTokenizer) => {
-        if (token = extTokenizer.call({ lexer: this }, src, tokens)) {
-          src = src.substring(token.raw.length);
-          tokens.push(token);
-          return true;
-        }
-        return false;
-      })) {
-        continue;
-      }
-      if (token = this.tokenizer.escape(src)) {
-        src = src.substring(token.raw.length);
-        tokens.push(token);
-        continue;
-      }
-      if (token = this.tokenizer.tag(src)) {
-        src = src.substring(token.raw.length);
-        tokens.push(token);
-        continue;
-      }
-      if (token = this.tokenizer.link(src)) {
-        src = src.substring(token.raw.length);
-        tokens.push(token);
-        continue;
-      }
-      if (token = this.tokenizer.reflink(src, this.tokens.links)) {
-        src = src.substring(token.raw.length);
-        const lastToken = tokens.at(-1);
-        if (token.type === "text" && lastToken?.type === "text") {
-          lastToken.raw += token.raw;
-          lastToken.text += token.text;
-        } else {
-          tokens.push(token);
-        }
-        continue;
-      }
-      if (token = this.tokenizer.emStrong(src, maskedSrc, prevChar)) {
-        src = src.substring(token.raw.length);
-        tokens.push(token);
-        continue;
-      }
-      if (token = this.tokenizer.codespan(src)) {
-        src = src.substring(token.raw.length);
-        tokens.push(token);
-        continue;
-      }
-      if (token = this.tokenizer.br(src)) {
-        src = src.substring(token.raw.length);
-        tokens.push(token);
-        continue;
-      }
-      if (token = this.tokenizer.del(src)) {
-        src = src.substring(token.raw.length);
-        tokens.push(token);
-        continue;
-      }
-      if (token = this.tokenizer.autolink(src)) {
-        src = src.substring(token.raw.length);
-        tokens.push(token);
-        continue;
-      }
-      if (!this.state.inLink && (token = this.tokenizer.url(src))) {
-        src = src.substring(token.raw.length);
-        tokens.push(token);
-        continue;
-      }
-      let cutSrc = src;
-      if (this.options.extensions?.startInline) {
-        let startIndex = Infinity;
-        const tempSrc = src.slice(1);
-        let tempStart;
-        this.options.extensions.startInline.forEach((getStartIndex) => {
-          tempStart = getStartIndex.call({ lexer: this }, tempSrc);
-          if (typeof tempStart === "number" && tempStart >= 0) {
-            startIndex = Math.min(startIndex, tempStart);
-          }
-        });
-        if (startIndex < Infinity && startIndex >= 0) {
-          cutSrc = src.substring(0, startIndex + 1);
-        }
-      }
-      if (token = this.tokenizer.inlineText(cutSrc)) {
-        src = src.substring(token.raw.length);
-        if (token.raw.slice(-1) !== "_") {
-          prevChar = token.raw.slice(-1);
-        }
-        keepPrevChar = true;
-        const lastToken = tokens.at(-1);
-        if (lastToken?.type === "text") {
-          lastToken.raw += token.raw;
-          lastToken.text += token.text;
-        } else {
-          tokens.push(token);
-        }
-        continue;
-      }
-      if (src) {
-        const errMsg = "Infinite loop on byte: " + src.charCodeAt(0);
-        if (this.options.silent) {
-          console.error(errMsg);
-          break;
-        } else {
-          throw new Error(errMsg);
-        }
-      }
-    }
-    return tokens;
-  }
-}, _Renderer = class {
-  options;
-  parser;
-  constructor(options2) {
-    this.options = options2 || _defaults;
-  }
-  space(token) {
-    return "";
-  }
-  code({ text, lang, escaped }) {
-    const langString = (lang || "").match(other.notSpaceStart)?.[0];
-    const code = text.replace(other.endingNewline, "") + `
-`;
-    if (!langString) {
-      return "<pre><code>" + (escaped ? code : escape22(code, true)) + `</code></pre>
-`;
-    }
-    return '<pre><code class="language-' + escape22(langString) + '">' + (escaped ? code : escape22(code, true)) + `</code></pre>
-`;
-  }
-  blockquote({ tokens }) {
-    const body = this.parser.parse(tokens);
-    return `<blockquote>
-${body}</blockquote>
-`;
-  }
-  html({ text }) {
-    return text;
-  }
-  heading({ tokens, depth }) {
-    return `<h${depth}>${this.parser.parseInline(tokens)}</h${depth}>
-`;
-  }
-  hr(token) {
-    return `<hr>
-`;
-  }
-  list(token) {
-    const ordered = token.ordered;
-    const start = token.start;
-    let body = "";
-    for (let j = 0;j < token.items.length; j++) {
-      const item = token.items[j];
-      body += this.listitem(item);
-    }
-    const type = ordered ? "ol" : "ul";
-    const startAttr = ordered && start !== 1 ? ' start="' + start + '"' : "";
-    return "<" + type + startAttr + `>
-` + body + "</" + type + `>
-`;
-  }
-  listitem(item) {
-    let itemBody = "";
-    if (item.task) {
-      const checkbox = this.checkbox({ checked: !!item.checked });
-      if (item.loose) {
-        if (item.tokens[0]?.type === "paragraph") {
-          item.tokens[0].text = checkbox + " " + item.tokens[0].text;
-          if (item.tokens[0].tokens && item.tokens[0].tokens.length > 0 && item.tokens[0].tokens[0].type === "text") {
-            item.tokens[0].tokens[0].text = checkbox + " " + escape22(item.tokens[0].tokens[0].text);
-            item.tokens[0].tokens[0].escaped = true;
-          }
-        } else {
-          item.tokens.unshift({
-            type: "text",
-            raw: checkbox + " ",
-            text: checkbox + " ",
-            escaped: true
-          });
-        }
-      } else {
-        itemBody += checkbox + " ";
-      }
-    }
-    itemBody += this.parser.parse(item.tokens, !!item.loose);
-    return `<li>${itemBody}</li>
-`;
-  }
-  checkbox({ checked }) {
-    return "<input " + (checked ? 'checked="" ' : "") + 'disabled="" type="checkbox">';
-  }
-  paragraph({ tokens }) {
-    return `<p>${this.parser.parseInline(tokens)}</p>
-`;
-  }
-  table(token) {
-    let header = "";
-    let cell = "";
-    for (let j = 0;j < token.header.length; j++) {
-      cell += this.tablecell(token.header[j]);
-    }
-    header += this.tablerow({ text: cell });
-    let body = "";
-    for (let j = 0;j < token.rows.length; j++) {
-      const row = token.rows[j];
-      cell = "";
-      for (let k = 0;k < row.length; k++) {
-        cell += this.tablecell(row[k]);
-      }
-      body += this.tablerow({ text: cell });
-    }
-    if (body)
-      body = `<tbody>${body}</tbody>`;
-    return `<table>
-<thead>
-` + header + `</thead>
-` + body + `</table>
-`;
-  }
-  tablerow({ text }) {
-    return `<tr>
-${text}</tr>
-`;
-  }
-  tablecell(token) {
-    const content = this.parser.parseInline(token.tokens);
-    const type = token.header ? "th" : "td";
-    const tag2 = token.align ? `<${type} align="${token.align}">` : `<${type}>`;
-    return tag2 + content + `</${type}>
-`;
-  }
-  strong({ tokens }) {
-    return `<strong>${this.parser.parseInline(tokens)}</strong>`;
-  }
-  em({ tokens }) {
-    return `<em>${this.parser.parseInline(tokens)}</em>`;
-  }
-  codespan({ text }) {
-    return `<code>${escape22(text, true)}</code>`;
-  }
-  br(token) {
-    return "<br>";
-  }
-  del({ tokens }) {
-    return `<del>${this.parser.parseInline(tokens)}</del>`;
-  }
-  link({ href, title, tokens }) {
-    const text = this.parser.parseInline(tokens);
-    const cleanHref = cleanUrl(href);
-    if (cleanHref === null) {
-      return text;
-    }
-    href = cleanHref;
-    let out = '<a href="' + href + '"';
-    if (title) {
-      out += ' title="' + escape22(title) + '"';
-    }
-    out += ">" + text + "</a>";
-    return out;
-  }
-  image({ href, title, text, tokens }) {
-    if (tokens) {
-      text = this.parser.parseInline(tokens, this.parser.textRenderer);
-    }
-    const cleanHref = cleanUrl(href);
-    if (cleanHref === null) {
-      return escape22(text);
-    }
-    href = cleanHref;
-    let out = `<img src="${href}" alt="${text}"`;
-    if (title) {
-      out += ` title="${escape22(title)}"`;
-    }
-    out += ">";
-    return out;
-  }
-  text(token) {
-    return "tokens" in token && token.tokens ? this.parser.parseInline(token.tokens) : ("escaped" in token) && token.escaped ? token.text : escape22(token.text);
-  }
-}, _TextRenderer = class {
-  strong({ text }) {
-    return text;
-  }
-  em({ text }) {
-    return text;
-  }
-  codespan({ text }) {
-    return text;
-  }
-  del({ text }) {
-    return text;
-  }
-  html({ text }) {
-    return text;
-  }
-  text({ text }) {
-    return text;
-  }
-  link({ text }) {
-    return "" + text;
-  }
-  image({ text }) {
-    return "" + text;
-  }
-  br() {
-    return "";
-  }
-}, _Parser = class __Parser {
-  options;
-  renderer;
-  textRenderer;
-  constructor(options2) {
-    this.options = options2 || _defaults;
-    this.options.renderer = this.options.renderer || new _Renderer;
-    this.renderer = this.options.renderer;
-    this.renderer.options = this.options;
-    this.renderer.parser = this;
-    this.textRenderer = new _TextRenderer;
-  }
-  static parse(tokens, options2) {
-    const parser2 = new __Parser(options2);
-    return parser2.parse(tokens);
-  }
-  static parseInline(tokens, options2) {
-    const parser2 = new __Parser(options2);
-    return parser2.parseInline(tokens);
-  }
-  parse(tokens, top = true) {
-    let out = "";
-    for (let i = 0;i < tokens.length; i++) {
-      const anyToken = tokens[i];
-      if (this.options.extensions?.renderers?.[anyToken.type]) {
-        const genericToken = anyToken;
-        const ret = this.options.extensions.renderers[genericToken.type].call({ parser: this }, genericToken);
-        if (ret !== false || !["space", "hr", "heading", "code", "table", "blockquote", "list", "html", "paragraph", "text"].includes(genericToken.type)) {
-          out += ret || "";
-          continue;
-        }
-      }
-      const token = anyToken;
-      switch (token.type) {
-        case "space": {
-          out += this.renderer.space(token);
-          continue;
-        }
-        case "hr": {
-          out += this.renderer.hr(token);
-          continue;
-        }
-        case "heading": {
-          out += this.renderer.heading(token);
-          continue;
-        }
-        case "code": {
-          out += this.renderer.code(token);
-          continue;
-        }
-        case "table": {
-          out += this.renderer.table(token);
-          continue;
-        }
-        case "blockquote": {
-          out += this.renderer.blockquote(token);
-          continue;
-        }
-        case "list": {
-          out += this.renderer.list(token);
-          continue;
-        }
-        case "html": {
-          out += this.renderer.html(token);
-          continue;
-        }
-        case "paragraph": {
-          out += this.renderer.paragraph(token);
-          continue;
-        }
-        case "text": {
-          let textToken = token;
-          let body = this.renderer.text(textToken);
-          while (i + 1 < tokens.length && tokens[i + 1].type === "text") {
-            textToken = tokens[++i];
-            body += `
-` + this.renderer.text(textToken);
-          }
-          if (top) {
-            out += this.renderer.paragraph({
-              type: "paragraph",
-              raw: body,
-              text: body,
-              tokens: [{ type: "text", raw: body, text: body, escaped: true }]
-            });
-          } else {
-            out += body;
-          }
-          continue;
-        }
-        default: {
-          const errMsg = 'Token with "' + token.type + '" type was not found.';
-          if (this.options.silent) {
-            console.error(errMsg);
-            return "";
-          } else {
-            throw new Error(errMsg);
-          }
-        }
-      }
-    }
-    return out;
-  }
-  parseInline(tokens, renderer = this.renderer) {
-    let out = "";
-    for (let i = 0;i < tokens.length; i++) {
-      const anyToken = tokens[i];
-      if (this.options.extensions?.renderers?.[anyToken.type]) {
-        const ret = this.options.extensions.renderers[anyToken.type].call({ parser: this }, anyToken);
-        if (ret !== false || !["escape", "html", "link", "image", "strong", "em", "codespan", "br", "del", "text"].includes(anyToken.type)) {
-          out += ret || "";
-          continue;
-        }
-      }
-      const token = anyToken;
-      switch (token.type) {
-        case "escape": {
-          out += renderer.text(token);
-          break;
-        }
-        case "html": {
-          out += renderer.html(token);
-          break;
-        }
-        case "link": {
-          out += renderer.link(token);
-          break;
-        }
-        case "image": {
-          out += renderer.image(token);
-          break;
-        }
-        case "strong": {
-          out += renderer.strong(token);
-          break;
-        }
-        case "em": {
-          out += renderer.em(token);
-          break;
-        }
-        case "codespan": {
-          out += renderer.codespan(token);
-          break;
-        }
-        case "br": {
-          out += renderer.br(token);
-          break;
-        }
-        case "del": {
-          out += renderer.del(token);
-          break;
-        }
-        case "text": {
-          out += renderer.text(token);
-          break;
-        }
-        default: {
-          const errMsg = 'Token with "' + token.type + '" type was not found.';
-          if (this.options.silent) {
-            console.error(errMsg);
-            return "";
-          } else {
-            throw new Error(errMsg);
-          }
-        }
-      }
-    }
-    return out;
-  }
-}, _Hooks, Marked = class {
-  defaults = _getDefaults();
-  options = this.setOptions;
-  parse = this.parseMarkdown(true);
-  parseInline = this.parseMarkdown(false);
-  Parser = _Parser;
-  Renderer = _Renderer;
-  TextRenderer = _TextRenderer;
-  Lexer = _Lexer;
-  Tokenizer = _Tokenizer;
-  Hooks = _Hooks;
-  constructor(...args) {
-    this.use(...args);
-  }
-  walkTokens(tokens, callback) {
-    let values = [];
-    for (const token of tokens) {
-      values = values.concat(callback.call(this, token));
-      switch (token.type) {
-        case "table": {
-          const tableToken = token;
-          for (const cell of tableToken.header) {
-            values = values.concat(this.walkTokens(cell.tokens, callback));
-          }
-          for (const row of tableToken.rows) {
-            for (const cell of row) {
-              values = values.concat(this.walkTokens(cell.tokens, callback));
-            }
-          }
-          break;
-        }
-        case "list": {
-          const listToken = token;
-          values = values.concat(this.walkTokens(listToken.items, callback));
-          break;
-        }
-        default: {
-          const genericToken = token;
-          if (this.defaults.extensions?.childTokens?.[genericToken.type]) {
-            this.defaults.extensions.childTokens[genericToken.type].forEach((childTokens) => {
-              const tokens2 = genericToken[childTokens].flat(Infinity);
-              values = values.concat(this.walkTokens(tokens2, callback));
-            });
-          } else if (genericToken.tokens) {
-            values = values.concat(this.walkTokens(genericToken.tokens, callback));
-          }
-        }
-      }
-    }
-    return values;
-  }
-  use(...args) {
-    const extensions = this.defaults.extensions || { renderers: {}, childTokens: {} };
-    args.forEach((pack) => {
-      const opts = { ...pack };
-      opts.async = this.defaults.async || opts.async || false;
-      if (pack.extensions) {
-        pack.extensions.forEach((ext) => {
-          if (!ext.name) {
-            throw new Error("extension name required");
-          }
-          if ("renderer" in ext) {
-            const prevRenderer = extensions.renderers[ext.name];
-            if (prevRenderer) {
-              extensions.renderers[ext.name] = function(...args2) {
-                let ret = ext.renderer.apply(this, args2);
-                if (ret === false) {
-                  ret = prevRenderer.apply(this, args2);
-                }
-                return ret;
-              };
-            } else {
-              extensions.renderers[ext.name] = ext.renderer;
-            }
-          }
-          if ("tokenizer" in ext) {
-            if (!ext.level || ext.level !== "block" && ext.level !== "inline") {
-              throw new Error("extension level must be 'block' or 'inline'");
-            }
-            const extLevel = extensions[ext.level];
-            if (extLevel) {
-              extLevel.unshift(ext.tokenizer);
-            } else {
-              extensions[ext.level] = [ext.tokenizer];
-            }
-            if (ext.start) {
-              if (ext.level === "block") {
-                if (extensions.startBlock) {
-                  extensions.startBlock.push(ext.start);
-                } else {
-                  extensions.startBlock = [ext.start];
-                }
-              } else if (ext.level === "inline") {
-                if (extensions.startInline) {
-                  extensions.startInline.push(ext.start);
-                } else {
-                  extensions.startInline = [ext.start];
-                }
-              }
-            }
-          }
-          if ("childTokens" in ext && ext.childTokens) {
-            extensions.childTokens[ext.name] = ext.childTokens;
-          }
-        });
-        opts.extensions = extensions;
-      }
-      if (pack.renderer) {
-        const renderer = this.defaults.renderer || new _Renderer(this.defaults);
-        for (const prop in pack.renderer) {
-          if (!(prop in renderer)) {
-            throw new Error(`renderer '${prop}' does not exist`);
-          }
-          if (["options", "parser"].includes(prop)) {
+      const nextChar = match[1] || "";
+      const prevIsCjk = isPrevCharCjk(prevChar, maskedSrc, src);
+      if (!nextChar || !prevChar || rules.inline.punctuation.exec(prevChar) || prevIsCjk || cjkTest.test(nextChar)) {
+        const lLength = [...match[0]].length - 1;
+        let rDelim;
+        let rLength;
+        let delimTotal = lLength;
+        delRDelimCjk.lastIndex = 0;
+        const clippedMaskedSrc = maskedSrc.slice(-1 * src.length + lLength);
+        let rMatch;
+        while ((rMatch = delRDelimCjk.exec(clippedMaskedSrc)) != null) {
+          rDelim = rMatch[1] || rMatch[2] || rMatch[3] || rMatch[4] || rMatch[5] || rMatch[6];
+          if (!rDelim)
+            continue;
+          rLength = [...rDelim].length;
+          if (rLength !== lLength)
+            continue;
+          const isCjkAdjacent = isCjkAdjacentToDelimiter(rMatch, clippedMaskedSrc);
+          if ((rMatch[3] || rMatch[4]) && !isCjkAdjacent) {
+            delimTotal += rLength;
             continue;
           }
-          const rendererProp = prop;
-          const rendererFunc = pack.renderer[rendererProp];
-          const prevRenderer = renderer[rendererProp];
-          renderer[rendererProp] = (...args2) => {
-            let ret = rendererFunc.apply(renderer, args2);
-            if (ret === false) {
-              ret = prevRenderer.apply(renderer, args2);
-            }
-            return ret || "";
+          delimTotal -= rLength;
+          if (delimTotal > 0)
+            continue;
+          rLength = Math.min(rLength, rLength + delimTotal);
+          const lastCharLength = rMatch[0].codePointAt(0) > 65535 ? 2 : 1;
+          const raw = src.slice(0, lLength + rMatch.index + lastCharLength + rLength);
+          const text = raw.slice(lLength, -lLength);
+          return {
+            type: "del",
+            raw,
+            text,
+            tokens: this.lexer.inlineTokens(text)
           };
         }
-        opts.renderer = renderer;
       }
-      if (pack.tokenizer) {
-        const tokenizer = this.defaults.tokenizer || new _Tokenizer(this.defaults);
-        for (const prop in pack.tokenizer) {
-          if (!(prop in tokenizer)) {
-            throw new Error(`tokenizer '${prop}' does not exist`);
-          }
-          if (["options", "rules", "lexer"].includes(prop)) {
-            continue;
-          }
-          const tokenizerProp = prop;
-          const tokenizerFunc = pack.tokenizer[tokenizerProp];
-          const prevTokenizer = tokenizer[tokenizerProp];
-          tokenizer[tokenizerProp] = (...args2) => {
-            let ret = tokenizerFunc.apply(tokenizer, args2);
-            if (ret === false) {
-              ret = prevTokenizer.apply(tokenizer, args2);
-            }
-            return ret;
-          };
-        }
-        opts.tokenizer = tokenizer;
-      }
-      if (pack.hooks) {
-        const hooks = this.defaults.hooks || new _Hooks;
-        for (const prop in pack.hooks) {
-          if (!(prop in hooks)) {
-            throw new Error(`hook '${prop}' does not exist`);
-          }
-          if (["options", "block"].includes(prop)) {
-            continue;
-          }
-          const hooksProp = prop;
-          const hooksFunc = pack.hooks[hooksProp];
-          const prevHook = hooks[hooksProp];
-          if (_Hooks.passThroughHooks.has(prop)) {
-            hooks[hooksProp] = (arg) => {
-              if (this.defaults.async) {
-                return Promise.resolve(hooksFunc.call(hooks, arg)).then((ret2) => {
-                  return prevHook.call(hooks, ret2);
-                });
-              }
-              const ret = hooksFunc.call(hooks, arg);
-              return prevHook.call(hooks, ret);
-            };
-          } else {
-            hooks[hooksProp] = (...args2) => {
-              let ret = hooksFunc.apply(hooks, args2);
-              if (ret === false) {
-                ret = prevHook.apply(hooks, args2);
-              }
-              return ret;
-            };
-          }
-        }
-        opts.hooks = hooks;
-      }
-      if (pack.walkTokens) {
-        const walkTokens2 = this.defaults.walkTokens;
-        const packWalktokens = pack.walkTokens;
-        opts.walkTokens = function(token) {
-          let values = [];
-          values.push(packWalktokens.call(this, token));
-          if (walkTokens2) {
-            values = values.concat(walkTokens2.call(this, token));
-          }
-          return values;
-        };
-      }
-      this.defaults = { ...this.defaults, ...opts };
-    });
-    return this;
-  }
-  setOptions(opt) {
-    this.defaults = { ...this.defaults, ...opt };
-    return this;
-  }
-  lexer(src, options2) {
-    return _Lexer.lex(src, options2 ?? this.defaults);
-  }
-  parser(tokens, options2) {
-    return _Parser.parse(tokens, options2 ?? this.defaults);
-  }
-  parseMarkdown(blockType) {
-    const parse2 = (src, options2) => {
-      const origOpt = { ...options2 };
-      const opt = { ...this.defaults, ...origOpt };
-      const throwError = this.onError(!!opt.silent, !!opt.async);
-      if (this.defaults.async === true && origOpt.async === false) {
-        return throwError(new Error("marked(): The async option was set to true by an extension. Remove async: false from the parse options object to return a Promise."));
-      }
-      if (typeof src === "undefined" || src === null) {
-        return throwError(new Error("marked(): input parameter is undefined or null"));
-      }
-      if (typeof src !== "string") {
-        return throwError(new Error("marked(): input parameter is of type " + Object.prototype.toString.call(src) + ", string expected"));
-      }
-      if (opt.hooks) {
-        opt.hooks.options = opt;
-        opt.hooks.block = blockType;
-      }
-      const lexer2 = opt.hooks ? opt.hooks.provideLexer() : blockType ? _Lexer.lex : _Lexer.lexInline;
-      const parser2 = opt.hooks ? opt.hooks.provideParser() : blockType ? _Parser.parse : _Parser.parseInline;
-      if (opt.async) {
-        return Promise.resolve(opt.hooks ? opt.hooks.preprocess(src) : src).then((src2) => lexer2(src2, opt)).then((tokens) => opt.hooks ? opt.hooks.processAllTokens(tokens) : tokens).then((tokens) => opt.walkTokens ? Promise.all(this.walkTokens(tokens, opt.walkTokens)).then(() => tokens) : tokens).then((tokens) => parser2(tokens, opt)).then((html2) => opt.hooks ? opt.hooks.postprocess(html2) : html2).catch(throwError);
-      }
-      try {
-        if (opt.hooks) {
-          src = opt.hooks.preprocess(src);
-        }
-        let tokens = lexer2(src, opt);
-        if (opt.hooks) {
-          tokens = opt.hooks.processAllTokens(tokens);
-        }
-        if (opt.walkTokens) {
-          this.walkTokens(tokens, opt.walkTokens);
-        }
-        let html2 = parser2(tokens, opt);
-        if (opt.hooks) {
-          html2 = opt.hooks.postprocess(html2);
-        }
-        return html2;
-      } catch (e) {
-        return throwError(e);
-      }
-    };
-    return parse2;
-  }
-  onError(silent, async) {
-    return (e) => {
-      e.message += `
-Please report this to https://github.com/markedjs/marked.`;
-      if (silent) {
-        const msg = "<p>An error occurred:</p><pre>" + escape22(e.message + "", true) + "</pre>";
-        if (async) {
-          return Promise.resolve(msg);
-        }
-        return msg;
-      }
-      if (async) {
-        return Promise.reject(e);
-      }
-      throw e;
-    };
-  }
-}, markedInstance, options, setOptions, use, walkTokens, parseInline, parser2, lexer2;
-var init_marked_esm = __esm(() => {
-  _defaults = _getDefaults();
-  noopTest = { exec: () => null };
-  other = {
-    codeRemoveIndent: /^(?: {1,4}| {0,3}\t)/gm,
-    outputLinkReplace: /\\([\[\]])/g,
-    indentCodeCompensation: /^(\s+)(?:```)/,
-    beginningSpace: /^\s+/,
-    endingHash: /#$/,
-    startingSpaceChar: /^ /,
-    endingSpaceChar: / $/,
-    nonSpaceChar: /[^ ]/,
-    newLineCharGlobal: /\n/g,
-    tabCharGlobal: /\t/g,
-    multipleSpaceGlobal: /\s+/g,
-    blankLine: /^[ \t]*$/,
-    doubleBlankLine: /\n[ \t]*\n[ \t]*$/,
-    blockquoteStart: /^ {0,3}>/,
-    blockquoteSetextReplace: /\n {0,3}((?:=+|-+) *)(?=\n|$)/g,
-    blockquoteSetextReplace2: /^ {0,3}>[ \t]?/gm,
-    listReplaceTabs: /^\t+/,
-    listReplaceNesting: /^ {1,4}(?=( {4})*[^ ])/g,
-    listIsTask: /^\[[ xX]\] /,
-    listReplaceTask: /^\[[ xX]\] +/,
-    anyLine: /\n.*\n/,
-    hrefBrackets: /^<(.*)>$/,
-    tableDelimiter: /[:|]/,
-    tableAlignChars: /^\||\| *$/g,
-    tableRowBlankLine: /\n[ \t]*$/,
-    tableAlignRight: /^ *-+: *$/,
-    tableAlignCenter: /^ *:-+: *$/,
-    tableAlignLeft: /^ *:-+ *$/,
-    startATag: /^<a /i,
-    endATag: /^<\/a>/i,
-    startPreScriptTag: /^<(pre|code|kbd|script)(\s|>)/i,
-    endPreScriptTag: /^<\/(pre|code|kbd|script)(\s|>)/i,
-    startAngleBracket: /^</,
-    endAngleBracket: />$/,
-    pedanticHrefTitle: /^([^'"]*[^\s])\s+(['"])(.*)\2/,
-    unicodeAlphaNumeric: /[\p{L}\p{N}]/u,
-    escapeTest: /[&<>"']/,
-    escapeReplace: /[&<>"']/g,
-    escapeTestNoEncode: /[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/,
-    escapeReplaceNoEncode: /[<>"']|&(?!(#\d{1,7}|#[Xx][a-fA-F0-9]{1,6}|\w+);)/g,
-    unescapeTest: /&(#(?:\d+)|(?:#x[0-9A-Fa-f]+)|(?:\w+));?/ig,
-    caret: /(^|[^\[])\^/g,
-    percentDecode: /%25/g,
-    findPipe: /\|/g,
-    splitPipe: / \|/,
-    slashPipe: /\\\|/g,
-    carriageReturn: /\r\n|\r/g,
-    spaceLine: /^ +$/gm,
-    notSpaceStart: /^\S*/,
-    endingNewline: /\n$/,
-    listItemRegex: (bull) => new RegExp(`^( {0,3}${bull})((?:[	 ][^\\n]*)?(?:\\n|$))`),
-    nextBulletRegex: (indent) => new RegExp(`^ {0,${Math.min(3, indent - 1)}}(?:[*+-]|\\d{1,9}[.)])((?:[ 	][^\\n]*)?(?:\\n|$))`),
-    hrRegex: (indent) => new RegExp(`^ {0,${Math.min(3, indent - 1)}}((?:- *){3,}|(?:_ *){3,}|(?:\\* *){3,})(?:\\n+|$)`),
-    fencesBeginRegex: (indent) => new RegExp(`^ {0,${Math.min(3, indent - 1)}}(?:\`\`\`|~~~)`),
-    headingBeginRegex: (indent) => new RegExp(`^ {0,${Math.min(3, indent - 1)}}#`),
-    htmlBeginRegex: (indent) => new RegExp(`^ {0,${Math.min(3, indent - 1)}}<(?:[a-z].*>|!--)`, "i")
-  };
-  newline = /^(?:[ \t]*(?:\n|$))+/;
-  blockCode = /^((?: {4}| {0,3}\t)[^\n]+(?:\n(?:[ \t]*(?:\n|$))*)?)+/;
-  fences = /^ {0,3}(`{3,}(?=[^`\n]*(?:\n|$))|~{3,})([^\n]*)(?:\n|$)(?:|([\s\S]*?)(?:\n|$))(?: {0,3}\1[~`]* *(?=\n|$)|$)/;
-  hr = /^ {0,3}((?:-[\t ]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})(?:\n+|$)/;
-  heading = /^ {0,3}(#{1,6})(?=\s|$)(.*)(?:\n+|$)/;
-  bullet = /(?:[*+-]|\d{1,9}[.)])/;
-  lheadingCore = /^(?!bull |blockCode|fences|blockquote|heading|html|table)((?:.|\n(?!\s*?\n|bull |blockCode|fences|blockquote|heading|html|table))+?)\n {0,3}(=+|-+) *(?:\n+|$)/;
-  lheading = edit(lheadingCore).replace(/bull/g, bullet).replace(/blockCode/g, /(?: {4}| {0,3}\t)/).replace(/fences/g, / {0,3}(?:`{3,}|~{3,})/).replace(/blockquote/g, / {0,3}>/).replace(/heading/g, / {0,3}#{1,6}/).replace(/html/g, / {0,3}<[^\n>]+>\n/).replace(/\|table/g, "").getRegex();
-  lheadingGfm = edit(lheadingCore).replace(/bull/g, bullet).replace(/blockCode/g, /(?: {4}| {0,3}\t)/).replace(/fences/g, / {0,3}(?:`{3,}|~{3,})/).replace(/blockquote/g, / {0,3}>/).replace(/heading/g, / {0,3}#{1,6}/).replace(/html/g, / {0,3}<[^\n>]+>\n/).replace(/table/g, / {0,3}\|?(?:[:\- ]*\|)+[\:\- ]*\n/).getRegex();
-  _paragraph = /^([^\n]+(?:\n(?!hr|heading|lheading|blockquote|fences|list|html|table| +\n)[^\n]+)*)/;
-  blockText = /^[^\n]+/;
-  _blockLabel = /(?!\s*\])(?:\\.|[^\[\]\\])+/;
-  def = edit(/^ {0,3}\[(label)\]: *(?:\n[ \t]*)?([^<\s][^\s]*|<.*?>)(?:(?: +(?:\n[ \t]*)?| *\n[ \t]*)(title))? *(?:\n+|$)/).replace("label", _blockLabel).replace("title", /(?:"(?:\\"?|[^"\\])*"|'[^'\n]*(?:\n[^'\n]+)*\n?'|\([^()]*\))/).getRegex();
-  list = edit(/^( {0,3}bull)([ \t][^\n]+?)?(?:\n|$)/).replace(/bull/g, bullet).getRegex();
-  _comment = /<!--(?:-?>|[\s\S]*?(?:-->|$))/;
-  html = edit("^ {0,3}(?:<(script|pre|style|textarea)[\\s>][\\s\\S]*?(?:</\\1>[^\\n]*\\n+|$)|comment[^\\n]*(\\n+|$)|<\\?[\\s\\S]*?(?:\\?>\\n*|$)|<![A-Z][\\s\\S]*?(?:>\\n*|$)|<!\\[CDATA\\[[\\s\\S]*?(?:\\]\\]>\\n*|$)|</?(tag)(?: +|\\n|/?>)[\\s\\S]*?(?:(?:\\n[ \t]*)+\\n|$)|<(?!script|pre|style|textarea)([a-z][\\w-]*)(?:attribute)*? */?>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:(?:\\n[ \t]*)+\\n|$)|</(?!script|pre|style|textarea)[a-z][\\w-]*\\s*>(?=[ \\t]*(?:\\n|$))[\\s\\S]*?(?:(?:\\n[ \t]*)+\\n|$))", "i").replace("comment", _comment).replace("tag", _tag).replace("attribute", / +[a-zA-Z:_][\w.:-]*(?: *= *"[^"\n]*"| *= *'[^'\n]*'| *= *[^\s"'=<>`]+)?/).getRegex();
-  paragraph = edit(_paragraph).replace("hr", hr).replace("heading", " {0,3}#{1,6}(?:\\s|$)").replace("|lheading", "").replace("|table", "").replace("blockquote", " {0,3}>").replace("fences", " {0,3}(?:`{3,}(?=[^`\\n]*\\n)|~{3,})[^\\n]*\\n").replace("list", " {0,3}(?:[*+-]|1[.)]) ").replace("html", "</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag", _tag).getRegex();
-  blockquote = edit(/^( {0,3}> ?(paragraph|[^\n]*)(?:\n|$))+/).replace("paragraph", paragraph).getRegex();
-  blockNormal = {
-    blockquote,
-    code: blockCode,
-    def,
-    fences,
-    heading,
-    hr,
-    html,
-    lheading,
-    list,
-    newline,
-    paragraph,
-    table: noopTest,
-    text: blockText
-  };
-  gfmTable = edit("^ *([^\\n ].*)\\n {0,3}((?:\\| *)?:?-+:? *(?:\\| *:?-+:? *)*(?:\\| *)?)(?:\\n((?:(?! *\\n|hr|heading|blockquote|code|fences|list|html).*(?:\\n|$))*)\\n*|$)").replace("hr", hr).replace("heading", " {0,3}#{1,6}(?:\\s|$)").replace("blockquote", " {0,3}>").replace("code", "(?: {4}| {0,3}\t)[^\\n]").replace("fences", " {0,3}(?:`{3,}(?=[^`\\n]*\\n)|~{3,})[^\\n]*\\n").replace("list", " {0,3}(?:[*+-]|1[.)]) ").replace("html", "</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag", _tag).getRegex();
-  blockGfm = {
-    ...blockNormal,
-    lheading: lheadingGfm,
-    table: gfmTable,
-    paragraph: edit(_paragraph).replace("hr", hr).replace("heading", " {0,3}#{1,6}(?:\\s|$)").replace("|lheading", "").replace("table", gfmTable).replace("blockquote", " {0,3}>").replace("fences", " {0,3}(?:`{3,}(?=[^`\\n]*\\n)|~{3,})[^\\n]*\\n").replace("list", " {0,3}(?:[*+-]|1[.)]) ").replace("html", "</?(?:tag)(?: +|\\n|/?>)|<(?:script|pre|style|textarea|!--)").replace("tag", _tag).getRegex()
-  };
-  blockPedantic = {
-    ...blockNormal,
-    html: edit(`^ *(?:comment *(?:\\n|\\s*$)|<(tag)[\\s\\S]+?</\\1> *(?:\\n{2,}|\\s*$)|<tag(?:"[^"]*"|'[^']*'|\\s[^'"/>\\s]*)*?/?> *(?:\\n{2,}|\\s*$))`).replace("comment", _comment).replace(/tag/g, "(?!(?:a|em|strong|small|s|cite|q|dfn|abbr|data|time|code|var|samp|kbd|sub|sup|i|b|u|mark|ruby|rt|rp|bdi|bdo|span|br|wbr|ins|del|img)\\b)\\w+(?!:|[^\\w\\s@]*@)\\b").getRegex(),
-    def: /^ *\[([^\]]+)\]: *<?([^\s>]+)>?(?: +(["(][^\n]+[")]))? *(?:\n+|$)/,
-    heading: /^(#{1,6})(.*)(?:\n+|$)/,
-    fences: noopTest,
-    lheading: /^(.+?)\n {0,3}(=+|-+) *(?:\n+|$)/,
-    paragraph: edit(_paragraph).replace("hr", hr).replace("heading", ` *#{1,6} *[^
-]`).replace("lheading", lheading).replace("|table", "").replace("blockquote", " {0,3}>").replace("|fences", "").replace("|list", "").replace("|html", "").replace("|tag", "").getRegex()
-  };
-  escape2 = /^\\([!"#$%&'()*+,\-./:;<=>?@\[\]\\^_`{|}~])/;
-  inlineCode = /^(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/;
-  br = /^( {2,}|\\)\n(?!\s*$)/;
-  inlineText = /^(`+|[^`])(?:(?= {2,}\n)|[\s\S]*?(?:(?=[\\<!\[`*_]|\b_|$)|[^ ](?= {2,}\n)))/;
-  _punctuation = /[\p{P}\p{S}]/u;
-  _punctuationOrSpace = /[\s\p{P}\p{S}]/u;
-  _notPunctuationOrSpace = /[^\s\p{P}\p{S}]/u;
-  punctuation = edit(/^((?![*_])punctSpace)/, "u").replace(/punctSpace/g, _punctuationOrSpace).getRegex();
-  _punctuationGfmStrongEm = /(?!~)[\p{P}\p{S}]/u;
-  _punctuationOrSpaceGfmStrongEm = /(?!~)[\s\p{P}\p{S}]/u;
-  _notPunctuationOrSpaceGfmStrongEm = /(?:[^\s\p{P}\p{S}]|~)/u;
-  blockSkip = /\[[^[\]]*?\]\((?:\\.|[^\\\(\)]|\((?:\\.|[^\\\(\)])*\))*\)|`[^`]*?`|<[^<>]*?>/g;
-  emStrongLDelimCore = /^(?:\*+(?:((?!\*)punct)|[^\s*]))|^_+(?:((?!_)punct)|([^\s_]))/;
-  emStrongLDelim = edit(emStrongLDelimCore, "u").replace(/punct/g, _punctuation).getRegex();
-  emStrongLDelimGfm = edit(emStrongLDelimCore, "u").replace(/punct/g, _punctuationGfmStrongEm).getRegex();
-  emStrongRDelimAst = edit(emStrongRDelimAstCore, "gu").replace(/notPunctSpace/g, _notPunctuationOrSpace).replace(/punctSpace/g, _punctuationOrSpace).replace(/punct/g, _punctuation).getRegex();
-  emStrongRDelimAstGfm = edit(emStrongRDelimAstCore, "gu").replace(/notPunctSpace/g, _notPunctuationOrSpaceGfmStrongEm).replace(/punctSpace/g, _punctuationOrSpaceGfmStrongEm).replace(/punct/g, _punctuationGfmStrongEm).getRegex();
-  emStrongRDelimUnd = edit("^[^_*]*?\\*\\*[^_*]*?_[^_*]*?(?=\\*\\*)|[^_]+(?=[^_])|(?!_)punct(_+)(?=[\\s]|$)|notPunctSpace(_+)(?!_)(?=punctSpace|$)|(?!_)punctSpace(_+)(?=notPunctSpace)|[\\s](_+)(?!_)(?=punct)|(?!_)punct(_+)(?!_)(?=punct)", "gu").replace(/notPunctSpace/g, _notPunctuationOrSpace).replace(/punctSpace/g, _punctuationOrSpace).replace(/punct/g, _punctuation).getRegex();
-  anyPunctuation = edit(/\\(punct)/, "gu").replace(/punct/g, _punctuation).getRegex();
-  autolink = edit(/^<(scheme:[^\s\x00-\x1f<>]*|email)>/).replace("scheme", /[a-zA-Z][a-zA-Z0-9+.-]{1,31}/).replace("email", /[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+(@)[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+(?![-_])/).getRegex();
-  _inlineComment = edit(_comment).replace("(?:-->|$)", "-->").getRegex();
-  tag = edit("^comment|^</[a-zA-Z][\\w:-]*\\s*>|^<[a-zA-Z][\\w-]*(?:attribute)*?\\s*/?>|^<\\?[\\s\\S]*?\\?>|^<![a-zA-Z]+\\s[\\s\\S]*?>|^<!\\[CDATA\\[[\\s\\S]*?\\]\\]>").replace("comment", _inlineComment).replace("attribute", /\s+[a-zA-Z:_][\w.:-]*(?:\s*=\s*"[^"]*"|\s*=\s*'[^']*'|\s*=\s*[^\s"'=<>`]+)?/).getRegex();
-  _inlineLabel = /(?:\[(?:\\.|[^\[\]\\])*\]|\\.|`[^`]*`|[^\[\]\\`])*?/;
-  link = edit(/^!?\[(label)\]\(\s*(href)(?:(?:[ \t]*(?:\n[ \t]*)?)(title))?\s*\)/).replace("label", _inlineLabel).replace("href", /<(?:\\.|[^\n<>\\])+>|[^ \t\n\x00-\x1f]*/).replace("title", /"(?:\\"?|[^"\\])*"|'(?:\\'?|[^'\\])*'|\((?:\\\)?|[^)\\])*\)/).getRegex();
-  reflink = edit(/^!?\[(label)\]\[(ref)\]/).replace("label", _inlineLabel).replace("ref", _blockLabel).getRegex();
-  nolink = edit(/^!?\[(ref)\](?:\[\])?/).replace("ref", _blockLabel).getRegex();
-  reflinkSearch = edit("reflink|nolink(?!\\()", "g").replace("reflink", reflink).replace("nolink", nolink).getRegex();
-  inlineNormal = {
-    _backpedal: noopTest,
-    anyPunctuation,
-    autolink,
-    blockSkip,
-    br,
-    code: inlineCode,
-    del: noopTest,
-    emStrongLDelim,
-    emStrongRDelimAst,
-    emStrongRDelimUnd,
-    escape: escape2,
-    link,
-    nolink,
-    punctuation,
-    reflink,
-    reflinkSearch,
-    tag,
-    text: inlineText,
-    url: noopTest
-  };
-  inlinePedantic = {
-    ...inlineNormal,
-    link: edit(/^!?\[(label)\]\((.*?)\)/).replace("label", _inlineLabel).getRegex(),
-    reflink: edit(/^!?\[(label)\]\s*\[([^\]]*)\]/).replace("label", _inlineLabel).getRegex()
-  };
-  inlineGfm = {
-    ...inlineNormal,
-    emStrongRDelimAst: emStrongRDelimAstGfm,
-    emStrongLDelim: emStrongLDelimGfm,
-    url: edit(/^((?:ftp|https?):\/\/|www\.)(?:[a-zA-Z0-9\-]+\.?)+[^\s<]*|^email/, "i").replace("email", /[A-Za-z0-9._+-]+(@)[a-zA-Z0-9-_]+(?:\.[a-zA-Z0-9-_]*[a-zA-Z0-9])+(?![-_])/).getRegex(),
-    _backpedal: /(?:[^?!.,:;*_'"~()&]+|\([^)]*\)|&(?![a-zA-Z0-9]+;$)|[?!.,:;*_'"~)]+(?!$))+/,
-    del: /^(~~?)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/,
-    text: /^([`~]+|[^`~])(?:(?= {2,}\n)|(?=[a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-]+@)|[\s\S]*?(?:(?=[\\<!\[`*~_]|\b_|https?:\/\/|ftp:\/\/|www\.|$)|[^ ](?= {2,}\n)|[^a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-](?=[a-zA-Z0-9.!#$%&'*+\/=?_`{\|}~-]+@)))/
-  };
-  inlineBreaks = {
-    ...inlineGfm,
-    br: edit(br).replace("{2,}", "*").getRegex(),
-    text: edit(inlineGfm.text).replace("\\b_", "\\b_| {2,}\\n").replace(/\{2,\}/g, "*").getRegex()
-  };
-  block = {
-    normal: blockNormal,
-    gfm: blockGfm,
-    pedantic: blockPedantic
-  };
-  inline = {
-    normal: inlineNormal,
-    gfm: inlineGfm,
-    breaks: inlineBreaks,
-    pedantic: inlinePedantic
-  };
-  escapeReplacements = {
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;"
-  };
-  _Hooks = class {
-    options;
-    block;
-    constructor(options2) {
-      this.options = options2 || _defaults;
     }
-    static passThroughHooks = /* @__PURE__ */ new Set([
-      "preprocess",
-      "postprocess",
-      "processAllTokens"
-    ]);
-    preprocess(markdown) {
-      return markdown;
-    }
-    postprocess(html2) {
-      return html2;
-    }
-    processAllTokens(tokens) {
-      return tokens;
-    }
-    provideLexer() {
-      return this.block ? _Lexer.lex : _Lexer.lexInline;
-    }
-    provideParser() {
-      return this.block ? _Parser.parse : _Parser.parseInline;
-    }
-  };
-  markedInstance = new Marked;
-  marked.options = marked.setOptions = function(options2) {
-    markedInstance.setOptions(options2);
-    marked.defaults = markedInstance.defaults;
-    changeDefaults(marked.defaults);
-    return marked;
-  };
-  marked.getDefaults = _getDefaults;
-  marked.defaults = _defaults;
-  marked.use = function(...args) {
-    markedInstance.use(...args);
-    marked.defaults = markedInstance.defaults;
-    changeDefaults(marked.defaults);
-    return marked;
-  };
-  marked.walkTokens = function(tokens, callback) {
-    return markedInstance.walkTokens(tokens, callback);
-  };
-  marked.parseInline = markedInstance.parseInline;
-  marked.Parser = _Parser;
-  marked.parser = _Parser.parse;
-  marked.Renderer = _Renderer;
-  marked.TextRenderer = _TextRenderer;
-  marked.Lexer = _Lexer;
-  marked.lexer = _Lexer.lex;
-  marked.Tokenizer = _Tokenizer;
-  marked.Hooks = _Hooks;
-  marked.parse = marked;
-  options = marked.options;
-  setOptions = marked.setOptions;
-  use = marked.use;
-  walkTokens = marked.walkTokens;
-  parseInline = marked.parseInline;
-  parser2 = _Parser.parse;
-  lexer2 = _Lexer.lex;
+  } };
+}
+var CJK = "\\u1100-\\u11ff\\u20a9\\u2329-\\u232a\\u2630-\\u2637\\u268a-\\u268f\\u2e80-\\u2e99\\u2e9b-\\u2ef3\\u2f00-\\u2fd5\\u2ff0-\\u303e\\u3041-\\u3096\\u3099-\\u30ff\\u3105-\\u312f\\u3131-\\u318e\\u3190-\\u31e5\\u31ef-\\u321e\\u3220-\\u3247\\u3250-\\ua48c\\ua490-\\ua4c6\\ua960-\\ua97c\\uac00-\\ud7a3\\ud7b0-\\ud7c6\\ud7cb-\\ud7fb\\uf900-\\ufaff\\ufe10-\\ufe19\\ufe30-\\ufe52\\ufe54-\\ufe66\\ufe68-\\ufe6b\\uff01-\\uffbe\\uffc2-\\uffc7\\uffca-\\uffcf\\uffd2-\\uffd7\\uffda-\\uffdc\\uffe0-\\uffe6\\uffe8-\\uffee\\u{16fe0}-\\u{16fe4}\\u{16ff0}-\\u{16ff6}\\u{17000}-\\u{18cda}\\u{18cff}-\\u{18d20}\\u{18d80}-\\u{18df2}\\u{18e00}-\\u{19191}\\u{191a0}-\\u{191d2}\\u{1aff0}-\\u{1aff3}\\u{1aff5}-\\u{1affb}\\u{1affd}-\\u{1affe}\\u{1b000}-\\u{1b128}\\u{1b132}\\u{1b150}-\\u{1b152}\\u{1b155}\\u{1b164}-\\u{1b168}\\u{1b170}-\\u{1b2fb}\\u{1d300}-\\u{1d356}\\u{1d360}-\\u{1d376}\\u{1f1ae}\\u{1f200}\\u{1f202}\\u{1f210}-\\u{1f219}\\u{1f21b}-\\u{1f22e}\\u{1f230}-\\u{1f231}\\u{1f237}\\u{1f23b}\\u{1f240}-\\u{1f248}\\u{1f260}-\\u{1f265}\\u{1f7da}\\u{20000}-\\u{3fffd}", cjkTest, punctuationCjk, cjkPunct, cjkPunctSpace, cjkNotPunctSpace, cjkDelPunct, cjkDelPunctSpace, cjkDelNotPunctSpace, cjkPunctGfm, cjkPunctSpaceGfm, cjkNotPunctSpaceGfm, emStrongRDelimAstCjk, emStrongRDelimAstCjkGfm, emStrongRDelimUndCjk, delRDelimCjk;
+var init_dist2 = __esm(() => {
+  cjkTest = new RegExp(`[${CJK}]`, "u");
+  punctuationCjk = new RegExp(`^((?![*_])[\\s\\p{P}\\p{S}${CJK}])`, "u");
+  cjkPunct = `[\\p{P}\\p{S}${CJK}]`;
+  cjkPunctSpace = `[\\s\\p{P}\\p{S}${CJK}]`;
+  cjkNotPunctSpace = `[^\\s\\p{P}\\p{S}${CJK}]`;
+  cjkDelPunct = `(?![*_])[\\p{P}\\p{S}${CJK}]`;
+  cjkDelPunctSpace = `(?![*_])[\\s\\p{P}\\p{S}${CJK}]`;
+  cjkDelNotPunctSpace = `(?:[^\\s\\p{P}\\p{S}${CJK}]|[*_])`;
+  cjkPunctGfm = `(?!~)[\\p{P}\\p{S}${CJK}]`;
+  cjkPunctSpaceGfm = `(?!~)[\\s\\p{P}\\p{S}${CJK}]`;
+  cjkNotPunctSpaceGfm = `(?:[^\\s\\p{P}\\p{S}${CJK}]|~)`;
+  emStrongRDelimAstCjk = buildRDelimAst(cjkPunct, cjkPunctSpace, cjkNotPunctSpace);
+  emStrongRDelimAstCjkGfm = buildRDelimAst(cjkPunctGfm, cjkPunctSpaceGfm, cjkNotPunctSpaceGfm);
+  emStrongRDelimUndCjk = buildRDelimUnd(cjkPunct, cjkPunctSpace, cjkNotPunctSpace);
+  delRDelimCjk = buildRDelimDel(cjkDelPunct, cjkDelPunctSpace, cjkDelNotPunctSpace);
+});
+
+// node_modules/@earendil-works/pi-tui/dist/latex.js
+var NAMED_OPERATORS, LIMIT_OPERATORS, DISPLAY_LIMIT_SYMBOLS, RELATION_COMMANDS, SPACING_COMMANDS, NEGATIVE_SPACING_COMMANDS, FONT_SWITCH_COMMANDS, IGNORED_COMMANDS, SIZE_COMMANDS, PLAIN_WRAPPERS;
+var init_latex = __esm(() => {
+  init_utils();
+  NAMED_OPERATORS = new Set([
+    "arccos",
+    "arcsin",
+    "arctan",
+    "arg",
+    "cos",
+    "cosh",
+    "cot",
+    "coth",
+    "csc",
+    "deg",
+    "det",
+    "dim",
+    "exp",
+    "gcd",
+    "hom",
+    "inf",
+    "ker",
+    "lg",
+    "lim",
+    "liminf",
+    "limsup",
+    "ln",
+    "log",
+    "max",
+    "min",
+    "Pr",
+    "sec",
+    "sin",
+    "sinh",
+    "sup",
+    "tan",
+    "tanh"
+  ]);
+  LIMIT_OPERATORS = new Set([
+    "argmax",
+    "argmin",
+    "inf",
+    "injlim",
+    "lim",
+    "liminf",
+    "limsup",
+    "max",
+    "min",
+    "projlim",
+    "sup"
+  ]);
+  DISPLAY_LIMIT_SYMBOLS = new Set([
+    "bigcap",
+    "bigcup",
+    "bigodot",
+    "bigoplus",
+    "bigotimes",
+    "bigsqcup",
+    "biguplus",
+    "bigvee",
+    "bigwedge",
+    "coprod",
+    "int",
+    "iint",
+    "iiint",
+    "oint",
+    "prod",
+    "sum"
+  ]);
+  RELATION_COMMANDS = new Set([
+    "Leftarrow",
+    "Leftrightarrow",
+    "Longleftarrow",
+    "Longleftrightarrow",
+    "Longrightarrow",
+    "Rightarrow",
+    "Join",
+    "Vdash",
+    "Vvdash",
+    "approx",
+    "asymp",
+    "bowtie",
+    "cong",
+    "dashv",
+    "fullouterjoin",
+    "doteq",
+    "downarrow",
+    "equiv",
+    "ge",
+    "geq",
+    "geqslant",
+    "gets",
+    "gg",
+    "hookleftarrow",
+    "hookrightarrow",
+    "iff",
+    "implies",
+    "in",
+    "leadsto",
+    "le",
+    "leftarrow",
+    "leftharpoondown",
+    "leftharpoonup",
+    "leftrightarrow",
+    "leftrightharpoons",
+    "leftouterjoin",
+    "leq",
+    "leqslant",
+    "ll",
+    "longleftarrow",
+    "longleftrightarrow",
+    "longmapsto",
+    "longrightarrow",
+    "ltimes",
+    "mapsto",
+    "mid",
+    "models",
+    "ne",
+    "nearrow",
+    "neq",
+    "ni",
+    "notin",
+    "nvdash",
+    "nvDash",
+    "nwarrow",
+    "parallel",
+    "perp",
+    "prec",
+    "preceq",
+    "propto",
+    "rightharpoondown",
+    "rightharpoonup",
+    "rightleftharpoons",
+    "rightouterjoin",
+    "rightarrow",
+    "rightsquigarrow",
+    "rtimes",
+    "searrow",
+    "sim",
+    "simeq",
+    "sqsubset",
+    "sqsubseteq",
+    "sqsupset",
+    "sqsupseteq",
+    "subset",
+    "subseteq",
+    "succ",
+    "succeq",
+    "supset",
+    "supseteq",
+    "swarrow",
+    "to",
+    "triangleleft",
+    "triangleright",
+    "twoheadleftarrow",
+    "twoheadrightarrow",
+    "uparrow",
+    "vdash"
+  ]);
+  SPACING_COMMANDS = new Set([
+    ",",
+    ":",
+    ";",
+    " ",
+    ">",
+    "enspace",
+    "enskip",
+    "medspace",
+    "quad",
+    "qquad",
+    "thickspace",
+    "thinspace"
+  ]);
+  NEGATIVE_SPACING_COMMANDS = new Set(["!", "negmedspace", "negthickspace", "negthinspace"]);
+  FONT_SWITCH_COMMANDS = new Set(["bf", "cal", "it", "rm", "sf", "sl", "tt"]);
+  IGNORED_COMMANDS = new Set([
+    "displaystyle",
+    "limits",
+    "nolimits",
+    "scriptstyle",
+    "scriptscriptstyle",
+    "textstyle"
+  ]);
+  SIZE_COMMANDS = new Set([
+    "big",
+    "Big",
+    "bigg",
+    "Bigg",
+    "bigl",
+    "Bigl",
+    "biggl",
+    "Biggl",
+    "bigr",
+    "Bigr",
+    "biggr",
+    "Biggr"
+  ]);
+  PLAIN_WRAPPERS = new Set([
+    "emph",
+    "mathcal",
+    "mathbf",
+    "mathfrak",
+    "mathit",
+    "mathrm",
+    "mathnormal",
+    "mathscr",
+    "mathsf",
+    "mathtt",
+    "mathup",
+    "mbox",
+    "overbrace",
+    "pmb",
+    "smash",
+    "substack",
+    "text",
+    "textbf",
+    "textit",
+    "textmd",
+    "textnormal",
+    "textrm",
+    "textsc",
+    "textsf",
+    "textsl",
+    "texttt",
+    "textup",
+    "underbrace",
+    "bm",
+    "boldsymbol"
+  ]);
 });
 
 // node_modules/@earendil-works/pi-tui/dist/components/markdown.js
-var STRICT_STRIKETHROUGH_REGEX, StrictStrikethroughTokenizer, markdownParser;
+function isEscaped(source, index) {
+  let backslashes = 0;
+  for (let position = index - 1;position >= 0 && source[position] === "\\"; position--) {
+    backslashes++;
+  }
+  return backslashes % 2 === 1;
+}
+function findClosingDelimiter(source, closing, start) {
+  let index = source.indexOf(closing, start);
+  while (index >= 0 && isEscaped(source, index)) {
+    index = source.indexOf(closing, index + closing.length);
+  }
+  return index;
+}
+function looksLikePendingDollarMath(source) {
+  return /\\[A-Za-z]+|[_^=+*/<>()[\]|\u00B1\u2264\u2265\u2260\u2248\u2208\u2192\u21D2\u221E\u222B\u2211\u221A-]/.test(source);
+}
+function tokenizeInlineLatex(source) {
+  let opening = "";
+  let closing = "";
+  if (source.startsWith("$$")) {
+    opening = "$$";
+    closing = "$$";
+  } else if (source.startsWith("\\(")) {
+    opening = "\\(";
+    closing = "\\)";
+  } else if (source.startsWith("\\[")) {
+    opening = "\\[";
+    closing = "\\]";
+  } else if (source.startsWith("$") && !/^\$\s/.test(source)) {
+    opening = "$";
+    closing = "$";
+  } else {
+    return;
+  }
+  const closingIndex = findClosingDelimiter(source, closing, opening.length);
+  if (closingIndex >= 0 && opening === "$" && (/\s$/.test(source.slice(opening.length, closingIndex)) || /^\d/.test(source.slice(closingIndex + 1)) || /^[A-Z_][A-Z0-9_]*(?:[^A-Za-z0-9_\s])?$/.test(source.slice(opening.length, closingIndex)) && /^[A-Za-z_][A-Za-z0-9_]*/.test(source.slice(closingIndex + 1)) || source.slice(opening.length, closingIndex).includes("`"))) {
+    return;
+  }
+  if (closingIndex < 0) {
+    const pendingSource = source.slice(opening.length);
+    if (opening.startsWith("\\") || looksLikePendingDollarMath(pendingSource)) {
+      return { type: "latex", raw: source, text: pendingSource, pending: true };
+    }
+    return;
+  }
+  const text = source.slice(opening.length, closingIndex);
+  if (!text || text.includes(`
+`)) {
+    return;
+  }
+  const raw = source.slice(0, closingIndex + closing.length);
+  return { type: "latex", raw, text };
+}
+function containsTableStart(source) {
+  const lines = source.split(`
+`);
+  for (let index = 0;index < lines.length - 1; index++) {
+    const delimiterRow = lines[index + 1];
+    if ((delimiterRow.includes("|") || lines[index].includes("|")) && TABLE_DELIMITER_ROW_REGEX.test(delimiterRow)) {
+      return true;
+    }
+  }
+  return false;
+}
+function tokenizeBlockLatex(source) {
+  const dollarMatch = /^ {0,3}\$\$[ \t]*(?:\n)?([\s\S]*?)\$\$[ \t]*(?:\n|$)/.exec(source);
+  if (dollarMatch?.[1] && !containsTableStart(dollarMatch[1])) {
+    return { type: "latexBlock", raw: dollarMatch[0], text: dollarMatch[1].trim() };
+  }
+  const bracketMatch = /^ {0,3}\\\[[ \t]*(?:\n)?([\s\S]*?)\\\][ \t]*(?:\n|$)/.exec(source);
+  if (bracketMatch?.[1] && !containsTableStart(bracketMatch[1])) {
+    return { type: "latexBlock", raw: bracketMatch[0], text: bracketMatch[1].trim() };
+  }
+  const pendingBracket = /^ {0,3}\\\[[ \t]*(?:\n)?([\s\S]*)$/.exec(source);
+  if (pendingBracket?.[1] && !containsTableStart(pendingBracket[1])) {
+    return { type: "latexBlock", raw: pendingBracket[0], text: pendingBracket[1], pending: true };
+  }
+  const pendingDollar = /^ {0,3}\$\$[ \t]*(?:\n)?([\s\S]*)$/.exec(source);
+  if (pendingDollar?.[1] && looksLikePendingDollarMath(pendingDollar[1]) && !containsTableStart(pendingDollar[1])) {
+    return { type: "latexBlock", raw: pendingDollar[0], text: pendingDollar[1], pending: true };
+  }
+  return;
+}
+var STRICT_STRIKETHROUGH_REGEX, MarkdownTokenizer, TABLE_DELIMITER_ROW_REGEX, LATEX_MARKDOWN_EXTENSIONS, markdownParser;
 var init_markdown = __esm(() => {
   init_marked_esm();
+  init_dist2();
+  init_latex();
   init_terminal_image();
   init_utils();
   STRICT_STRIKETHROUGH_REGEX = /^(~~)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/;
-  StrictStrikethroughTokenizer = class StrictStrikethroughTokenizer extends _Tokenizer {
+  MarkdownTokenizer = class MarkdownTokenizer extends y {
+    url(src) {
+      const token = super.url(src);
+      if (!token)
+        return;
+      const punctuationIndex = token.raw.search(cjkPunctuationRegex);
+      return punctuationIndex < 0 ? token : super.url(token.raw.slice(0, punctuationIndex));
+    }
     del(src) {
       const match = STRICT_STRIKETHROUGH_REGEX.exec(src);
       if (!match) {
@@ -37266,10 +37593,47 @@ var init_markdown = __esm(() => {
       };
     }
   };
-  markdownParser = new Marked;
+  TABLE_DELIMITER_ROW_REGEX = /^ {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/;
+  LATEX_MARKDOWN_EXTENSIONS = [
+    {
+      name: "latexBlock",
+      level: "block",
+      start(source) {
+        const match = /(?:^|\n) {0,3}(?:\$\$|\\\[)/.exec(source);
+        return match ? match.index + (match[0].startsWith(`
+`) ? 1 : 0) : undefined;
+      },
+      tokenizer: tokenizeBlockLatex
+    },
+    {
+      name: "latex",
+      level: "inline",
+      start(source) {
+        const indices = [source.indexOf("$"), source.indexOf("\\("), source.indexOf("\\[")].filter((index) => index >= 0);
+        return indices.length > 0 ? Math.min(...indices) : undefined;
+      },
+      tokenizer: tokenizeInlineLatex
+    }
+  ];
+  markdownParser = new Z;
   markdownParser.setOptions({
-    tokenizer: new StrictStrikethroughTokenizer
+    tokenizer: new MarkdownTokenizer
   });
+  markdownParser.use({
+    tokenizer: { emStrong: markedCjkFriendly().tokenizer?.emStrong },
+    extensions: [...LATEX_MARKDOWN_EXTENSIONS]
+  });
+});
+
+// node_modules/@earendil-works/pi-tui/dist/components/mouse-region.js
+var init_mouse_region = __esm(() => {
+  init_tui();
+});
+
+// node_modules/@earendil-works/pi-tui/dist/components/scroll-view.js
+var init_scroll_view = __esm(() => {
+  init_layout_node();
+  init_tui();
 });
 
 // node_modules/@earendil-works/pi-tui/dist/components/settings-list.js
@@ -37283,8 +37647,104 @@ var init_truncated_text = __esm(() => {
   init_utils();
 });
 
+// node_modules/@earendil-works/pi-tui/dist/components/v-stack.js
+var init_v_stack = __esm(() => {
+  init_stack();
+});
+
+// node_modules/@earendil-works/pi-tui/dist/native-module-path.js
+import { createRequire as createRequire6 } from "module";
+import { dirname as dirname19, join as join29 } from "path";
+import { fileURLToPath as fileURLToPath9 } from "url";
+function getNativeModuleCandidates(nativePath, options = {}) {
+  const moduleDir = dirname19(fileURLToPath9(options.moduleUrl ?? import.meta.url));
+  const candidates = [];
+  try {
+    const packageEntry = (options.resolvePackage ?? moduleRequire.resolve)(TUI_PACKAGE_NAME);
+    candidates.push(join29(dirname19(packageEntry), "..", nativePath));
+  } catch {}
+  candidates.push(join29(moduleDir, "..", nativePath), join29(moduleDir, nativePath), join29(dirname19(options.execPath ?? process.execPath), nativePath));
+  return Array.from(new Set(candidates));
+}
+var moduleRequire, TUI_PACKAGE_NAME = "@earendil-works/pi-tui";
+var init_native_module_path = __esm(() => {
+  moduleRequire = createRequire6(import.meta.url);
+});
+
+// node_modules/@earendil-works/pi-tui/dist/native-platform.js
+import { createRequire as createRequire7 } from "module";
+import * as path2 from "path";
+function loadNativePlatformHelper(platform, suffix = "") {
+  const arch = process.arch;
+  if (arch !== "x64" && arch !== "arm64")
+    return;
+  const nativePath = path2.join("native", platform, "prebuilds", `${platform}-${arch}`, `${platform}-platform${suffix}.node`);
+  if (helpers.has(nativePath))
+    return helpers.get(nativePath);
+  for (const modulePath of getNativeModuleCandidates(nativePath)) {
+    try {
+      const helper = cjsRequire(modulePath);
+      if (typeof helper?.getText === "function" && typeof helper.getImage === "function") {
+        helpers.set(nativePath, helper);
+        return helper;
+      }
+    } catch {}
+  }
+  helpers.set(nativePath, undefined);
+  return;
+}
+function getNativePlatformHelper() {
+  if (process.platform !== "darwin" && process.platform !== "win32")
+    return;
+  return loadNativePlatformHelper(process.platform);
+}
+var cjsRequire, helpers;
+var init_native_platform = __esm(() => {
+  init_native_module_path();
+  cjsRequire = createRequire7(import.meta.url);
+  helpers = new Map;
+});
+
+// node_modules/@earendil-works/pi-tui/dist/program-status.js
+function isProgramStatusReply(sequence) {
+  return /^\x1b\]7501;\?[^\x07\x1b]*(?:\x07|\x1b\\)$/.test(sequence);
+}
+function truncateUtf8(text, maxBytes) {
+  if (Buffer.byteLength(text, "utf8") <= maxBytes)
+    return text;
+  let bytes = 0;
+  let end = 0;
+  for (const char of text) {
+    const size = Buffer.byteLength(char, "utf8");
+    if (bytes + size > maxBytes)
+      break;
+    bytes += size;
+    end += char.length;
+  }
+  return text.slice(0, end);
+}
+function formatProgramStatus(status) {
+  const pairs = [`state=${status.state}`];
+  if (status.app !== undefined && APP_PATTERN.test(status.app))
+    pairs.push(`app=${status.app}`);
+  if (status.state === "blocked" && status.kind)
+    pairs.push(`kind=${status.kind}`);
+  const message = truncateUtf8(replaceControlCharacters(status.message ?? "").trim(), MAX_MESSAGE_BYTES);
+  if (message)
+    pairs.push(`msg=${Buffer.from(message, "utf8").toString("base64")}`);
+  return `\x1B]7501;${pairs.join(":")}\x1B\\`;
+}
+var PROGRAM_STATUS_QUERY = "\x1B]7501;?\x1B\\", APP_PATTERN, MAX_MESSAGE_BYTES = 2048;
+var init_program_status = __esm(() => {
+  init_utils();
+  APP_PATTERN = /^[A-Za-z0-9_.+-]{1,32}$/;
+});
+
 // node_modules/@earendil-works/pi-tui/dist/stdin-buffer.js
 import { EventEmitter } from "events";
+function isControlString(data) {
+  return data.startsWith(`${ESC}]`) || data.startsWith(`${ESC}P`) || data.startsWith(`${ESC}_`);
+}
 function isCompleteSequence(data) {
   if (!data.startsWith(ESC)) {
     return "not-escape";
@@ -37384,8 +37844,20 @@ function extractCompleteSequences(buffer) {
   while (pos < buffer.length) {
     const remaining = buffer.slice(pos);
     if (remaining.startsWith(ESC)) {
+      const terminalReply = isControlString(remaining) && TERMINAL_REPLY_HEADER_PATTERN.test(remaining);
       let seqEnd = 1;
       while (seqEnd <= remaining.length) {
+        if (terminalReply && seqEnd > 2) {
+          const char = remaining[seqEnd - 1];
+          if (char === "\x18" || char === "\x1A") {
+            pos += seqEnd;
+            break;
+          }
+          if (char === ESC && seqEnd < remaining.length && remaining[seqEnd] !== "\\") {
+            pos += seqEnd - 1;
+            break;
+          }
+        }
         const candidate = remaining.slice(0, seqEnd);
         const status = isCompleteSequence(candidate);
         if (status === "complete") {
@@ -37418,18 +37890,21 @@ function extractCompleteSequences(buffer) {
   }
   return { sequences, remainder: "" };
 }
-var ESC = "\x1B", BRACKETED_PASTE_START = "\x1B[200~", BRACKETED_PASTE_END = "\x1B[201~", StdinBuffer;
+var ESC = "\x1B", DEFAULT_SEQUENCE_TIMEOUT_MS = 50, DEFAULT_ESCAPE_TIMEOUT_MS = 10, BRACKETED_PASTE_START = "\x1B[200~", BRACKETED_PASTE_END = "\x1B[201~", TERMINAL_REPLY_HEADER_PATTERN, StdinBuffer;
 var init_stdin_buffer = __esm(() => {
+  TERMINAL_REPLY_HEADER_PATTERN = /^\x1b(?:\](?:1[01];|4;\d{1,3};|7501;\?)|P>\||_G(?:[a-z]=\d+,)*[a-z]=\d+;)/;
   StdinBuffer = class StdinBuffer extends EventEmitter {
     buffer = "";
     timeout = null;
     timeoutMs;
+    escapeTimeoutMs;
     pasteMode = false;
     pasteBuffer = "";
     pendingKittyPrintableCodepoint;
     constructor(options = {}) {
       super();
-      this.timeoutMs = options.timeout ?? 10;
+      this.timeoutMs = options.timeout ?? DEFAULT_SEQUENCE_TIMEOUT_MS;
+      this.escapeTimeoutMs = options.escapeTimeout ?? DEFAULT_ESCAPE_TIMEOUT_MS;
     }
     process(data) {
       if (this.timeout) {
@@ -37503,12 +37978,20 @@ var init_stdin_buffer = __esm(() => {
         this.emitDataSequence(sequence);
       }
       if (this.buffer.length > 0) {
+        if (TERMINAL_REPLY_HEADER_PATTERN.test(this.buffer))
+          return;
+        const timeoutMs = this.buffer === ESC ? this.escapeTimeoutMs : this.timeoutMs;
         this.timeout = setTimeout(() => {
           const flushed = this.flush();
           for (const sequence of flushed) {
-            this.emitDataSequence(sequence);
+            if (sequence.length > 2 && isControlString(sequence)) {
+              this.emitDataSequence(sequence.slice(0, 2));
+              this.process(sequence.slice(2));
+            } else {
+              this.emitDataSequence(sequence);
+            }
           }
-        }, this.timeoutMs);
+        }, timeoutMs);
       }
     }
     emitDataSequence(sequence) {
@@ -37552,11 +38035,66 @@ var init_stdin_buffer = __esm(() => {
   };
 });
 
+// node_modules/@earendil-works/pi-tui/dist/native-modifiers.js
+function isNativeModifierPressed(key) {
+  const helper = getNativePlatformHelper();
+  if (!helper?.isModifierPressed)
+    return false;
+  try {
+    return helper.isModifierPressed(key) === true;
+  } catch {
+    return false;
+  }
+}
+var init_native_modifiers = __esm(() => {
+  init_native_platform();
+});
+
 // node_modules/@earendil-works/pi-tui/dist/terminal.js
-import * as fs2 from "fs";
-import { createRequire as createRequire6 } from "module";
+import * as fs from "fs";
 import * as path3 from "path";
-import { fileURLToPath as fileURLToPath9 } from "url";
+function parseKeyboardProtocolNegotiationSequence(sequence) {
+  const kittyFlags = sequence.match(/^\x1b\[\?(\d+)u$/);
+  if (kittyFlags) {
+    return { type: "kitty-flags", flags: Number.parseInt(kittyFlags[1], 10) };
+  }
+  if (/^\x1b\[\?[\d;]*c$/.test(sequence)) {
+    return { type: "device-attributes" };
+  }
+  return;
+}
+function isKeyboardProtocolNegotiationSequencePrefix(sequence) {
+  return sequence === "\x1B[" || /^\x1b\[\?[\d;]*$/.test(sequence);
+}
+function isAppleTerminalSession() {
+  return process.platform === "darwin" && process.env.TERM_PROGRAM === "Apple_Terminal";
+}
+function refreshTerminalDimensions() {
+  if (process.platform === "win32" || process.pid <= 0)
+    return;
+  try {
+    process.kill(process.pid, "SIGWINCH");
+  } catch {}
+}
+function isNativeShiftEnterCandidate(data) {
+  return data === "\r" || data === "\x1B\r";
+}
+function normalizeNativeShiftEnterInput(data, shouldDetectNativeShiftEnter, isShiftPressed) {
+  if (shouldDetectNativeShiftEnter && isNativeShiftEnterCandidate(data) && isShiftPressed) {
+    return NATIVE_SHIFT_ENTER_SEQUENCE;
+  }
+  return data;
+}
+function resolveEscapeTimeoutMs(env = process.env) {
+  const configured = Number(env.PI_TUI_ESC_TIMEOUT);
+  if (Number.isFinite(configured) && configured > 0) {
+    return configured;
+  }
+  if (env.SSH_CONNECTION || env.SSH_TTY) {
+    return DEFAULT_SSH_ESCAPE_TIMEOUT_MS;
+  }
+  return DEFAULT_ESCAPE_TIMEOUT_MS2;
+}
 
 class ProcessTerminal {
   wasRaw = false;
@@ -37564,15 +38102,22 @@ class ProcessTerminal {
   resizeHandler;
   _kittyProtocolActive = false;
   _modifyOtherKeysActive = false;
+  keyboardProtocolPushed = false;
+  pendingKeyboardProtocolDeviceAttributes = 0;
+  keyboardProtocolNegotiationBuffer = "";
+  keyboardProtocolBufferFlushTimer;
   stdinBuffer;
   stdinDataHandler;
   progressInterval;
+  programStatus;
+  programStatusSupported = false;
+  programStatusQueryPending = false;
   writeLogPath = (() => {
     const env = process.env.PI_TUI_WRITE_LOG || "";
     if (!env)
       return "";
     try {
-      if (fs2.statSync(env).isDirectory()) {
+      if (fs.statSync(env).isDirectory()) {
         const now = new Date;
         const ts = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}-${String(now.getMinutes()).padStart(2, "0")}-${String(now.getSeconds()).padStart(2, "0")}`;
         return path3.join(env, `tui-${ts}-${process.pid}.log`);
@@ -37582,6 +38127,9 @@ class ProcessTerminal {
   })();
   get kittyProtocolActive() {
     return this._kittyProtocolActive;
+  }
+  get modifyOtherKeysActive() {
+    return this._modifyOtherKeysActive;
   }
   start(onInput, onResize) {
     this.inputHandler = onInput;
@@ -37594,28 +38142,30 @@ class ProcessTerminal {
     process.stdin.resume();
     process.stdout.write("\x1B[?2004h");
     process.stdout.on("resize", this.resizeHandler);
-    if (process.platform !== "win32") {
-      process.kill(process.pid, "SIGWINCH");
-    }
+    refreshTerminalDimensions();
     this.enableWindowsVTInput();
     this.queryAndEnableKittyProtocol();
   }
   setupStdinBuffer() {
-    this.stdinBuffer = new StdinBuffer({ timeout: 10 });
-    const kittyResponsePattern = /^\x1b\[\?(\d+)u$/;
+    this.stdinBuffer = new StdinBuffer({ escapeTimeout: resolveEscapeTimeoutMs() });
     this.stdinBuffer.on("data", (sequence) => {
-      if (!this._kittyProtocolActive) {
-        const match = sequence.match(kittyResponsePattern);
-        if (match) {
-          this._kittyProtocolActive = true;
-          setKittyProtocolActive(true);
-          process.stdout.write("\x1B[>7u");
-          return;
+      if (isProgramStatusReply(sequence)) {
+        if (this.programStatusQueryPending) {
+          this.programStatusQueryPending = false;
+          this.programStatusSupported = true;
+          this.writeProgramStatus();
         }
+        return;
       }
-      if (this.inputHandler) {
-        this.inputHandler(sequence);
+      const negotiation = this.readKeyboardProtocolNegotiationSequence(sequence);
+      if (negotiation === "pending") {
+        this.scheduleKeyboardProtocolNegotiationBufferFlush();
+        return;
       }
+      if (negotiation && this.handleKeyboardProtocolNegotiationSequence(negotiation.parsed)) {
+        return;
+      }
+      this.forwardInputSequence(negotiation?.sequence ?? sequence);
     });
     this.stdinBuffer.on("paste", (content) => {
       if (this.inputHandler) {
@@ -37629,47 +38179,130 @@ class ProcessTerminal {
   queryAndEnableKittyProtocol() {
     this.setupStdinBuffer();
     process.stdin.on("data", this.stdinDataHandler);
-    process.stdout.write("\x1B[?u");
-    setTimeout(() => {
-      if (!this._kittyProtocolActive && !this._modifyOtherKeysActive) {
-        process.stdout.write("\x1B[>4;2m");
-        this._modifyOtherKeysActive = true;
+    this.keyboardProtocolPushed = true;
+    this.pendingKeyboardProtocolDeviceAttributes += 1;
+    this.clearKeyboardProtocolNegotiationBuffer();
+    const programStatusOverride = process.env.PI_PROGRAM_STATUS;
+    this.programStatusSupported = programStatusOverride === "1";
+    this.programStatusQueryPending = programStatusOverride !== "1" && programStatusOverride !== "0";
+    const programStatusQuery = this.programStatusQueryPending ? PROGRAM_STATUS_QUERY : "";
+    process.stdout.write(`${KITTY_KEYBOARD_PROTOCOL_QUERY}${programStatusQuery}${DEVICE_ATTRIBUTES_QUERY}`);
+    this.writeProgramStatus();
+  }
+  handleKeyboardProtocolNegotiationSequence(negotiationSequence) {
+    this.clearKeyboardProtocolNegotiationBuffer();
+    if (negotiationSequence.type === "device-attributes") {
+      if (this.pendingKeyboardProtocolDeviceAttributes === 0)
+        return false;
+      this.pendingKeyboardProtocolDeviceAttributes -= 1;
+      if (this.pendingKeyboardProtocolDeviceAttributes === 0)
+        this.programStatusQueryPending = false;
+    }
+    if (negotiationSequence.type === "kitty-flags") {
+      if (negotiationSequence.flags !== 0) {
+        this.disableModifyOtherKeys();
+        if (!this._kittyProtocolActive) {
+          this._kittyProtocolActive = true;
+          setKittyProtocolActive(true);
+        }
+      } else {
+        this.enableModifyOtherKeys();
       }
-    }, 150);
+      return true;
+    }
+    if (!this._kittyProtocolActive) {
+      this.enableModifyOtherKeys();
+    }
+    return true;
+  }
+  readKeyboardProtocolNegotiationSequence(sequence) {
+    if (this.keyboardProtocolNegotiationBuffer) {
+      const bufferedSequence = this.keyboardProtocolNegotiationBuffer + sequence;
+      const negotiationSequence = parseKeyboardProtocolNegotiationSequence(bufferedSequence);
+      if (negotiationSequence) {
+        this.clearKeyboardProtocolNegotiationBuffer();
+        return { parsed: negotiationSequence, sequence: bufferedSequence };
+      }
+      if (isKeyboardProtocolNegotiationSequencePrefix(bufferedSequence)) {
+        this.setKeyboardProtocolNegotiationBuffer(bufferedSequence);
+        return "pending";
+      }
+      this.flushKeyboardProtocolNegotiationBufferAsInput();
+    }
+    const negotiationSequence = parseKeyboardProtocolNegotiationSequence(sequence);
+    if (negotiationSequence)
+      return { parsed: negotiationSequence, sequence };
+    if (isKeyboardProtocolNegotiationSequencePrefix(sequence)) {
+      this.setKeyboardProtocolNegotiationBuffer(sequence);
+      return "pending";
+    }
+    return;
+  }
+  setKeyboardProtocolNegotiationBuffer(sequence) {
+    this.clearKeyboardProtocolNegotiationBufferFlushTimer();
+    this.keyboardProtocolNegotiationBuffer = sequence;
+  }
+  clearKeyboardProtocolNegotiationBuffer() {
+    this.clearKeyboardProtocolNegotiationBufferFlushTimer();
+    this.keyboardProtocolNegotiationBuffer = "";
+  }
+  flushKeyboardProtocolNegotiationBufferAsInput() {
+    if (!this.keyboardProtocolNegotiationBuffer)
+      return;
+    const sequence = this.keyboardProtocolNegotiationBuffer;
+    this.clearKeyboardProtocolNegotiationBuffer();
+    this.forwardInputSequence(sequence);
+  }
+  scheduleKeyboardProtocolNegotiationBufferFlush() {
+    if (!this.keyboardProtocolNegotiationBuffer || this.keyboardProtocolBufferFlushTimer)
+      return;
+    this.keyboardProtocolBufferFlushTimer = setTimeout(() => {
+      this.keyboardProtocolBufferFlushTimer = undefined;
+      this.flushKeyboardProtocolNegotiationBufferAsInput();
+    }, KEYBOARD_PROTOCOL_RESPONSE_FRAGMENT_TIMEOUT_MS);
+  }
+  clearKeyboardProtocolNegotiationBufferFlushTimer() {
+    if (!this.keyboardProtocolBufferFlushTimer)
+      return;
+    clearTimeout(this.keyboardProtocolBufferFlushTimer);
+    this.keyboardProtocolBufferFlushTimer = undefined;
+  }
+  forwardInputSequence(sequence) {
+    if (!this.inputHandler)
+      return;
+    const shouldDetectNativeShiftEnter = isNativeShiftEnterCandidate(sequence) && (isAppleTerminalSession() || process.platform === "win32");
+    const input = normalizeNativeShiftEnterInput(sequence, shouldDetectNativeShiftEnter, shouldDetectNativeShiftEnter && isNativeModifierPressed("shift"));
+    this.inputHandler(input);
+  }
+  enableModifyOtherKeys() {
+    if (this._kittyProtocolActive || this._modifyOtherKeysActive)
+      return;
+    process.stdout.write("\x1B[>4;2m");
+    this._modifyOtherKeysActive = true;
+  }
+  disableModifyOtherKeys() {
+    if (!this._modifyOtherKeysActive)
+      return;
+    process.stdout.write("\x1B[>4;0m");
+    this._modifyOtherKeysActive = false;
   }
   enableWindowsVTInput() {
     if (process.platform !== "win32")
       return;
     try {
-      const arch = process.arch;
-      if (arch !== "x64" && arch !== "arm64")
-        return;
-      const moduleDir = path3.dirname(fileURLToPath9(import.meta.url));
-      const nativePath = path3.join("native", "win32", "prebuilds", `win32-${arch}`, "win32-console-mode.node");
-      const candidates = [
-        path3.join(moduleDir, "..", nativePath),
-        path3.join(moduleDir, nativePath),
-        path3.join(path3.dirname(process.execPath), nativePath)
-      ];
-      for (const modulePath of candidates) {
-        try {
-          const helper = cjsRequire(modulePath);
-          helper.enableVirtualTerminalInput?.();
-          return;
-        } catch {}
-      }
+      getNativePlatformHelper()?.enableVirtualTerminalInput?.();
     } catch {}
   }
   async drainInput(maxMs = 1000, idleMs = 50) {
-    if (this._kittyProtocolActive) {
+    const shouldDisableKittyProtocol = this.keyboardProtocolPushed || this._kittyProtocolActive;
+    this.clearKeyboardProtocolNegotiationBuffer();
+    if (shouldDisableKittyProtocol) {
       process.stdout.write("\x1B[<u");
+      this.keyboardProtocolPushed = false;
       this._kittyProtocolActive = false;
       setKittyProtocolActive(false);
     }
-    if (this._modifyOtherKeysActive) {
-      process.stdout.write("\x1B[>4;0m");
-      this._modifyOtherKeysActive = false;
-    }
+    this.disableModifyOtherKeys();
     const previousHandler = this.inputHandler;
     this.inputHandler = undefined;
     let lastDataTime = Date.now();
@@ -37697,16 +38330,21 @@ class ProcessTerminal {
     if (this.clearProgressInterval()) {
       process.stdout.write(TERMINAL_PROGRESS_CLEAR_SEQUENCE);
     }
+    if (this.programStatusSupported && this.programStatus) {
+      process.stdout.write(formatProgramStatus({ state: "clear" }));
+    }
+    this.programStatusSupported = false;
+    this.programStatusQueryPending = false;
     process.stdout.write("\x1B[?2004l");
-    if (this._kittyProtocolActive) {
+    const shouldDisableKittyProtocol = this.keyboardProtocolPushed || this._kittyProtocolActive;
+    this.clearKeyboardProtocolNegotiationBuffer();
+    if (shouldDisableKittyProtocol) {
       process.stdout.write("\x1B[<u");
+      this.keyboardProtocolPushed = false;
       this._kittyProtocolActive = false;
       setKittyProtocolActive(false);
     }
-    if (this._modifyOtherKeysActive) {
-      process.stdout.write("\x1B[>4;0m");
-      this._modifyOtherKeysActive = false;
-    }
+    this.disableModifyOtherKeys();
     if (this.stdinBuffer) {
       this.stdinBuffer.destroy();
       this.stdinBuffer = undefined;
@@ -37725,11 +38363,25 @@ class ProcessTerminal {
       process.stdin.setRawMode(this.wasRaw);
     }
   }
+  restoreOnExit(before, after) {
+    let sequence = before;
+    if (this.progressInterval)
+      sequence += TERMINAL_PROGRESS_CLEAR_SEQUENCE;
+    sequence += "\x1B[?2004l";
+    if (this.keyboardProtocolPushed || this._kittyProtocolActive)
+      sequence += "\x1B[<u";
+    if (this._modifyOtherKeysActive)
+      sequence += "\x1B[>4;0m";
+    sequence += after;
+    try {
+      fs.writeSync(process.stdout.fd, sequence);
+    } catch {}
+  }
   write(data) {
     process.stdout.write(data);
     if (this.writeLogPath) {
       try {
-        fs2.appendFileSync(this.writeLogPath, data, { encoding: "utf8" });
+        fs.appendFileSync(this.writeLogPath, data, { encoding: "utf8" });
       } catch {}
     }
   }
@@ -37762,7 +38414,17 @@ class ProcessTerminal {
     process.stdout.write("\x1B[2J\x1B[H");
   }
   setTitle(title) {
-    process.stdout.write(`\x1B]0;${title}\x07`);
+    process.stdout.write(`\x1B]0;${replaceControlCharacters(title)}\x07`);
+  }
+  setProgramStatus(status) {
+    this.programStatus = status.state === "clear" ? undefined : status;
+    if (this.programStatusSupported)
+      process.stdout.write(formatProgramStatus(status));
+  }
+  writeProgramStatus() {
+    if (this.programStatusSupported && this.programStatus) {
+      process.stdout.write(formatProgramStatus(this.programStatus));
+    }
   }
   setProgress(active) {
     if (active) {
@@ -37785,11 +38447,602 @@ class ProcessTerminal {
     return true;
   }
 }
-var cjsRequire, TERMINAL_PROGRESS_KEEPALIVE_MS = 1000, TERMINAL_PROGRESS_ACTIVE_SEQUENCE = "\x1B]9;4;3\x07", TERMINAL_PROGRESS_CLEAR_SEQUENCE = "\x1B]9;4;0;\x07";
+var TERMINAL_PROGRESS_KEEPALIVE_MS = 1000, TERMINAL_PROGRESS_ACTIVE_SEQUENCE = "\x1B]9;4;3\x07", TERMINAL_PROGRESS_CLEAR_SEQUENCE = "\x1B]9;4;0\x07", NATIVE_SHIFT_ENTER_SEQUENCE = "\x1B[13;2u", DESIRED_KITTY_KEYBOARD_PROTOCOL_FLAGS = 7, KEYBOARD_PROTOCOL_RESPONSE_FRAGMENT_TIMEOUT_MS = 150, KITTY_KEYBOARD_PROTOCOL_QUERY, DEVICE_ATTRIBUTES_QUERY = "\x1B[c", DEFAULT_ESCAPE_TIMEOUT_MS2 = 10, DEFAULT_SSH_ESCAPE_TIMEOUT_MS = 100;
 var init_terminal = __esm(() => {
   init_keys();
+  init_native_modifiers();
+  init_native_platform();
+  init_program_status();
   init_stdin_buffer();
-  cjsRequire = createRequire6(import.meta.url);
+  init_utils();
+  KITTY_KEYBOARD_PROTOCOL_QUERY = `\x1B[>${DESIRED_KITTY_KEYBOARD_PROTOCOL_FLAGS}u\x1B[?u`;
+});
+
+// node_modules/@earendil-works/pi-tui/dist/alt-screen-search.js
+var segmenter2;
+var init_alt_screen_search = __esm(() => {
+  init_input();
+  init_keybindings();
+  init_utils();
+  segmenter2 = getGraphemeSegmenter();
+});
+
+// node_modules/@earendil-works/pi-tui/dist/components/alt-screen-flash.js
+var init_alt_screen_flash = __esm(() => {
+  init_utils();
+});
+
+// node_modules/@earendil-works/pi-tui/dist/layout.js
+var init_layout = __esm(() => {
+  init_stack();
+  init_layout_node();
+  init_terminal_image();
+  init_tui();
+  init_utils();
+});
+// node_modules/@earendil-works/pi-tui/dist/tui-alt-screen.js
+var MAX_CACHED_OFFSCREEN_KITTY_TRANSMISSION_BYTES, MAX_CACHED_OFFSCREEN_KITTY_DECODED_BYTES, TERMINAL_WORD_SELECTION_JOINERS, wordSegmenter4;
+var init_tui_alt_screen = __esm(() => {
+  init_alt_screen_search();
+  init_alt_screen_flash();
+  init_scroll_view();
+  init_keybindings();
+  init_keys();
+  init_layout();
+  init_layout_node();
+  init_terminal_image();
+  init_tui();
+  init_utils();
+  MAX_CACHED_OFFSCREEN_KITTY_TRANSMISSION_BYTES = 32 * 1024 * 1024;
+  MAX_CACHED_OFFSCREEN_KITTY_DECODED_BYTES = 64 * 1024 * 1024;
+  TERMINAL_WORD_SELECTION_JOINERS = new Set(["/", "-", "+", "\\", "~", "_", "."]);
+  wordSegmenter4 = getWordSegmenter();
+});
+
+// node_modules/@earendil-works/pi-tui/dist/tui-main-screen.js
+import * as fs2 from "fs";
+import * as os2 from "os";
+import * as path4 from "path";
+
+class BoundedTerminalWriter {
+  buffer = "";
+  writtenChars = 0;
+  write;
+  constructor(write) {
+    this.write = write;
+  }
+  append(value) {
+    let offset = 0;
+    while (offset < value.length) {
+      const capacity = MAX_RENDER_WRITE_CHARS - this.buffer.length;
+      if (capacity === 0) {
+        this.flush();
+        continue;
+      }
+      let end = Math.min(value.length, offset + capacity);
+      if (end < value.length && value.charCodeAt(end - 1) >= 55296 && value.charCodeAt(end - 1) <= 56319 && value.charCodeAt(end) >= 56320 && value.charCodeAt(end) <= 57343) {
+        end--;
+      }
+      if (end === offset) {
+        this.flush();
+        continue;
+      }
+      this.buffer += value.slice(offset, end);
+      offset = end;
+      if (this.buffer.length === MAX_RENDER_WRITE_CHARS) {
+        this.flush();
+      }
+    }
+  }
+  flush() {
+    if (!this.buffer)
+      return;
+    this.write(this.buffer);
+    this.writtenChars += this.buffer.length;
+    this.buffer = "";
+  }
+  get length() {
+    return this.writtenChars + this.buffer.length;
+  }
+}
+function parseKittyImageHeader(line) {
+  const sequenceStart = line.indexOf(KITTY_SEQUENCE_PREFIX);
+  if (sequenceStart === -1)
+    return;
+  const paramsStart = sequenceStart + KITTY_SEQUENCE_PREFIX.length;
+  const paramsEnd = line.indexOf(";", paramsStart);
+  if (paramsEnd === -1)
+    return;
+  const ids = [];
+  let rows = 1;
+  for (const param of line.slice(paramsStart, paramsEnd).split(",")) {
+    const [key, value] = param.split("=", 2);
+    if (value === undefined)
+      continue;
+    const numberValue = Number(value);
+    if (!Number.isInteger(numberValue) || numberValue <= 0 || numberValue > 4294967295)
+      continue;
+    if (key === "i")
+      ids.push(numberValue);
+    else if (key === "r")
+      rows = numberValue;
+  }
+  return { ids, rows };
+}
+function extractKittyImageIds(line) {
+  return parseKittyImageHeader(line)?.ids ?? [];
+}
+function extractKittyImageRows(line) {
+  return parseKittyImageHeader(line)?.rows ?? 1;
+}
+function isTermuxSession() {
+  return Boolean(process.env.TERMUX_VERSION);
+}
+var OSC133_ZONE_PREFIX, KITTY_SEQUENCE_PREFIX = "\x1B_G", MAX_RENDER_WRITE_CHARS, TuiMainScreen;
+var init_tui_main_screen = __esm(() => {
+  init_terminal_image();
+  init_tui();
+  init_utils();
+  OSC133_ZONE_PREFIX = /^(?:\x1b\]133;[ABC](?:\x07|\x1b\\))+/;
+  MAX_RENDER_WRITE_CHARS = 1024 * 1024;
+  TuiMainScreen = class TuiMainScreen extends TuiBase {
+    mode = "regular";
+    previousLines = [];
+    previousKittyImageIds = new Set;
+    previousWidth = 0;
+    previousHeight = 0;
+    cursorRow = 0;
+    hardwareCursorRow = 0;
+    maxLinesRendered = 0;
+    previousViewportTop = 0;
+    captureRenderState() {
+      return {
+        previousLines: [...this.previousLines],
+        previousWidth: this.previousWidth,
+        previousHeight: this.previousHeight,
+        cursorRow: this.cursorRow,
+        hardwareCursorRow: this.hardwareCursorRow,
+        maxLinesRendered: this.maxLinesRendered,
+        previousViewportTop: this.previousViewportTop
+      };
+    }
+    restoreRenderState(state) {
+      this.previousLines = state.previousLines.map((line) => isImageLine(line) ? "" : line);
+      this.previousKittyImageIds = new Set;
+      this.previousWidth = state.previousWidth;
+      this.previousHeight = state.previousHeight;
+      this.cursorRow = state.cursorRow;
+      this.hardwareCursorRow = state.hardwareCursorRow;
+      this.maxLinesRendered = state.maxLinesRendered;
+      this.previousViewportTop = state.previousViewportTop;
+    }
+    resetRenderState() {
+      this.previousLines = [];
+      this.previousWidth = -1;
+      this.previousHeight = -1;
+      this.cursorRow = 0;
+      this.hardwareCursorRow = 0;
+      this.maxLinesRendered = 0;
+      this.previousViewportTop = 0;
+    }
+    beforeTerminalStop(options) {
+      if (options.preserveScreen || this.previousLines.length === 0)
+        return;
+      this.terminal.write(" ");
+      const targetRow = this.previousLines.length;
+      const lineDiff = targetRow - this.hardwareCursorRow;
+      if (lineDiff > 0)
+        this.terminal.write(`\x1B[${lineDiff}B`);
+      else if (lineDiff < 0)
+        this.terminal.write(`\x1B[${-lineDiff}A`);
+      this.terminal.write(`\r
+`);
+    }
+    collectKittyImageIds(lines) {
+      const ids = new Set;
+      for (const line of lines) {
+        for (const id of extractKittyImageIds(line)) {
+          ids.add(id);
+        }
+      }
+      return ids;
+    }
+    deleteKittyImages(ids) {
+      let buffer = "";
+      for (const id of ids) {
+        buffer += deleteKittyImage(id);
+      }
+      return buffer;
+    }
+    getKittyImageReservedRows(lines, index, maxIndex = lines.length - 1) {
+      const rows = extractKittyImageRows(lines[index] ?? "");
+      if (rows <= 1)
+        return 1;
+      const maxRows = Math.min(rows, maxIndex - index + 1, lines.length - index);
+      let reservedRows = 1;
+      while (reservedRows < maxRows) {
+        const line = lines[index + reservedRows] ?? "";
+        if (isImageLine(line) || visibleWidth(line) > 0)
+          break;
+        reservedRows++;
+      }
+      return reservedRows;
+    }
+    expandChangedRangeForKittyImages(firstChanged, lastChanged, newLines) {
+      let expandedFirstChanged = firstChanged;
+      let expandedLastChanged = lastChanged;
+      const expandForLines = (lines) => {
+        for (let i = 0;i < lines.length; i++) {
+          if (extractKittyImageIds(lines[i]).length === 0)
+            continue;
+          const blockEnd = i + this.getKittyImageReservedRows(lines, i) - 1;
+          if (i >= firstChanged || i <= lastChanged && blockEnd >= firstChanged) {
+            expandedFirstChanged = Math.min(expandedFirstChanged, i);
+            expandedLastChanged = Math.max(expandedLastChanged, blockEnd);
+          }
+        }
+      };
+      expandForLines(this.previousLines);
+      expandForLines(newLines);
+      return { firstChanged: expandedFirstChanged, lastChanged: expandedLastChanged };
+    }
+    deleteChangedKittyImages(firstChanged, lastChanged) {
+      if (firstChanged < 0 || lastChanged < firstChanged)
+        return "";
+      const ids = new Set;
+      const maxLine = Math.min(lastChanged, this.previousLines.length - 1);
+      for (let i = firstChanged;i <= maxLine; i++) {
+        for (const id of extractKittyImageIds(this.previousLines[i] ?? "")) {
+          ids.add(id);
+        }
+      }
+      return this.deleteKittyImages(ids);
+    }
+    doRender() {
+      if (this.stopped)
+        return;
+      const width = this.terminal.columns;
+      const height = this.terminal.rows;
+      const widthChanged = this.previousWidth !== 0 && this.previousWidth !== width;
+      const heightChanged = this.previousHeight !== 0 && this.previousHeight !== height;
+      const previousBufferLength = this.previousHeight > 0 ? this.previousViewportTop + this.previousHeight : height;
+      let prevViewportTop = heightChanged ? Math.max(0, previousBufferLength - height) : this.previousViewportTop;
+      let viewportTop = prevViewportTop;
+      let hardwareCursorRow = this.hardwareCursorRow;
+      const computeLineDiff = (targetRow) => {
+        const currentScreenRow = hardwareCursorRow - prevViewportTop;
+        const targetScreenRow = targetRow - viewportTop;
+        return targetScreenRow - currentScreenRow;
+      };
+      let newLines = this.resolveFakeCursors(this.render(width).map((line) => line.replace(OSC133_ZONE_PREFIX, "")));
+      if (this.hasOverlayEntries) {
+        newLines = this.compositeOverlays(newLines, width, height);
+      }
+      const cursorPos = this.extractCursorPosition(newLines, height);
+      newLines = this.applyLineResets(newLines);
+      const fullRender = (clear) => {
+        this.fullRedrawCount += 1;
+        const output = new BoundedTerminalWriter((data) => this.terminal.write(data));
+        output.append("\x1B[?2026h");
+        if (clear) {
+          output.append(this.deleteKittyImages(this.previousKittyImageIds));
+          output.append("\x1B[2J\x1B[H\x1B[3J");
+        }
+        for (let i = 0;i < newLines.length; i++) {
+          if (i > 0)
+            output.append(`\r
+`);
+          const line = newLines[i];
+          const isImage = isImageLine(line);
+          const imageReservedRows = isImage ? this.getKittyImageReservedRows(newLines, i) : 1;
+          if (imageReservedRows > 1 && imageReservedRows <= height) {
+            for (let row = 1;row < imageReservedRows; row++) {
+              output.append(`\r
+`);
+            }
+            output.append(`\x1B[${imageReservedRows - 1}A`);
+            output.append(line);
+            output.append(`\x1B[${imageReservedRows - 1}B`);
+            i += imageReservedRows - 1;
+            continue;
+          }
+          output.append(line);
+        }
+        output.append("\x1B[?2026l");
+        output.flush();
+        this.cursorRow = Math.max(0, newLines.length - 1);
+        this.hardwareCursorRow = this.cursorRow;
+        if (clear) {
+          this.maxLinesRendered = newLines.length;
+        } else {
+          this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
+        }
+        const bufferLength = Math.max(height, newLines.length);
+        this.previousViewportTop = Math.max(0, bufferLength - height);
+        this.positionHardwareCursor(cursorPos, newLines.length);
+        this.previousLines = newLines;
+        this.previousKittyImageIds = this.collectKittyImageIds(newLines);
+        this.previousWidth = width;
+        this.previousHeight = height;
+      };
+      const redrawLogDirectory = process.env.PI_TUI_DEBUG_REDRAW === "1" ? this.logDirectory : undefined;
+      const logRedraw = (reason) => {
+        if (redrawLogDirectory === undefined)
+          return;
+        const logPath = path4.join(redrawLogDirectory, "pi-tui-debug.log");
+        const msg = `[${new Date().toISOString()}] fullRender: ${reason} (prev=${this.previousLines.length}, new=${newLines.length}, height=${height})
+`;
+        fs2.mkdirSync(path4.dirname(logPath), { recursive: true });
+        fs2.appendFileSync(logPath, msg);
+      };
+      if (this.previousLines.length === 0 && !widthChanged && !heightChanged) {
+        logRedraw("first render");
+        fullRender(false);
+        return;
+      }
+      if (widthChanged) {
+        logRedraw(`terminal width changed (${this.previousWidth} -> ${width})`);
+        fullRender(true);
+        return;
+      }
+      if (heightChanged && !isTermuxSession()) {
+        logRedraw(`terminal height changed (${this.previousHeight} -> ${height})`);
+        fullRender(true);
+        return;
+      }
+      if (this.getClearOnShrink() && newLines.length < this.maxLinesRendered && !this.hasOverlayEntries) {
+        logRedraw(`clearOnShrink (maxLinesRendered=${this.maxLinesRendered})`);
+        fullRender(true);
+        return;
+      }
+      let firstChanged = -1;
+      let lastChanged = -1;
+      const maxLines = Math.max(newLines.length, this.previousLines.length);
+      for (let i = 0;i < maxLines; i++) {
+        const oldLine = i < this.previousLines.length ? this.previousLines[i] : "";
+        const newLine = i < newLines.length ? newLines[i] : "";
+        if (oldLine !== newLine) {
+          if (firstChanged === -1) {
+            firstChanged = i;
+          }
+          lastChanged = i;
+        }
+      }
+      const appendedLines = newLines.length > this.previousLines.length;
+      if (appendedLines) {
+        if (firstChanged === -1) {
+          firstChanged = this.previousLines.length;
+        }
+        lastChanged = newLines.length - 1;
+      }
+      if (firstChanged !== -1) {
+        const expandedRange = this.expandChangedRangeForKittyImages(firstChanged, lastChanged, newLines);
+        firstChanged = expandedRange.firstChanged;
+        lastChanged = expandedRange.lastChanged;
+      }
+      const appendStart = appendedLines && firstChanged === this.previousLines.length && firstChanged > 0;
+      if (firstChanged === -1) {
+        this.positionHardwareCursor(cursorPos, newLines.length);
+        this.previousViewportTop = prevViewportTop;
+        this.previousHeight = height;
+        return;
+      }
+      if (firstChanged >= newLines.length) {
+        if (this.previousLines.length > newLines.length) {
+          const output = new BoundedTerminalWriter((data) => this.terminal.write(data));
+          output.append("\x1B[?2026h");
+          output.append(this.deleteChangedKittyImages(firstChanged, lastChanged));
+          const targetRow = Math.max(0, newLines.length - 1);
+          if (targetRow < prevViewportTop) {
+            logRedraw(`deleted lines moved viewport up (${targetRow} < ${prevViewportTop})`);
+            fullRender(true);
+            return;
+          }
+          const lineDiff = computeLineDiff(targetRow);
+          if (lineDiff > 0)
+            output.append(`\x1B[${lineDiff}B`);
+          else if (lineDiff < 0)
+            output.append(`\x1B[${-lineDiff}A`);
+          output.append("\r");
+          const extraLines = this.previousLines.length - newLines.length;
+          if (extraLines > height) {
+            logRedraw(`extraLines > height (${extraLines} > ${height})`);
+            fullRender(true);
+            return;
+          }
+          const clearStartOffset = newLines.length === 0 ? 0 : 1;
+          if (extraLines > 0 && clearStartOffset > 0) {
+            output.append(`\x1B[${clearStartOffset}B`);
+          }
+          for (let i = 0;i < extraLines; i++) {
+            output.append("\r\x1B[2K");
+            if (i < extraLines - 1)
+              output.append("\x1B[1B");
+          }
+          const moveBack = Math.max(0, extraLines - 1 + clearStartOffset);
+          if (moveBack > 0) {
+            output.append(`\x1B[${moveBack}A`);
+          }
+          output.append("\x1B[?2026l");
+          output.flush();
+          this.cursorRow = targetRow;
+          this.hardwareCursorRow = targetRow;
+        }
+        this.positionHardwareCursor(cursorPos, newLines.length);
+        this.previousLines = newLines;
+        this.previousKittyImageIds = this.collectKittyImageIds(newLines);
+        this.previousWidth = width;
+        this.previousHeight = height;
+        this.previousViewportTop = prevViewportTop;
+        return;
+      }
+      if (firstChanged < prevViewportTop) {
+        logRedraw(`firstChanged < viewportTop (${firstChanged} < ${prevViewportTop})`);
+        fullRender(true);
+        return;
+      }
+      const output = new BoundedTerminalWriter((data) => this.terminal.write(data));
+      output.append("\x1B[?2026h");
+      output.append(this.deleteChangedKittyImages(firstChanged, lastChanged));
+      const prevViewportBottom = prevViewportTop + height - 1;
+      const moveTargetRow = appendStart ? firstChanged - 1 : firstChanged;
+      if (moveTargetRow > prevViewportBottom) {
+        const currentScreenRow = Math.max(0, Math.min(height - 1, hardwareCursorRow - prevViewportTop));
+        const moveToBottom = height - 1 - currentScreenRow;
+        if (moveToBottom > 0) {
+          output.append(`\x1B[${moveToBottom}B`);
+        }
+        const scroll = moveTargetRow - prevViewportBottom;
+        output.append(`\r
+`.repeat(scroll));
+        prevViewportTop += scroll;
+        viewportTop += scroll;
+        hardwareCursorRow = moveTargetRow;
+      }
+      const lineDiff = computeLineDiff(moveTargetRow);
+      if (lineDiff > 0) {
+        output.append(`\x1B[${lineDiff}B`);
+      } else if (lineDiff < 0) {
+        output.append(`\x1B[${-lineDiff}A`);
+      }
+      output.append(appendStart ? `\r
+` : "\r");
+      const renderEnd = Math.min(lastChanged, newLines.length - 1);
+      for (let i = firstChanged;i <= renderEnd; i++) {
+        if (i > firstChanged)
+          output.append(`\r
+`);
+        const line = newLines[i];
+        const isImage = isImageLine(line);
+        const imageReservedRows = isImage ? this.getKittyImageReservedRows(newLines, i, renderEnd) : 1;
+        if (imageReservedRows > 1) {
+          const imageStartScreenRow = i - viewportTop;
+          if (imageStartScreenRow < 0 || imageStartScreenRow + imageReservedRows > height) {
+            logRedraw(`kitty image pre-clear would scroll (${imageStartScreenRow} + ${imageReservedRows} > ${height})`);
+            fullRender(true);
+            return;
+          }
+          output.append("\x1B[2K");
+          for (let row = 1;row < imageReservedRows; row++) {
+            output.append(`\r
+\x1B[2K`);
+          }
+          output.append(`\x1B[${imageReservedRows - 1}A`);
+          output.append(line);
+          output.append(`\x1B[${imageReservedRows - 1}B`);
+          i += imageReservedRows - 1;
+          continue;
+        }
+        output.append("\x1B[2K");
+        if (!isImage && visibleWidth(line) > width) {
+          const crashLogPath = path4.join(this.logDirectory ?? os2.tmpdir(), "pi-tui-crash.log");
+          const crashData = [
+            `Crash at ${new Date().toISOString()}`,
+            `Terminal width: ${width}`,
+            `Line ${i} visible width: ${visibleWidth(line)}`,
+            "",
+            "=== All rendered lines ===",
+            ...newLines.map((l, idx) => `[${idx}] (w=${visibleWidth(l)}) ${l}`),
+            ""
+          ].join(`
+`);
+          fs2.mkdirSync(path4.dirname(crashLogPath), { recursive: true });
+          fs2.writeFileSync(crashLogPath, crashData);
+          this.stop();
+          const errorMsg = [
+            `Rendered line ${i} exceeds terminal width (${visibleWidth(line)} > ${width}).`,
+            "",
+            "This is likely caused by a custom TUI component not truncating its output.",
+            "Use visibleWidth() to measure and truncateToWidth() to truncate lines.",
+            "",
+            `Debug log written to: ${crashLogPath}`
+          ].join(`
+`);
+          throw new Error(errorMsg);
+        }
+        output.append(line);
+      }
+      let finalCursorRow = renderEnd;
+      if (this.previousLines.length > newLines.length) {
+        if (renderEnd < newLines.length - 1) {
+          const moveDown = newLines.length - 1 - renderEnd;
+          output.append(`\x1B[${moveDown}B`);
+          finalCursorRow = newLines.length - 1;
+        }
+        const extraLines = this.previousLines.length - newLines.length;
+        for (let i = newLines.length;i < this.previousLines.length; i++) {
+          output.append(`\r
+\x1B[2K`);
+        }
+        output.append(`\x1B[${extraLines}A`);
+      }
+      output.append("\x1B[?2026l");
+      if (process.env.PI_TUI_DEBUG === "1") {
+        const debugDir = "/tmp/tui";
+        fs2.mkdirSync(debugDir, { recursive: true });
+        const debugPath = path4.join(debugDir, `render-${Date.now()}-${Math.random().toString(36).slice(2)}.log`);
+        const debugData = [
+          `firstChanged: ${firstChanged}`,
+          `viewportTop: ${viewportTop}`,
+          `cursorRow: ${this.cursorRow}`,
+          `height: ${height}`,
+          `lineDiff: ${lineDiff}`,
+          `hardwareCursorRow: ${hardwareCursorRow}`,
+          `renderEnd: ${renderEnd}`,
+          `finalCursorRow: ${finalCursorRow}`,
+          `cursorPos: ${JSON.stringify(cursorPos)}`,
+          `newLines.length: ${newLines.length}`,
+          `previousLines.length: ${this.previousLines.length}`,
+          "",
+          "=== newLines ===",
+          JSON.stringify(newLines, null, 2),
+          "",
+          "=== previousLines ===",
+          JSON.stringify(this.previousLines, null, 2),
+          "",
+          "=== buffer ===",
+          `[${output.length} chars written in bounded chunks]`
+        ].join(`
+`);
+        fs2.writeFileSync(debugPath, debugData);
+      }
+      output.flush();
+      this.cursorRow = Math.max(0, newLines.length - 1);
+      this.hardwareCursorRow = finalCursorRow;
+      this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
+      this.previousViewportTop = Math.max(prevViewportTop, finalCursorRow - height + 1);
+      this.positionHardwareCursor(cursorPos, newLines.length);
+      this.previousLines = newLines;
+      this.previousKittyImageIds = this.collectKittyImageIds(newLines);
+      this.previousWidth = width;
+      this.previousHeight = height;
+    }
+    positionHardwareCursor(cursorPos, totalLines) {
+      if (!cursorPos || totalLines <= 0) {
+        this.terminal.hideCursor();
+        return;
+      }
+      const targetRow = Math.max(0, Math.min(cursorPos.row, totalLines - 1));
+      const targetCol = Math.max(0, cursorPos.col);
+      const rowDelta = targetRow - this.hardwareCursorRow;
+      let buffer = "";
+      if (rowDelta > 0) {
+        buffer += `\x1B[${rowDelta}B`;
+      } else if (rowDelta < 0) {
+        buffer += `\x1B[${-rowDelta}A`;
+      }
+      buffer += `\x1B[${targetCol + 1}G`;
+      if (buffer) {
+        this.terminal.write(buffer);
+      }
+      this.hardwareCursorRow = targetRow;
+      if (this.getShowHardwareCursor()) {
+        this.terminal.showCursor();
+      } else {
+        this.terminal.hideCursor();
+      }
+    }
+  };
 });
 
 // node_modules/@earendil-works/pi-tui/dist/index.js
@@ -37799,30 +39052,43 @@ __export(exports_dist, {
   Input: () => Input,
   Key: () => Key,
   ProcessTerminal: () => ProcessTerminal,
-  TUI: () => TUI,
+  TuiMainScreen: () => TuiMainScreen,
   matchesKey: () => matchesKey,
   truncateToWidth: () => truncateToWidth,
   wrapTextWithAnsi: () => wrapTextWithAnsi
 });
-var init_dist2 = __esm(() => {
+var init_dist3 = __esm(() => {
+  init_marked_esm();
   init_autocomplete();
+  init_colors();
   init_box();
   init_cancellable_loader();
   init_editor();
+  init_h_stack();
   init_image();
   init_input();
   init_loader2();
   init_markdown();
+  init_mouse_region();
+  init_scroll_view();
   init_select_list();
   init_settings_list();
   init_text();
   init_truncated_text();
+  init_v_stack();
   init_keybindings();
   init_keys();
+  init_latex();
+  init_native_platform();
+  init_oklab();
+  init_program_status();
   init_stdin_buffer();
   init_terminal();
+  init_terminal_colors();
   init_terminal_image();
   init_tui();
+  init_tui_alt_screen();
+  init_tui_main_screen();
   init_utils();
 });
 
@@ -37896,12 +39162,12 @@ class ChatFeed {
 }
 var DEFAULT_LIMIT2 = 2000;
 var init_feed = __esm(() => {
-  init_dist2();
+  init_dist3();
 });
 
 // src/specialist/status-load.ts
 import { appendFileSync as appendFileSync5, existsSync as existsSync28, mkdirSync as mkdirSync15, readdirSync as readdirSync8, readFileSync as readFileSync21, renameSync as renameSync4, writeFileSync as writeFileSync13 } from "fs";
-import { join as join31 } from "path";
+import { join as join33 } from "path";
 function hasStatusId(status) {
   return typeof status.id === "string" && status.id.trim().length > 0;
 }
@@ -37910,7 +39176,7 @@ function readStatusesFromFiles(jobsDir) {
     return [];
   const statuses = [];
   for (const entry of readdirSync8(jobsDir)) {
-    const statusPath = join31(jobsDir, entry, "status.json");
+    const statusPath = join33(jobsDir, entry, "status.json");
     if (!existsSync28(statusPath))
       continue;
     try {
@@ -37922,7 +39188,7 @@ function readStatusesFromFiles(jobsDir) {
   return statuses.sort((a, b) => b.started_at_ms - a.started_at_ms);
 }
 function readLastToolEventFromFile(jobsDir, jobId) {
-  const eventsPath = join31(jobsDir, jobId, "events.jsonl");
+  const eventsPath = join33(jobsDir, jobId, "events.jsonl");
   if (!existsSync28(eventsPath))
     return;
   try {
@@ -38068,13 +39334,13 @@ function persistRecoveryToFiles(jobsDir, status, event) {
   if (!isJobFileOutputEnabled())
     return;
   try {
-    const dir = join31(jobsDir, status.id);
+    const dir = join33(jobsDir, status.id);
     mkdirSync15(dir, { recursive: true });
-    const statusPath = join31(dir, "status.json");
+    const statusPath = join33(dir, "status.json");
     const tmpPath = `${statusPath}.tmp`;
     writeFileSync13(tmpPath, JSON.stringify(status, null, 2), "utf-8");
     renameSync4(tmpPath, statusPath);
-    appendFileSync5(join31(dir, "events.jsonl"), `${JSON.stringify(event)}
+    appendFileSync5(join33(dir, "events.jsonl"), `${JSON.stringify(event)}
 `, "utf-8");
   } catch {}
 }
@@ -38256,7 +39522,7 @@ function formatModel(status) {
 var DEFAULT_POLL_INTERVAL_MS = 500, STATUS_ORDER;
 var init_status = __esm(() => {
   init_status_load();
-  init_dist2();
+  init_dist3();
   STATUS_ORDER = ["running", "waiting", "starting", "done", "error", "cancelled"];
 });
 
@@ -39006,12 +40272,12 @@ async function run16() {
     process.exit(1);
   });
   dbg("specialist loaded", { name: args.name });
-  const piTui = await Promise.resolve().then(() => (init_dist2(), exports_dist));
-  dbg("pi-tui imported", { hasTUI: !!piTui.TUI, hasInput: !!piTui.Input, hasMatchesKey: !!piTui.matchesKey });
-  const { TUI, Input, matchesKey } = piTui;
+  const piTui = await Promise.resolve().then(() => (init_dist3(), exports_dist));
+  dbg("pi-tui imported", { hasTuiMainScreen: !!piTui.TuiMainScreen, hasInput: !!piTui.Input, hasMatchesKey: !!piTui.matchesKey });
+  const { TuiMainScreen, Input, matchesKey } = piTui;
   const terminal = new ProcessTerminal;
   dbg("ProcessTerminal constructed");
-  const tui = new TUI(terminal);
+  const tui = new TuiMainScreen(terminal);
   dbg("TUI constructed", { hasAddInputListener: typeof tui.addInputListener === "function", hasSetFocus: typeof tui.setFocus === "function" });
   const feed = new ChatFeed;
   const status = new ChatStatus(tui, { pollIntervalMs: DEFAULT_POLL_INTERVAL_MS2 });
@@ -39709,7 +40975,7 @@ function consoleHelpText() {
 
 // src/specialist/process-health.ts
 import { existsSync as existsSync29, readdirSync as readdirSync9, readFileSync as readFileSync23, readlinkSync as readlinkSync2 } from "fs";
-import { join as join32 } from "path";
+import { join as join34 } from "path";
 function parseThreshold(raw, fallback) {
   if (!raw)
     return fallback;
@@ -39743,7 +41009,7 @@ function readProcStringOrNull(path) {
 }
 function readProcCwdOrNull(pid, procRoot) {
   try {
-    return readlinkSync2(join32(procRoot, String(pid), "cwd"));
+    return readlinkSync2(join34(procRoot, String(pid), "cwd"));
   } catch {
     return null;
   }
@@ -39763,7 +41029,7 @@ function parseStat(stat) {
 }
 function readProcUptimeSecondsOrNull(procRoot) {
   try {
-    const match = /^(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)$/.exec(readFileSync23(join32(procRoot, "uptime"), "utf-8").trim());
+    const match = /^(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)$/.exec(readFileSync23(join34(procRoot, "uptime"), "utf-8").trim());
     if (!match)
       return null;
     return Number(match[1]);
@@ -39772,7 +41038,7 @@ function readProcUptimeSecondsOrNull(procRoot) {
   }
 }
 function readProcessLiveness(pid, procRoot) {
-  if (!existsSync29(join32(procRoot, String(pid))))
+  if (!existsSync29(join34(procRoot, String(pid))))
     return "dead";
   try {
     process.kill(pid, 0);
@@ -39784,19 +41050,19 @@ function readProcessLiveness(pid, procRoot) {
   }
 }
 function readProcessSnapshot(pid, procRoot, uptimeSeconds) {
-  const basePath = join32(procRoot, String(pid));
-  const cmdlineRaw = readProcStringOrNull(join32(basePath, "cmdline"));
+  const basePath = join34(procRoot, String(pid));
+  const cmdlineRaw = readProcStringOrNull(join34(basePath, "cmdline"));
   if (!cmdlineRaw)
     return null;
   const cmdline = cmdlineRaw.replace(/\0/g, " ").trim();
   if (!cmdline)
     return null;
-  const comm = (readProcStringOrNull(join32(basePath, "comm")) ?? "").trim();
-  const stat = readProcStringOrNull(join32(basePath, "stat"));
+  const comm = (readProcStringOrNull(join34(basePath, "comm")) ?? "").trim();
+  const stat = readProcStringOrNull(join34(basePath, "stat"));
   const parsedStat = stat ? parseStat(stat) : null;
   if (!parsedStat)
     return null;
-  const status = readProcStringOrNull(join32(basePath, "status")) ?? "";
+  const status = readProcStringOrNull(join34(basePath, "status")) ?? "";
   const rssMatch = /VmRSS:\s+(\d+)\s+kB/m.exec(status);
   const rssBytes = rssMatch ? Number(rssMatch[1]) * 1024 : 0;
   const cwd = readProcCwdOrNull(pid, procRoot);
@@ -40012,9 +41278,9 @@ function collectStaleSpecialistJobs(options = {}) {
         candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: null, ageMs, reason: "dead-pid" });
         continue;
       }
-      const basePath = join32(procRoot, String(pid));
-      const cmdlineRaw = readProcStringOrNull(join32(basePath, "cmdline"));
-      const statRaw = readProcStringOrNull(join32(basePath, "stat"));
+      const basePath = join34(procRoot, String(pid));
+      const cmdlineRaw = readProcStringOrNull(join34(basePath, "cmdline"));
+      const statRaw = readProcStringOrNull(join34(basePath, "stat"));
       const parsedStat = statRaw ? parseStat(statRaw) : null;
       if (status.status === "waiting" && parsedStat?.ppid === 1 && cmdlineRaw && isSpecialistRunCommand(cmdlineRaw.replace(/\0/g, " "))) {
         candidates.push({ jobId: status.id, pid, beadId: status.bead_id ?? null, specialist: status.specialist, cwd: readProcCwdOrNull(pid, procRoot), ageMs, reason: "orphaned-keep-alive" });
@@ -40601,7 +41867,7 @@ function visibleLength(s) {
 }
 var PALETTE, KEYBAR_FG, KEYBAR_BG, STATUS_GLYPH, CONTAINER_GLYPH, STATUS_COLOR, COLUMNS, JOB_COLUMN_ORDER, JOB_DROP_ORDER, STATS_FIELD_ORDER;
 var init_theme = __esm(() => {
-  init_dist2();
+  init_dist3();
   PALETTE = {
     txt: [200, 200, 200],
     bright: [228, 228, 228],
@@ -40888,20 +42154,20 @@ import {
   statSync as statSync6,
   writeFileSync as writeFileSync15
 } from "fs";
-import { homedir as homedir11 } from "os";
-import { dirname as dirname21, join as join33 } from "path";
+import { homedir as homedir10 } from "os";
+import { dirname as dirname21, join as join35 } from "path";
 function getConsoleConfigPath() {
-  const home = process.env.HOME?.trim() || homedir11();
+  const home = process.env.HOME?.trim() || homedir10();
   const xdgConfigHome = process.env.XDG_CONFIG_HOME?.trim();
   if (xdgConfigHome) {
-    const xdgPath = join33(xdgConfigHome, SPECIALISTS_SUBDIR2, CONFIG_FILENAME2);
+    const xdgPath = join35(xdgConfigHome, SPECIALISTS_SUBDIR2, CONFIG_FILENAME2);
     return { path: xdgPath, exists: existsSync30(xdgPath), source: "xdg" };
   }
-  const configHomePath = join33(home, ".config", SPECIALISTS_SUBDIR2, CONFIG_FILENAME2);
+  const configHomePath = join35(home, ".config", SPECIALISTS_SUBDIR2, CONFIG_FILENAME2);
   if (existsSync30(configHomePath)) {
     return { path: configHomePath, exists: true, source: "config-home" };
   }
-  const legacyPath = join33(home, ".specialists", CONFIG_FILENAME2);
+  const legacyPath = join35(home, ".specialists", CONFIG_FILENAME2);
   if (existsSync30(legacyPath)) {
     return { path: legacyPath, exists: true, source: "legacy" };
   }
@@ -40979,14 +42245,14 @@ var init_repo_config = __esm(() => {
 
 // src/cli/console/repo-discovery.ts
 import { existsSync as existsSync31, readdirSync as readdirSync10, statSync as statSync7 } from "fs";
-import { homedir as homedir12 } from "os";
-import { join as join34 } from "path";
+import { homedir as homedir11 } from "os";
+import { join as join36 } from "path";
 function expandHomePath(p) {
-  const home = process.env.HOME?.trim() || homedir12();
+  const home = process.env.HOME?.trim() || homedir11();
   if (p === "~")
     return home;
   if (p.startsWith("~/"))
-    return join34(home, p.slice(2));
+    return join36(home, p.slice(2));
   return p;
 }
 function discoverRepos(baseDirCandidates = DEFAULT_BASE_DIR_CANDIDATES) {
@@ -41015,7 +42281,7 @@ function walk(dir, depth, seen, repos) {
   for (const entry of entries) {
     if (entry.startsWith("."))
       continue;
-    const root = join34(dir, entry);
+    const root = join36(dir, entry);
     if (!safeIsDirectory(root))
       continue;
     if (isWorktreeDir(root))
@@ -41034,7 +42300,7 @@ function walk(dir, depth, seen, repos) {
 }
 function isWorktreeDir(path) {
   try {
-    const gitPath = join34(path, ".git");
+    const gitPath = join36(path, ".git");
     if (!existsSync31(gitPath))
       return false;
     return !statSync7(gitPath).isDirectory();
@@ -41076,13 +42342,13 @@ var init_repo_discovery = __esm(() => {
 });
 
 // src/cli/console/config-source.ts
-import { homedir as homedir13 } from "os";
-import { join as join35 } from "path";
+import { homedir as homedir12 } from "os";
+import { join as join37 } from "path";
 import { existsSync as existsSync32, readFileSync as readFileSync25, statSync as statSync8 } from "fs";
 function readGlobalConfigSnapshot(loader) {
   const location = getGlobalUserConfigPath();
   const exists = existsSync32(location.path);
-  const home = homedir13();
+  const home = homedir12();
   const displayPath = home && location.path.startsWith(home) ? location.path.replace(home, "~") : location.path;
   if (!exists) {
     return {
@@ -41140,7 +42406,7 @@ function readPackageSpec(name) {
     const dir = resolveCanonicalAssetDir("specialists");
     if (!dir)
       return;
-    const specPath = join35(dir, `${name}.specialist.json`);
+    const specPath = join37(dir, `${name}.specialist.json`);
     if (!existsSync32(specPath))
       return;
     return JSON.parse(readFileSync25(specPath, "utf-8"));
@@ -41499,7 +42765,7 @@ var init_config_source = __esm(() => {
 // src/cli/console/runtime.ts
 import { spawnSync as spawnSync17 } from "child_process";
 import { existsSync as existsSync33, readdirSync as readdirSync11, readFileSync as readFileSync26, statSync as statSync9 } from "fs";
-import { basename as basename7, dirname as dirname22, join as join36 } from "path";
+import { basename as basename7, dirname as dirname22, join as join38 } from "path";
 function createRuntimeClient(cwd = process.cwd()) {
   return new LocalRuntimeClient(cwd);
 }
@@ -42093,7 +43359,7 @@ function scanSiblingsForRepos(repoRoot) {
   for (const entry of entries) {
     if (entry.startsWith("."))
       continue;
-    const root = join36(parent, entry);
+    const root = join38(parent, entry);
     if (seen.has(root))
       continue;
     try {
@@ -42287,7 +43553,7 @@ function readFileStatuses(jobsDir) {
   if (!existsSync33(jobsDir))
     return [];
   return readdirSync11(jobsDir).flatMap((entry) => {
-    const path = join36(jobsDir, entry, "status.json");
+    const path = join38(jobsDir, entry, "status.json");
     if (!existsSync33(path))
       return [];
     try {
@@ -42306,7 +43572,7 @@ function readEvents(repo, jobId) {
   } catch {} finally {
     client?.close();
   }
-  const eventsPath = join36(resolveJobsDir(repo.path), jobId, "events.jsonl");
+  const eventsPath = join38(resolveJobsDir(repo.path), jobId, "events.jsonl");
   if (!existsSync33(eventsPath))
     return [];
   return readFileSync26(eventsPath, "utf-8").split(`
@@ -42321,7 +43587,7 @@ function readResultOutput(repo, jobId, events) {
   } catch {} finally {
     client?.close();
   }
-  const resultPath = join36(resolveJobsDir(repo.path), jobId, "result.txt");
+  const resultPath = join38(resolveJobsDir(repo.path), jobId, "result.txt");
   if (existsSync33(resultPath))
     return readFileSync26(resultPath, "utf-8");
   for (let i = events.length - 1;i >= 0; i -= 1) {
@@ -44343,7 +45609,7 @@ function fitFrame(lines, width, height) {
 }
 var COALESCE_MS2 = 50, TOP_CHROME_ROWS = 4, BOTTOM_CHROME_ROWS = 2, CHROME_ROWS, VIEWS;
 var init_components = __esm(() => {
-  init_dist2();
+  init_dist3();
   init_runtime();
   init_theme();
   init_config_source();
@@ -44356,7 +45622,7 @@ var init_components = __esm(() => {
 // src/cli/console.ts
 async function run17() {
   const terminal = new ProcessTerminal;
-  const tui = new TUI(terminal);
+  const tui = new TuiMainScreen(terminal);
   const root = new Container;
   let resolveExit = null;
   const exit = new Promise((resolve) => {
@@ -44390,7 +45656,7 @@ async function run17() {
   }
 }
 var init_console = __esm(() => {
-  init_dist2();
+  init_dist3();
   init_components();
   init_runtime();
 });
@@ -44433,7 +45699,7 @@ var init_hooks = () => {};
 
 // src/specialist/worktree.ts
 import { existsSync as existsSync34, symlinkSync as symlinkSync2, mkdirSync as mkdirSync17, rmSync as rmSync5 } from "fs";
-import { join as join37, resolve as resolve17 } from "path";
+import { join as join39, resolve as resolve17 } from "path";
 import { spawnSync as spawnSync18, execFileSync as execFileSync3 } from "child_process";
 function deriveBranchName(beadId, specialistName) {
   return `feature/${beadId}-${slugify(specialistName)}`;
@@ -44500,9 +45766,9 @@ function provisionWorktree(options) {
   if (existingPath) {
     return { branch, worktreePath: resolve17(existingPath), reused: true };
   }
-  const worktreeBase = options.worktreeBase ?? join37(commonRoot, ".worktrees", options.beadId);
+  const worktreeBase = options.worktreeBase ?? join39(commonRoot, ".worktrees", options.beadId);
   const worktreeName = deriveWorktreeName(options.beadId, options.specialistName);
-  const worktreePath = resolve17(join37(worktreeBase, worktreeName));
+  const worktreePath = resolve17(join39(worktreeBase, worktreeName));
   createWorktreeViaBd(worktreePath, branch, commonRoot);
   const coordinatorBase = resolveCoordinatorBase(commonRoot);
   const baseBranch = coordinatorBase && coordinatorBase !== branch ? coordinatorBase : undefined;
@@ -44511,7 +45777,7 @@ function provisionWorktree(options) {
   }
   normalizeParentHooksPath(commonRoot);
   try {
-    rmSync5(join37(worktreePath, ".beads"), { recursive: true, force: true });
+    rmSync5(join39(worktreePath, ".beads"), { recursive: true, force: true });
     markBeadsSkipWorktree(worktreePath);
   } catch {}
   symlinkPiNpmCache(commonRoot, worktreePath);
@@ -44532,7 +45798,7 @@ function normalizeParentHooksPath(mainRepoRoot) {
       return;
     if (current !== ".beads/hooks" && current !== "./.beads/hooks")
       return;
-    const absolute = join37(mainRepoRoot, ".beads", "hooks");
+    const absolute = join39(mainRepoRoot, ".beads", "hooks");
     spawnSync18("git", ["-C", mainRepoRoot, "config", "core.hooksPath", absolute], { stdio: "pipe" });
   } catch {}
 }
@@ -44556,12 +45822,12 @@ function markBeadsSkipWorktree(worktreePath) {
   } catch {}
 }
 function symlinkPiNpmCache(commonRoot, worktreePath) {
-  const source = join37(commonRoot, ".pi", "npm");
-  const target = join37(worktreePath, ".pi", "npm");
+  const source = join39(commonRoot, ".pi", "npm");
+  const target = join39(worktreePath, ".pi", "npm");
   if (!existsSync34(source) || existsSync34(target))
     return;
   try {
-    mkdirSync17(join37(worktreePath, ".pi"), { recursive: true });
+    mkdirSync17(join39(worktreePath, ".pi"), { recursive: true });
     symlinkSync2(source, target);
   } catch {}
 }
@@ -44602,12 +45868,12 @@ var init_worktree = __esm(() => {
 
 // src/specialist/epic-reconciler.ts
 import { mkdirSync as mkdirSync18, openSync as openSync3, readFileSync as readFileSync27, rmSync as rmSync6, writeFileSync as writeFileSync16 } from "fs";
-import { join as join38 } from "path";
+import { join as join40 } from "path";
 function buildEpicLockPath(epicId) {
   const location = resolveObservabilityDbLocation();
-  const lockDir = join38(location.dbDirectory, "locks");
+  const lockDir = join40(location.dbDirectory, "locks");
   mkdirSync18(lockDir, { recursive: true });
-  return join38(lockDir, `epic-${epicId}.lock`);
+  return join40(lockDir, `epic-${epicId}.lock`);
 }
 function withEpicAdvisoryLock(epicId, action) {
   const lockPath = buildEpicLockPath(epicId);
@@ -44814,7 +46080,7 @@ var init_epic_reconciler = __esm(() => {
 // src/cli/merge.ts
 import { spawnSync as spawnSync19 } from "child_process";
 import { existsSync as existsSync35, readFileSync as readFileSync28, readdirSync as readdirSync12 } from "fs";
-import { join as join39 } from "path";
+import { join as join41 } from "path";
 function parseOptions(argv) {
   let target = "";
   let rebuild = false;
@@ -45053,12 +46319,12 @@ function readAllJobStatuses() {
       sqliteClient.close();
     }
   }
-  const jobsDir = join39(process.cwd(), ".specialists", "jobs");
+  const jobsDir = join41(process.cwd(), ".specialists", "jobs");
   if (!existsSync35(jobsDir))
     return [];
   const statuses = [];
   for (const jobId of readdirSync12(jobsDir)) {
-    const statusFile = join39(jobsDir, jobId, "status.json");
+    const statusFile = join41(jobsDir, jobId, "status.json");
     if (!existsSync35(statusFile))
       continue;
     try {
@@ -45416,7 +46682,7 @@ ${conflicts.map((file) => `- ${file}`).join(`
   throw new Error(`Merge conflict while merging '${branch}'.${context}`);
 }
 function runTypecheckGate(cwd = process.cwd()) {
-  const hasTypeScriptConfig = existsSync35(join39(cwd, "tsconfig.json")) || readdirSync12(cwd).some((entry) => entry.startsWith("tsconfig") && entry.endsWith(".json"));
+  const hasTypeScriptConfig = existsSync35(join41(cwd, "tsconfig.json")) || readdirSync12(cwd).some((entry) => entry.startsWith("tsconfig") && entry.endsWith(".json"));
   if (!hasTypeScriptConfig) {
     console.log("TypeScript gate: skipped (no tsconfig \u2014 non-TS repo)");
     return;
@@ -45430,7 +46696,7 @@ function runTypecheckGate(cwd = process.cwd()) {
 ${stderr || stdout || "Unknown tsc error"}`);
 }
 function hasNodeBuildScript(cwd) {
-  const packageJsonPath = join39(cwd, "package.json");
+  const packageJsonPath = join41(cwd, "package.json");
   if (!existsSync35(packageJsonPath))
     return false;
   try {
@@ -45839,10 +47105,10 @@ function createPiJsonProjector(context) {
 }
 
 // src/cli/run.ts
-import { dirname as dirname24, join as join40, resolve as resolve18, sep as sep4 } from "path";
+import { dirname as dirname24, join as join42, resolve as resolve18, sep as sep4 } from "path";
 import { constants as fsConstants, existsSync as existsSync36, fstatSync as fstatSync2, openSync as openSync4, readFileSync as readFileSync29, readSync, readdirSync as readdirSync13, realpathSync as realpathSync5, statSync as statSync10, closeSync as closeSync3 } from "fs";
 import { randomBytes } from "crypto";
-import { spawn as cpSpawn, execFileSync as execFileSync4, execSync as execSync5 } from "child_process";
+import { spawn as cpSpawn, execFileSync as execFileSync4, execSync as execSync6 } from "child_process";
 function formatBackgroundLaunchLine(opts) {
   if (opts.outputMode !== "json")
     return `${opts.jobId ?? opts.pid ?? ""}
@@ -46120,7 +47386,7 @@ function resolveNewestJobIdFromDb(cwd, jobsDir, specialist, previousLatest, minS
     const newest = sqliteClient.listStatuses().filter((status) => {
       if (status.specialist !== specialist || status.id === previousLatest || status.started_at_ms < minStartedAtMs)
         return false;
-      return existsSync36(join40(jobsDir, status.id, "status.json"));
+      return existsSync36(join42(jobsDir, status.id, "status.json"));
     }).sort((left, right) => right.started_at_ms - left.started_at_ms || left.id.localeCompare(right.id))[0];
     return newest?.id ?? "";
   } catch {
@@ -46132,8 +47398,8 @@ function resolveNewestJobIdFromDb(cwd, jobsDir, specialist, previousLatest, minS
 function resolveNewestJobIdFromJobsDir(jobsDir, previousLatest, minMtimeMs) {
   try {
     const entries = readdirSync13(jobsDir, { withFileTypes: true }).filter((entry) => entry.isDirectory() && /^[a-f0-9]{6}$/.test(entry.name) && entry.name !== previousLatest).map((entry) => {
-      const dirPath = join40(jobsDir, entry.name);
-      const statusPath = join40(dirPath, "status.json");
+      const dirPath = join42(jobsDir, entry.name);
+      const statusPath = join42(dirPath, "status.json");
       const stats = statSync10(dirPath);
       const statusStats = statSync10(statusPath);
       return {
@@ -46247,7 +47513,7 @@ function resolveWorkingDirectory(args, jobsDir, permissionRequired, readStatus) 
   return {};
 }
 function startEventTailer(jobId, jobsDir, mode, _specialist, _beadId) {
-  const eventsPath = join40(jobsDir, jobId, "events.jsonl");
+  const eventsPath = join42(jobsDir, jobId, "events.jsonl");
   const sqliteClient = createObservabilitySqliteClient(process.cwd());
   let linesRead = 0;
   let lastSeq = 0;
@@ -46382,7 +47648,7 @@ function recordTmuxLiveFeedStarted(options) {
   }
 }
 function runGit2(cwd, args) {
-  return execSync5(["git", ...args.map(shellQuote2)].join(" "), {
+  return execSync6(["git", ...args.map(shellQuote2)].join(" "), {
     cwd,
     stdio: "pipe",
     encoding: "utf-8",
@@ -46829,7 +48095,7 @@ function buildInjectedDiffContext(cwd, maxFiles = 20, explicitBaseSha) {
     try {
       return {
         ok: true,
-        output: execSync5(command, {
+        output: execSync6(command, {
           cwd,
           stdio: "pipe",
           encoding: "utf-8",
@@ -47200,7 +48466,7 @@ async function run19() {
   const ambientRuntimeOrigin = propagatedOrigin ?? ambientCapture;
   if (args.background) {
     const jobsDir = resolveJobsDir();
-    const latestPath = join40(jobsDir, "latest");
+    const latestPath = join42(jobsDir, "latest");
     const oldLatest = (() => {
       try {
         return readFileSync29(latestPath, "utf-8").trim();
@@ -47223,7 +48489,7 @@ async function run19() {
       const suffix = randomBytes(3).toString("hex");
       const sessionName = buildSessionName(args.name, suffix);
       tmuxSessionName = sessionName;
-      handoffPath = join40(jobsDir, `.bg-job-id-${sessionName}`);
+      handoffPath = join42(jobsDir, `.bg-job-id-${sessionName}`);
       const feedCommandPrefix = [process.execPath, process.argv[1], "feed"].map(shellQuote2).join(" ");
       const tmuxCmd = buildTmuxLiveFeedCommand({
         cwd,
@@ -47345,7 +48611,7 @@ async function run19() {
     process.exit(0);
   }
   const circuitBreaker = new CircuitBreaker;
-  const hooks = new HookEmitter({ tracePath: join40(process.cwd(), ".specialists", "trace.jsonl") });
+  const hooks = new HookEmitter({ tracePath: join42(process.cwd(), ".specialists", "trace.jsonl") });
   const beadsClient = args.noBeads ? undefined : new BeadsClient;
   const beadReader = beadsClient ?? new BeadsClient;
   let prompt = args.prompt;
@@ -47557,7 +48823,7 @@ var init_node_resolve = __esm(() => {
 
 // src/specialist/job-control.ts
 import { existsSync as existsSync37, readFileSync as readFileSync30, writeFileSync as writeFileSync18 } from "fs";
-import { join as join41 } from "path";
+import { join as join43 } from "path";
 
 class JobControl {
   supervisor;
@@ -47675,7 +48941,7 @@ class JobControl {
     writeFileSync18(status.fifo_path, jsonLine, { flag: "a" });
   }
   resultPath(jobId) {
-    return join41(this.jobsDir, jobId, "result.txt");
+    return join43(this.jobsDir, jobId, "result.txt");
   }
 }
 var TERMINAL_STATUSES2, INITIAL_BACKOFF_MS = 100, MAX_BACKOFF_MS = 2000;
@@ -49751,7 +51017,7 @@ var init_node_supervisor = __esm(() => {
 // src/cli/node.ts
 import { existsSync as existsSync38, readFileSync as readFileSync31, readdirSync as readdirSync14 } from "fs";
 import { randomUUID as randomUUID3 } from "crypto";
-import { basename as basename8, join as join42, resolve as resolve19 } from "path";
+import { basename as basename8, join as join44, resolve as resolve19 } from "path";
 function parseNodeArgs(argv) {
   const command = argv[0];
   const supportedCommands = new Set(["run", "list", "promote", "members", "memory", "stop", "spawn-member", "create-bead", "complete", "wait-phase"]);
@@ -49956,7 +51222,7 @@ function discoverNodeConfigs(cwd) {
       continue;
     const files = readdirSync14(absoluteDir).filter((fileName) => fileName.endsWith(NODE_CONFIG_SUFFIX));
     for (const fileName of files) {
-      const path = join42(absoluteDir, fileName);
+      const path = join44(absoluteDir, fileName);
       const name = toNodeName(fileName);
       if (discoveredByName.has(name))
         continue;
@@ -50080,7 +51346,7 @@ async function handleNodeRun(args) {
     const loader = new SpecialistLoader;
     const runner = new SpecialistRunner({
       loader,
-      hooks: new HookEmitter({ tracePath: join42(process.cwd(), ".specialists", "trace.jsonl") }),
+      hooks: new HookEmitter({ tracePath: join44(process.cwd(), ".specialists", "trace.jsonl") }),
       circuitBreaker: new CircuitBreaker
     });
     const nodeId = `${config.name}-${randomUUID3().slice(0, 8)}`;
@@ -50441,7 +51707,7 @@ async function createNodeActionRunnerDependencies() {
   const loader = new SpecialistLoader;
   const runner = new SpecialistRunner({
     loader,
-    hooks: new HookEmitter({ tracePath: join42(process.cwd(), ".specialists", "trace.jsonl") }),
+    hooks: new HookEmitter({ tracePath: join44(process.cwd(), ".specialists", "trace.jsonl") }),
     circuitBreaker: new CircuitBreaker
   });
   return { loader, runner };
@@ -51340,7 +52606,7 @@ var init_epic = __esm(() => {
 // src/cli/status.ts
 import { spawnSync as spawnSync22 } from "child_process";
 import { existsSync as existsSync39, readFileSync as readFileSync32 } from "fs";
-import { join as join43 } from "path";
+import { join as join45 } from "path";
 function ok2(msg) {
   console.log(`  ${green9("\u2713")} ${msg}`);
 }
@@ -51437,7 +52703,7 @@ function countJobEvents(sqliteClient, jobsDir, jobId) {
   if (detectJobOutputMode() !== "on") {
     return 0;
   }
-  const eventsFile = join43(jobsDir, jobId, "events.jsonl");
+  const eventsFile = join45(jobsDir, jobId, "events.jsonl");
   if (!existsSync39(eventsFile))
     return 0;
   const raw = readFileSync32(eventsFile, "utf-8").trim();
@@ -51474,7 +52740,7 @@ function getLatestContextSnapshot(sqliteClient, jobsDir, jobId) {
   if (detectJobOutputMode() !== "on") {
     return null;
   }
-  const eventsFile = join43(jobsDir, jobId, "events.jsonl");
+  const eventsFile = join45(jobsDir, jobId, "events.jsonl");
   if (!existsSync39(eventsFile))
     return null;
   const lines = readFileSync32(eventsFile, "utf-8").split(`
@@ -51575,7 +52841,7 @@ async function run20() {
 `).slice(1).map((line) => line.split(/\s+/)[0]).filter(Boolean)) : new Set;
     const bdInstalled = isInstalled2("bd");
     const bdVersion = bdInstalled ? cmd("bd", ["--version"]) : null;
-    const beadsPresent = existsSync39(join43(process.cwd(), ".beads"));
+    const beadsPresent = existsSync39(join45(process.cwd(), ".beads"));
     const specialistsBin = cmd("which", ["specialists"]);
     const jobsDir = resolveJobsDir();
     const jobFileOutputMode = detectJobFileOutputMode();
@@ -53162,7 +54428,7 @@ var init_ps = __esm(() => {
 
 // src/cli/result.ts
 import { existsSync as existsSync41, readFileSync as readFileSync33 } from "fs";
-import { join as join44 } from "path";
+import { join as join46 } from "path";
 function isNativeActivationId(ref) {
   return /^act:[^:]+$/.test(ref);
 }
@@ -53306,7 +54572,7 @@ function readTimelineEventsForResult(sqliteClient, jobsDir, jobId) {
       return sqliteClient.readEvents(jobId);
     } catch {}
   }
-  const eventsPath = join44(jobsDir, jobId, "events.jsonl");
+  const eventsPath = join46(jobsDir, jobId, "events.jsonl");
   if (!existsSync41(eventsPath))
     return [];
   return readFileSync33(eventsPath, "utf-8").split(`
@@ -53452,7 +54718,7 @@ async function run22() {
       error
     }, null, 2));
   };
-  const jobsDir = join44(process.cwd(), ".specialists", "jobs");
+  const jobsDir = join46(process.cwd(), ".specialists", "jobs");
   const supervisor = new Supervisor({ runner: null, runOptions: null, jobsDir });
   const sqliteClient = createObservabilitySqliteClient();
   const emitHumanResult = (output, status, startupContext, trailingFooter) => {
@@ -53554,7 +54820,7 @@ async function run22() {
         process.exit(1);
       }
     }
-    const resultPath = join44(jobsDir, jobId, "result.txt");
+    const resultPath = join46(jobsDir, jobId, "result.txt");
     const readResultOutput = () => {
       try {
         const sqliteResult = sqliteClient?.readResult(jobId) ?? null;
@@ -53783,7 +55049,7 @@ var init_result = __esm(() => {
 
 // src/specialist/timeline-query.ts
 import { existsSync as existsSync42, readdirSync as readdirSync15, readFileSync as readFileSync34 } from "fs";
-import { basename as basename9, join as join45 } from "path";
+import { basename as basename9, join as join47 } from "path";
 function readJobEvents(jobDir) {
   const jobId = basename9(jobDir);
   try {
@@ -53795,7 +55061,7 @@ function readJobEvents(jobDir) {
   } catch {}
   if (process.env.SPECIALISTS_JOB_FILE_OUTPUT !== "on")
     return [];
-  const eventsPath = join45(jobDir, "events.jsonl");
+  const eventsPath = join47(jobDir, "events.jsonl");
   if (!existsSync42(eventsPath))
     return [];
   const content = readFileSync34(eventsPath, "utf-8");
@@ -53847,7 +55113,7 @@ function readAllJobEvents(jobsDir, jobId) {
   const batches = [];
   const entries = readdirSync15(jobsDir);
   for (const entry of entries) {
-    const jobDir = join45(jobsDir, entry);
+    const jobDir = join47(jobsDir, entry);
     try {
       const stat = __require("fs").statSync(jobDir);
       if (!stat.isDirectory())
@@ -53856,7 +55122,7 @@ function readAllJobEvents(jobsDir, jobId) {
       continue;
     }
     const jobId = entry;
-    const statusPath = join45(jobDir, "status.json");
+    const statusPath = join47(jobDir, "status.json");
     let specialist = "unknown";
     let beadId;
     if (existsSync42(statusPath)) {
@@ -53932,7 +55198,7 @@ import {
   readdirSync as readdirSync16,
   statSync as statSync11
 } from "fs";
-import { join as join46 } from "path";
+import { join as join48 } from "path";
 function getHumanEventKey2(event) {
   switch (event.type) {
     case "meta":
@@ -54137,7 +55403,7 @@ function readStatusJson(sqliteClient, jobsDir, jobId) {
   } catch (error) {
     console.warn(`SQLite status read failed for job ${jobId}; falling back to status.json`, error);
   }
-  const statusPath = join46(jobsDir, jobId, "status.json");
+  const statusPath = join48(jobsDir, jobId, "status.json");
   const raw = readFileFresh(statusPath);
   if (!raw)
     return null;
@@ -54412,7 +55678,7 @@ function listMatchingJobIds(sqliteClient, jobsDir, options) {
   } catch {}
   if (existsSync43(jobsDir)) {
     for (const entry of readdirSync16(jobsDir)) {
-      const jobDir = join46(jobsDir, entry);
+      const jobDir = join48(jobsDir, entry);
       try {
         if (!statSync11(jobDir).isDirectory())
           continue;
@@ -54454,7 +55720,7 @@ function readJobEventsFresh(sqliteClient, jobsDir, jobId) {
   } catch (error) {
     console.warn(`SQLite events read failed for job ${jobId}; falling back to events.jsonl`, error);
   }
-  const eventsPath = join46(jobsDir, jobId, "events.jsonl");
+  const eventsPath = join48(jobsDir, jobId, "events.jsonl");
   const content = readFileFresh(eventsPath);
   if (!content)
     return [];
@@ -54478,7 +55744,7 @@ function readJobEventsIncremental(sqliteClient, jobsDir, jobId, afterSeq, fileCa
   } catch (error) {
     console.warn(`SQLite incremental events read failed for job ${jobId}; falling back to events.jsonl`, error);
   }
-  const eventsPath = join46(jobsDir, jobId, "events.jsonl");
+  const eventsPath = join48(jobsDir, jobId, "events.jsonl");
   let stats;
   try {
     stats = statSync11(eventsPath);
@@ -54644,7 +55910,7 @@ async function run23() {
   const options = parseArgs12(process.argv.slice(3));
   const sqliteClient = createObservabilitySqliteClient();
   try {
-    const jobsDir = join46(process.cwd(), ".specialists", "jobs");
+    const jobsDir = join48(process.cwd(), ".specialists", "jobs");
     const hasSqliteStatuses = (() => {
       try {
         return (sqliteClient?.listStatuses?.() ?? []).length > 0;
@@ -55570,7 +56836,7 @@ var init_metrics = __esm(() => {
 
 // src/cli/log.ts
 import { existsSync as existsSync44, readdirSync as readdirSync17, statSync as statSync12 } from "fs";
-import { basename as basename11, join as join47 } from "path";
+import { basename as basename11, join as join49 } from "path";
 function parseSince4(value) {
   if (value.includes("T") || value.includes("-"))
     return new Date(value).getTime();
@@ -55676,14 +56942,14 @@ function discoverDbTargets(cwd, repoFilter) {
     return [];
   }
   for (const entry of entries) {
-    const root = join47(cwd, entry);
+    const root = join49(cwd, entry);
     try {
       if (!statSync12(root).isDirectory())
         continue;
     } catch {
       continue;
     }
-    const dbPath = join47(root, ".specialists", "db", "observability.db");
+    const dbPath = join49(root, ".specialists", "db", "observability.db");
     if (!existsSync44(dbPath))
       continue;
     if (repoFilter && entry !== repoFilter)
@@ -56403,10 +57669,10 @@ async function run30() {
 
 // src/specialist/worktree-gc.ts
 import { existsSync as existsSync45, readdirSync as readdirSync18, readFileSync as readFileSync36 } from "fs";
-import { join as join48 } from "path";
+import { join as join50 } from "path";
 import { spawnSync as spawnSync25 } from "child_process";
 function readJobStatus2(jobDir) {
-  const statusPath = join48(jobDir, "status.json");
+  const statusPath = join50(jobDir, "status.json");
   if (!existsSync45(statusPath))
     return null;
   try {
@@ -56450,7 +57716,7 @@ function collectWorktreeGcCandidates(jobsDir) {
   for (const entry of readdirSync18(jobsDir, { withFileTypes: true })) {
     if (!entry.isDirectory())
       continue;
-    const status = readJobStatus2(join48(jobsDir, entry.name));
+    const status = readJobStatus2(join50(jobsDir, entry.name));
     if (!status)
       continue;
     if (isActive(status.status))
@@ -56503,7 +57769,7 @@ var init_worktree_gc = __esm(() => {
 
 // src/cli/clean.ts
 import { existsSync as existsSync46, readFileSync as readFileSync37, readdirSync as readdirSync19, rmSync as rmSync7, statSync as statSync13 } from "fs";
-import { join as join49 } from "path";
+import { join as join51 } from "path";
 function parseDuration2(raw) {
   const match = /^(\d+)(ms|s|m|h|d)$/i.exec(raw.trim());
   if (!match)
@@ -56658,7 +57924,7 @@ function parseOptions2(argv) {
 function readDirectorySizeBytes(directoryPath) {
   let totalBytes = 0;
   for (const entry of readdirSync19(directoryPath, { withFileTypes: true })) {
-    const entryPath = join49(directoryPath, entry.name);
+    const entryPath = join51(directoryPath, entry.name);
     const stats = statSync13(entryPath);
     totalBytes += stats.isDirectory() ? readDirectorySizeBytes(entryPath) : stats.size;
   }
@@ -56666,7 +57932,7 @@ function readDirectorySizeBytes(directoryPath) {
 }
 function containsProtectedSqliteArtifact(directoryPath) {
   for (const entry of readdirSync19(directoryPath, { withFileTypes: true })) {
-    const entryPath = join49(directoryPath, entry.name);
+    const entryPath = join51(directoryPath, entry.name);
     if (entry.isDirectory()) {
       if (containsProtectedSqliteArtifact(entryPath))
         return true;
@@ -56687,10 +57953,10 @@ function getJobTimestamps(status) {
 function readCompletedJobDirectory(baseDirectory, entry) {
   if (!entry.isDirectory())
     return null;
-  const directoryPath = join49(baseDirectory, entry.name);
+  const directoryPath = join51(baseDirectory, entry.name);
   if (containsProtectedSqliteArtifact(directoryPath))
     return null;
-  const statusFilePath = join49(directoryPath, "status.json");
+  const statusFilePath = join51(directoryPath, "status.json");
   if (!existsSync46(statusFilePath))
     return null;
   let statusData;
@@ -56709,7 +57975,7 @@ function collectCompletedJobs(jobsDirectoryPath) {
   const statuses = sqliteClient?.listStatuses() ?? [];
   if (statuses.length > 0) {
     return statuses.filter((status) => COMPLETED_STATUSES.has(status.status)).map((status) => {
-      const directoryPath = join49(jobsDirectoryPath, status.id);
+      const directoryPath = join51(jobsDirectoryPath, status.id);
       if (!existsSync46(directoryPath) || containsProtectedSqliteArtifact(directoryPath))
         return null;
       const { createdAtMs, completedAtMs } = getJobTimestamps(status);
@@ -57322,9 +58588,9 @@ var init_finalize = __esm(() => {
 
 // src/cli/attach-tui.ts
 async function run35(target, deps = {}) {
-  const piTui = await Promise.resolve().then(() => (init_dist2(), {}));
+  const piTui = await Promise.resolve().then(() => (init_dist3(), {}));
   const terminal = new ProcessTerminal;
-  const tui = new TUI(terminal);
+  const tui = new TuiMainScreen(terminal);
   const feed = new ChatFeed;
   const statusBar = new ChatStatus(tui, { pollIntervalMs: 500 });
   statusBar.setJobId(target.id);
@@ -57580,14 +58846,14 @@ var init_attach = __esm(() => {
 
 // src/specialist/drift-detector.ts
 import { existsSync as existsSync47, readFileSync as readFileSync38, readdirSync as readdirSync20, rmSync as rmSync8 } from "fs";
-import { join as join50, resolve as resolve20, relative as relative4 } from "path";
+import { join as join52, resolve as resolve20, relative as relative4 } from "path";
 function listFiles(root) {
   if (!existsSync47(root))
     return [];
   const out = [];
   const visit = (dir) => {
     for (const entry of readdirSync20(dir, { withFileTypes: true })) {
-      const full = join50(dir, entry.name);
+      const full = join52(dir, entry.name);
       if (entry.isDirectory()) {
         visit(full);
         continue;
@@ -57626,7 +58892,7 @@ function detectDriftForRepo(repoRoot) {
         continue;
       for (const file of listFiles(dir)) {
         const rel = relPath(file, dir);
-        const canonicalPath = join50(asset.canonicalDir, rel);
+        const canonicalPath = join52(asset.canonicalDir, rel);
         if (!existsSync47(canonicalPath))
           continue;
         const bytesEqual = readFileSync38(file).equals(readFileSync38(canonicalPath));
@@ -57653,7 +58919,7 @@ function detectDriftUnderRoot(root) {
         continue;
       if (entry.name === "node_modules" || entry.name === ".git")
         continue;
-      visit(join50(dir, entry.name));
+      visit(join52(dir, entry.name));
     }
   };
   visit(resolve20(root));
@@ -58049,7 +59315,7 @@ ${detail.missing.map((m) => `  - ${m}`).join(`
 import { execFileSync as execFileSync5, spawnSync as spawnSync27 } from "child_process";
 import { createHash as createHash8 } from "crypto";
 import { appendFileSync as appendFileSync7, existsSync as existsSync48, linkSync, mkdirSync as mkdirSync19, readFileSync as readFileSync39, realpathSync as realpathSync6, renameSync as renameSync6, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync21 } from "fs";
-import { basename as basename12, dirname as dirname25, join as join51 } from "path";
+import { basename as basename12, dirname as dirname25, join as join53 } from "path";
 function workspaceIdentityFor(cwd) {
   return { repositoryRoot: cwd, worktreePath: cwd };
 }
@@ -58092,8 +59358,8 @@ function provisionWriterWorkspace(cwd, issueRef, role) {
     let created = false;
     if (!worktreePath) {
       const mainRoot = dirname25(git("rev-parse", "--path-format=absolute", "--git-common-dir"));
-      worktreePath = join51(mainRoot, ".xtrm", "worktrees", `${basename12(mainRoot)}-sp-${roleSlug}-${slug}`);
-      if (spawnSync27("git", ["check-ignore", "-q", join51(worktreePath, "x")], { cwd: mainRoot }).status !== 0) {
+      worktreePath = join53(mainRoot, ".xtrm", "worktrees", `${basename12(mainRoot)}-sp-${roleSlug}-${slug}`);
+      if (spawnSync27("git", ["check-ignore", "-q", join53(worktreePath, "x")], { cwd: mainRoot }).status !== 0) {
         appendFileSync7(git("rev-parse", "--path-format=absolute", "--git-path", "info/exclude"), `
 /.xtrm/worktrees/
 `);
@@ -58148,10 +59414,10 @@ function workspaceKey(workspace) {
   return createHash8("sha256").update(resolved).digest("hex").slice(0, 16);
 }
 function leaseDir(workspace) {
-  return join51(workspace.gitCommonDir ?? workspace.repositoryRoot, ".specialists", "leases");
+  return join53(workspace.gitCommonDir ?? workspace.repositoryRoot, ".specialists", "leases");
 }
 function leasePath(workspace) {
-  return join51(leaseDir(workspace), `${workspaceKey(workspace)}.json`);
+  return join53(leaseDir(workspace), `${workspaceKey(workspace)}.json`);
 }
 function inspect(workspace, probe = procLeaseProbe()) {
   const path = leasePath(workspace);
@@ -58318,7 +59584,7 @@ var init_workspace_lease = __esm(() => {
 // src/activation/workspace-reconcile.ts
 import { appendFileSync as appendFileSync8, existsSync as existsSync49, mkdirSync as mkdirSync20, readdirSync as readdirSync21, readFileSync as readFileSync40, unlinkSync as unlinkSync3 } from "fs";
 import { userInfo } from "os";
-import { join as join52 } from "path";
+import { join as join54 } from "path";
 function reconcile(workspace, request, options = {}) {
   const probe = options.probe ?? procLeaseProbe();
   const now = options.now ?? Date.now;
@@ -58449,11 +59715,11 @@ function projectUncertainWorkspaces(scope, probe = procLeaseProbe()) {
     if (!entry.endsWith(".json"))
       continue;
     const key = entry.slice(0, -".json".length);
-    const lease = readLeaseFile(join52(dir, entry));
+    const lease = readLeaseFile(join54(dir, entry));
     const status = lease ? inspect({ ...scope, worktreePath: lease.worktreePath }, probe) : { state: "uncertain", uncertainReason: "unreadable_record" };
     if (status.state !== "uncertain")
       continue;
-    const log = readLogAt(join52(dir, `${key}.reconcile.jsonl`));
+    const log = readLogAt(join54(dir, `${key}.reconcile.jsonl`));
     const last = log[log.length - 1];
     out.push({
       workspace_key: key,
@@ -58508,7 +59774,7 @@ import { resolve as resolve22 } from "path";
 function runLeaseCommand(argv, io) {
   const [verb, ...rest] = argv;
   if (verb === "list")
-    return list2(rest, io);
+    return list(rest, io);
   if (verb === "reconcile")
     return reconcileCommand(rest, io);
   io.err(`${verb ? `Unknown subcommand '${verb}'.
@@ -58516,7 +59782,7 @@ function runLeaseCommand(argv, io) {
 `);
   return 1;
 }
-function list2(argv, io) {
+function list(argv, io) {
   const json = argv.includes("--json");
   const items = projectUncertainWorkspaces(leaseScopeFor(io.cwd), io.probe);
   if (json) {
@@ -58634,7 +59900,7 @@ var init_lease = __esm(() => {
 });
 
 // src/specialist/pr-drift-refresh.ts
-import { execSync as execSync6 } from "child_process";
+import { execSync as execSync7 } from "child_process";
 import { createHash as createHash9 } from "crypto";
 function hashSummary(input) {
   return createHash9("sha256").update(input).digest("hex").slice(0, 16);
@@ -58695,7 +59961,7 @@ async function refreshPrDriftForJob(opts) {
   }
   let stdout;
   try {
-    stdout = execSync6(`gh pr view ${prNumber} --json state,mergeable,mergeStateStatus,baseRefName,baseRefOid,headRefOid,url`, { encoding: "utf8", timeout: 1e4, stdio: ["ignore", "pipe", "pipe"] });
+    stdout = execSync7(`gh pr view ${prNumber} --json state,mergeable,mergeStateStatus,baseRefName,baseRefOid,headRefOid,url`, { encoding: "utf8", timeout: 1e4, stdio: ["ignore", "pipe", "pipe"] });
   } catch (err) {
     const { kind, summary } = classifyError(err);
     const patch = { pr_classification: "unknown", pr_drift_checked_at_ms: now };
@@ -58943,8 +60209,8 @@ var init_channel_doctor = () => {};
 import { createHash as createHash10 } from "crypto";
 import { spawnSync as spawnSync28 } from "child_process";
 import { existsSync as existsSync51, mkdirSync as mkdirSync21, readdirSync as readdirSync22, readFileSync as readFileSync42, writeFileSync as writeFileSync22 } from "fs";
-import { homedir as homedir14 } from "os";
-import { join as join53, relative as relative5, resolve as resolve23 } from "path";
+import { homedir as homedir13 } from "os";
+import { join as join55, relative as relative5, resolve as resolve23 } from "path";
 import { fileURLToPath as fileURLToPath10 } from "url";
 function ok3(msg) {
   console.log(`  ${green14("\u2713")} ${msg}`);
@@ -59019,7 +60285,7 @@ function checkBd() {
     return true;
   }
   hint(`bd installed  ${dim14(sp("bd", ["--version"]).stdout || "")}  ${dim14("(legacy compatibility only)")}`);
-  if (existsSync51(join53(CWD, ".beads")))
+  if (existsSync51(join55(CWD, ".beads")))
     hint(".beads/ present \u2014 historical/legacy workspace available");
   else
     ok3("no .beads/ workspace \u2014 expected for a Substrate-first project");
@@ -59045,7 +60311,7 @@ async function checkSubstrateRuntime() {
       hint("the legacy sp CLI does not need it; only specialist_dispatch does");
       return;
     }
-    const manifestPath = join53(dir, "package.json");
+    const manifestPath = join55(dir, "package.json");
     if (!existsSync51(manifestPath)) {
       warn3(`no package.json at ${dir} \u2014 native dispatch will be refused`);
       fix("point XTRM_SUBSTRATE_DIR at a @jaggerxtrm/substrate checkout");
@@ -59121,7 +60387,7 @@ function checkChannels() {
   section3("Claude Code channel wake  (8-gate chain, spec AM.3)");
   const report = runChannelDoctorChecks({
     managedSettingsPath: resolveManagedSettingsPath(),
-    installedPluginsPath: join53(homedir14(), ".claude", "plugins", "installed_plugins.json"),
+    installedPluginsPath: join55(homedir13(), ".claude", "plugins", "installed_plugins.json"),
     serverSourcePath: resolveServerSourcePath(),
     expectedPluginName: EXPECTED_PLUGIN_NAME,
     expectedMarketplaceName: EXPECTED_MARKETPLACE_NAME,
@@ -59157,7 +60423,7 @@ function checkCatalogs(options = {}) {
       catalogs: index.catalogs,
       resolveInstalledVersion: (packageName) => {
         const packageDir = resolveGlobalPackageDir(packageName);
-        return packageDir ? readPackageVersion(join53(packageDir, "package.json")) : undefined;
+        return packageDir ? readPackageVersion(join55(packageDir, "package.json")) : undefined;
       }
     });
   } catch (error) {
@@ -59234,7 +60500,7 @@ function collectFileHashes(rootDir) {
   const hashes = new Map;
   const visit = (dir) => {
     for (const entry of readdirSync22(dir, { withFileTypes: true })) {
-      const fullPath = join53(dir, entry.name);
+      const fullPath = join55(dir, entry.name);
       if (entry.isDirectory()) {
         visit(fullPath);
         continue;
@@ -59250,10 +60516,10 @@ function collectFileHashes(rootDir) {
   return hashes;
 }
 function resolvePackageAssetDir(relativePath) {
-  return resolveCanonicalAssetDir(relativePath) ?? (existsSync51(join53(CWD, "config", relativePath)) ? join53(CWD, "config", relativePath) : null);
+  return resolveCanonicalAssetDir(relativePath) ?? (existsSync51(join55(CWD, "config", relativePath)) ? join55(CWD, "config", relativePath) : null);
 }
 function checkSkillDrift() {
-  section3(`Skills \u2014 global default pool  (~/${relative5(homedir14(), GLOBAL_DEFAULT_SKILLS_DIR)})`);
+  section3(`Skills \u2014 global default pool  (~/${relative5(homedir13(), GLOBAL_DEFAULT_SKILLS_DIR)})`);
   const canonicalSkillsDir = resolvePackageAssetDir("skills");
   if (!canonicalSkillsDir) {
     fail9("package canonical skills source missing");
@@ -59307,8 +60573,8 @@ function checkUserOverlayDrift() {
   const packageSpecialistsDir = resolvePackageAssetDir("specialists");
   let allOk = true;
   for (const name of overlays) {
-    const userPath = join53(USER_SPECIALISTS_DIR, name);
-    const defaultPath = packageSpecialistsDir ? join53(packageSpecialistsDir, name) : "";
+    const userPath = join55(USER_SPECIALISTS_DIR, name);
+    const defaultPath = packageSpecialistsDir ? join55(packageSpecialistsDir, name) : "";
     const userSpec = loadJson2(userPath);
     if (!userSpec) {
       warn3(`${name}: failed to parse \u2014 skipping drift check`);
@@ -59342,9 +60608,9 @@ function checkUserOverlayDrift() {
 }
 function checkRuntimeDirs() {
   section3(".specialists/ runtime directories");
-  const rootDir = join53(CWD, ".specialists");
-  const jobsDir = join53(rootDir, "jobs");
-  const readyDir = join53(rootDir, "ready");
+  const rootDir = join55(CWD, ".specialists");
+  const jobsDir = join55(rootDir, "jobs");
+  const readyDir = join55(rootDir, "ready");
   let allOk = true;
   if (!existsSync51(rootDir)) {
     warn3(".specialists/ not found in current project");
@@ -59367,7 +60633,7 @@ function checkRuntimeDirs() {
 function checkClaudeMdFragments() {
   section3("CLAUDE.md fragments");
   const projectRoot = process.cwd();
-  const claudeMd = join53(projectRoot, "CLAUDE.md");
+  const claudeMd = join55(projectRoot, "CLAUDE.md");
   if (!existsSync51(claudeMd)) {
     warn3("No CLAUDE.md in project root \u2014 skipping fragment check");
     return true;
@@ -59714,7 +60980,7 @@ function cleanupProcesses(jobsDir, dryRun) {
     zombieJobIds: []
   };
   for (const jobId of entries) {
-    const statusPath = join53(jobsDir, jobId, "status.json");
+    const statusPath = join55(jobsDir, jobId, "status.json");
     if (!existsSync51(statusPath))
       continue;
     try {
@@ -59803,7 +61069,7 @@ function resolveWatchdogMode() {
 function checkZombieJobs() {
   section3("Background jobs");
   hint(`watchdog mode: ${resolveWatchdogMode()}`);
-  const jobsDir = join53(CWD, ".specialists", "jobs");
+  const jobsDir = join55(CWD, ".specialists", "jobs");
   if (!existsSync51(jobsDir)) {
     hint("No .specialists/jobs/ \u2014 skipping");
     return true;
@@ -60037,17 +61303,17 @@ var init_doctor = __esm(() => {
   init_workitem_store();
   init_version_check();
   CWD = process.cwd();
-  SPECIALISTS_DIR = join53(CWD, ".specialists");
-  USER_SPECIALISTS_DIR = join53(SPECIALISTS_DIR, "user");
-  XTRM_HOME = join53(homedir14(), ".xtrm");
-  GLOBAL_DEFAULT_SKILLS_DIR = join53(XTRM_HOME, "skills", "default");
+  SPECIALISTS_DIR = join55(CWD, ".specialists");
+  USER_SPECIALISTS_DIR = join55(SPECIALISTS_DIR, "user");
+  XTRM_HOME = join55(homedir13(), ".xtrm");
+  GLOBAL_DEFAULT_SKILLS_DIR = join55(XTRM_HOME, "skills", "default");
 });
 
 // src/specialist/benchmarks.ts
 import { randomUUID as randomUUID4 } from "crypto";
 import { closeSync as closeSync5, existsSync as existsSync52, fsyncSync as fsyncSync2, mkdirSync as mkdirSync22, openSync as openSync6, readFileSync as readFileSync43, renameSync as renameSync7, writeFileSync as writeFileSync23 } from "fs";
-import { homedir as homedir15 } from "os";
-import { dirname as dirname26, join as join54 } from "path";
+import { homedir as homedir14 } from "os";
+import { dirname as dirname26, join as join56 } from "path";
 async function loadBenchmarkSnapshot(options = {}) {
   const warnings = [];
   const warn = (warning) => {
@@ -60163,8 +61429,8 @@ function toSnapshot(cache) {
 function isOffline(options) {
   return options.offline === true || process.env.SPECIALISTS_OFFLINE === "1";
 }
-function getBenchmarkCachePath(source, cacheDir = join54(homedir15(), ".cache", "specialists", "benchmarks")) {
-  return join54(cacheDir, `${source}.json`);
+function getBenchmarkCachePath(source, cacheDir = join56(homedir14(), ".cache", "specialists", "benchmarks")) {
+  return join56(cacheDir, `${source}.json`);
 }
 function writeCache2(path, snapshot) {
   mkdirSync22(dirname26(path), { recursive: true, mode: 448 });
@@ -60202,12 +61468,12 @@ var init_benchmarks = __esm(() => {
 // src/specialist/model-probes.ts
 import { createHash as createHash11, randomUUID as randomUUID5 } from "crypto";
 import { mkdirSync as mkdirSync23, readdirSync as readdirSync23, readFileSync as readFileSync44, writeFileSync as writeFileSync24 } from "fs";
-import { homedir as homedir16 } from "os";
-import { dirname as dirname27, join as join55, resolve as resolve24 } from "path";
+import { homedir as homedir15 } from "os";
+import { dirname as dirname27, join as join57, resolve as resolve24 } from "path";
 async function runAgenticFollowthroughProbe(model, specName, opts = {}) {
   const probeDir = getProbeRunDir(model, specName, opts.cacheDir);
   mkdirSync23(probeDir, { recursive: true, mode: 448 });
-  writeFileSync24(join55(probeDir, "probe-notes.md"), `# Probe notes
+  writeFileSync24(join57(probeDir, "probe-notes.md"), `# Probe notes
 `, { mode: 384 });
   const run = opts.runSpecialist ?? runScriptSpecialist;
   const result = await withTimeout(run({
@@ -60224,7 +61490,7 @@ async function runAgenticFollowthroughProbe(model, specName, opts = {}) {
   const transcriptPath = writeTranscript(probeDir, result, output, opts.now ?? new Date);
   const metrics = collectMetrics(probeDir, output, result);
   const verdict = classifyProbe(metrics);
-  const summaryPath = join55(probeDir, "probe-summary.json");
+  const summaryPath = join57(probeDir, "probe-summary.json");
   const canonicalPath = getProbeCanonicalPath(model, specName, opts.cacheDir);
   const summaryJson = `${JSON.stringify({ verdict, metrics, sample_output: output, transcript_path: transcriptPath }, null, 2)}
 `;
@@ -60234,7 +61500,7 @@ async function runAgenticFollowthroughProbe(model, specName, opts = {}) {
   return { verdict, metrics, sample_output: output, transcript_path: transcriptPath };
 }
 function collectMetrics(probeDir, output, result) {
-  const eventsPath = join55(probeDir, "events.jsonl");
+  const eventsPath = join57(probeDir, "events.jsonl");
   const events = readJsonl(eventsPath);
   const turns = events.filter(isTurnEvent).length;
   const tools = events.filter(isToolEvent).length;
@@ -60294,7 +61560,7 @@ function countFilesOutsideScope(probeDir) {
   }
 }
 function writeTranscript(probeDir, result, output, now) {
-  const transcriptPath = join55(probeDir, "events.jsonl");
+  const transcriptPath = join57(probeDir, "events.jsonl");
   writeFileSync24(transcriptPath, `${JSON.stringify({ type: "probe_result", at: now.toISOString(), result, output })}
 `, { flag: "a", mode: 384 });
   return transcriptPath;
@@ -60306,12 +61572,12 @@ function withTimeout(promise, timeoutMs) {
   });
   return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeout));
 }
-function getProbeRunDir(model, specName, cacheDir = join55(homedir16(), ".cache", "specialists", "probes")) {
+function getProbeRunDir(model, specName, cacheDir = join57(homedir15(), ".cache", "specialists", "probes")) {
   return resolve24(getProbeCanonicalPath(model, specName, cacheDir).replace(/\.json$/u, ""), randomUUID5());
 }
-function getProbeCanonicalPath(model, specName, cacheDir = join55(homedir16(), ".cache", "specialists", "probes")) {
+function getProbeCanonicalPath(model, specName, cacheDir = join57(homedir15(), ".cache", "specialists", "probes")) {
   const probeId = createHash11("sha256").update(`${model}\x00${specName}\x00${PROBE_TEMPLATE}`).digest("hex").slice(0, 12);
-  return join55(cacheDir, `${sanitizePathSegment(model)}-${sanitizePathSegment(specName)}-${probeId}.json`);
+  return join57(cacheDir, `${sanitizePathSegment(model)}-${sanitizePathSegment(specName)}-${probeId}.json`);
 }
 function sanitizePathSegment(value) {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
@@ -60834,7 +62100,7 @@ var init_setup = __esm(() => {
 
 // src/cli/serve-hot-reload.ts
 import { existsSync as existsSync53, readdirSync as readdirSync24, statSync as statSync14, watch as fsWatch } from "fs";
-import { join as join56 } from "path";
+import { join as join58 } from "path";
 function specialistNameFromFile(file) {
   const match = file.match(/^(.+)\.specialist\.(json|yaml)$/);
   return match ? match[1] : null;
@@ -60846,7 +62112,7 @@ function snapshotMtimes(dir) {
   const entries = readdirSync24(dir).filter((name) => specialistNameFromFile(name) !== null);
   for (const name of entries) {
     try {
-      out.set(name, statSync14(join56(dir, name)).mtimeMs);
+      out.set(name, statSync14(join58(dir, name)).mtimeMs);
     } catch {}
   }
   return out;
@@ -60938,8 +62204,8 @@ import { once } from "events";
 import { spawnSync as spawnSync30 } from "child_process";
 import { access, readdir as readdir2, readFile as readFile4, constants as constants3 } from "fs/promises";
 import { existsSync as existsSync54 } from "fs";
-import { homedir as homedir17 } from "os";
-import { join as join57 } from "path";
+import { homedir as homedir16 } from "os";
+import { join as join59 } from "path";
 function createReadinessState() {
   return { shuttingDown: false, auditFailures: [], dbWriteFailuresTotal: 0 };
 }
@@ -60964,7 +62230,7 @@ async function checkUserDirSpecs(userDir) {
   let validCount = 0;
   for (const file of specFiles) {
     try {
-      const content = await readFile4(join57(userDir, file), "utf-8");
+      const content = await readFile4(join59(userDir, file), "utf-8");
       const json = file.endsWith(".json") ? content : null;
       if (!json)
         continue;
@@ -60982,7 +62248,7 @@ async function evaluateReadiness2(opts) {
   if (opts.state.auditFailures.length > opts.auditFailureThreshold) {
     return { ready: false, reason: "degraded:audit" };
   }
-  const piConfigPath = opts.piConfigPath ?? join57(homedir17(), ".pi", "agent", "auth.json");
+  const piConfigPath = opts.piConfigPath ?? join59(homedir16(), ".pi", "agent", "auth.json");
   try {
     await access(piConfigPath, constants3.R_OK);
   } catch {
@@ -61003,7 +62269,7 @@ async function evaluateReadiness2(opts) {
       warning = canaryFailure;
     }
   }
-  const userDir = join57(opts.projectDir, ".specialists", "user");
+  const userDir = join59(opts.projectDir, ".specialists", "user");
   const userDirResult = await checkUserDirSpecs(userDir);
   if (userDirResult === "empty")
     return { ready: false, reason: "empty_user_dir" };
@@ -61149,7 +62415,7 @@ async function startServe(argv = process.argv.slice(3)) {
     return createObservabilitySqliteClientAtPath(dbLocation.dbPath);
   })();
   const readinessState = createReadinessState();
-  const userDir = join57(args.projectDir, ".specialists", "user");
+  const userDir = join59(args.projectDir, ".specialists", "user");
   const hotReload = createUserDirWatcher({ loader, userDir, pollMs: args.reloadPollMs });
   let active = 0;
   const children = new Set;
@@ -89849,7 +91115,7 @@ function fromJsonSchema2(schema, validator) {
   return fromJsonSchema(schema, validator ?? (_defaultValidator ??= new AjvJsonSchemaValidator));
 }
 var _defaultValidator;
-var init_dist3 = __esm(() => {
+var init_dist4 = __esm(() => {
   init_mcp_DXXb3Vv3();
   init_src_CX2iR2pK();
   init_shimsNode();
@@ -91483,7 +92749,7 @@ var init_specialist_lease_reconcile_tool = __esm(() => {
 
 // src/activation/transport/pending-store.ts
 import { existsSync as existsSync56, mkdirSync as mkdirSync24, readdirSync as readdirSync25, readFileSync as readFileSync47, renameSync as renameSync8, unlinkSync as unlinkSync4, writeFileSync as writeFileSync25 } from "fs";
-import { join as join58 } from "path";
+import { join as join60 } from "path";
 function projectDeliveryState(state) {
   if (state === "delivered")
     return "delivered";
@@ -91495,13 +92761,13 @@ function createsPendingAsk(kind) {
   return KINDS_AWAITING_REPLY.has(kind);
 }
 function interactionsRoot(repoRoot) {
-  return join58(repoRoot, ".specialists", "interactions");
+  return join60(repoRoot, ".specialists", "interactions");
 }
 function recordPath(repoRoot, activationId, messageId) {
-  return join58(interactionsRoot(repoRoot), activationId, `${messageId}.json`);
+  return join60(interactionsRoot(repoRoot), activationId, `${messageId}.json`);
 }
 function replyPath(repoRoot, activationId, messageId) {
-  return join58(interactionsRoot(repoRoot), activationId, `${messageId}.reply.json`);
+  return join60(interactionsRoot(repoRoot), activationId, `${messageId}.reply.json`);
 }
 function writeAtomic(path, value, exclusive = false) {
   if (exclusive && existsSync56(path)) {
@@ -91537,7 +92803,7 @@ function create(repoRoot, input) {
     message: input.message,
     delivery: { state: "pending", attempts: [] }
   };
-  mkdirSync24(join58(interactionsRoot(repoRoot), input.activationId), { recursive: true, mode: 448 });
+  mkdirSync24(join60(interactionsRoot(repoRoot), input.activationId), { recursive: true, mode: 448 });
   writeAtomic(recordPath(repoRoot, input.activationId, input.messageId), record, true);
   return record;
 }
@@ -91591,14 +92857,14 @@ function recordReplyDelivery(repoRoot, activationId, messageId, reply) {
   return record;
 }
 function listForActivation(repoRoot, activationId) {
-  const dir = join58(interactionsRoot(repoRoot), activationId);
+  const dir = join60(interactionsRoot(repoRoot), activationId);
   if (!existsSync56(dir))
     return [];
   const views = [];
   for (const entry of readdirSync25(dir)) {
     if (!entry.endsWith(".json") || entry.endsWith(".reply.json") || entry.endsWith(".tmp"))
       continue;
-    const record = readJson3(join58(dir, entry));
+    const record = readJson3(join60(dir, entry));
     if (!record)
       continue;
     views.push({ ...record, reply: readReply(repoRoot, activationId, record.messageId) });
@@ -92185,10 +93451,10 @@ var init_peer_bridge = __esm(() => {
 
 // src/activation/transport/roster.ts
 import { existsSync as existsSync57, readdirSync as readdirSync26, readFileSync as readFileSync48 } from "fs";
-import { homedir as homedir18 } from "os";
-import { join as join59 } from "path";
+import { homedir as homedir17 } from "os";
+import { join as join61 } from "path";
 function defaultRosterDir() {
-  return join59(homedir18(), ".claude", "sessions");
+  return join61(homedir17(), ".claude", "sessions");
 }
 function procProbe() {
   let bootSeconds;
@@ -92266,7 +93532,7 @@ function scanRoster(options = {}) {
       continue;
     let registration;
     try {
-      registration = JSON.parse(readFileSync48(join59(dir, file), "utf-8"));
+      registration = JSON.parse(readFileSync48(join61(dir, file), "utf-8"));
     } catch {
       rejected.push({ file, reason: "unparsable" });
       continue;
@@ -92578,13 +93844,13 @@ var ASK_TOOL = "ask_coordinator", ESCALATE_TOOL = "escalate_to_coordinator", too
 
 // src/activation/pi-sdk.ts
 import { existsSync as existsSync58 } from "fs";
-import { join as join60 } from "path";
+import { join as join62 } from "path";
 import { pathToFileURL as pathToFileURL2 } from "url";
 function piSdkCandidates(deps = {}) {
   const exists = deps.exists ?? existsSync58;
   const candidates = [PI_SDK_PACKAGE];
   for (const root of resolveGlobalNodeModulesDirs(deps)) {
-    const entry = join60(root, PI_SDK_PACKAGE, "dist", "index.js");
+    const entry = join62(root, PI_SDK_PACKAGE, "dist", "index.js");
     if (exists(entry))
       candidates.push(pathToFileURL2(entry).href);
   }
@@ -92639,7 +93905,7 @@ ${attempted.map((p) => `  \u2022 ${p}`).join(`
 });
 
 // src/specialist/native-activation-observability.ts
-function at(event, t) {
+function at2(event, t) {
   return { ...event, t };
 }
 function record4(value) {
@@ -92780,19 +94046,19 @@ function nativeAttemptNo(attemptId) {
 function mapNativeLifecycleEvent(event, context, t = Date.now()) {
   switch (event.name) {
     case "activation_started":
-      return at(createRunStartEvent(event.specialist, event.beadId, {
+      return at2(createRunStartEvent(event.specialist, event.beadId, {
         job_id: event.activationId,
         specialist_name: event.specialist,
         bead_id: event.beadId,
         worktree_path: context.workspacePath
       }), t);
     case "activation_settled":
-      return at(createStatusChangeEvent("waiting", "running"), t);
+      return at2(createStatusChangeEvent("waiting", "running"), t);
     case "activation_resumed":
-      return at(createStatusChangeEvent("running", "waiting"), t);
+      return at2(createStatusChangeEvent("running", "waiting"), t);
     case "activation_completed": {
       const reconciliation = reconcileSessionUsage(context.tokenUsage, context.sessionStats);
-      return at(createRunCompleteEvent("COMPLETE", Math.max(0, t - context.startedAtMs) / 1000, {
+      return at2(createRunCompleteEvent("COMPLETE", Math.max(0, t - context.startedAtMs) / 1000, {
         model: context.resolvedModel,
         backend: context.resolvedModel?.split("/")[0],
         bead_id: event.beadId,
@@ -92821,7 +94087,7 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
     case "lease_denied":
     case "lease_uncertain":
     case "tool_blocked":
-      return at(createControlSignalEvent(event.name, {
+      return at2(createControlSignalEvent(event.name, {
         bead_id: event.beadId,
         ...event.payload ?? {}
       }), t);
@@ -92830,12 +94096,12 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
     case "lease_release_failed":
     case "mandatory_rules_injection":
     case "tool_contract_unsatisfied_on_fallback":
-      return at(createControlSignalEvent(event.name, {
+      return at2(createControlSignalEvent(event.name, {
         bead_id: event.beadId,
         ...event.payload ?? {}
       }), t);
     case "activation_admitted":
-      return at(createControlSignalEvent(event.name, {
+      return at2(createControlSignalEvent(event.name, {
         bead_id: event.beadId,
         ...event.payload ?? {}
       }), t);
@@ -92843,7 +94109,7 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
       const skipped = booleanField2(event.payload?.skipped) === true;
       const notStarted = stringField2(event.payload?.not_started_model) ?? stringField2(event.payload?.to_model);
       const ranModel = stringField2(event.payload?.resolved_model) ?? stringField2(event.payload?.from_model);
-      return at({
+      return at2({
         t,
         type: TIMELINE_EVENT_TYPES.MODEL_CHANGE,
         action: "cycle_model",
@@ -92861,63 +94127,63 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
     }
     case "session_stats_captured": {
       const stats = normalizePiSessionStats(event.payload?.session_stats);
-      return stats ? at(createSessionStatsEvent(stats), t) : at(createSessionStatsErrorEvent("session_stats_captured carried no usable snapshot"), t);
+      return stats ? at2(createSessionStatsEvent(stats), t) : at2(createSessionStatsErrorEvent("session_stats_captured carried no usable snapshot"), t);
     }
     case "session_stats_failed":
-      return at(createSessionStatsErrorEvent(stringField2(event.payload?.error) ?? "session stats capture failed", numberField2(event.payload?.timeout_ms)), t);
+      return at2(createSessionStatsErrorEvent(stringField2(event.payload?.error) ?? "session stats capture failed", numberField2(event.payload?.timeout_ms)), t);
     case "settlement_stored":
-      return at(createSettlementEvent("settlement_stored", {
+      return at2(createSettlementEvent("settlement_stored", {
         bead_id: event.beadId,
         ...settlementDetail(record4(event.payload))
       }), t);
     case "settlement_receipt_allocated":
-      return at(createSettlementEvent("settlement_receipt_allocated", {
+      return at2(createSettlementEvent("settlement_receipt_allocated", {
         bead_id: event.beadId,
         ...settlementDetail(record4(event.payload))
       }), t);
     case "settlement_artifact_attached":
-      return at(createSettlementEvent("settlement_artifact_attached", {
+      return at2(createSettlementEvent("settlement_artifact_attached", {
         bead_id: event.beadId,
         ...settlementDetail(record4(event.payload))
       }), t);
     case "settlement_result_published":
-      return at(createSettlementEvent("settlement_result_published", {
+      return at2(createSettlementEvent("settlement_result_published", {
         bead_id: event.beadId,
         ...settlementDetail(record4(event.payload))
       }), t);
     case "settlement_republish_deferred":
-      return at(createSettlementEvent("settlement_republish_deferred", {
+      return at2(createSettlementEvent("settlement_republish_deferred", {
         bead_id: event.beadId,
         ...settlementDetail(record4(event.payload))
       }), t);
     case "settlement_republish_error":
-      return at(createSettlementEvent("settlement_republish_error", {
+      return at2(createSettlementEvent("settlement_republish_error", {
         bead_id: event.beadId,
         ...settlementDetail(record4(event.payload))
       }), t);
     case "settlement_republish_reconciled":
-      return at(createSettlementEvent("settlement_republish_reconciled", {
+      return at2(createSettlementEvent("settlement_republish_reconciled", {
         bead_id: event.beadId,
         ...settlementDetail(record4(event.payload))
       }), t);
     case "settlement_republish_refused":
-      return at(createSettlementEvent("settlement_republish_refused", {
+      return at2(createSettlementEvent("settlement_republish_refused", {
         bead_id: event.beadId,
         ...settlementDetail(record4(event.payload))
       }), t);
     case "settlement_degraded":
-      return at(createSettlementEvent("settlement_degraded", {
+      return at2(createSettlementEvent("settlement_degraded", {
         bead_id: event.beadId,
         ...settlementDetail(record4(event.payload))
       }), t);
     case "settlement_store_failed":
-      return at(createSettlementEvent("settlement_store_failed", {
+      return at2(createSettlementEvent("settlement_store_failed", {
         bead_id: event.beadId,
         ...settlementDetail(record4(event.payload))
       }), t);
     case "activation_failed":
     case "activation_rejected":
-      return at(createRunCompleteEvent("ERROR", Math.max(0, t - context.startedAtMs) / 1000, {
+      return at2(createRunCompleteEvent("ERROR", Math.max(0, t - context.startedAtMs) / 1000, {
         model: context.resolvedModel,
         backend: context.resolvedModel?.split("/")[0],
         bead_id: event.beadId,
@@ -92932,7 +94198,7 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
       const payload = record4(event.payload);
       const reason = stringField2(payload?.reason);
       const tool = stringField2(payload?.tool);
-      return at(createStaleWarningEvent(reason ?? "tool_duration", {
+      return at2(createStaleWarningEvent(reason ?? "tool_duration", {
         silence_ms: numberField2(payload?.silence_ms) ?? 0,
         threshold_ms: numberField2(payload?.threshold_ms) ?? 0,
         ...tool !== undefined ? { tool } : {}
@@ -92940,7 +94206,7 @@ function mapNativeLifecycleEvent(event, context, t = Date.now()) {
     }
     case "thinking_level_unavailable": {
       const payload = record4(event.payload);
-      return at({
+      return at2({
         t,
         type: "thinking_level_unavailable",
         requested_level: stringField2(payload?.requested_level) ?? "unknown",
@@ -92955,7 +94221,7 @@ function mapNativeSessionEvent(event, t = Date.now(), turnIndex = 0) {
   const mapped = [];
   const add = (timeline) => {
     if (timeline)
-      mapped.push(at(timeline, t));
+      mapped.push(at2(timeline, t));
   };
   switch (event.type) {
     case "turn_start":
@@ -92971,7 +94237,7 @@ function mapNativeSessionEvent(event, t = Date.now(), turnIndex = 0) {
         const model = stringField2(message?.model);
         const provider = stringField2(message?.provider);
         if (model || provider)
-          mapped.push(at(createMetaEvent(model ?? "unknown", provider ?? "unknown"), t));
+          mapped.push(at2(createMetaEvent(model ?? "unknown", provider ?? "unknown"), t));
         add(mapCallbackEventToTimelineEvent("message_start_assistant", {}));
       }
       if (role === "toolResult")
@@ -92988,10 +94254,10 @@ function mapNativeSessionEvent(event, t = Date.now(), turnIndex = 0) {
           mapped.push({ t, type: TIMELINE_EVENT_TYPES.TEXT, char_count: text.length, content: text });
         add(mapCallbackEventToTimelineEvent("message_end_assistant", {}));
         if (usage)
-          mapped.push(at(createTokenUsageEvent(usage, "message_done"), t));
+          mapped.push(at2(createTokenUsageEvent(usage, "message_done"), t));
         if (finishReason)
-          mapped.push(at(createFinishReasonEvent(finishReason, "message_done"), t));
-        mapped.push(at(createTurnSummaryEvent(turnIndex, usage, finishReason, text), t));
+          mapped.push(at2(createFinishReasonEvent(finishReason, "message_done"), t));
+        mapped.push(at2(createTurnSummaryEvent(turnIndex, usage, finishReason, text), t));
       }
       if (role === "toolResult")
         add(mapCallbackEventToTimelineEvent("message_end_tool_result", {}));
@@ -93721,7 +94987,7 @@ var init_settlement_publication = __esm(() => {
 
 // src/activation/settlement-store.ts
 import { mkdirSync as mkdirSync25, readFileSync as readFileSync49, readdirSync as readdirSync27, writeFileSync as writeFileSync26 } from "fs";
-import { join as join61 } from "path";
+import { join as join63 } from "path";
 function safeSegment(id) {
   const safe = id.replace(/[^A-Za-z0-9.:_-]/g, "_");
   if (!safe || safe === "." || safe === "..")
@@ -93742,11 +95008,11 @@ function publicationStateOf(record) {
   return record.publication?.state === "refused" ? "refused" : "pending";
 }
 function createFileSettlementStore(root) {
-  const pathFor = (activationId, attemptId) => join61(root, safeSegment(activationId), `${safeSegment(attemptId)}.json`);
+  const pathFor = (activationId, attemptId) => join63(root, safeSegment(activationId), `${safeSegment(attemptId)}.json`);
   return {
     save(record) {
       const path = pathFor(record.activationId, record.attemptId);
-      mkdirSync25(join61(root, safeSegment(record.activationId)), { recursive: true });
+      mkdirSync25(join63(root, safeSegment(record.activationId)), { recursive: true });
       writeFileSync26(path, JSON.stringify(record), "utf8");
       return `${safeSegment(record.activationId)}/${safeSegment(record.attemptId)}.json`;
     },
@@ -93760,14 +95026,14 @@ function createFileSettlementStore(root) {
     listAttempts(activationId) {
       let files;
       try {
-        files = readdirSync27(join61(root, safeSegment(activationId)));
+        files = readdirSync27(join63(root, safeSegment(activationId)));
       } catch {
         return [];
       }
       const out = [];
       for (const file of files.filter((f) => f.endsWith(".json")).sort()) {
         try {
-          out.push(JSON.parse(readFileSync49(join61(root, safeSegment(activationId), file), "utf8")));
+          out.push(JSON.parse(readFileSync49(join63(root, safeSegment(activationId), file), "utf8")));
         } catch {}
       }
       return out;
@@ -93796,14 +95062,14 @@ function createFileSettlementStore(root) {
   function readActivationDir(activation) {
     let files;
     try {
-      files = readdirSync27(join61(root, activation));
+      files = readdirSync27(join63(root, activation));
     } catch {
       return [];
     }
     const out = [];
     for (const file of files.filter((f) => f.endsWith(".json")).sort()) {
       try {
-        out.push(JSON.parse(readFileSync49(join61(root, activation, file), "utf8")));
+        out.push(JSON.parse(readFileSync49(join63(root, activation, file), "utf8")));
       } catch {}
     }
     return out;
@@ -93814,7 +95080,7 @@ var init_settlement_store = () => {};
 // src/activation/native-host.ts
 import { randomUUID as randomUUID9 } from "crypto";
 import { existsSync as existsSync59 } from "fs";
-import { join as join62 } from "path";
+import { join as join64 } from "path";
 function extractTokenUsage(event) {
   const nested = nativeEventTokenUsage(event);
   if (nested) {
@@ -93846,7 +95112,7 @@ function resolveNpmExtensionSource(source, env = defaultExtensionSourceResolutio
   const packageName = parseNpmSourceName(source);
   if (!packageName)
     return null;
-  return env.globalNodeModulesDirs().map((root) => join62(root, packageName)).find(env.manifestExists) ?? null;
+  return env.globalNodeModulesDirs().map((root) => join64(root, packageName)).find(env.manifestExists) ?? null;
 }
 function resolveGitExtensionSource(source, env = defaultExtensionSourceResolutionEnv) {
   if (!source.startsWith("git:"))
@@ -93859,7 +95125,7 @@ function resolveGitExtensionSource(source, env = defaultExtensionSourceResolutio
   const agentDir = env.piAgentDir?.();
   if (!agentDir)
     return null;
-  const checkoutPath = join62(agentDir, "git", spec);
+  const checkoutPath = join64(agentDir, "git", spec);
   return env.manifestExists(checkoutPath) ? checkoutPath : null;
 }
 function expectedRemoteExtensionLabels(declaredSources, skippedSources) {
@@ -94113,7 +95379,7 @@ class NativeActivationHost {
     this.sessionStatsTimeoutMs = deps.sessionStatsTimeoutMs;
     this.piVersion = deps.piVersion;
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
-    this.settlements = deps.settlements ?? createFileSettlementStore(join62(this.cwd, ".specialists", "settlements"));
+    this.settlements = deps.settlements ?? createFileSettlementStore(join64(this.cwd, ".specialists", "settlements"));
     this.admission = deps.admission ?? ((candidate, tier, contract) => validateBeforeRun(candidate, tier, contract));
     this.toolDurationWarnMs = normalizeToolDurationWarnMs(deps.stallDetection?.tool_duration_warn_ms) ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms;
     this.toolDurationWarnMsByDep = normalizeToolDurationWarnMs(deps.stallDetection?.tool_duration_warn_ms);
@@ -96104,7 +97370,7 @@ var init_native_host = __esm(() => {
   NON_LOCAL_EXTENSION_PREFIXES = ["npm:", "git:", "github:", "http:", "https:", "ssh:"];
   defaultExtensionSourceResolutionEnv = {
     globalNodeModulesDirs: resolveGlobalNodeModulesDirs,
-    manifestExists: (packagePath) => existsSync59(join62(packagePath, "package.json")),
+    manifestExists: (packagePath) => existsSync59(join64(packagePath, "package.json")),
     piAgentDir: () => {
       return;
     }
@@ -96654,7 +97920,7 @@ var init_resume_tool = __esm(() => {
 });
 
 // src/substrate/services.ts
-import { createRequire as createRequire7 } from "module";
+import { createRequire as createRequire8 } from "module";
 function resolveSubstrate() {
   if (cached8)
     return cached8;
@@ -96716,7 +97982,7 @@ var require6, SUBSTRATE_PACKAGE2 = "@jaggerxtrm/substrate", UNAVAILABLE_HELP, ca
 var init_services = __esm(() => {
   init_authority_store();
   init_logger();
-  require6 = createRequire7(import.meta.url);
+  require6 = createRequire8(import.meta.url);
   UNAVAILABLE_HELP = {
     module_not_resolvable: `${SUBSTRATE_PACKAGE2} is not installed. Install it to enable this surface.`,
     runtime_incompatible: "The installed Substrate could not load on this runtime. It ships a dual-runtime sqlite seam " + "(bun:sqlite under bun, node:sqlite under node), so this indicates a regression in that seam " + "rather than an expected state.",
@@ -97288,7 +98554,7 @@ function serveV2Stdio(era = stdioEraFromEnv()) {
 var init_v2_server = __esm(() => {
   init_zod();
   init_tool_schema();
-  init_dist3();
+  init_dist4();
   init_stdio();
   init_constants();
   init_observability_sqlite();
