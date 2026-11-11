@@ -111,14 +111,16 @@ repository layer and consent cannot.
   `OVERRIDE_ALLOWED_EXECUTION_FIELDS` does. Use a spec layer until that mismatch is fixed.
 - Use a `claude-bridge/...` model id. `anthropic/...` is Pi's own API-key provider and does not go
   through Claude Code.
-- **Admission is strict; runtime is not.** A `claude-bridge/...` primary that cannot be admitted ends
-  the dispatch with `model_unavailable` and is not substituted — that guard sits in
-  `src/activation/native-host.ts` next to the first model check. An admitted run that then **fails
-  mid-run** (an inherited `ANTHROPIC_*` breaking auth on turn 1, a quota error, a closed session)
-  goes through `runWithFallback`/`walkFallbackChain`, where no bridge guard exists: it can continue
-  on the next `fallback_models` entry, which may be an API-key provider. If attribution matters more
-  than continuity for a run, pin a single model with `model_override` and leave `fallback_models`
-  empty.
+- **Admission is strict; the runtime walk is narrower than "any failure".** A `claude-bridge/...`
+  primary that cannot be admitted ends the dispatch with `model_unavailable` and is not substituted —
+  that guard sits in `src/activation/native-host.ts` next to the first model check. An admitted run
+  that fails mid-run walks `fallback_models` only for the retryable classes
+  `FALLBACK_RETRYABLE_CLASSES = {rate_limit, timeout, transient}`; any other class, including `auth`,
+  ends the run on the primary without a hop. So the realistic route-change case is a Claude
+  subscription **rate limit** (or a timeout, or a transient error) continuing on an API-key
+  fallback, on a different billing surface than the one the operator chose.
+- Pinning one model is `model_override`: it replaces the chain with `[override]`, so no fallback
+  entry can be reached regardless of the failure class.
 
 ### Permission tiers
 

@@ -655,8 +655,9 @@ Two switches must both be on: the operator enables the route once per machine in
 `~/.config/specialists/user.json` (`{"claude_bridge":{"enabled":true}}`), and a definition sets
 `execution.claude_bridge: true` with a `claude-bridge/...` model. A repository cannot enable it on
 its own. With either switch off, a dispatch whose primary model is `claude-bridge/...` is refused
-with `model_unavailable` before a session exists, and admission is not substituted; a run that is
-admitted and then **fails mid-run** can still walk `fallback_models`, as the route's page explains.
+with `model_unavailable` before a session exists, and admission is not substituted. A run that is
+admitted and then fails mid-run walks `fallback_models` only for retryable classes, so a subscription
+rate limit can continue on a metered provider — see the authoring reference for the exact rule.
 
 Install the bridge where Pi keeps its packages (`pi install npm:pi-claude-bridge@0.12.0`), log in
 once with `claude auth login`, and read [claude-bridge.md](docs/claude-bridge.md) before enabling it:
