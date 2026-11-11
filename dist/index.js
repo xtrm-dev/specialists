@@ -62374,28 +62374,39 @@ ${result.stderr ?? ""}`;
   const missing = flags.find((flag) => !help.includes(flag));
   return missing ? "pi_flag_missing" : undefined;
 }
+function errorForWire(error) {
+  const out = { name: error.name, message: error.message };
+  const code = error.code;
+  if (typeof code === "string" || typeof code === "number")
+    out.code = code;
+  return out;
+}
 function toWireValue(value, seen = new WeakSet, depth = 0) {
   if (value === null || typeof value !== "object")
     return value;
   if (value instanceof Error)
-    return { name: value.name, message: value.message };
+    return errorForWire(value);
   if (depth >= MAX_WIRE_DEPTH)
     return "[truncated]";
   if (seen.has(value))
     return "[circular]";
   seen.add(value);
-  if (Array.isArray(value))
-    return value.map((entry) => toWireValue(entry, seen, depth + 1));
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null)
-    return value;
-  const out = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (STACK_KEYS.has(key))
-      continue;
-    out[key] = toWireValue(entry, seen, depth + 1);
+  try {
+    if (Array.isArray(value))
+      return value.map((entry) => toWireValue(entry, seen, depth + 1));
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null)
+      return value;
+    const out = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (STACK_KEYS.has(key))
+        continue;
+      out[key] = toWireValue(entry, seen, depth + 1);
+    }
+    return out;
+  } finally {
+    seen.delete(value);
   }
-  return out;
 }
 function serializeForWire(body) {
   return JSON.stringify(toWireValue(body)) ?? "null";
@@ -62654,7 +62665,7 @@ async function startServe(argv = process.argv.slice(3)) {
 async function run42(argv = process.argv.slice(3)) {
   await startServe(argv);
 }
-var AUDIT_WINDOW_MS = 60000, DEFAULT_REQUIRED_PI_FLAGS, STACK_KEYS, MAX_WIRE_DEPTH = 12;
+var AUDIT_WINDOW_MS = 60000, DEFAULT_REQUIRED_PI_FLAGS, STACK_KEYS, MAX_WIRE_DEPTH = 1000;
 var init_serve = __esm(() => {
   init_loader();
   init_script_runner();

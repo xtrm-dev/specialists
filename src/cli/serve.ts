@@ -205,31 +205,53 @@ export function checkPiHelpForFlags(flags: string[] = DEFAULT_REQUIRED_PI_FLAGS)
 
 /** Keys that carry stack traces. They never belong on the wire (CodeQL #23). */
 const STACK_KEYS = new Set(['stack', 'stackTrace', 'stacktrace', 'stack_trace']);
-const MAX_WIRE_DEPTH = 12;
 
 /**
- * Rebuild a response body without stack traces. Errors become `{ name, message }`, plain objects
- * lose stack-bearing keys, and exotic values (Date, Buffer) are left for JSON.stringify so their
- * existing encoding does not change.
+ * A recursion guard, not a shape rule: no response this server builds comes anywhere near it, and
+ * hitting it means the body is pathological rather than merely deep. Setting it low truncated valid
+ * data (review of #546).
+ */
+const MAX_WIRE_DEPTH = 1000;
+
+/** Error fields that are safe to publish: no stack, no cause chain. */
+function errorForWire(error: Error): Record<string, unknown> {
+  const out: Record<string, unknown> = { name: error.name, message: error.message };
+  const code = (error as Error & { code?: unknown }).code;
+  if (typeof code === 'string' || typeof code === 'number') out.code = code;
+  return out;
+}
+
+/**
+ * Rebuild a response body without stack traces. Errors become `{ name, message, code? }`, plain
+ * objects lose stack-bearing keys, and exotic values (Date, Buffer) are left for JSON.stringify so
+ * their existing encoding does not change.
+ *
+ * `seen` holds the ANCESTORS of the current value and is unwound on the way out, so only a real
+ * cycle is `[circular]`; a body that legitimately reuses one object (`{a: x, b: x}`) keeps both
+ * copies intact.
  */
 export function toWireValue(value: unknown, seen: WeakSet<object> = new WeakSet(), depth = 0): unknown {
   if (value === null || typeof value !== 'object') return value;
-  if (value instanceof Error) return { name: value.name, message: value.message };
+  if (value instanceof Error) return errorForWire(value);
   if (depth >= MAX_WIRE_DEPTH) return '[truncated]';
   if (seen.has(value)) return '[circular]';
+
   seen.add(value);
+  try {
+    if (Array.isArray(value)) return value.map((entry) => toWireValue(entry, seen, depth + 1));
 
-  if (Array.isArray(value)) return value.map((entry) => toWireValue(entry, seen, depth + 1));
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return value;
 
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) return value;
-
-  const out: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (STACK_KEYS.has(key)) continue;
-    out[key] = toWireValue(entry, seen, depth + 1);
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (STACK_KEYS.has(key)) continue;
+      out[key] = toWireValue(entry, seen, depth + 1);
+    }
+    return out;
+  } finally {
+    seen.delete(value);
   }
-  return out;
 }
 
 /** JSON for the wire, with stack traces removed. */
@@ -237,7 +259,8 @@ export function serializeForWire(body: unknown): string {
   return JSON.stringify(toWireValue(body)) ?? 'null';
 }
 
-function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
+/** Internal, exported so a test can prove the sink actually goes through the sanitizer. */
+export function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
   res.writeHead(statusCode, { 'content-type': 'application/json' });
   res.end(serializeForWire(body));
 }
