@@ -46,7 +46,7 @@ jobs:
         run: |
           set -euo pipefail
           # The dispatch input is the only attacker-controlled value here. It never reaches a shell
-          # through ${{ }} and must be semver before it becomes a matrix row (SPECIALISTS-4438).
+          # through an expression and must be semver before it becomes a matrix row (SPECIALISTS-4438).
           SEMVER_RE='^(0|[1-9][0-9]*)\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
           if [ -n "$REQUESTED" ]; then
             if ! [[ "$REQUESTED" =~ $SEMVER_RE ]]; then
