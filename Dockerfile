@@ -15,8 +15,14 @@ FROM docker.io/oven/bun:1.3.14-slim AS runtime
 # The pi package the runtime actually loads (src/activation/pi-sdk.ts PI_SDK_PACKAGE).
 # Overridable, but the default must be the real one: this image is what the pi-compat job boots, and
 # it installed @mariozechner/pi-coding-agent while the runtime had moved on (SPECIALISTS-50).
+# The version is pinned, not `latest`: an unpinned default made the image take whatever npm served
+# that day, while the sources declare a peer range (>=1.4.0 <2.0.0). Move this pin deliberately with
+# that range (SPECIALISTS-4437). pi-compat still overrides it per run with --build-arg.
+# Note: pi declares engines.node >= 22.19.0, and this stage installs Debian's npm (Node 20), so the
+# container's `pi` CLI cannot start. That is dormant, not harmless: the service loads pi as a bun
+# library (src/activation/pi-sdk.ts) and pi-compat runs the CLI smoke on the runner, never in-image.
 ARG PI_PACKAGE=@earendil-works/pi-coding-agent
-ARG PI_VERSION=latest
+ARG PI_VERSION=1.5.2
 WORKDIR /app
 
 ENV NODE_ENV=production

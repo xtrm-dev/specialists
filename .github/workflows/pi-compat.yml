@@ -161,12 +161,35 @@ jobs:
           fi
           echo "pi accepted our spawn args (auth/provider error is fine, args parse is fine)."
 
+      # The image default is pinned (SPECIALISTS-4437). Build THROUGH that pin whenever the version
+      # under test is the pinned one, so CI exercises the default a consumer actually gets; only an
+      # older/newer version under test is passed as a build arg.
       - name: Build image with reviewed pi
         run: |
-          docker build \
-            --build-arg "PI_PACKAGE=${{ steps.pi.outputs.package }}" \
-            --build-arg "PI_VERSION=${{ steps.pi.outputs.version }}" \
-            -t specialists-service:ci .
+          set -euo pipefail
+          PINNED="$(grep -oE '^ARG PI_VERSION=[^[:space:]]+' Dockerfile | cut -d= -f2)"
+          PINNED_PACKAGE="$(grep -oE '^ARG PI_PACKAGE=[^[:space:]]+' Dockerfile | cut -d= -f2)"
+          if [ "${{ steps.pi.outputs.version }}" = "$PINNED" ] && [ "${{ steps.pi.outputs.package }}" = "$PINNED_PACKAGE" ]; then
+            echo "Building the pinned default: ${PINNED_PACKAGE}@${PINNED}"
+            docker build -t specialists-service:ci .
+          else
+            echo "Building ${{ steps.pi.outputs.package }}@${{ steps.pi.outputs.version }} over the pinned ${PINNED_PACKAGE}@${PINNED}"
+            docker build \
+              --build-arg "PI_PACKAGE=${{ steps.pi.outputs.package }}" \
+              --build-arg "PI_VERSION=${{ steps.pi.outputs.version }}" \
+              -t specialists-service:ci .
+          fi
+
+      - name: Image carries the version under test
+        run: |
+          set -euo pipefail
+          INSTALLED="$(docker run --rm --entrypoint npm specialists-service:ci ls -g --depth=0 \
+            | grep -oE 'pi-coding-agent@[0-9]+\.[0-9]+\.[0-9]+' | head -1 | cut -d@ -f2)"
+          if [ "$INSTALLED" != "${{ steps.pi.outputs.version }}" ]; then
+            echo "::error title=pi compat regression::image carries pi ${INSTALLED:-nothing}, expected ${{ steps.pi.outputs.version }}"
+            exit 1
+          fi
+          echo "Image carries ${{ steps.pi.outputs.package }}@${INSTALLED}."
 
       - name: Container boot smoke
         run: |
