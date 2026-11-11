@@ -177,6 +177,27 @@ export interface ReceiptSource {
   /** Resolve with the receipt naming `origMsgId`, or `undefined` if none arrives in time. */
   waitForReceipt(origMsgId: string, timeoutMs: number): Promise<ReceiptFrame | undefined>;
   close(): Promise<void>;
+  /** Diagnostic: how many receipts are currently retained. Optional for injected sources. */
+  retainedCount?(): number;
+}
+
+/**
+ * Receipts are retained so a fast peer's receipt can arrive before the sender asks for it, but
+ * "retained" must not mean "forever": a same-user peer could otherwise grow this process without
+ * bound (SPECIALISTS-4433 measured ~600 bytes per frame and no eviction at all). The guarantee the
+ * protocol needs is short-lived, so the store is bounded by both count and age.
+ */
+export const MAX_RETAINED_RECEIPTS = 512;
+export const RECEIPT_TTL_MS = 120_000;
+
+interface RetainedReceipt {
+  frame: ReceiptFrame;
+  receivedAt: number;
+}
+
+/** A retained receipt is usable only inside the window the protocol needs it. */
+export function receiptExpired(receivedAt: number, now: number = Date.now()): boolean {
+  return now - receivedAt >= RECEIPT_TTL_MS;
 }
 
 /**
@@ -190,8 +211,25 @@ export interface ReceiptSource {
  * a failure to the peer that sent it.
  */
 export async function createSocketReceiptSource(socketPath: string): Promise<ReceiptSource> {
-  const received = new Map<string, ReceiptFrame>();
+  const received = new Map<string, RetainedReceipt>();
   const waiters = new Map<string, (frame: ReceiptFrame) => void>();
+
+  /** Drop the oldest receipts until the store is within its bound, and any receipt past its TTL. */
+  const pruneReceived = (now: number): void => {
+    for (const [id, entry] of received) {
+      if (received.size <= MAX_RETAINED_RECEIPTS && !receiptExpired(entry.receivedAt, now)) break;
+      if (receiptExpired(entry.receivedAt, now) || received.size > MAX_RETAINED_RECEIPTS) {
+        received.delete(id);
+      }
+    }
+  };
+
+  const retain = (id: string, frame: ReceiptFrame): void => {
+    // Re-inserting keeps the map in arrival order, so eviction is genuinely oldest-first.
+    received.delete(id);
+    received.set(id, { frame, receivedAt: Date.now() });
+    pruneReceived(Date.now());
+  };
 
   const server: Server = createServer(conn => {
     conn.setEncoding('utf8');
@@ -212,7 +250,7 @@ export async function createSocketReceiptSource(socketPath: string): Promise<Rec
         try { frame = JSON.parse(line); } catch { continue; }
         const f = frame as Partial<ReceiptFrame>;
         if (f.type !== 'control' || f.action !== 'peer_message_status' || !f.orig_msg_id) continue;
-        received.set(f.orig_msg_id, frame as ReceiptFrame);
+        retain(f.orig_msg_id, frame as ReceiptFrame);
         waiters.get(f.orig_msg_id)?.(frame as ReceiptFrame);
         waiters.delete(f.orig_msg_id);
       }
@@ -231,11 +269,20 @@ export async function createSocketReceiptSource(socketPath: string): Promise<Rec
   return {
     waitForReceipt(origMsgId, timeoutMs) {
       const already = received.get(origMsgId);
-      if (already) return Promise.resolve(already);
+      if (already) {
+        if (receiptExpired(already.receivedAt)) {
+          received.delete(origMsgId);
+        } else {
+          return Promise.resolve(already.frame);
+        }
+      }
       return new Promise(resolve => {
         const timer = setTimeout(() => { waiters.delete(origMsgId); resolve(undefined); }, timeoutMs);
         waiters.set(origMsgId, frame => { clearTimeout(timer); resolve(frame); });
       });
+    },
+    retainedCount() {
+      return received.size;
     },
     close() {
       waiters.clear();
