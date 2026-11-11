@@ -74,17 +74,17 @@ var require_visit = __commonJS(function(exports) {
   visit.BREAK = BREAK;
   visit.SKIP = SKIP;
   visit.REMOVE = REMOVE;
-  function visit_(key, node, visitor, path) {
-    const ctrl = callVisitor(key, node, visitor, path);
+  function visit_(key, node, visitor, path2) {
+    const ctrl = callVisitor(key, node, visitor, path2);
     if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-      replaceNode(key, path, ctrl);
-      return visit_(key, ctrl, visitor, path);
+      replaceNode(key, path2, ctrl);
+      return visit_(key, ctrl, visitor, path2);
     }
     if (typeof ctrl !== "symbol") {
       if (identity.isCollection(node)) {
-        path = Object.freeze(path.concat(node));
+        path2 = Object.freeze(path2.concat(node));
         for (let i = 0;i < node.items.length; ++i) {
-          const ci = visit_(i, node.items[i], visitor, path);
+          const ci = visit_(i, node.items[i], visitor, path2);
           if (typeof ci === "number")
             i = ci - 1;
           else if (ci === BREAK)
@@ -95,13 +95,13 @@ var require_visit = __commonJS(function(exports) {
           }
         }
       } else if (identity.isPair(node)) {
-        path = Object.freeze(path.concat(node));
-        const ck = visit_("key", node.key, visitor, path);
+        path2 = Object.freeze(path2.concat(node));
+        const ck = visit_("key", node.key, visitor, path2);
         if (ck === BREAK)
           return BREAK;
         else if (ck === REMOVE)
           node.key = null;
-        const cv = visit_("value", node.value, visitor, path);
+        const cv = visit_("value", node.value, visitor, path2);
         if (cv === BREAK)
           return BREAK;
         else if (cv === REMOVE)
@@ -122,17 +122,17 @@ var require_visit = __commonJS(function(exports) {
   visitAsync.BREAK = BREAK;
   visitAsync.SKIP = SKIP;
   visitAsync.REMOVE = REMOVE;
-  async function visitAsync_(key, node, visitor, path) {
-    const ctrl = await callVisitor(key, node, visitor, path);
+  async function visitAsync_(key, node, visitor, path2) {
+    const ctrl = await callVisitor(key, node, visitor, path2);
     if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-      replaceNode(key, path, ctrl);
-      return visitAsync_(key, ctrl, visitor, path);
+      replaceNode(key, path2, ctrl);
+      return visitAsync_(key, ctrl, visitor, path2);
     }
     if (typeof ctrl !== "symbol") {
       if (identity.isCollection(node)) {
-        path = Object.freeze(path.concat(node));
+        path2 = Object.freeze(path2.concat(node));
         for (let i = 0;i < node.items.length; ++i) {
-          const ci = await visitAsync_(i, node.items[i], visitor, path);
+          const ci = await visitAsync_(i, node.items[i], visitor, path2);
           if (typeof ci === "number")
             i = ci - 1;
           else if (ci === BREAK)
@@ -143,13 +143,13 @@ var require_visit = __commonJS(function(exports) {
           }
         }
       } else if (identity.isPair(node)) {
-        path = Object.freeze(path.concat(node));
-        const ck = await visitAsync_("key", node.key, visitor, path);
+        path2 = Object.freeze(path2.concat(node));
+        const ck = await visitAsync_("key", node.key, visitor, path2);
         if (ck === BREAK)
           return BREAK;
         else if (ck === REMOVE)
           node.key = null;
-        const cv = await visitAsync_("value", node.value, visitor, path);
+        const cv = await visitAsync_("value", node.value, visitor, path2);
         if (cv === BREAK)
           return BREAK;
         else if (cv === REMOVE)
@@ -176,23 +176,23 @@ var require_visit = __commonJS(function(exports) {
     }
     return visitor;
   }
-  function callVisitor(key, node, visitor, path) {
+  function callVisitor(key, node, visitor, path2) {
     if (typeof visitor === "function")
-      return visitor(key, node, path);
+      return visitor(key, node, path2);
     if (identity.isMap(node))
-      return visitor.Map?.(key, node, path);
+      return visitor.Map?.(key, node, path2);
     if (identity.isSeq(node))
-      return visitor.Seq?.(key, node, path);
+      return visitor.Seq?.(key, node, path2);
     if (identity.isPair(node))
-      return visitor.Pair?.(key, node, path);
+      return visitor.Pair?.(key, node, path2);
     if (identity.isScalar(node))
-      return visitor.Scalar?.(key, node, path);
+      return visitor.Scalar?.(key, node, path2);
     if (identity.isAlias(node))
-      return visitor.Alias?.(key, node, path);
+      return visitor.Alias?.(key, node, path2);
     return;
   }
-  function replaceNode(key, path, node) {
-    const parent = path[path.length - 1];
+  function replaceNode(key, path2, node) {
+    const parent = path2[path2.length - 1];
     if (identity.isCollection(parent)) {
       parent.items[key] = node;
     } else if (identity.isPair(parent)) {
@@ -751,10 +751,10 @@ var require_Collection = __commonJS(function(exports) {
   var createNode = require_createNode();
   var identity = require_identity();
   var Node = require_Node();
-  function collectionFromPath(schema, path, value) {
+  function collectionFromPath(schema, path2, value) {
     let v = value;
-    for (let i = path.length - 1;i >= 0; --i) {
-      const k = path[i];
+    for (let i = path2.length - 1;i >= 0; --i) {
+      const k = path2[i];
       if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
         const a = [];
         a[k] = v;
@@ -773,7 +773,7 @@ var require_Collection = __commonJS(function(exports) {
       sourceObjects: new Map
     });
   }
-  var isEmptyPath = (path) => path == null || typeof path === "object" && !!path[Symbol.iterator]().next().done;
+  var isEmptyPath = (path2) => path2 == null || typeof path2 === "object" && !!path2[Symbol.iterator]().next().done;
 
   class Collection extends Node.NodeBase {
     constructor(type, schema) {
@@ -794,11 +794,11 @@ var require_Collection = __commonJS(function(exports) {
         copy.range = this.range.slice();
       return copy;
     }
-    addIn(path, value) {
-      if (isEmptyPath(path))
+    addIn(path2, value) {
+      if (isEmptyPath(path2))
         this.add(value);
       else {
-        const [key, ...rest] = path;
+        const [key, ...rest] = path2;
         const node = this.get(key, true);
         if (identity.isCollection(node))
           node.addIn(rest, value);
@@ -808,8 +808,8 @@ var require_Collection = __commonJS(function(exports) {
           throw new Error(`Expected YAML collection at ${key}. Remaining path: ${rest}`);
       }
     }
-    deleteIn(path) {
-      const [key, ...rest] = path;
+    deleteIn(path2) {
+      const [key, ...rest] = path2;
       if (rest.length === 0)
         return this.delete(key);
       const node = this.get(key, true);
@@ -818,8 +818,8 @@ var require_Collection = __commonJS(function(exports) {
       else
         throw new Error(`Expected YAML collection at ${key}. Remaining path: ${rest}`);
     }
-    getIn(path, keepScalar) {
-      const [key, ...rest] = path;
+    getIn(path2, keepScalar) {
+      const [key, ...rest] = path2;
       const node = this.get(key, true);
       if (rest.length === 0)
         return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -834,15 +834,15 @@ var require_Collection = __commonJS(function(exports) {
         return n == null || allowScalar && identity.isScalar(n) && n.value == null && !n.commentBefore && !n.comment && !n.tag;
       });
     }
-    hasIn(path) {
-      const [key, ...rest] = path;
+    hasIn(path2) {
+      const [key, ...rest] = path2;
       if (rest.length === 0)
         return this.has(key);
       const node = this.get(key, true);
       return identity.isCollection(node) ? node.hasIn(rest) : false;
     }
-    setIn(path, value) {
-      const [key, ...rest] = path;
+    setIn(path2, value) {
+      const [key, ...rest] = path2;
       if (rest.length === 0) {
         this.set(key, value);
       } else {
@@ -3235,9 +3235,9 @@ var require_Document = __commonJS(function(exports) {
       if (assertCollection(this.contents))
         this.contents.add(value);
     }
-    addIn(path, value) {
+    addIn(path2, value) {
       if (assertCollection(this.contents))
-        this.contents.addIn(path, value);
+        this.contents.addIn(path2, value);
     }
     createAlias(node, name) {
       if (!node.anchor) {
@@ -3286,30 +3286,30 @@ var require_Document = __commonJS(function(exports) {
     delete(key) {
       return assertCollection(this.contents) ? this.contents.delete(key) : false;
     }
-    deleteIn(path) {
-      if (Collection.isEmptyPath(path)) {
+    deleteIn(path2) {
+      if (Collection.isEmptyPath(path2)) {
         if (this.contents == null)
           return false;
         this.contents = null;
         return true;
       }
-      return assertCollection(this.contents) ? this.contents.deleteIn(path) : false;
+      return assertCollection(this.contents) ? this.contents.deleteIn(path2) : false;
     }
     get(key, keepScalar) {
       return identity.isCollection(this.contents) ? this.contents.get(key, keepScalar) : undefined;
     }
-    getIn(path, keepScalar) {
-      if (Collection.isEmptyPath(path))
+    getIn(path2, keepScalar) {
+      if (Collection.isEmptyPath(path2))
         return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-      return identity.isCollection(this.contents) ? this.contents.getIn(path, keepScalar) : undefined;
+      return identity.isCollection(this.contents) ? this.contents.getIn(path2, keepScalar) : undefined;
     }
     has(key) {
       return identity.isCollection(this.contents) ? this.contents.has(key) : false;
     }
-    hasIn(path) {
-      if (Collection.isEmptyPath(path))
+    hasIn(path2) {
+      if (Collection.isEmptyPath(path2))
         return this.contents !== undefined;
-      return identity.isCollection(this.contents) ? this.contents.hasIn(path) : false;
+      return identity.isCollection(this.contents) ? this.contents.hasIn(path2) : false;
     }
     set(key, value) {
       if (this.contents == null) {
@@ -3318,13 +3318,13 @@ var require_Document = __commonJS(function(exports) {
         this.contents.set(key, value);
       }
     }
-    setIn(path, value) {
-      if (Collection.isEmptyPath(path)) {
+    setIn(path2, value) {
+      if (Collection.isEmptyPath(path2)) {
         this.contents = value;
       } else if (this.contents == null) {
-        this.contents = Collection.collectionFromPath(this.schema, Array.from(path), value);
+        this.contents = Collection.collectionFromPath(this.schema, Array.from(path2), value);
       } else if (assertCollection(this.contents)) {
-        this.contents.setIn(path, value);
+        this.contents.setIn(path2, value);
       }
     }
     setSchema(version, options = {}) {
@@ -5221,9 +5221,9 @@ var require_cst_visit = __commonJS(function(exports) {
   visit.BREAK = BREAK;
   visit.SKIP = SKIP;
   visit.REMOVE = REMOVE;
-  visit.itemAtPath = (cst, path) => {
+  visit.itemAtPath = (cst, path2) => {
     let item = cst;
-    for (const [field, index] of path) {
+    for (const [field, index] of path2) {
       const tok = item?.[field];
       if (tok && "items" in tok) {
         item = tok.items[index];
@@ -5232,23 +5232,23 @@ var require_cst_visit = __commonJS(function(exports) {
     }
     return item;
   };
-  visit.parentCollection = (cst, path) => {
-    const parent = visit.itemAtPath(cst, path.slice(0, -1));
-    const field = path[path.length - 1][0];
+  visit.parentCollection = (cst, path2) => {
+    const parent = visit.itemAtPath(cst, path2.slice(0, -1));
+    const field = path2[path2.length - 1][0];
     const coll = parent?.[field];
     if (coll && "items" in coll)
       return coll;
     throw new Error("Parent collection not found");
   };
-  function _visit(path, item, visitor) {
-    let ctrl = visitor(item, path);
+  function _visit(path2, item, visitor) {
+    let ctrl = visitor(item, path2);
     if (typeof ctrl === "symbol")
       return ctrl;
     for (const field of ["key", "value"]) {
       const token = item[field];
       if (token && "items" in token) {
         for (let i = 0;i < token.items.length; ++i) {
-          const ci = _visit(Object.freeze(path.concat([[field, i]])), token.items[i], visitor);
+          const ci = _visit(Object.freeze(path2.concat([[field, i]])), token.items[i], visitor);
           if (typeof ci === "number")
             i = ci - 1;
           else if (ci === BREAK)
@@ -5259,10 +5259,10 @@ var require_cst_visit = __commonJS(function(exports) {
           }
         }
         if (typeof ctrl === "function" && field === "key")
-          ctrl = ctrl(item, path);
+          ctrl = ctrl(item, path2);
       }
     }
-    return typeof ctrl === "function" ? ctrl(item, path) : ctrl;
+    return typeof ctrl === "function" ? ctrl(item, path2) : ctrl;
   }
   exports.visit = visit;
 });
@@ -17834,6 +17834,177 @@ ${mandatoryRulesBlock}`;
   };
 }
 
+// src/pi/identity-env.ts
+import { spawnSync as spawnSync3 } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
+var IDENTITY_ENV_ALLOWLIST = [
+  "SUBSTRATE_HOLDER",
+  "XTRM_ROLE",
+  "GIT_AUTHOR_NAME",
+  "GIT_AUTHOR_EMAIL",
+  "GIT_COMMITTER_NAME",
+  "GIT_COMMITTER_EMAIL"
+];
+var GIT_CONFIG_PREFIXES = ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"];
+var GIT_CONFIG_COUNT_KEY = "GIT_CONFIG_COUNT";
+var GIT_CONFIG_KEY_PREFIX = "GIT_CONFIG_KEY_";
+var GIT_CONFIG_VALUE_PREFIX = "GIT_CONFIG_VALUE_";
+function isAllowed(key) {
+  if (IDENTITY_ENV_ALLOWLIST.includes(key))
+    return true;
+  return GIT_CONFIG_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
+function warnIdentityEnv(message) {
+  process.stderr.write(`[specialists] identity-env: ${message}
+`);
+}
+var launcherWarning = warnIdentityEnv;
+var IDENTITY_MANAGED_KEY = /^(?:SUBSTRATE_HOLDER|XTRM_ROLE|GIT_AUTHOR_NAME|GIT_AUTHOR_EMAIL|GIT_COMMITTER_NAME|GIT_COMMITTER_EMAIL|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+)$/;
+function isIdentityManagedKey(key) {
+  return IDENTITY_MANAGED_KEY.test(key);
+}
+function snapshotIdentityEnv(env = process.env) {
+  const snapshot = {};
+  for (const key of Object.keys(env)) {
+    if (isIdentityManagedKey(key))
+      snapshot[key] = env[key];
+  }
+  return snapshot;
+}
+function clearIdentityEnv(env = process.env) {
+  for (const key of Object.keys(env)) {
+    if (isIdentityManagedKey(key))
+      delete env[key];
+  }
+}
+function restoreIdentityEnv(snapshot, env = process.env) {
+  clearIdentityEnv(env);
+  for (const [key, value] of Object.entries(snapshot)) {
+    if (typeof value === "string")
+      env[key] = value;
+  }
+}
+function keepConsistentGitConfig(env, warn) {
+  const gitConfigKeys = Object.keys(env).filter((key) => GIT_CONFIG_PREFIXES.some((prefix) => key.startsWith(prefix)));
+  if (gitConfigKeys.length === 0)
+    return;
+  const dropped = (reason) => {
+    for (const key of gitConfigKeys)
+      delete env[key];
+    warn(`dropped the GIT_CONFIG_* block (${reason}); git runs with the machine's transport, not this role's identity`);
+  };
+  const count = (env[GIT_CONFIG_COUNT_KEY] ?? "").trim();
+  if (!/^\d+$/.test(count))
+    return dropped(`GIT_CONFIG_COUNT is not a number`);
+  const indices = Number(count);
+  for (let index = 0;index < indices; index += 1) {
+    if (!(GIT_CONFIG_KEY_PREFIX + index in env))
+      return dropped(`${GIT_CONFIG_KEY_PREFIX}${index} is missing`);
+    if (!(GIT_CONFIG_VALUE_PREFIX + index in env))
+      return dropped(`${GIT_CONFIG_VALUE_PREFIX}${index} is missing`);
+  }
+  for (const key of gitConfigKeys) {
+    if (key === GIT_CONFIG_COUNT_KEY)
+      continue;
+    const suffix = key.replace(/^GIT_CONFIG_(?:KEY|VALUE)_/, "");
+    if (!/^\d+$/.test(suffix) || Number(suffix) >= indices)
+      return dropped(`${key} is outside GIT_CONFIG_COUNT`);
+  }
+}
+function describeErrorClass(error) {
+  if (!(error instanceof Error))
+    return "non-Error";
+  const code = error.code;
+  return typeof code === "string" && code ? `${error.name} ${code}` : error.name || "Error";
+}
+function resolveAgentIdentityEnv(input = {}) {
+  const holder = (input.holder ?? "").trim();
+  if (!holder)
+    return {};
+  const roleName = (input.roleName ?? "").trim();
+  const base = { SUBSTRATE_HOLDER: holder };
+  if (roleName)
+    base.XTRM_ROLE = roleName;
+  const run = input.run ?? ((cmd, args, opts) => {
+    const result2 = spawnSync3(cmd, args, {
+      encoding: "utf8",
+      cwd: opts.cwd,
+      env: opts.env,
+      timeout: opts.timeoutMs,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    return { status: result2.status, stdout: String(result2.stdout ?? ""), error: result2.error };
+  });
+  const warn = input.warn ?? launcherWarning;
+  const withoutRole = (reason) => {
+    warn(`identity env unavailable (${reason}); the session runs without an agent identity`);
+    return base;
+  };
+  let result;
+  try {
+    result = run("xt", ["identity", "env", "--json"], {
+      cwd: input.cwd,
+      env: { ...input.env ?? process.env, ...base },
+      timeoutMs: input.timeoutMs ?? 5000
+    });
+  } catch (error) {
+    return withoutRole(`lookup threw ${describeErrorClass(error)}`);
+  }
+  if (result.error)
+    return withoutRole(`lookup did not run (${describeErrorClass(result.error)})`);
+  if (result.status !== 0) {
+    return withoutRole(result.status === null ? "xt exited on a signal" : `xt exited ${result.status}`);
+  }
+  let answer;
+  try {
+    answer = JSON.parse(result.stdout);
+  } catch {
+    return withoutRole("returned unparseable JSON");
+  }
+  const env = answer?.env;
+  if (!env || typeof env !== "object" || Array.isArray(env))
+    return withoutRole("returned no env");
+  const merged = { ...base };
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value !== "string" || !isAllowed(key))
+      continue;
+    if (value === "" && !key.startsWith(GIT_CONFIG_VALUE_PREFIX))
+      continue;
+    merged[key] = value;
+  }
+  keepConsistentGitConfig(merged, warn);
+  merged.SUBSTRATE_HOLDER = holder;
+  return merged;
+}
+function shimBinDir(env = process.env) {
+  return path.join(env.HOME || os.homedir(), ".local", "bin");
+}
+function specialistPath(env = process.env) {
+  const shim = shimBinDir(env);
+  const seen = new Set([shim]);
+  const entries = [shim];
+  for (const raw of (env.PATH ?? "").split(path.delimiter)) {
+    const entry = raw.trim();
+    if (!entry || seen.has(entry))
+      continue;
+    seen.add(entry);
+    entries.push(entry);
+  }
+  return entries.join(path.delimiter);
+}
+function resolveAgentLaunchEnv(input = {}) {
+  const identity = resolveAgentIdentityEnv(input);
+  if (!identity.SUBSTRATE_HOLDER)
+    return identity;
+  return { ...identity, PATH: specialistPath(input.env ?? process.env) };
+}
+function specialistHolderName(specialistName, jobId, pid = process.pid) {
+  const name = (specialistName || "specialist").trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "specialist";
+  const job = (jobId ?? "").trim().replace(/[^A-Za-z0-9]/g, "");
+  return job ? `sp-${name}-${job.slice(0, 8)}` : `sp-${name}-${pid}`;
+}
+
 // src/utils/circuitBreaker.ts
 var TRANSIENT_ERROR_PATTERNS = [
   /\b5\d{2}\b/,
@@ -18173,7 +18344,7 @@ ${summaries.join(`
 }
 
 // src/specialist/runner.ts
-import { execSync as execSync2, spawnSync as spawnSync3 } from "node:child_process";
+import { execSync as execSync2, spawnSync as spawnSync4 } from "node:child_process";
 import { existsSync as existsSync12, readFileSync as readFileSync7 } from "node:fs";
 import { basename as basename2, resolve as resolve9 } from "node:path";
 import { homedir as homedir3 } from "node:os";
@@ -18210,7 +18381,7 @@ function runScript(command, cwd, displayName) {
   }
   const scriptName = sanitizeScriptName(basename2(run.split(" ")[0]));
   const label = typeof displayName === "string" && displayName.trim() ? sanitizeDisplayName(displayName) : undefined;
-  const result = spawnSync3(run, {
+  const result = spawnSync4(run, {
     encoding: "utf8",
     timeout: 30000,
     cwd,
@@ -18314,7 +18485,7 @@ function resolvePath2(p) {
   return p.startsWith("~/") ? resolve9(homedir3(), p.slice(2)) : resolve9(p);
 }
 function commandExists(cmd) {
-  const result = spawnSync3("which", [cmd], { stdio: "ignore" });
+  const result = spawnSync4("which", [cmd], { stdio: "ignore" });
   return result.status === 0;
 }
 var SHELL_BUILTINS = new Set([
@@ -19117,10 +19288,10 @@ class CompatGuardError extends Error {
     this.name = "CompatGuardError";
   }
 }
-function normalizePath(path, baseDir) {
-  if (isAbsolute2(path))
-    return path;
-  return resolve10(baseDir ?? process.cwd(), path);
+function normalizePath(path2, baseDir) {
+  if (isAbsolute2(path2))
+    return path2;
+  return resolve10(baseDir ?? process.cwd(), path2);
 }
 function isPathWithinRoot(candidate, root) {
   const rel = relative(root, candidate);
@@ -19140,9 +19311,9 @@ function canonicalizeSkillRoot(root, baseDir) {
     throw new CompatGuardError("skills.paths", "--allow-skills-roots entry is not usable; rejected");
   }
 }
-function canonicalizeSkillPath(field, path, baseDir) {
+function canonicalizeSkillPath(field, path2, baseDir) {
   try {
-    const normalized = normalizePath(path, baseDir);
+    const normalized = normalizePath(path2, baseDir);
     lstatSync2(normalized);
     const canonical = realpathSync2(normalized);
     const stat = lstatSync2(canonical);
@@ -19161,8 +19332,8 @@ function canonicalizeSkillPath(field, path, baseDir) {
     throw new CompatGuardError(field, "skill path is not usable; rejected");
   }
 }
-function assertSkillPathWithinRoots(field, path, canonicalRoots, baseDir) {
-  const candidate = canonicalizeSkillPath(field, path, baseDir);
+function assertSkillPathWithinRoots(field, path2, canonicalRoots, baseDir) {
+  const candidate = canonicalizeSkillPath(field, path2, baseDir);
   if (!canonicalRoots.some((root) => isPathWithinRoot(candidate, root))) {
     throw new CompatGuardError(field, "skill path is not under any --allow-skills-roots entry");
   }
@@ -19201,7 +19372,7 @@ function compatGuard(spec, trust) {
   if (trust?.allowSkills) {
     const canonicalRoots = (trust.allowSkillsRoots ?? []).map((root) => canonicalizeSkillRoot(root, trust.baseDir));
     const paths = spec.specialist.skills?.paths ?? [];
-    const canonicalPaths = paths.map((path) => canonicalRoots.length > 0 ? assertSkillPathWithinRoots("skills.paths", path, canonicalRoots, trust.baseDir) : canonicalizeSkillPath("skills.paths", path, trust.baseDir));
+    const canonicalPaths = paths.map((path2) => canonicalRoots.length > 0 ? assertSkillPathWithinRoots("skills.paths", path2, canonicalRoots, trust.baseDir) : canonicalizeSkillPath("skills.paths", path2, trust.baseDir));
     if (spec.specialist.skills?.paths)
       spec.specialist.skills.paths = canonicalPaths;
     if (typeof spec.specialist.prompt.skill_inherit === "string") {
@@ -19211,7 +19382,7 @@ function compatGuard(spec, trust) {
 }
 function collectSkillPathEntries(spec, baseDir) {
   return [
-    ...(spec.specialist.skills?.paths ?? []).map((path) => ({ path: normalizePath(path, baseDir), source: "skills.paths" })),
+    ...(spec.specialist.skills?.paths ?? []).map((path2) => ({ path: normalizePath(path2, baseDir), source: "skills.paths" })),
     ...typeof spec.specialist.prompt.skill_inherit === "string" ? [{ path: normalizePath(spec.specialist.prompt.skill_inherit, baseDir), source: "prompt.skill_inherit" }] : []
   ];
 }
@@ -19224,13 +19395,13 @@ function requireNoFollowFlag() {
   }
   return constants.O_NOFOLLOW;
 }
-function readSkillSourceBytes(path, noFollowFlag) {
-  if (realpathSync2(path) !== path)
+function readSkillSourceBytes(path2, noFollowFlag) {
+  if (realpathSync2(path2) !== path2)
     throw new Error("skill source canonical path changed");
-  const declaredStat = lstatSync2(path);
+  const declaredStat = lstatSync2(path2);
   if (declaredStat.isSymbolicLink())
     throw new Error("symlinked skill source");
-  const sourcePath = declaredStat.isDirectory() ? join10(path, "SKILL.md") : path;
+  const sourcePath = declaredStat.isDirectory() ? join10(path2, "SKILL.md") : path2;
   if (realpathSync2(sourcePath) !== sourcePath)
     throw new Error("skill file canonical path changed");
   const sourceStat = lstatSync2(sourcePath);
@@ -19250,13 +19421,13 @@ function computeSkillSources(spec, baseDir) {
   const entries = collectSkillPathEntries(spec, baseDir);
   const noFollowFlag = entries.length > 0 ? requireNoFollowFlag() : 0;
   const sources = [];
-  for (const { path, source } of entries) {
+  for (const { path: path2, source } of entries) {
     try {
-      const content = readSkillSourceBytes(path, noFollowFlag);
+      const content = readSkillSourceBytes(path2, noFollowFlag);
       const sha256 = createHash4("sha256").update(content).digest("hex");
-      sources.push({ path, sha256, source, attestation: "observation_time_only" });
+      sources.push({ path: path2, sha256, source, attestation: "observation_time_only" });
     } catch {
-      sources.push({ path, sha256: "unreadable", source, attestation: "observation_time_only" });
+      sources.push({ path: path2, sha256: "unreadable", source, attestation: "observation_time_only" });
     }
   }
   return sources;
@@ -20386,17 +20557,17 @@ function loadPresets(options = {}) {
     join11(baseDir, "config", "presets.json"),
     join11(baseDir, "config", "specialists", "presets.json")
   ];
-  for (const path of paths) {
-    if (!existsSync14(path))
+  for (const path2 of paths) {
+    if (!existsSync14(path2))
       continue;
     try {
-      presetsCache = JSON.parse(readFileSync9(path, "utf-8"));
+      presetsCache = JSON.parse(readFileSync9(path2, "utf-8"));
       presetsCacheBaseDir = baseDir;
       return presetsCache;
     } catch (error) {
       presetsCache = null;
       presetsCacheBaseDir = null;
-      throw new SpecialistPresetConfigError(path, error);
+      throw new SpecialistPresetConfigError(path2, error);
     }
   }
   presetsCache = {};
@@ -20710,11 +20881,11 @@ class SpecialistExtensionSourceCollisionError extends Error {
     this.name = "SpecialistExtensionSourceCollisionError";
   }
 }
-function realpathOr(path) {
+function realpathOr(path2) {
   try {
-    return realpathSync4(path);
+    return realpathSync4(path2);
   } catch {
-    return path;
+    return path2;
   }
 }
 function resolveHomeDir() {
@@ -20811,7 +20982,7 @@ class SpecialistLoader {
       specialist: name,
       baseExecution,
       overrideExecution,
-      resolveValue: (path, value) => this.resolveOverrideValue(name, `specialist.execution.${path}`, value)
+      resolveValue: (path2, value) => this.resolveOverrideValue(name, `specialist.execution.${path2}`, value)
     });
     baseSpec.execution = baseExecution;
     const overridePrompt = overrideSpec.prompt ?? {};
@@ -20827,11 +20998,11 @@ class SpecialistLoader {
     baseSpec.prompt = basePrompt;
     const overrideStallDetection = overrideSpec.stall_detection ?? {};
     const baseStallDetection = baseSpec.stall_detection ?? {};
-    for (const path of OVERRIDE_ALLOWED_STALL_DETECTION_PATHS) {
-      const overrideValue = readDottedPath(overrideStallDetection, path);
+    for (const path2 of OVERRIDE_ALLOWED_STALL_DETECTION_PATHS) {
+      const overrideValue = readDottedPath(overrideStallDetection, path2);
       if (overrideValue === null || overrideValue === undefined)
         continue;
-      writeDottedPath(baseStallDetection, path, this.resolveOverrideValue(name, `specialist.stall_detection.${path}`, overrideValue));
+      writeDottedPath(baseStallDetection, path2, this.resolveOverrideValue(name, `specialist.stall_detection.${path2}`, overrideValue));
     }
     if (Object.keys(baseStallDetection).length > 0) {
       baseSpec.stall_detection = baseStallDetection;
@@ -20962,7 +21133,7 @@ class SpecialistLoader {
       specialist: name,
       baseExecution: execution,
       overrideExecution: execution,
-      resolveValue: (path, value) => this.resolveOverrideValue(name, `specialist.execution.${path}`, value)
+      resolveValue: (path2, value) => this.resolveOverrideValue(name, `specialist.execution.${path2}`, value)
     });
   }
   async list(category) {
@@ -21076,23 +21247,23 @@ class SpecialistLoader {
 }
 var PROTOTYPE_POLLUTION_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 function mergeExecutionExtensionOverrides(options) {
-  for (const path of OVERRIDE_ALLOWED_NESTED_EXECUTION_PATHS) {
-    if (path !== "extensions")
+  for (const path2 of OVERRIDE_ALLOWED_NESTED_EXECUTION_PATHS) {
+    if (path2 !== "extensions")
       continue;
-    const overrideValue = readDottedPath(options.overrideExecution, path);
+    const overrideValue = readDottedPath(options.overrideExecution, path2);
     if (!overrideValue || typeof overrideValue !== "object" || Array.isArray(overrideValue))
       continue;
-    const baseValue = readDottedPath(options.baseExecution, path);
+    const baseValue = readDottedPath(options.baseExecution, path2);
     const mergedExtensions = {
       ...baseValue && typeof baseValue === "object" && !Array.isArray(baseValue) ? baseValue : {}
     };
     for (const [key, value] of Object.entries(overrideValue)) {
       if (value === null || value === undefined)
         continue;
-      mergedExtensions[key] = options.resolveValue(`${path}.${key}`, value);
+      mergedExtensions[key] = options.resolveValue(`${path2}.${key}`, value);
     }
     rejectNpmSourceCollisions(options.specialist, mergedExtensions);
-    writeDottedPath(options.baseExecution, path, mergedExtensions);
+    writeDottedPath(options.baseExecution, path2, mergedExtensions);
   }
 }
 var NPM_NAME_RE = /^[a-z0-9][a-z0-9._~-]{0,213}$/;
@@ -22234,15 +22405,15 @@ function recordPath(repoRoot, activationId, messageId) {
 function replyPath(repoRoot, activationId, messageId) {
   return join16(interactionsRoot(repoRoot), activationId, `${messageId}.reply.json`);
 }
-function writeAtomic(path, value, exclusive = false) {
-  if (exclusive && existsSync17(path)) {
-    throw new Error(`interaction record already exists: ${path}`);
+function writeAtomic(path2, value, exclusive = false) {
+  if (exclusive && existsSync17(path2)) {
+    throw new Error(`interaction record already exists: ${path2}`);
   }
-  const tmp = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  const tmp = `${path2}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
   writeFileSync4(tmp, `${JSON.stringify(value, null, 2)}
 `, { mode: 384 });
   try {
-    renameSync2(tmp, path);
+    renameSync2(tmp, path2);
   } catch (err) {
     try {
       unlinkSync(tmp);
@@ -22250,11 +22421,11 @@ function writeAtomic(path, value, exclusive = false) {
     throw err;
   }
 }
-function readJson(path) {
-  if (!existsSync17(path))
+function readJson(path2) {
+  if (!existsSync17(path2))
     return;
   try {
-    return JSON.parse(readFileSync10(path, "utf-8"));
+    return JSON.parse(readFileSync10(path2, "utf-8"));
   } catch {
     return;
   }
@@ -22711,7 +22882,7 @@ function isDeliveredStatus(status) {
 }
 
 // src/activation/workspace-lease.ts
-import { execFileSync as execFileSync2, spawnSync as spawnSync4 } from "node:child_process";
+import { execFileSync as execFileSync2, spawnSync as spawnSync5 } from "node:child_process";
 import { createHash as createHash5 } from "node:crypto";
 import { appendFileSync as appendFileSync2, existsSync as existsSync19, linkSync, mkdirSync as mkdirSync7, readFileSync as readFileSync12, realpathSync as realpathSync5, renameSync as renameSync3, rmSync as rmSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "node:fs";
 import { basename as basename4, dirname as dirname12, join as join18 } from "node:path";
@@ -22803,12 +22974,12 @@ function provisionWriterWorkspace(cwd, issueRef, role) {
     if (!worktreePath) {
       const mainRoot = dirname12(git("rev-parse", "--path-format=absolute", "--git-common-dir"));
       worktreePath = join18(mainRoot, ".xtrm", "worktrees", `${basename4(mainRoot)}-sp-${roleSlug}-${slug}`);
-      if (spawnSync4("git", ["check-ignore", "-q", join18(worktreePath, "x")], { cwd: mainRoot }).status !== 0) {
+      if (spawnSync5("git", ["check-ignore", "-q", join18(worktreePath, "x")], { cwd: mainRoot }).status !== 0) {
         appendFileSync2(git("rev-parse", "--path-format=absolute", "--git-path", "info/exclude"), `
 /.xtrm/worktrees/
 `);
       }
-      const branchExists = spawnSync4("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd }).status === 0;
+      const branchExists = spawnSync5("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd }).status === 0;
       const base = branchExists ? undefined : resolveWorktreeBase(git);
       git("worktree", "add", ...base ? ["-b", branch, worktreePath, base] : [worktreePath, branch]);
       created = !branchExists;
@@ -22824,9 +22995,9 @@ function provisionWriterWorkspace(cwd, issueRef, role) {
   }
 }
 function removeWriterWorkspace(cwd, workspace) {
-  spawnSync4("git", ["worktree", "remove", "--force", workspace.worktreePath], { cwd, stdio: "ignore" });
+  spawnSync5("git", ["worktree", "remove", "--force", workspace.worktreePath], { cwd, stdio: "ignore" });
   if (workspace.branch)
-    spawnSync4("git", ["branch", "-D", workspace.branch], { cwd, stdio: "ignore" });
+    spawnSync5("git", ["branch", "-D", workspace.branch], { cwd, stdio: "ignore" });
 }
 function procLeaseProbe() {
   return {
@@ -22864,12 +23035,12 @@ function leasePath(workspace) {
   return join18(leaseDir(workspace), `${workspaceKey(workspace)}.json`);
 }
 function inspect(workspace, probe = procLeaseProbe()) {
-  const path = leasePath(workspace);
-  if (!existsSync19(path))
+  const path2 = leasePath(workspace);
+  if (!existsSync19(path2))
     return { state: "free" };
   let lease;
   try {
-    lease = JSON.parse(readFileSync12(path, "utf-8"));
+    lease = JSON.parse(readFileSync12(path2, "utf-8"));
     if (typeof lease?.holder?.pid !== "number")
       throw new Error("missing holder");
   } catch {
@@ -22888,10 +23059,10 @@ function inspect(workspace, probe = procLeaseProbe()) {
   return { state: "held", lease };
 }
 function releaseHolderLease(workspace, input) {
-  const path = leasePath(workspace);
+  const path2 = leasePath(workspace);
   let lease;
   try {
-    lease = JSON.parse(readFileSync12(path, "utf-8"));
+    lease = JSON.parse(readFileSync12(path2, "utf-8"));
   } catch {
     return { applied: false, reason: "already_free" };
   }
@@ -22900,7 +23071,7 @@ function releaseHolderLease(workspace, input) {
   }
   const at = input.now ?? Date.now();
   try {
-    appendFileSync2(join18(dirname12(path), "recoveries.jsonl"), `${JSON.stringify({
+    appendFileSync2(join18(dirname12(path2), "recoveries.jsonl"), `${JSON.stringify({
       workspace: workspace.worktreePath,
       holderActivationId: lease.activationId,
       holderPid: lease.holder.pid,
@@ -22909,7 +23080,7 @@ function releaseHolderLease(workspace, input) {
       recoveredAt: at
     })}
 `);
-    rmSync2(path, { force: true });
+    rmSync2(path2, { force: true });
   } catch {
     return { applied: false, reason: "not_recoverable" };
   }
@@ -22917,7 +23088,7 @@ function releaseHolderLease(workspace, input) {
 }
 function recoverDeadHolder(workspace, input) {
   const probe = input.probe ?? procLeaseProbe();
-  const path = leasePath(workspace);
+  const path2 = leasePath(workspace);
   const status = inspect(workspace, probe);
   if (status.state === "free")
     return { applied: false, reason: "already_free" };
@@ -22928,7 +23099,7 @@ function recoverDeadHolder(workspace, input) {
   }
   let current;
   try {
-    current = JSON.parse(readFileSync12(path, "utf-8"));
+    current = JSON.parse(readFileSync12(path2, "utf-8"));
   } catch {
     return { applied: false, reason: "already_free" };
   }
@@ -22937,7 +23108,7 @@ function recoverDeadHolder(workspace, input) {
   }
   const at = input.now ?? Date.now();
   try {
-    appendFileSync2(join18(dirname12(path), "recoveries.jsonl"), `${JSON.stringify({
+    appendFileSync2(join18(dirname12(path2), "recoveries.jsonl"), `${JSON.stringify({
       workspace: workspace.worktreePath,
       holderActivationId: status.lease.activationId,
       holderPid: status.lease.holder.pid,
@@ -22946,7 +23117,7 @@ function recoverDeadHolder(workspace, input) {
       recoveredAt: at
     })}
 `);
-    rmSync2(path, { force: true });
+    rmSync2(path2, { force: true });
   } catch {
     return { applied: false, reason: "not_recoverable", observedReason: status.uncertainReason };
   }
@@ -22954,7 +23125,7 @@ function recoverDeadHolder(workspace, input) {
 }
 function acquire(request, probe = procLeaseProbe()) {
   const { workspace, activationId, attemptId } = request;
-  const path = leasePath(workspace);
+  const path2 = leasePath(workspace);
   const status = inspect(workspace, probe);
   if (status.state === "held" && status.lease) {
     if (status.lease.activationId === activationId) {
@@ -22976,11 +23147,11 @@ function acquire(request, probe = procLeaseProbe()) {
     acquiredAtMs: Date.now()
   };
   mkdirSync7(leaseDir(workspace), { recursive: true, mode: 448 });
-  const staging = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  const staging = `${path2}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
   writeFileSync5(staging, `${JSON.stringify(lease, null, 2)}
 `, { mode: 384 });
   try {
-    linkSync(staging, path);
+    linkSync(staging, path2);
   } catch (err) {
     if (err.code === "EEXIST") {
       throw refusal("workspace_held_by_another_writer", request, inspect(workspace, probe));
@@ -22994,11 +23165,11 @@ function acquire(request, probe = procLeaseProbe()) {
   return lease;
 }
 function rewrite(workspace, lease) {
-  const path = leasePath(workspace);
-  const staging = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  const path2 = leasePath(workspace);
+  const staging = `${path2}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
   writeFileSync5(staging, `${JSON.stringify(lease, null, 2)}
 `, { mode: 384 });
-  renameSync3(staging, path);
+  renameSync3(staging, path2);
   return lease;
 }
 function release(workspace, activationId, probe = procLeaseProbe()) {
@@ -24357,9 +24528,9 @@ function createFileSettlementStore(root) {
   const pathFor = (activationId, attemptId) => join20(root, safeSegment(activationId), `${safeSegment(attemptId)}.json`);
   return {
     save(record2) {
-      const path = pathFor(record2.activationId, record2.attemptId);
+      const path2 = pathFor(record2.activationId, record2.attemptId);
       mkdirSync8(join20(root, safeSegment(record2.activationId)), { recursive: true });
-      writeFileSync6(path, JSON.stringify(record2), "utf8");
+      writeFileSync6(path2, JSON.stringify(record2), "utf8");
       return `${safeSegment(record2.activationId)}/${safeSegment(record2.attemptId)}.json`;
     },
     get(activationId, attemptId) {
@@ -24710,6 +24881,7 @@ class NativeActivationHost {
   workItemsDefault;
   forensics;
   loadSdk;
+  identityEnvRun;
   cwd;
   provisionWriterWorkspace;
   backgroundTaskAlive;
@@ -24727,6 +24899,8 @@ class NativeActivationHost {
   settlements;
   admission;
   republished = false;
+  liveIdentityEnv = [];
+  identityEnvBaseline = null;
   env;
   registry = new FleetRegistry;
   fleetEpoch = 0;
@@ -24748,6 +24922,7 @@ class NativeActivationHost {
     this.workItemsInjected = deps.workItems;
     this.forensics = withFleetWake(deps.forensics ?? NULL_FORENSIC_SINK, () => this.wakeFleetWaiters());
     this.loadSdk = deps.loadSdk ?? loadPiSdk;
+    this.identityEnvRun = deps.identityEnvRun;
     this.now = deps.now ?? (() => Date.now());
     this.wakeSettlement = deps.onWakeSettlement;
     this.sessionStatsTimeoutMs = deps.sessionStatsTimeoutMs;
@@ -24758,6 +24933,84 @@ class NativeActivationHost {
     this.toolDurationWarnMs = normalizeToolDurationWarnMs(deps.stallDetection?.tool_duration_warn_ms) ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms;
     this.toolDurationWarnMsByDep = normalizeToolDurationWarnMs(deps.stallDetection?.tool_duration_warn_ms);
     this.env = deps.env ?? process.env;
+  }
+  applyActivationIdentityEnv(activationId, specialistName, workspacePath) {
+    const launchEnv = resolveAgentLaunchEnv({
+      holder: specialistHolderName(specialistName, activationId),
+      roleName: specialistName,
+      cwd: workspacePath,
+      env: process.env,
+      run: this.identityEnvRun
+    });
+    const existing = this.liveIdentityEnv.findIndex((entry) => entry.activationId === activationId);
+    if (existing >= 0)
+      this.liveIdentityEnv.splice(existing, 1);
+    if (this.liveIdentityEnv.length === 0)
+      this.identityEnvBaseline = snapshotIdentityEnv(process.env);
+    this.liveIdentityEnv.push({ activationId, env: launchEnv });
+    this.writeIdentityEnv(launchEnv);
+  }
+  writeIdentityEnv(env) {
+    clearIdentityEnv(process.env);
+    Object.assign(process.env, env);
+  }
+  identityEnvMatches(env) {
+    const current = snapshotIdentityEnv(process.env);
+    for (const key of new Set([...Object.keys(env), ...Object.keys(current)])) {
+      if (!isIdentityManagedKey(key))
+        continue;
+      if ((current[key] ?? "") !== (env[key] ?? ""))
+        return false;
+    }
+    return true;
+  }
+  assertActivationIdentityEnv(snapshot) {
+    const previousTop = this.liveIdentityEnv[this.liveIdentityEnv.length - 1]?.activationId;
+    const index = this.liveIdentityEnv.findIndex((entry2) => entry2.activationId === snapshot.activationId);
+    if (index < 0) {
+      this.applyActivationIdentityEnv(snapshot.activationId, snapshot.specialist, snapshot.workspace?.worktreePath ?? this.cwd);
+      this.warnIdentityTakeover(snapshot.activationId, previousTop);
+      return;
+    }
+    const entry = this.liveIdentityEnv[index];
+    const isTop = index === this.liveIdentityEnv.length - 1;
+    if (isTop && this.identityEnvMatches(entry.env))
+      return;
+    this.liveIdentityEnv.splice(index, 1);
+    this.liveIdentityEnv.push(entry);
+    this.writeIdentityEnv(entry.env);
+    this.warnIdentityTakeover(snapshot.activationId, previousTop);
+  }
+  warnIdentityTakeover(activationId, previousTop) {
+    if (!previousTop || previousTop === activationId || this.liveIdentityEnv.length < 2)
+      return;
+    warnIdentityEnv(`activation ${activationId} started a leg and took process env from ${previousTop}; ${this.liveIdentityEnv.length} activations are live`);
+  }
+  shutdown() {
+    this.liveIdentityEnv.length = 0;
+    const baseline = this.identityEnvBaseline;
+    this.identityEnvBaseline = null;
+    if (baseline)
+      restoreIdentityEnv(baseline, process.env);
+  }
+  settleActivationIdentityEnv(activationId) {
+    const index = this.liveIdentityEnv.findIndex((entry) => entry.activationId === activationId);
+    if (index < 0)
+      return;
+    const wasTop = index === this.liveIdentityEnv.length - 1;
+    this.liveIdentityEnv.splice(index, 1);
+    if (!wasTop)
+      return;
+    const top = this.liveIdentityEnv[this.liveIdentityEnv.length - 1];
+    if (!top) {
+      const baseline = this.identityEnvBaseline;
+      this.identityEnvBaseline = null;
+      if (baseline)
+        restoreIdentityEnv(baseline, process.env);
+      return;
+    }
+    this.writeIdentityEnv(top.env);
+    warnIdentityEnv(`activation ${activationId} settled while ${this.liveIdentityEnv.length} others are live; process env now carries ${top.activationId}`);
   }
   async start(request) {
     const activationId = `act:${randomUUID4().slice(0, 12)}`;
@@ -24802,6 +25055,7 @@ class NativeActivationHost {
       release2();
     };
     const reject = (reason, detail = {}) => {
+      this.settleActivationIdentityEnv(activationId);
       releaseLeaseOnRefusal();
       releaseClaimForRefusal();
       removeWorkspaceOnRefusal();
@@ -25274,19 +25528,19 @@ class NativeActivationHost {
       self: participantId,
       parent: request.requestedByParticipantId,
       onAsk: (kind, body) => {
-        const record3 = this.registry.get(activationId);
-        if (record3)
-          record3.snapshot.state = kind === "escalation" ? "escalated" : "needs_reply";
-        if (record3)
-          this.save(record3.snapshot);
+        const record2 = this.registry.get(activationId);
+        if (record2)
+          record2.snapshot.state = kind === "escalation" ? "escalated" : "needs_reply";
+        if (record2)
+          this.save(record2.snapshot);
         emit2(kind === "escalation" ? "escalation_raised" : "clarification_requested", { body });
       },
       onAnswered: (kind) => {
-        const record3 = this.registry.get(activationId);
-        if (record3)
-          record3.snapshot.state = "running";
-        if (record3)
-          this.save(record3.snapshot);
+        const record2 = this.registry.get(activationId);
+        if (record2)
+          record2.snapshot.state = "running";
+        if (record2)
+          this.save(record2.snapshot);
         emit2(kind === "escalation" ? "escalation_resolved" : "clarification_answered");
       }
     });
@@ -25317,241 +25571,247 @@ class NativeActivationHost {
     if (nativeGuard && curatedExtensions.all.includes(nativeGuard.path)) {
       Object.assign(process.env, nativeGuard.tierEnv);
     }
-    const resourceLoader = createActivationResourceLoader(sdk, {
-      cwd: workspace.worktreePath,
-      skillPaths: specialist.specialist.skills?.paths ?? [],
-      extensionPaths: [...curatedExtensions.all, ...dynamicExtensions]
-    });
-    await resourceLoader.reload();
-    const baseSessionOptions = {
-      customTools: [...askTools, ...guardedTools.tools],
-      cwd: workspace.worktreePath,
-      ...claudeBridge ? { modelRuntime } : {},
-      resourceLoader,
-      model: modelCheck.model,
-      ...thinkingLevel ? { thinkingLevel } : {},
-      noTools: "builtin",
-      tools: [...effectiveToolContract.toolsList, ASK_TOOL, ESCALATE_TOOL],
-      systemPrompt: systemPrompt.text
-    };
-    const PROMISED_TOOLS = [...effectiveToolContract.toolsList];
-    const missingPromisedTools = (candidate) => {
-      const active = new Set(candidate.getActiveToolNames());
-      return PROMISED_TOOLS.filter((tool) => !active.has(tool));
-    };
-    const createVerifiedSession = async (model, options = {}) => {
-      const created = await sdk.createAgentSession({ ...baseSessionOptions, model });
-      const missing = missingPromisedTools(created.session);
-      if (missing.length > 0) {
-        created.session.dispose();
-        const detail = {
-          missing,
-          ...autoCreatedRef ? { created_ref: autoCreatedRef } : {},
-          note: `the session did not expose ${missing.join(", ")}; the resolved contract promised them, ` + "and a native activation is never launched with a smaller tool surface than its contract declares"
-        };
-        if (options.viaFallback) {
-          emit2("tool_contract_unsatisfied_on_fallback", { missing, model: model.id ?? null });
-          throw new DispatchRejectedError("tool_contract_unsatisfied", {
-            specialist: request.specialist,
-            issueRef: request.issueRef,
-            ...detail
-          });
-        }
-        return reject("tool_contract_unsatisfied", detail);
-      }
-      const provisionalPattern = provisionalModelPatterns.get(model);
-      if (provisionalPattern) {
-        let resolvedModel2;
-        try {
-          const scope = await sdk.resolveModelScopeWithDiagnostics([provisionalPattern], modelRuntime);
-          resolvedModel2 = scope.scopedModels?.[0]?.model;
-        } catch {
-          resolvedModel2 = undefined;
-        }
-        if (!resolvedModel2) {
+    this.applyActivationIdentityEnv(activationId, specialist.specialist.metadata.name, workspace.worktreePath);
+    try {
+      const resourceLoader = createActivationResourceLoader(sdk, {
+        cwd: workspace.worktreePath,
+        skillPaths: specialist.specialist.skills?.paths ?? [],
+        extensionPaths: [...curatedExtensions.all, ...dynamicExtensions]
+      });
+      await resourceLoader.reload();
+      const baseSessionOptions = {
+        customTools: [...askTools, ...guardedTools.tools],
+        cwd: workspace.worktreePath,
+        ...claudeBridge ? { modelRuntime } : {},
+        resourceLoader,
+        model: modelCheck.model,
+        ...thinkingLevel ? { thinkingLevel } : {},
+        noTools: "builtin",
+        tools: [...effectiveToolContract.toolsList, ASK_TOOL, ESCALATE_TOOL],
+        systemPrompt: systemPrompt.text
+      };
+      const PROMISED_TOOLS = [...effectiveToolContract.toolsList];
+      const missingPromisedTools = (candidate) => {
+        const active = new Set(candidate.getActiveToolNames());
+        return PROMISED_TOOLS.filter((tool) => !active.has(tool));
+      };
+      const createVerifiedSession = async (model, options = {}) => {
+        const created = await sdk.createAgentSession({ ...baseSessionOptions, model });
+        const missing = missingPromisedTools(created.session);
+        if (missing.length > 0) {
           created.session.dispose();
           const detail = {
-            requestedModel: provisionalPattern,
-            note: `the "${CLAUDE_BRIDGE_PROVIDER}" provider did not register on the session runtime, so ` + `"${provisionalPattern}" does not exist; the extension is installed but did not load its provider`
+            missing,
+            ...autoCreatedRef ? { created_ref: autoCreatedRef } : {},
+            note: `the session did not expose ${missing.join(", ")}; the resolved contract promised them, ` + "and a native activation is never launched with a smaller tool surface than its contract declares"
           };
           if (options.viaFallback) {
-            throw new DispatchRejectedError("model_unavailable", {
+            emit2("tool_contract_unsatisfied_on_fallback", { missing, model: model.id ?? null });
+            throw new DispatchRejectedError("tool_contract_unsatisfied", {
               specialist: request.specialist,
               issueRef: request.issueRef,
               ...detail
             });
           }
-          return reject("model_unavailable", detail);
+          return reject("tool_contract_unsatisfied", detail);
         }
-        const installModel = created.session.setModel;
-        if (typeof installModel !== "function") {
-          created.session.dispose();
-          const detail = {
-            requestedModel: provisionalPattern,
-            note: `this pi SDK session has no setModel, so "${provisionalPattern}" cannot be installed; ` + "a provisionally admitted model is never run on the gate placeholder"
-          };
-          if (options.viaFallback) {
-            throw new DispatchRejectedError("model_unavailable", {
-              specialist: request.specialist,
-              issueRef: request.issueRef,
-              ...detail
-            });
+        const provisionalPattern = provisionalModelPatterns.get(model);
+        if (provisionalPattern) {
+          let resolvedModel2;
+          try {
+            const scope = await sdk.resolveModelScopeWithDiagnostics([provisionalPattern], modelRuntime);
+            resolvedModel2 = scope.scopedModels?.[0]?.model;
+          } catch {
+            resolvedModel2 = undefined;
           }
-          return reject("model_unavailable", detail);
-        }
-        try {
-          await installModel.call(created.session, resolvedModel2);
-        } catch (error) {
-          created.session.dispose();
-          const detail = {
-            requestedModel: provisionalPattern,
-            note: `resolved "${provisionalPattern}" but could not install it on the session: ${error instanceof Error ? error.message : String(error)}`
-          };
-          if (options.viaFallback) {
-            throw new DispatchRejectedError("model_unavailable", {
-              specialist: request.specialist,
-              issueRef: request.issueRef,
-              ...detail
-            });
+          if (!resolvedModel2) {
+            created.session.dispose();
+            const detail = {
+              requestedModel: provisionalPattern,
+              note: `the "${CLAUDE_BRIDGE_PROVIDER}" provider did not register on the session runtime, so ` + `"${provisionalPattern}" does not exist; the extension is installed but did not load its provider`
+            };
+            if (options.viaFallback) {
+              throw new DispatchRejectedError("model_unavailable", {
+                specialist: request.specialist,
+                issueRef: request.issueRef,
+                ...detail
+              });
+            }
+            return reject("model_unavailable", detail);
           }
-          return reject("model_unavailable", detail);
-        }
-        if (thinkingLevel) {
-          const applyThinking = created.session.setThinkingLevel;
-          if (typeof applyThinking !== "function") {
-            emit2("thinking_level_unavailable", {
-              requested_level: thinkingLevel,
-              note: "this pi SDK session has no setThinkingLevel; the run continues at the default thinking level"
-            });
-          } else {
-            try {
-              applyThinking.call(created.session, thinkingLevel);
-            } catch (error) {
-              created.session.dispose();
-              const detail = {
-                requestedModel: provisionalPattern,
-                note: `installed "${provisionalPattern}" but could not re-apply thinking level "${thinkingLevel}": ${error instanceof Error ? error.message : String(error)}`
-              };
-              if (options.viaFallback) {
-                throw new DispatchRejectedError("model_unavailable", {
-                  specialist: request.specialist,
-                  issueRef: request.issueRef,
-                  ...detail
-                });
+          const installModel = created.session.setModel;
+          if (typeof installModel !== "function") {
+            created.session.dispose();
+            const detail = {
+              requestedModel: provisionalPattern,
+              note: `this pi SDK session has no setModel, so "${provisionalPattern}" cannot be installed; ` + "a provisionally admitted model is never run on the gate placeholder"
+            };
+            if (options.viaFallback) {
+              throw new DispatchRejectedError("model_unavailable", {
+                specialist: request.specialist,
+                issueRef: request.issueRef,
+                ...detail
+              });
+            }
+            return reject("model_unavailable", detail);
+          }
+          try {
+            await installModel.call(created.session, resolvedModel2);
+          } catch (error) {
+            created.session.dispose();
+            const detail = {
+              requestedModel: provisionalPattern,
+              note: `resolved "${provisionalPattern}" but could not install it on the session: ${error instanceof Error ? error.message : String(error)}`
+            };
+            if (options.viaFallback) {
+              throw new DispatchRejectedError("model_unavailable", {
+                specialist: request.specialist,
+                issueRef: request.issueRef,
+                ...detail
+              });
+            }
+            return reject("model_unavailable", detail);
+          }
+          if (thinkingLevel) {
+            const applyThinking = created.session.setThinkingLevel;
+            if (typeof applyThinking !== "function") {
+              emit2("thinking_level_unavailable", {
+                requested_level: thinkingLevel,
+                note: "this pi SDK session has no setThinkingLevel; the run continues at the default thinking level"
+              });
+            } else {
+              try {
+                applyThinking.call(created.session, thinkingLevel);
+              } catch (error) {
+                created.session.dispose();
+                const detail = {
+                  requestedModel: provisionalPattern,
+                  note: `installed "${provisionalPattern}" but could not re-apply thinking level "${thinkingLevel}": ${error instanceof Error ? error.message : String(error)}`
+                };
+                if (options.viaFallback) {
+                  throw new DispatchRejectedError("model_unavailable", {
+                    specialist: request.specialist,
+                    issueRef: request.issueRef,
+                    ...detail
+                  });
+                }
+                return reject("model_unavailable", detail);
               }
-              return reject("model_unavailable", detail);
             }
           }
         }
+        return created.session;
+      };
+      const session = await createVerifiedSession(modelCheck.model);
+      let binding;
+      try {
+        binding = await workItems.bind({
+          ref: issueRef,
+          specialist: request.specialist,
+          holder: participantId,
+          activationId,
+          attemptId,
+          sessionId: session.sessionId,
+          workspace: workspace.worktreePath
+        });
+      } catch (error) {
+        try {
+          session.dispose();
+        } catch {}
+        return reject("issue_binding_failed", {
+          note: error instanceof Error ? error.message : String(error)
+        });
       }
-      return created.session;
-    };
-    const session = await createVerifiedSession(modelCheck.model);
-    let binding;
-    try {
-      binding = await workItems.bind({
-        ref: issueRef,
-        specialist: request.specialist,
-        holder: participantId,
+      const boundContextHash = binding.resolvedContextHash;
+      if (resolvedContext && (typeof boundContextHash !== "string" || boundContextHash !== resolvedContext.hash)) {
+        try {
+          session.dispose();
+        } catch {}
+        return reject("context_changed", {
+          note: "contextRefs changed between prompt render and binding; re-dispatch to render the current context",
+          rendered_context_hash: resolvedContext.hash,
+          bound_context_hash: boundContextHash
+        });
+      }
+      const createSessionForModel = (model) => createVerifiedSession(model, { viaFallback: true });
+      const purpose = purposeExcerptFromContract(view.contract);
+      const startedAt = this.now();
+      const toolContractNotes = [...new Set([...effectiveToolContract.warnings, ...effectiveToolContract.downgradeReasons])];
+      const configNotes = legacyOnlyConfigNotes(specialist.specialist);
+      const snapshot = {
         activationId,
+        participantId,
         attemptId,
-        sessionId: session.sessionId,
-        workspace: workspace.worktreePath
+        specialist: request.specialist,
+        issueId: view.issueId,
+        issueRef: view.ref,
+        issueRevision: binding.issueRevision,
+        contractHash: binding.contractHash,
+        executionBindingId: binding.id,
+        state: "starting",
+        access,
+        workspace,
+        ...leaseWaiver ? { leaseWaiver: true } : {},
+        piSessionId: session.sessionId,
+        configuredModel,
+        requestedModel,
+        resolvedModel,
+        modelOverride: Boolean(request.modelOverride),
+        ...thinkingLevel ? { thinkingLevel } : {},
+        thinkingOverride: request.thinkingOverride !== undefined,
+        turnCount: 0,
+        ...purpose ? { purpose } : {},
+        startedAt,
+        lastActivityAt: startedAt,
+        ...toolContractNotes.length > 0 ? { toolContractNotes } : {},
+        ...configNotes.length > 0 ? { configNotes } : {}
+      };
+      emit2("activation_started", { pi_session_id: session.sessionId });
+      const unsubscribe = session.subscribe((event) => this.onSessionEvent(snapshot, event, emit2));
+      const record2 = {
+        snapshot,
+        session,
+        unsubscribe,
+        result: undefined,
+        stepContract,
+        initialPrompt: rendered.initial_prompt,
+        createSession: createSessionForModel,
+        lineage: {
+          ...request.requestedByParticipantId ? { coordinatorParticipantId: request.requestedByParticipantId } : {},
+          ...request.coordinatorSessionId ? { coordinatorSessionId: request.coordinatorSessionId } : {}
+        },
+        workItems,
+        ...typeof binding.baseCommit === "string" && binding.baseCommit.trim() !== "" ? { bindingBaseCommit: binding.baseCommit } : {}
+      };
+      const result = this.runWithFallback(record2, {
+        modelChain,
+        modelIndex,
+        sdk,
+        modelRuntime,
+        initialPrompt: rendered.initial_prompt,
+        emit: emit2
       });
+      record2.result = result;
+      this.registry.register(record2);
+      this.save(snapshot);
+      releaseOwnLease = null;
+      return {
+        activationId,
+        participantId,
+        attemptId,
+        specialist: request.specialist,
+        issueId: view.issueId,
+        issueRef: view.ref,
+        access,
+        workspace,
+        resolvedModel,
+        stepContract,
+        result
+      };
     } catch (error) {
-      try {
-        session.dispose();
-      } catch {}
-      return reject("issue_binding_failed", {
-        note: error instanceof Error ? error.message : String(error)
-      });
+      this.settleActivationIdentityEnv(activationId);
+      throw error;
     }
-    const boundContextHash = binding.resolvedContextHash;
-    if (resolvedContext && (typeof boundContextHash !== "string" || boundContextHash !== resolvedContext.hash)) {
-      try {
-        session.dispose();
-      } catch {}
-      return reject("context_changed", {
-        note: "contextRefs changed between prompt render and binding; re-dispatch to render the current context",
-        rendered_context_hash: resolvedContext.hash,
-        bound_context_hash: boundContextHash
-      });
-    }
-    const createSessionForModel = (model) => createVerifiedSession(model, { viaFallback: true });
-    const purpose = purposeExcerptFromContract(view.contract);
-    const startedAt = this.now();
-    const toolContractNotes = [...new Set([...effectiveToolContract.warnings, ...effectiveToolContract.downgradeReasons])];
-    const configNotes = legacyOnlyConfigNotes(specialist.specialist);
-    const snapshot = {
-      activationId,
-      participantId,
-      attemptId,
-      specialist: request.specialist,
-      issueId: view.issueId,
-      issueRef: view.ref,
-      issueRevision: binding.issueRevision,
-      contractHash: binding.contractHash,
-      executionBindingId: binding.id,
-      state: "starting",
-      access,
-      workspace,
-      ...leaseWaiver ? { leaseWaiver: true } : {},
-      piSessionId: session.sessionId,
-      configuredModel,
-      requestedModel,
-      resolvedModel,
-      modelOverride: Boolean(request.modelOverride),
-      ...thinkingLevel ? { thinkingLevel } : {},
-      thinkingOverride: request.thinkingOverride !== undefined,
-      turnCount: 0,
-      ...purpose ? { purpose } : {},
-      startedAt,
-      lastActivityAt: startedAt,
-      ...toolContractNotes.length > 0 ? { toolContractNotes } : {},
-      ...configNotes.length > 0 ? { configNotes } : {}
-    };
-    emit2("activation_started", { pi_session_id: session.sessionId });
-    const unsubscribe = session.subscribe((event) => this.onSessionEvent(snapshot, event, emit2));
-    const record2 = {
-      snapshot,
-      session,
-      unsubscribe,
-      result: undefined,
-      stepContract,
-      initialPrompt: rendered.initial_prompt,
-      createSession: createSessionForModel,
-      lineage: {
-        ...request.requestedByParticipantId ? { coordinatorParticipantId: request.requestedByParticipantId } : {},
-        ...request.coordinatorSessionId ? { coordinatorSessionId: request.coordinatorSessionId } : {}
-      },
-      workItems,
-      ...typeof binding.baseCommit === "string" && binding.baseCommit.trim() !== "" ? { bindingBaseCommit: binding.baseCommit } : {}
-    };
-    const result = this.runWithFallback(record2, {
-      modelChain,
-      modelIndex,
-      sdk,
-      modelRuntime,
-      initialPrompt: rendered.initial_prompt,
-      emit: emit2
-    });
-    record2.result = result;
-    this.registry.register(record2);
-    this.save(snapshot);
-    releaseOwnLease = null;
-    return {
-      activationId,
-      participantId,
-      attemptId,
-      specialist: request.specialist,
-      issueId: view.issueId,
-      issueRef: view.ref,
-      access,
-      workspace,
-      resolvedModel,
-      stepContract,
-      result
-    };
   }
   async resolveWorkItems() {
     if (this.workItemsInjected)
@@ -25623,6 +25883,7 @@ class NativeActivationHost {
         break;
       case "agent_start":
         this.noteWakeTurnStart(snapshot);
+        this.assertActivationIdentityEnv(snapshot);
         snapshot.state = "running";
         this.save(snapshot);
         emit2("turn_started");
@@ -25646,6 +25907,8 @@ class NativeActivationHost {
             this.finalizeWakeTurn(snapshot, record2, emit2).finally(() => {
               this.wakeFinalising.delete(snapshot.activationId);
             });
+          } else {
+            this.settleActivationIdentityEnv(snapshot.activationId);
           }
         }
         break;
@@ -25856,6 +26119,7 @@ class NativeActivationHost {
     } catch (error) {
       snapshot.state = "failed";
       this.save(snapshot);
+      this.settleActivationIdentityEnv(snapshot.activationId);
       const message = error instanceof Error ? error.message : String(error);
       await recordSettlementOnce();
       emit2("activation_failed", { error: message });
@@ -25892,6 +26156,7 @@ class NativeActivationHost {
       const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
       snapshot.state = "failed";
       this.save(snapshot);
+      this.settleActivationIdentityEnv(snapshot.activationId);
       emit2("activation_failed", { error: detail, stop_reason: last.stopReason });
       const failedResult = {
         activationId: snapshot.activationId,
@@ -25970,7 +26235,9 @@ class NativeActivationHost {
       const session = record2.session;
       await this.captureSessionStats(session, emit2);
       this.settleTurnTail(snapshot, session, emit2, record2, { notifyWake: true });
-    } catch {}
+    } catch {} finally {
+      this.settleActivationIdentityEnv(snapshot.activationId);
+    }
   }
   notifyWakeSettlement(result) {
     const notify = this.wakeSettlement;
@@ -26041,6 +26308,7 @@ class NativeActivationHost {
       return await this.walkFallbackChain(record2, ctx, legEmit, flushFailure, index, fallbackUsed);
     } finally {
       flushFailure(false);
+      this.settleActivationIdentityEnv(record2.snapshot.activationId);
     }
   }
   async walkFallbackChain(record2, ctx, legEmit, flushFailure, index, fallbackUsed) {
@@ -26254,7 +26522,7 @@ class NativeActivationHost {
       model_override: record2.snapshot.modelOverride,
       reused_session: reusedSession
     });
-    const result = this.runToSettled(record2.snapshot, record2.session, opts?.prompt ?? record2.initialPrompt, emit2, record2);
+    const result = this.runToSettled(record2.snapshot, record2.session, opts?.prompt ?? record2.initialPrompt, emit2, record2).finally(() => this.settleActivationIdentityEnv(activationId));
     record2.result = result;
     return {
       activationId,
@@ -26420,6 +26688,7 @@ class NativeActivationHost {
     } finally {
       this.stopToolDurationWatch(activationId);
       this.toolDurationWarnMsByActivation.delete(activationId);
+      this.settleActivationIdentityEnv(activationId);
       this.forgetBackgroundTasks(activationId);
       this.wakeDirty.delete(activationId);
       this.wakeFinalising.delete(activationId);
@@ -26530,7 +26799,7 @@ class NativeActivationHost {
     });
     record2.unsubscribe();
     record2.unsubscribe = record2.session.subscribe((event) => this.onSessionEvent(record2.snapshot, event, emit2));
-    const result = this.runToSettled(record2.snapshot, record2.session, prompt, emit2, record2);
+    const result = this.runToSettled(record2.snapshot, record2.session, prompt, emit2, record2).finally(() => this.settleActivationIdentityEnv(activationId));
     record2.result = result;
     return {
       activationId,
@@ -26642,15 +26911,15 @@ import { createHash as createHash6 } from "node:crypto";
 import { readFileSync as readFileSync14 } from "node:fs";
 var BUILD_ID_BYTES = 12;
 var UNKNOWN_BUILD_ID = "unknown";
-function hashFileBytes(path) {
-  return createHash6("sha256").update(readFileSync14(path)).digest("hex");
+function hashFileBytes(path2) {
+  return createHash6("sha256").update(readFileSync14(path2)).digest("hex");
 }
 function shortBuildId(hash) {
   return hash.slice(0, BUILD_ID_BYTES);
 }
-function readBuildId(path) {
+function readBuildId(path2) {
   try {
-    return shortBuildId(hashFileBytes(path));
+    return shortBuildId(hashFileBytes(path2));
   } catch {
     return UNKNOWN_BUILD_ID;
   }
@@ -27036,9 +27305,9 @@ function toActivationResultView(result) {
 }
 var DIST_LIB_PATH = (() => {
   for (const candidate of ["./lib.js", "../../../dist/lib.js"]) {
-    const path = fileURLToPath6(new URL(candidate, import.meta.url));
-    if (existsSync22(path))
-      return path;
+    const path2 = fileURLToPath6(new URL(candidate, import.meta.url));
+    if (existsSync22(path2))
+      return path2;
   }
   return fileURLToPath6(new URL("../../../dist/lib.js", import.meta.url));
 })();
@@ -27685,10 +27954,10 @@ function createSpecialistFeedTool(getHost, openObservability = () => createObser
   };
 }
 // src/specialist/bead-gate.ts
-import { spawnSync as spawnSync5 } from "node:child_process";
+import { spawnSync as spawnSync6 } from "node:child_process";
 var NON_DISPATCHABLE_STATUSES = new Set(["closed", "deferred"]);
 function readContractState(beadId) {
-  const result = spawnSync5("bd", ["state", beadId, "contract"], {
+  const result = spawnSync6("bd", ["state", beadId, "contract"], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "ignore"],
     timeout: 5000
@@ -27985,26 +28254,26 @@ function positiveInteger(value, fallback, name) {
   }
   return resolved;
 }
-async function safeCitationPath(path, trustedRoot = process.cwd()) {
-  if (/[\u0000-\u001f\u007f]/u.test(path)) {
+async function safeCitationPath(path2, trustedRoot = process.cwd()) {
+  if (/[\u0000-\u001f\u007f]/u.test(path2)) {
     throw new TypeError("path must not contain control characters");
   }
-  if (isAbsolute4(path)) {
+  if (isAbsolute4(path2)) {
     throw new TypeError("path must be relative to trusted root");
   }
-  if (path.split(/[\\/]/u).includes("..")) {
+  if (path2.split(/[\\/]/u).includes("..")) {
     throw new TypeError("path must remain within trusted root");
   }
   const canonicalRoot = await realpath(trustedRoot);
-  const canonicalPath = await realpath(resolve11(canonicalRoot, path));
+  const canonicalPath = await realpath(resolve11(canonicalRoot, path2));
   const pathFromRoot = relative3(canonicalRoot, canonicalPath);
   if (pathFromRoot === ".." || pathFromRoot.startsWith(`..${resolve11("/").slice(0, 1)}`) || isAbsolute4(pathFromRoot)) {
     throw new TypeError("path must remain within trusted root");
   }
   return canonicalPath;
 }
-async function readVerifiedCitationWindow(path, options = {}) {
-  const resolvedPath = await safeCitationPath(path, options.trustedRoot);
+async function readVerifiedCitationWindow(path2, options = {}) {
+  const resolvedPath = await safeCitationPath(path2, options.trustedRoot);
   const offset = positiveInteger(options.offset, 1, "offset");
   const limit = options.limit === undefined ? undefined : positiveInteger(options.limit, 1, "limit");
   const maxLines = positiveInteger(options.maxLines, 2000, "maxLines");
@@ -28039,7 +28308,7 @@ async function readVerifiedCitationWindow(path, options = {}) {
   const complete = consumedThrough >= totalLines;
   return {
     source: "deterministic_file_read",
-    path,
+    path: path2,
     trustedRoot: options.trustedRoot ?? process.cwd(),
     offset,
     totalLines,
@@ -28148,8 +28417,8 @@ function removeLease(workspace) {
 function keyFor(workspace, lease) {
   return lease?.workspaceKey ?? basenameKey(leasePath(workspace));
 }
-function basenameKey(path) {
-  const file = path.slice(path.lastIndexOf("/") + 1);
+function basenameKey(path2) {
+  const file = path2.slice(path2.lastIndexOf("/") + 1);
   return file.endsWith(".json") ? file.slice(0, -5) : file;
 }
 function reconciliationLogPath(workspace) {
@@ -28160,11 +28429,11 @@ function appendRecord(workspace, record2) {
   appendFileSync3(reconciliationLogPath(workspace), `${JSON.stringify(record2)}
 `, { mode: 384 });
 }
-function readLogAt(path) {
-  if (!existsSync23(path))
+function readLogAt(path2) {
+  if (!existsSync23(path2))
     return [];
   const out = [];
-  for (const line of readFileSync15(path, "utf-8").split(`
+  for (const line of readFileSync15(path2, "utf-8").split(`
 `)) {
     if (!line.trim())
       continue;
@@ -28244,9 +28513,9 @@ function projectUncertainWorkspaces(scope, probe = procLeaseProbe()) {
   }
   return out;
 }
-function readLeaseFile(path) {
+function readLeaseFile(path2) {
   try {
-    const lease = JSON.parse(readFileSync15(path, "utf-8"));
+    const lease = JSON.parse(readFileSync15(path2, "utf-8"));
     return typeof lease?.holder?.pid === "number" && typeof lease.worktreePath === "string" ? lease : undefined;
   } catch {
     return;
