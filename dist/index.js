@@ -59612,11 +59612,17 @@ function provisionWriterWorkspace(cwd, issueRef, role) {
     if (!worktreePath) {
       const mainRoot = dirname25(git("rev-parse", "--path-format=absolute", "--git-common-dir"));
       worktreePath = join53(mainRoot, ".xtrm", "worktrees", `${basename12(mainRoot)}-sp-${roleSlug}-${slug}`);
-      if (spawnSync27("git", ["check-ignore", "-q", join53(worktreePath, "x")], { cwd: mainRoot }).status !== 0) {
-        appendFileSync7(git("rev-parse", "--path-format=absolute", "--git-path", "info/exclude"), `
-/.xtrm/worktrees/
-`);
-      }
+      const excludePath = git("rev-parse", "--path-format=absolute", "--git-path", "info/exclude");
+      let additions = "";
+      if (spawnSync27("git", ["check-ignore", "-q", join53(mainRoot, ".xtrm", "worktrees", "x")], { cwd: mainRoot }).status !== 0)
+        additions += `/.xtrm/worktrees/
+`;
+      if (spawnSync27("git", ["check-ignore", "-q", join53(mainRoot, ".specialists", "x")], { cwd: mainRoot }).status !== 0)
+        additions += `/.specialists/
+`;
+      if (additions)
+        appendFileSync7(excludePath, `
+` + additions);
       const branchExists = spawnSync27("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd }).status === 0;
       const base = branchExists ? undefined : resolveWorktreeBase(git);
       git("worktree", "add", ...base ? ["-b", branch, worktreePath, base] : [worktreePath, branch]);
