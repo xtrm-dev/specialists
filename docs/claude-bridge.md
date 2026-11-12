@@ -64,8 +64,10 @@ For Specialist `N`:
 
 1. `enabled !== true`: no injection, the route is off for every Specialist.
 2. `specialists` absent: **legacy rule** — the merged definition flag decides and the machine
-   switch is the gate. Nothing changes for an existing home-layer setup; `sp doctor` reports this
-   shape as legacy once an allow list exists.
+   switch is the gate. Nothing changes for an existing home-layer setup. While no allow list
+   exists, `sp doctor` reports this shape as legacy and suggests writing one; the warning is about
+   the shape, not about a list being present — adding a list removes it, because the list then
+   decides.
 3. `specialists` present (including `[]`): the list is authoritative both ways. A listed `N` gets
    `execution.claude_bridge = true` and `execution.model = models[N] ?? default_model`; an unlisted
    `N` gets `execution.claude_bridge = false` even when a home or repository layer set it.
@@ -231,10 +233,11 @@ can become the merge base, but a name does not enter the list unless the operato
 
 ## Troubleshooting
 
-`claude_bridge_unavailable` is emitted only when **both** switches are on and the extension lookup
-then fails; a route that is merely off never produces it (it refuses with `model_unavailable`). The
-refusal note names `SPECIALISTS_CLAUDE_BRIDGE_PATH`, the install command, the store it lands in, and
-lists every path searched. The common
+`claude_bridge_unavailable` is emitted only when the route is enabled for that Specialist — named
+by the operator allow list, or, in the legacy shape, by the definition flag — and the extension
+lookup then fails; a route that is merely off never produces it (it refuses with
+`model_unavailable`). The refusal note names `SPECIALISTS_CLAUDE_BRIDGE_PATH`, the install command,
+the store it lands in, and lists every path searched. The common
 causes are a bridge installed into a project directory (never searched), a `pi install` that landed
 in a different `agentDir`, or a relative `SPECIALISTS_CLAUDE_BRIDGE_PATH`.
 

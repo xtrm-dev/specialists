@@ -1,8 +1,14 @@
 # The Claude Code route as a user-scope switch (SPECIALISTS-4439)
 
-Scoping document. It states how the route resolves today, what is broken or stale at this revision,
-compares the user-scope shapes, and proposes one shape plus an implementation contract. It does not
-implement the change and it does not edit any real HOME file.
+**Status: approved and implemented.** The operator chose Option A (§5) and the shipped behaviour is
+SPECIALISTS-4442 (merged as `36b89e24`); [`claude-bridge.md`](./claude-bridge.md) is the normative
+description of what runs, and this document is the point-in-time record of how the decision was
+reached — written before the change, so its "today" is the revision it says it is. Where the two
+disagree, `claude-bridge.md` wins.
+
+Scoping document. It states how the route resolved at the revision it was written against, what was
+broken or stale there, compares the user-scope shapes, and proposes one shape plus an implementation
+contract. It did not implement the change and it did not edit any real HOME file.
 
 Evidence rules: every claim about current behaviour cites `file:line`; the two probes were run
 hermetically with a temporary `HOME` and `XDG_CONFIG_HOME` and their output is quoted.
@@ -13,8 +19,8 @@ The operator wants the Claude Code route to be optional and off by default, sele
 `~/.config/specialists/user.json`, without a per-specialist `~/.specialists/user/<name>.specialist.json`
 copy on every machine ([OPERATOR RULING in the Issue, 2026-11-11]).
 
-Open decision for the operator: the exact shape of the user-scope block (§6 has the proposal and §5
-the alternatives) and two trust questions answered in §9.
+Settled decision: the exact shape of the user-scope block (§6 has the proposed shape, adopted as
+shipped, and §5 the alternatives) and two trust questions answered in §9.
 
 ## 2. How configuration resolves today
 
@@ -255,7 +261,8 @@ Resolution for Specialist `N`, applied in the loader after every other layer:
 1. `enabled !== true` → no injection; the route is off for every Specialist (unchanged kill switch).
 2. `specialists` absent → legacy rule: the merged definition flag decides, and the operator switch
    is the machine gate. This keeps today's behaviour and makes the change a rollout, not a flag day.
-   `sp doctor` reports the legacy shape as deprecated once the allow list exists.
+   `sp doctor` reports it as the legacy shape while no allow list exists, and the warning
+   disappears once one does — the list, not the shape's age, is what decides.
 3. `specialists` present (including `[]`) → the list is **authoritative both ways**: `N` listed gets
    `execution.claude_bridge = true` and `execution.model = models[N] ?? default_model`; `N` not
    listed gets `execution.claude_bridge = false` even if a home or repo layer set it. A listed `N`
@@ -271,7 +278,8 @@ Resolution for Specialist `N`, applied in the loader after every other layer:
    `claude_bridge` block — never run inert, because loading the bridge and then billing another
    provider is the silent billing-surface swap the route exists to prevent (§9, Q4).
 6. When the block changes a value a lower layer set (a home or repo layer asked for a different
-   model or flag), the loader records a provenance warning that `sp doctor` and `sp list` can show,
+   model or flag), the loader records a provenance warning that `sp doctor` and the loader's own
+   stderr line show,
    so the operator sees that their selection shadowed a layer rather than silently observing a
    different model (§9, amendment 1).
 
