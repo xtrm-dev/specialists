@@ -78,12 +78,11 @@ jobs:
           bun install --frozen-lockfile
           echo 'package-payload: install succeeded'
       - name: Build package payload
-        run: |
-          echo 'package-payload: verifying reproducible distributable payload'
-          NODE_ENV=test bun run build
-          git diff --exit-code -- dist/
-          test -z "$(git status --porcelain --untracked-files=all -- dist/)"
-          echo 'package-payload: build verification succeeded'
+        # One implementation for CI and for contributors (SPECIALISTS-4445): the script rebuilds with
+        # the bun .bun-version pins and fails with the cause (__esm wrapper) and the fix, instead of
+        # a raw bundle diff that three PRs in a row had to reverse-engineer. setup-bun already
+        # provides the pin here, so the version refusal never fires in CI; the message is the value.
+        run: node scripts/check-dist-reproducible.mjs
       - name: Generate npm pack manifest
         run: |
           echo 'package-payload: generating npm pack dry-run manifest'
