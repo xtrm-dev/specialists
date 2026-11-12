@@ -24819,6 +24819,16 @@ async function discoverDynamicExtensionTools(input) {
 function resolveWorkspace(cwd) {
   return workspaceIdentityFor(cwd);
 }
+async function bindActivationSession(session) {
+  if (typeof session.bindExtensions !== "function")
+    return { bound: false };
+  try {
+    await session.bindExtensions({});
+    return { bound: true };
+  } catch (error) {
+    return { bound: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
 function processAlive(pid) {
   try {
     process.kill(pid, 0);
@@ -25597,6 +25607,12 @@ class NativeActivationHost {
       };
       const createVerifiedSession = async (model, options = {}) => {
         const created = await sdk.createAgentSession({ ...baseSessionOptions, model });
+        const sessionBinding = await bindActivationSession(created.session);
+        if (claudeBridge) {
+          try {
+            await modelRuntime.refresh?.({ allowNetwork: false });
+          } catch {}
+        }
         const missing = missingPromisedTools(created.session);
         if (missing.length > 0) {
           created.session.dispose();
@@ -25626,9 +25642,10 @@ class NativeActivationHost {
           }
           if (!resolvedModel) {
             created.session.dispose();
+            const registered = typeof modelRuntime.getProvider === "function" ? modelRuntime.getProvider(CLAUDE_BRIDGE_PROVIDER)?.id ?? null : null;
             const detail = {
               requestedModel: provisionalPattern,
-              note: `the "${CLAUDE_BRIDGE_PROVIDER}" provider did not register on the session runtime, so ` + `"${provisionalPattern}" does not exist; the extension is installed but did not load its provider`
+              note: `the "${CLAUDE_BRIDGE_PROVIDER}" provider did not register on the session runtime, so ` + `"${provisionalPattern}" does not exist; the extension is installed but did not load its provider` + ` (extension ${claudeBridgePath ?? "<unresolved>"}: ` + `${sessionBinding.bound ? "session_start emitted" : "session_start not emitted"}` + `${sessionBinding.error ? `, bind failed: ${sessionBinding.error}` : ""}` + `; provider "${CLAUDE_BRIDGE_PROVIDER}" is ${registered ? "registered" : "absent"} on the runtime)`
             };
             if (options.viaFallback) {
               throw new DispatchRejectedError("model_unavailable", {

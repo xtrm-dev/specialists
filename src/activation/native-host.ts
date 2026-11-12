@@ -758,6 +758,31 @@ export function resolveWorkspace(cwd: string): WorkspaceIdentity {
   return workspaceIdentityFor(cwd);
 }
 
+/**
+ * Emit `session_start` on a freshly created native session.
+ *
+ * `sdk.createAgentSession` builds the session but does NOT emit the lifecycle: that is
+ * `AgentSession.bindExtensions`, which the CLI calls after it creates a session. A host that
+ * skips it runs every extension without its `session_start` handler. SPECIALISTS-4441: the
+ * Claude Code bridge registers its provider from exactly that handler for every module instance
+ * after the first in a process, so skipping it left the bridged provider unregistered and the
+ * post-load verification reported "the extension is installed but did not load its provider".
+ *
+ * No UI bindings are passed: a native activation has no terminal to bind to, and every binding
+ * field is optional on pi's side.
+ */
+export async function bindActivationSession(
+  session: Pick<PiAgentSessionLike, 'bindExtensions'>,
+): Promise<{ bound: boolean; error?: string }> {
+  if (typeof session.bindExtensions !== 'function') return { bound: false };
+  try {
+    await session.bindExtensions({});
+    return { bound: true };
+  } catch (error) {
+    return { bound: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 /** Signal 0 probes existence; EPERM means alive under another uid. */
 function processAlive(pid: number): boolean {
   try {
@@ -2416,6 +2441,21 @@ export class NativeActivationHost {
       options: { viaFallback?: boolean } = {},
     ): Promise<PiAgentSessionLike> => {
       const created = await sdk.createAgentSession({ ...baseSessionOptions, model });
+      // SPECIALISTS-4441: emit the lifecycle the extensions expect BEFORE verifying anything.
+      // `createAgentSession` does not do it; without this no extension sees session_start, and a
+      // provider registered from that handler never reaches the runtime this session uses.
+      const sessionBinding = await bindActivationSession(created.session);
+      if (claudeBridge) {
+        // A provider registered from session_start is not in the model snapshot yet: the SDK
+        // refreshes once after applying LOAD-time registrations, which does not cover this one.
+        // A failed refresh leaves the registration in place, and the verification below reports
+        // the truth rather than turning a refresh problem into a different refusal.
+        try {
+          await modelRuntime.refresh?.({ allowNetwork: false });
+        } catch {
+          // deliberately non-fatal
+        }
+      }
       const missing = missingPromisedTools(created.session);
       if (missing.length > 0) {
         // Fail closed BEFORE the binding and before any model turn: a session missing a
@@ -2468,11 +2508,18 @@ export class NativeActivationHost {
         }
         if (!resolvedModel) {
           created.session.dispose();
+          const registered = typeof modelRuntime.getProvider === 'function'
+            ? modelRuntime.getProvider(CLAUDE_BRIDGE_PROVIDER)?.id ?? null
+            : null;
           const detail = {
             requestedModel: provisionalPattern,
             note:
               `the "${CLAUDE_BRIDGE_PROVIDER}" provider did not register on the session runtime, so ` +
-              `"${provisionalPattern}" does not exist; the extension is installed but did not load its provider`,
+              `"${provisionalPattern}" does not exist; the extension is installed but did not load its provider` +
+              ` (extension ${claudeBridgePath ?? '<unresolved>'}: ` +
+              `${sessionBinding.bound ? 'session_start emitted' : 'session_start not emitted'}` +
+              `${sessionBinding.error ? `, bind failed: ${sessionBinding.error}` : ''}` +
+              `; provider "${CLAUDE_BRIDGE_PROVIDER}" is ${registered ? 'registered' : 'absent'} on the runtime)`,
           };
           if (options.viaFallback) {
             throw new DispatchRejectedError('model_unavailable', {
