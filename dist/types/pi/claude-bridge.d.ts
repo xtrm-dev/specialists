@@ -1,4 +1,4 @@
-import { type GlobalUserConfigPath } from '../specialist/global-config.js';
+import { type ClaudeBridgeBlockRead, type GlobalUserConfigPath } from '../specialist/global-config.js';
 /** The provider id the extension registers. Fixed by `PROVIDER_ID` in the bridge's own source. */
 export declare const CLAUDE_BRIDGE_PROVIDER = "claude-bridge";
 /** The npm package that ships the extension. */
@@ -22,14 +22,19 @@ export declare function claudeBridgeEnabled(execution: {
 /**
  * Whether the OPERATOR enabled the route on this machine.
  *
- * Read from `~/.config/specialists/user.json` (`{ "claude_bridge": { "enabled": true } }`), the one
- * config file a repository cannot write. The definition flag alone must never be enough: a repo
- * can ship `.specialists/user/<name>.json`, a repo-defined specialist name can become the merge
- * base, and the repo layer may even be a symlink into the home layer — so provenance cannot be
- * inferred from the merged spec, and the decision has to live somewhere outside every repo.
+ * Read from the `claude_bridge` block of `~/.config/specialists/user.json`, the one config file a
+ * repository cannot write. The definition flag alone must never be enough: a repo can ship
+ * `.specialists/user/<name>.json`, a repo-defined specialist name can become the merge base, and
+ * the repo layer may even be a symlink into the home layer — so provenance cannot be inferred from
+ * the merged spec, and the decision has to live somewhere outside every repo.
  *
- * Fail closed: absent, unreadable or malformed is OFF, and so is any shape other than
- * `enabled: true`.
+ * This is the MACHINE gate. Which Specialists may use the route is the block's allow list, applied
+ * by the loader (SPECIALISTS-4442); this function answers only "did the operator consent on this
+ * machine".
+ *
+ * Fail closed: absent, unreadable, malformed or invalid is OFF, and so is any shape other than
+ * `enabled: true`. The same validated reader the loader uses is the only reader, so the two
+ * cannot report different failures.
  */
 export declare function operatorClaudeBridgeEnabled(location?: GlobalUserConfigPath, readFile?: (path: string) => string): boolean;
 /**
@@ -41,12 +46,16 @@ export declare function claudeBridgeRouteEnabled(execution: {
     claude_bridge?: unknown;
 } | undefined, operatorEnabled?: () => boolean): boolean;
 /**
- * Which half of the route is off, named for a refusal note. Never changes what enables the route:
+ * Which switch is off, named for a refusal note. Never changes what enables the route:
  * `claudeBridgeRouteEnabled` stays the decision, this only explains a "no".
+ *
+ * `specialistName` is what makes the note truthful after SPECIALISTS-4442: when the operator block
+ * carries an allow list, the reason a repo-selected Specialist stays off is the missing NAME, not
+ * the definition flag (a repo layer can still write that flag; the list is what it cannot write).
  */
 export declare function claudeBridgeOffSwitches(execution: {
     claude_bridge?: unknown;
-} | undefined, operatorEnabled?: () => boolean): string[];
+} | undefined, operatorEnabled?: () => boolean, specialistName?: string, blockRead?: ClaudeBridgeBlockRead): string[];
 /**
  * Providers the gate may treat as supplied-by-an-extension for this activation.
  *

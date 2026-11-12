@@ -85,14 +85,97 @@ export declare const OverrideExecutionSchema: z.ZodObject<{
  * like the `_` metadata keys, or a single switch would invalidate every override in the file.
  */
 export declare const CLAUDE_BRIDGE_SWITCH_KEY = "claude_bridge";
-/** The operator half of the Claude Code route switch. Both this and the definition flag must be on. */
-export declare const ClaudeBridgeSwitchSchema: z.ZodObject<{
+/** The provider prefix every selectable bridge model must carry. */
+export declare const CLAUDE_BRIDGE_MODEL_PREFIX = "claude-bridge/";
+/** A model the bridge route can serve. A non-bridged string is refused at write time. */
+export declare const ClaudeBridgeModelSchema: z.ZodEffects<z.ZodString, string, string>;
+/**
+ * The operator's whole Claude Code route selection (SPECIALISTS-4442, Option A).
+ *
+ * This block is the ONLY operator-side selector: `enabled` is machine consent, `specialists` is
+ * the explicit allow list, and `default_model`/`models` name the bridged models. When
+ * `specialists` is present it is authoritative both ways for `execution.claude_bridge` and
+ * `execution.model` — the loader applies it after every other layer, so no repository layer can
+ * enable the route or redirect a listed Specialist.
+ *
+ * Absent `specialists` keeps the legacy rule (the merged definition flag decides) so the change
+ * is a rollout, not a flag day. `specialists: []` means "no Specialist", never "all".
+ */
+export declare const ClaudeBridgeBlockSchema: z.ZodEffects<z.ZodObject<{
     enabled: z.ZodDefault<z.ZodBoolean>;
+    default_model: z.ZodOptional<z.ZodEffects<z.ZodString, string, string>>;
+    specialists: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    models: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodEffects<z.ZodString, string, string>>>;
 }, "strict", z.ZodTypeAny, {
     enabled: boolean;
+    specialists?: string[] | undefined;
+    default_model?: string | undefined;
+    models?: Record<string, string> | undefined;
 }, {
+    specialists?: string[] | undefined;
     enabled?: boolean | undefined;
+    default_model?: string | undefined;
+    models?: Record<string, string> | undefined;
+}>, {
+    enabled: boolean;
+    specialists?: string[] | undefined;
+    default_model?: string | undefined;
+    models?: Record<string, string> | undefined;
+}, {
+    specialists?: string[] | undefined;
+    enabled?: boolean | undefined;
+    default_model?: string | undefined;
+    models?: Record<string, string> | undefined;
 }>;
+export type ClaudeBridgeBlock = z.infer<typeof ClaudeBridgeBlockSchema>;
+/** @deprecated Use {@link ClaudeBridgeBlockSchema}: the switch is now the whole route selection. */
+export declare const ClaudeBridgeSwitchSchema: z.ZodEffects<z.ZodObject<{
+    enabled: z.ZodDefault<z.ZodBoolean>;
+    default_model: z.ZodOptional<z.ZodEffects<z.ZodString, string, string>>;
+    specialists: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    models: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodEffects<z.ZodString, string, string>>>;
+}, "strict", z.ZodTypeAny, {
+    enabled: boolean;
+    specialists?: string[] | undefined;
+    default_model?: string | undefined;
+    models?: Record<string, string> | undefined;
+}, {
+    specialists?: string[] | undefined;
+    enabled?: boolean | undefined;
+    default_model?: string | undefined;
+    models?: Record<string, string> | undefined;
+}>, {
+    enabled: boolean;
+    specialists?: string[] | undefined;
+    default_model?: string | undefined;
+    models?: Record<string, string> | undefined;
+}, {
+    specialists?: string[] | undefined;
+    enabled?: boolean | undefined;
+    default_model?: string | undefined;
+    models?: Record<string, string> | undefined;
+}>;
+export interface ClaudeBridgeBlockRead {
+    /** The file holds a `claude_bridge` key. */
+    present: boolean;
+    /** The validated block, or null when absent or invalid. */
+    block: ClaudeBridgeBlock | null;
+    /** Structured reason the block could not be used; null when absent or valid. */
+    error: string | null;
+    /**
+     * Names the raw block appears to list, even when it fails validation. Lets the route refusal
+     * name a Specialist the operator asked for instead of routing it off silently.
+     */
+    listedNames: string[];
+    /** Absolute path of the file that was read. */
+    path: string;
+}
+/**
+ * Read + validate the reserved block. Deliberately separate from the sparse-layer read: this one
+ * follows `operatorClaudeBridgeEnabled` and NEVER throws, so the loader, the route reader and
+ * `sp doctor` all observe the same failure instead of two different ones (SPECIALISTS-4442, Q5.3).
+ */
+export declare function readClaudeBridgeBlock(location?: GlobalUserConfigPath, readFile?: (path: string) => string): ClaudeBridgeBlockRead;
 export declare const GlobalSpecialistOverrideSchema: z.ZodObject<{
     execution: z.ZodObject<{
         model: z.ZodNullable<z.ZodString>;
