@@ -6,12 +6,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DispatchRejectedError } from '../../../src/activation/types.js';
 import { provisionWriterWorkspace } from '../../../src/activation/workspace-lease.js';
+import { setRuntimeDiagnosticsSink, resetRuntimeDiagnosticsSink } from '../../../src/utils/runtime-diagnostics.js';
 
 /** SPECIALISTS-4393: writer worktrees live under .xtrm/worktrees and branch from origin/<default>. */
 
 const dirs: string[] = [];
 afterEach(() => {
   vi.restoreAllMocks();
+  resetRuntimeDiagnosticsSink();
   while (dirs.length > 0) rmSync(dirs.pop() as string, { recursive: true, force: true });
 });
 
@@ -85,7 +87,8 @@ describe('provisionWriterWorkspace', () => {
     mkdirSync(repo);
     run(repo, 'init', '-q', '-b', 'main');
     run(repo, 'commit', '-q', '--allow-empty', '-m', 'one');
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warn = vi.fn();
+    setRuntimeDiagnosticsSink(warn);
 
     const ws = provisionWriterWorkspace(repo, 'CORE-7', 'executor');
 

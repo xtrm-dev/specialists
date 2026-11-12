@@ -170,10 +170,13 @@ export function provisionWriterWorkspace(cwd: string, issueRef: string, role: st
     if (!worktreePath) {
       const mainRoot = dirname(git('rev-parse', '--path-format=absolute', '--git-common-dir'));
       worktreePath = join(mainRoot, '.xtrm', 'worktrees', `${basename(mainRoot)}-sp-${roleSlug}-${slug}`);
-      // An unignored nested worktree would show up as `?? .xtrm/` in the dispatcher's status.
-      if (spawnSync('git', ['check-ignore', '-q', join(worktreePath, 'x')], { cwd: mainRoot }).status !== 0) {
-        appendFileSync(git('rev-parse', '--path-format=absolute', '--git-path', 'info/exclude'), '\n/.xtrm/worktrees/\n');
-      }
+      // An unignored nested worktree or runtime state dir would show up as `?? ...` in the
+      // dispatcher's status. Keep both out of git's view via info/exclude (per-repo, not tracked).
+      const excludePath = git('rev-parse', '--path-format=absolute', '--git-path', 'info/exclude');
+      let additions = '';
+      if (spawnSync('git', ['check-ignore', '-q', join(mainRoot, '.xtrm', 'worktrees', 'x')], { cwd: mainRoot }).status !== 0) additions += '/.xtrm/worktrees/\n';
+      if (spawnSync('git', ['check-ignore', '-q', join(mainRoot, '.specialists', 'x')], { cwd: mainRoot }).status !== 0) additions += '/.specialists/\n';
+      if (additions) appendFileSync(excludePath, '\n' + additions);
       const branchExists = spawnSync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], { cwd }).status === 0;
       const base = branchExists ? undefined : resolveWorktreeBase(git);
       git('worktree', 'add', ...(base ? ['-b', branch, worktreePath, base] : [worktreePath, branch]));
