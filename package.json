@@ -1,7 +1,7 @@
 {
   "name": "@jaggerxtrm/specialists",
   "version": "4.2.0",
-  "description": "Specialists — Pi-based orchestration runtime: supervised specialist activation over MCP, with session continuity hooks and CLI workflows for .specialist.json definitions.",
+  "description": "Specialists \u2014 Pi-based orchestration runtime: supervised specialist activation over MCP, with session continuity hooks and CLI workflows for .specialist.json definitions.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/xtrm-dev/specialists.git"
@@ -70,7 +70,8 @@
     "preversion": "bun run changelog",
     "version": "node scripts/changelog-update.mjs --tag v$npm_package_version && node scripts/sync-plugin-versions.mjs && bun run build && git add CHANGELOG.md dist/ plugins/*/.claude-plugin/plugin.json",
     "typecheck:tests": "tsc -p tsconfig.test.json",
-    "check:pi-pin": "node scripts/check-pi-pin-sync.mjs"
+    "check:pi-pin": "node scripts/check-pi-pin-sync.mjs",
+    "check:dist-reproducible": "node scripts/check-dist-reproducible.mjs"
   },
   "keywords": [
     "omnispecialist",
