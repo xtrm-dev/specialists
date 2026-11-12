@@ -14,7 +14,15 @@ import { resolveCanonicalAssetDir } from '../specialist/canonical-asset-resolver
 import { detectDriftUnderRoot } from '../specialist/drift-detector.js';
 import { auditDeadJobs } from '../specialist/dead-job-audit.js';
 import { SpecialistLoader } from '../specialist/loader.js';
-import { analyzeGlobalUserConfigDrift, buildGlobalUserConfigTemplate, readValidatedGlobalUserConfig } from '../specialist/global-config.js';
+import {
+  analyzeGlobalUserConfigDrift,
+  buildGlobalUserConfigTemplate,
+  CLAUDE_BRIDGE_SWITCH_KEY,
+  readClaudeBridgeBlock,
+  readValidatedGlobalUserConfig,
+  type GlobalUserConfigPath,
+} from '../specialist/global-config.js';
+import { CLAUDE_BRIDGE_PROVIDER, isBridgedModel } from '../pi/claude-bridge.js';
 import { runChannelDoctorChecks, type ChannelDoctorInputs } from '../specialist/channel-doctor.js';
 import { describeCatalogCompatibility } from '../specialist/tool-catalog.js';
 import { loadSharedToolCatalogIndex, readPackageVersion, resolveGlobalPackageDir } from '../pi/session.js';
@@ -705,6 +713,10 @@ async function checkSpecialistOverrides(): Promise<boolean> {
     }
   }
 
+  // Claude Code route (SPECIALISTS-4442): the one operator surface for a subscription-billed
+  // route, so a shape that cannot work end to end is reported here rather than at dispatch.
+  const claudeBridgeOk = await checkClaudeBridgeRoute(loader, summaries, globalLayer);
+
   // Mandatory-rules selection coherence: report the effective specialist-specific
   // template_sets driven by the global layer. `null` inherits the shipped sets,
   // `[]` explicitly clears them, non-empty arrays replace them; index
@@ -791,7 +803,110 @@ async function checkSpecialistOverrides(): Promise<boolean> {
   // Health = no missing-with-config + no strip warnings. Fresh install (no file) is a notice, not a fail.
   const stripFailures = warnings.filter(w => w.severity === 'strip').length;
   const missingFailures = globalLayer.exists ? missing.length : 0;
-  return stripFailures === 0 && missingFailures === 0;
+  return stripFailures === 0 && missingFailures === 0 && claudeBridgeOk;
+}
+
+/**
+ * The operator's Claude Code route selection (SPECIALISTS-4442).
+ *
+ * Reads the block through the SAME reader the route decision uses, so doctor cannot disagree with
+ * the loader about a malformed file. Reports: legacy shape without an allow list; a listed
+ * Specialist whose merged model is not bridged; a definition flag on an unlisted Specialist; a
+ * bridged primary with fallbacks; a leftover per-Specialist selection the allow list now owns.
+ */
+async function checkClaudeBridgeRoute(
+  loader: SpecialistLoader,
+  summaries: Awaited<ReturnType<SpecialistLoader['list']>>,
+  globalLayer: GlobalUserConfigPath,
+): Promise<boolean> {
+  const read = readClaudeBridgeBlock(globalLayer);
+  if (read.error !== null) {
+    fail(`claude_bridge block is invalid: ${read.error}`);
+    fix(`correct the block in ${read.path} (sp edit --global ${CLAUDE_BRIDGE_SWITCH_KEY}.<field>), or remove it`);
+    // A name the broken block still lists cannot run: the loader refuses it, so say that here
+    // rather than letting the operator discover it at dispatch.
+    for (const name of read.listedNames) {
+      const decision = loader.getClaudeBridgeDecision(name);
+      fail(
+        `${name}: listed in ${CLAUDE_BRIDGE_SWITCH_KEY}.specialists but the block resolves no ` +
+        `${CLAUDE_BRIDGE_PROVIDER}/... model${decision?.model ? ` (resolved ${JSON.stringify(decision.model)})` : ''} ` +
+        '— a dispatch is refused, never run inert on another provider',
+      );
+    }
+    return false;
+  }
+
+  const block = read.block;
+  if (block === null) {
+    ok('Claude Code route: off (no claude_bridge block)');
+    return true;
+  }
+  if (block.enabled !== true) {
+    ok('Claude Code route: off (claude_bridge.enabled is false)');
+    return true;
+  }
+  if (block.specialists === undefined) {
+    warn('Claude Code route: legacy shape — enabled without an allow list, so the merged definition flag decides');
+    fix(`sp edit --global ${CLAUDE_BRIDGE_SWITCH_KEY}.specialists '["<name>"]'   (explicit allow list; deals with the repository-writable flag)`);
+    return true;
+  }
+  if (block.specialists.length === 0) {
+    ok('Claude Code route: enabled with an empty allow list — off for every Specialist');
+    return true;
+  }
+
+  const known = new Set(summaries.map(summary => summary.name));
+  const unknown = block.specialists.filter(name => !known.has(name));
+  ok(`Claude Code route: allow list ${block.specialists.join(', ')}${block.default_model ? ` (default ${block.default_model})` : ''}`);
+  if (unknown.length > 0) {
+    warn(`allow list names Specialist(s) that do not resolve: ${unknown.join(', ')}`);
+    fix(`remove them from ${read.path}, or fix the name`);
+  }
+
+  for (const summary of summaries) {
+    const decision = loader.getClaudeBridgeDecision(summary.name);
+    if (decision?.reason === 'unlisted' && decision.shadowed.some(shadow => shadow.field === 'execution.claude_bridge')) {
+      warn(
+        `${summary.name}: requests the Claude Code route (execution.claude_bridge: true) but the operator ` +
+        'allow list does not name it, so the route is off',
+      );
+      fix(`sp edit --global ${CLAUDE_BRIDGE_SWITCH_KEY}.specialists '["${summary.name}"]'   (only if intended)`);
+    }
+    for (const shadow of decision?.shadowed ?? []) {
+      if (shadow.field === 'execution.claude_bridge' && decision?.reason === 'unlisted') continue;
+      warn(
+        `${summary.name}: allow list shadows ${shadow.field} ` +
+        `(${JSON.stringify(shadow.layerValue)} -> ${JSON.stringify(shadow.blockValue)})`,
+      );
+    }
+
+    // A bridged primary suppresses the fallback walk, so a configured fallback can never run.
+    if (!isBridgedModel(summary.model)) continue;
+    const spec = await loader.getEffective(summary.name).catch(() => null);
+    const execution = spec?.specialist.execution;
+    const fallbacks = execution?.fallback_models ?? [];
+    if (fallbacks.length > 0 || execution?.fallback_model) {
+      warn(`${summary.name}: primary ${summary.model} is bridged, so fallbacks never run`);
+      fix(`remove execution.fallback_model/fallback_models for ${summary.name}`);
+    }
+  }
+
+  // A per-Specialist selection now owned by the allow list is redundant surface, not a second vote.
+  const { config } = readValidatedGlobalUserConfig(globalLayer);
+  if (config !== null) {
+    const listed = new Set(block.specialists);
+    const redundant = Object.entries(config)
+      .filter(([name, entry]) => listed.has(name)
+        && (entry as { execution?: { claude_bridge?: unknown } } | undefined)?.execution?.claude_bridge !== undefined)
+      .map(([name]) => name)
+      .sort();
+    if (redundant.length > 0) {
+      warn(`${CLAUDE_BRIDGE_SWITCH_KEY}.specialists owns the route for: ${redundant.join(', ')}`);
+      fix(`sp edit --global <name>.execution.claude_bridge null   (the per-Specialist flag is now redundant)`);
+    }
+  }
+
+  return true;
 }
 
 function renderDriftTable(root: string, json = false): void {

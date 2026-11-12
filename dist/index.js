@@ -4614,6 +4614,41 @@ function getGlobalUserConfigPath() {
   }
   return { path: configHomePath, exists: false, source: "config-home" };
 }
+function readClaudeBridgeBlock(location = getGlobalUserConfigPath(), readFile = (path) => readFileSync2(path, "utf-8")) {
+  const absent = { present: false, block: null, error: null, listedNames: [], path: location.path };
+  if (!location.exists)
+    return absent;
+  let raw;
+  try {
+    raw = JSON.parse(readFile(location.path));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ...absent, error: `cannot read ${location.path}: ${message}` };
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ...absent, error: `${location.path} is not a JSON object` };
+  }
+  const entry = raw[CLAUDE_BRIDGE_SWITCH_KEY];
+  if (entry === undefined)
+    return absent;
+  const listedNames = (() => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry))
+      return [];
+    const listed = entry.specialists;
+    return Array.isArray(listed) ? listed.filter((name) => typeof name === "string") : [];
+  })();
+  const parsed = ClaudeBridgeBlockSchema.safeParse(entry);
+  if (!parsed.success) {
+    return {
+      present: true,
+      block: null,
+      error: parsed.error.issues.map((issue) => `${[CLAUDE_BRIDGE_SWITCH_KEY, ...issue.path.map(String)].join(".")}: ${issue.message}`).join("; ") || "invalid claude_bridge block",
+      listedNames,
+      path: location.path
+    };
+  }
+  return { present: true, block: parsed.data, error: null, listedNames, path: location.path };
+}
 function getGlobalSpecialistOverrideLeafPaths() {
   return [
     ...OVERRIDE_ALLOWED_EXECUTION_FIELDS.map((field) => `execution.${field}`),
@@ -4686,6 +4721,10 @@ function mergeGlobalUserConfig(existing, template) {
   for (const [name, rawExisting] of Object.entries(existing)) {
     if (name.startsWith("_"))
       continue;
+    if (name === CLAUDE_BRIDGE_SWITCH_KEY) {
+      merged[name] = rawExisting;
+      continue;
+    }
     const templateOverride = template[name];
     if (templateOverride && typeof templateOverride === "object") {
       const normalized = fillMissingDefaults(rawExisting && typeof rawExisting === "object" ? { ...rawExisting } : {}, templateOverride);
@@ -4773,12 +4812,15 @@ function validateGlobalUserConfig(jsonContent) {
   }
   const switchErrors = [];
   if (raw && typeof raw === "object" && !Array.isArray(raw) && CLAUDE_BRIDGE_SWITCH_KEY in raw) {
-    const parsedSwitch = ClaudeBridgeSwitchSchema.safeParse(raw[CLAUDE_BRIDGE_SWITCH_KEY]);
+    const parsedSwitch = ClaudeBridgeBlockSchema.safeParse(raw[CLAUDE_BRIDGE_SWITCH_KEY]);
     if (!parsedSwitch.success) {
-      switchErrors.push({
-        path: CLAUDE_BRIDGE_SWITCH_KEY,
-        message: parsedSwitch.error.issues.map((issue) => issue.message).join("; ") || "invalid switch"
-      });
+      for (const issue of parsedSwitch.error.issues) {
+        const subPath = issue.path.map((part) => typeof part === "number" ? `[${part}]` : part).join(".");
+        switchErrors.push({
+          path: subPath ? `${CLAUDE_BRIDGE_SWITCH_KEY}.${subPath}` : CLAUDE_BRIDGE_SWITCH_KEY,
+          message: issue.message
+        });
+      }
     }
   }
   const result = GlobalUserConfigSchema.safeParse(raw);
@@ -4840,7 +4882,7 @@ function writeGlobalUserConfig(location, config) {
     throw renameError;
   }
 }
-var CONFIG_FILENAME = "user.json", SPECIALISTS_SUBDIR = "specialists", GLOBAL_USER_CONFIG_DOC = "./overrides-guide.md", OverrideExtensionsSchema, OverrideExecutionSchema, OverridePromptSchema, OverrideStallDetectionSchema, OverrideSkillsSchema, OverrideMandatoryRulesSchema, CLAUDE_BRIDGE_SWITCH_KEY = "claude_bridge", ClaudeBridgeSwitchSchema, GlobalSpecialistOverrideSchema, GlobalUserConfigSchema, RETIRED_EXTENSION_SOURCES, BUILTIN_EXTENSION_TOGGLES;
+var CONFIG_FILENAME = "user.json", SPECIALISTS_SUBDIR = "specialists", GLOBAL_USER_CONFIG_DOC = "./overrides-guide.md", OverrideExtensionsSchema, OverrideExecutionSchema, OverridePromptSchema, OverrideStallDetectionSchema, OverrideSkillsSchema, OverrideMandatoryRulesSchema, CLAUDE_BRIDGE_SWITCH_KEY = "claude_bridge", CLAUDE_BRIDGE_MODEL_PREFIX = "claude-bridge/", ClaudeBridgeSpecialistNameSchema, ClaudeBridgeModelSchema, ClaudeBridgeBlockSchema, GlobalSpecialistOverrideSchema, GlobalUserConfigSchema, RETIRED_EXTENSION_SOURCES, BUILTIN_EXTENSION_TOGGLES;
 var init_global_config = __esm(() => {
   init_zod();
   init_schema();
@@ -4872,9 +4914,29 @@ var init_global_config = __esm(() => {
   OverrideMandatoryRulesSchema = objectType({
     template_sets: arrayType(KebabCase).nullable()
   }).strict();
-  ClaudeBridgeSwitchSchema = objectType({
-    enabled: booleanType().default(false)
-  }).strict();
+  ClaudeBridgeSpecialistNameSchema = stringType().regex(/^[a-z][a-z0-9-]*$/, "must be an explicit kebab-case Specialist name (no wildcard, no glob)");
+  ClaudeBridgeModelSchema = stringType().refine((value) => value.startsWith(CLAUDE_BRIDGE_MODEL_PREFIX) && value.length > CLAUDE_BRIDGE_MODEL_PREFIX.length, {
+    message: `must be a ${CLAUDE_BRIDGE_MODEL_PREFIX}... model`
+  });
+  ClaudeBridgeBlockSchema = objectType({
+    enabled: booleanType().default(false),
+    default_model: ClaudeBridgeModelSchema.optional(),
+    specialists: arrayType(ClaudeBridgeSpecialistNameSchema).optional(),
+    models: recordType(stringType(), ClaudeBridgeModelSchema).optional()
+  }).strict().superRefine((block, ctx) => {
+    if (!block.specialists)
+      return;
+    for (const name of block.specialists) {
+      const model = block.models?.[name] ?? block.default_model;
+      if (model === undefined) {
+        ctx.addIssue({
+          code: ZodIssueCode.custom,
+          path: ["specialists"],
+          message: `listed Specialist "${name}" has no bridge model: set models.${name} or default_model ` + `(${CLAUDE_BRIDGE_MODEL_PREFIX}...)`
+        });
+      }
+    }
+  });
   GlobalSpecialistOverrideSchema = objectType({
     execution: OverrideExecutionSchema,
     prompt: OverridePromptSchema.optional(),
@@ -12271,6 +12333,77 @@ import { readdir, readFile, stat } from "fs/promises";
 import { basename, join as join6 } from "path";
 import { existsSync as existsSync6, realpathSync as realpathSync2 } from "fs";
 import { homedir as homedir3 } from "os";
+function resolveClaudeBridgeRoute(name, execution, read) {
+  const definitionFlag = execution?.claude_bridge === true;
+  const layerModel = typeof execution?.model === "string" && execution.model !== "" ? execution.model : null;
+  const base = {
+    source: "legacy",
+    reason: "block_absent",
+    listed: false,
+    enabled: definitionFlag,
+    model: null,
+    blockError: read.error,
+    blockPath: read.path,
+    shadowed: []
+  };
+  if (read.error !== null) {
+    const listed = read.listedNames.includes(name);
+    return {
+      ...base,
+      source: "block",
+      reason: listed ? "listed_model_mismatch" : "block_invalid",
+      listed,
+      enabled: false,
+      model: layerModel
+    };
+  }
+  const block = read.block;
+  if (block === null)
+    return base;
+  if (block.enabled !== true) {
+    return { ...base, source: "block", reason: "block_disabled", enabled: false };
+  }
+  if (block.specialists === undefined) {
+    return { ...base, source: "legacy", reason: "legacy_no_list" };
+  }
+  const listed = block.specialists.includes(name);
+  if (!listed) {
+    return {
+      ...base,
+      source: "block",
+      reason: "unlisted",
+      enabled: false,
+      shadowed: definitionFlag ? [{ field: "execution.claude_bridge", layerValue: true, blockValue: false }] : []
+    };
+  }
+  const model = block.models?.[name] ?? block.default_model ?? null;
+  if (model === null || !model.startsWith(CLAUDE_BRIDGE_MODEL_PREFIX)) {
+    return {
+      ...base,
+      source: "block",
+      reason: "listed_model_mismatch",
+      listed: true,
+      enabled: false,
+      model
+    };
+  }
+  const shadowed = [];
+  if ("claude_bridge" in (execution ?? {}) && execution?.claude_bridge !== true) {
+    shadowed.push({ field: "execution.claude_bridge", layerValue: execution?.claude_bridge, blockValue: true });
+  }
+  if (layerModel !== null && layerModel !== model) {
+    shadowed.push({ field: "execution.model", layerValue: layerModel, blockValue: model });
+  }
+  return {
+    ...base,
+    source: "block",
+    reason: "listed",
+    listed: true,
+    enabled: true,
+    model,
+    shadowed
+  };
+}
 async function checkStaleness(summary) {
   if (!summary.filestoWatch?.length || !summary.updated)
     return "OK";
@@ -12308,6 +12441,7 @@ function resolveHomeDir() {
 class SpecialistLoader {
   cache = new Map;
   blockedFieldWarnings = new Map;
+  claudeBridgeDecisions = new Map;
   projectDir;
   homeDir;
   constructor(options = {}) {
@@ -12514,6 +12648,23 @@ class SpecialistLoader {
       }
       warnings.push(...this.applyOverrideFields(name, base, overrideRaw, "user"));
     }
+    const executionRecord = base.specialist.execution ?? {};
+    const claudeBridgeDecision = resolveClaudeBridgeRoute(name, executionRecord, readClaudeBridgeBlock());
+    this.claudeBridgeDecisions.set(name, claudeBridgeDecision);
+    if (claudeBridgeDecision.source === "block" && claudeBridgeDecision.reason === "listed") {
+      executionRecord.claude_bridge = true;
+      executionRecord.model = claudeBridgeDecision.model;
+      base.specialist.execution = executionRecord;
+    } else if (claudeBridgeDecision.source === "block") {
+      if (executionRecord.claude_bridge === true || claudeBridgeDecision.reason === "listed_model_mismatch") {
+        executionRecord.claude_bridge = false;
+        base.specialist.execution = executionRecord;
+      }
+    }
+    for (const shadow of claudeBridgeDecision.shadowed) {
+      process.stderr.write(`[specialists] claude_bridge allow list in ${claudeBridgeDecision.blockPath} overrides '${name}' ` + `${shadow.field}: layer value ${JSON.stringify(shadow.layerValue)} ignored, using ` + `${JSON.stringify(shadow.blockValue)}
+`);
+    }
     const top = hits[hits.length - 1];
     resolveSkillsPaths(base, baseHit.dir.path, this.projectDir);
     return {
@@ -12605,6 +12756,10 @@ class SpecialistLoader {
       throw new Error(`Specialist not found: ${name}`);
     if (merged.warnings.length)
       this.blockedFieldWarnings.set(name, merged.warnings);
+    const routeDecision = this.claudeBridgeDecisions.get(name);
+    if (routeDecision?.reason === "listed_model_mismatch") {
+      throw new ClaudeBridgeRouteModelMismatchError(name, routeDecision.model, routeDecision.blockPath, routeDecision.blockError);
+    }
     const model = merged.spec.specialist.execution.model;
     if (model === null || model === undefined || model === "") {
       throw new SpecialistMissingModelError(name);
@@ -12636,6 +12791,9 @@ class SpecialistLoader {
       all.push(...warnings);
     return all;
   }
+  getClaudeBridgeDecision(name) {
+    return this.claudeBridgeDecisions.get(name);
+  }
   getGlobalLayerPath() {
     try {
       return getGlobalUserConfigPath();
@@ -12647,9 +12805,11 @@ class SpecialistLoader {
     if (name) {
       this.cache.delete(name);
       this.blockedFieldWarnings.delete(name);
+      this.claudeBridgeDecisions.delete(name);
     } else {
       this.cache.clear();
       this.blockedFieldWarnings.clear();
+      this.claudeBridgeDecisions.clear();
     }
   }
 }
@@ -12755,7 +12915,7 @@ function resolveSkillsPaths(spec, fileDir, consumerRoot) {
   const resolved = rawPaths.map((p) => resolveSkillPath(p, { consumerRoot, fileDir }));
   spec.specialist.skills.paths = resolved;
 }
-var STALL_DETECTION_DEFAULTS, SpecialistMissingModelError, SpecialistExtensionSourceCollisionError, PROTOTYPE_POLLUTION_KEYS, NPM_NAME_RE, NPM_SCOPED_NAME_RE;
+var STALL_DETECTION_DEFAULTS, SpecialistMissingModelError, ClaudeBridgeRouteModelMismatchError, SpecialistExtensionSourceCollisionError, PROTOTYPE_POLLUTION_KEYS, NPM_NAME_RE, NPM_SCOPED_NAME_RE;
 var init_loader = __esm(() => {
   init_dist();
   init_schema();
@@ -12776,6 +12936,21 @@ var init_loader = __esm(() => {
       super(`specialist '${specialistName}' has no model configured. ` + `Run: sp edit --global ${specialistName}.execution.model <model-id> ` + `(or 'sp init --global' to create the global user config file first).`);
       this.specialistName = specialistName;
       this.name = "SpecialistMissingModelError";
+    }
+  };
+  ClaudeBridgeRouteModelMismatchError = class ClaudeBridgeRouteModelMismatchError extends Error {
+    specialistName;
+    model;
+    blockPath;
+    blockError;
+    code = "claude_bridge_route_model_mismatch";
+    constructor(specialistName, model, blockPath, blockError) {
+      super(`specialist '${specialistName}' is listed in the claude_bridge block of ${blockPath}, but its ` + `resolved model ${model === null ? "is unset" : `"${model}"`} is not a claude-bridge/... model` + `${blockError ? ` (block error: ${blockError})` : ""}. ` + "Refusing the run rather than loading the bridge and billing another provider: fix " + "claude_bridge.models / claude_bridge.default_model (or remove the name from " + "claude_bridge.specialists) in ~/.config/specialists/user.json and re-dispatch.");
+      this.specialistName = specialistName;
+      this.model = model;
+      this.blockPath = blockPath;
+      this.blockError = blockError;
+      this.name = "ClaudeBridgeRouteModelMismatchError";
     }
   };
   SpecialistExtensionSourceCollisionError = class SpecialistExtensionSourceCollisionError extends Error {
@@ -21522,28 +21697,35 @@ function claudeBridgeEnabled(execution) {
   return execution?.claude_bridge === true;
 }
 function operatorClaudeBridgeEnabled(location = getGlobalUserConfigPath(), readFile = (path) => readFileSync11(path, "utf-8")) {
-  if (!location.exists)
-    return false;
-  try {
-    const raw = JSON.parse(readFile(location.path));
-    if (!raw || typeof raw !== "object" || Array.isArray(raw))
-      return false;
-    const entry = raw[CLAUDE_BRIDGE_SWITCH_KEY];
-    const parsed = ClaudeBridgeSwitchSchema.safeParse(entry);
-    return parsed.success && parsed.data.enabled === true;
-  } catch {
-    return false;
-  }
+  const read = readClaudeBridgeBlock(location, readFile);
+  return read.error === null && read.block !== null && read.block.enabled === true;
 }
 function claudeBridgeRouteEnabled(execution, operatorEnabled = operatorClaudeBridgeEnabled) {
   return claudeBridgeEnabled(execution) && operatorEnabled();
 }
-function claudeBridgeOffSwitches(execution, operatorEnabled = operatorClaudeBridgeEnabled) {
+function claudeBridgeOffSwitches(execution, operatorEnabled = operatorClaudeBridgeEnabled, specialistName, blockRead = readClaudeBridgeBlock()) {
   const off = [];
-  if (!claudeBridgeEnabled(execution))
-    off.push("the definition flag execution.claude_bridge");
-  if (!operatorEnabled())
+  const block = blockRead.block;
+  const allowListReason = () => {
+    if (specialistName === undefined || block === null || block.specialists === undefined)
+      return null;
+    if (!block.specialists.includes(specialistName)) {
+      return `the operator allow list ${CLAUDE_BRIDGE_SWITCH_KEY}.specialists in ~/.config/specialists/user.json, ` + `which does not name "${specialistName}"`;
+    }
+    return `the operator allow list ${CLAUDE_BRIDGE_SWITCH_KEY}.specialists in ~/.config/specialists/user.json, ` + `which resolves no ${CLAUDE_BRIDGE_PROVIDER}/... model for "${specialistName}"`;
+  };
+  if (blockRead.error !== null) {
+    off.push(`the operator ${CLAUDE_BRIDGE_SWITCH_KEY} block in ${blockRead.path} is invalid (${blockRead.error})`);
+  } else {
+    const allowList = allowListReason();
+    if (allowList !== null)
+      off.push(allowList);
+    else if (!claudeBridgeEnabled(execution))
+      off.push("the definition flag execution.claude_bridge");
+  }
+  if (!operatorEnabled()) {
     off.push(`the operator switch ${CLAUDE_BRIDGE_SWITCH_KEY} in ~/.config/specialists/user.json`);
+  }
   return off;
 }
 function claudeBridgeExtensionProviders(routeEnabled) {
@@ -31222,6 +31404,9 @@ function resolveGlobalPath(rawPath) {
     fail6(`Error: global path must be <specialist>.<field.path>, got: "${rawPath}"`);
   }
   const [specialistName, ...fieldSegments] = segments;
+  if (specialistName === CLAUDE_BRIDGE_SWITCH_KEY) {
+    return resolveClaudeBridgePath(rawPath, fieldSegments);
+  }
   let schema = GlobalSpecialistOverrideSchema;
   for (const segment of fieldSegments) {
     const unwrapped = unwrapSchema(schema);
@@ -31237,7 +31422,36 @@ function resolveGlobalPath(rawPath) {
   return {
     specialistName,
     fieldSegments,
-    schema: unwrapSchema(schema)
+    schema: unwrapSchema(schema),
+    reserved: false
+  };
+}
+function resolveClaudeBridgePath(rawPath, fieldSegments) {
+  let schema = ClaudeBridgeBlockSchema;
+  for (let index = 0;index < fieldSegments.length; index += 1) {
+    const segment = fieldSegments[index];
+    const unwrapped = unwrapSchema(schema);
+    if (unwrapped instanceof ZodRecord) {
+      if (index !== fieldSegments.length - 1) {
+        fail6(`Error: invalid global path "${rawPath}" ("${segment}" is a map key, not a nested object field)`);
+      }
+      schema = unwrapped.valueSchema;
+      continue;
+    }
+    if (!(unwrapped instanceof ZodObject)) {
+      fail6(`Error: invalid global path "${rawPath}" ("${segment}" is not a nested object field)`);
+    }
+    const shape = unwrapped.shape;
+    if (!(segment in shape)) {
+      fail6(`Error: invalid global path "${rawPath}". Unknown segment "${segment}". ` + `Available: ${Object.keys(shape).sort().join(", ")}`);
+    }
+    schema = shape[segment];
+  }
+  return {
+    specialistName: CLAUDE_BRIDGE_SWITCH_KEY,
+    fieldSegments,
+    schema: unwrapSchema(schema),
+    reserved: true
   };
 }
 function coerceGlobalValue(schema, rawValue) {
@@ -31307,10 +31521,21 @@ ${errorList}
   if (existing === null) {
     fail6(`Error: global config not found at ${location.path}. Run ${yellow8("specialists init --global")} first.`);
   }
-  const specialistOverride = existing[resolvedPath.specialistName];
-  if (specialistOverride === undefined) {
-    const available = listGlobalSpecialistNames(existing).join(", ");
-    fail6(`Error: specialist "${resolvedPath.specialistName}" not in global config. Available: ${available || "none"}`);
+  const rawEntry = existing[resolvedPath.specialistName];
+  let specialistOverride;
+  if (resolvedPath.reserved) {
+    const isObject = rawEntry !== null && typeof rawEntry === "object" && !Array.isArray(rawEntry);
+    if (!isObject && args.action === "get") {
+      console.log(`${yellow8(resolvedPath.specialistName)}.${resolvedPath.fieldSegments.join(".")}: ${dim7("(not set)")}`);
+      return;
+    }
+    specialistOverride = isObject ? rawEntry : {};
+  } else {
+    specialistOverride = rawEntry;
+    if (specialistOverride === undefined) {
+      const available = listGlobalSpecialistNames(existing).join(", ");
+      fail6(`Error: specialist "${resolvedPath.specialistName}" not in global config. Available: ${available || "none"}`);
+    }
   }
   if (args.action === "get") {
     const value = getAtPath(specialistOverride, resolvedPath.fieldSegments);
@@ -31319,6 +31544,9 @@ ${errorList}
   }
   const nextValue = coerceGlobalValue(resolvedPath.schema, args.value);
   setAtPath(specialistOverride, resolvedPath.fieldSegments, nextValue);
+  if (resolvedPath.reserved) {
+    existing[resolvedPath.specialistName] = specialistOverride;
+  }
   const updatedJson = `${JSON.stringify(existing, null, 2)}
 `;
   const validation = validateGlobalUserConfig(updatedJson);
@@ -60837,6 +61065,7 @@ async function checkSpecialistOverrides() {
       }
     }
   }
+  const claudeBridgeOk = await checkClaudeBridgeRoute(loader, summaries, globalLayer);
   const selection = (() => {
     if (!globalLayer.exists)
       return null;
@@ -60911,7 +61140,75 @@ async function checkSpecialistOverrides() {
   }
   const stripFailures = warnings.filter((w) => w.severity === "strip").length;
   const missingFailures = globalLayer.exists ? missing.length : 0;
-  return stripFailures === 0 && missingFailures === 0;
+  return stripFailures === 0 && missingFailures === 0 && claudeBridgeOk;
+}
+async function checkClaudeBridgeRoute(loader, summaries, globalLayer) {
+  const read = readClaudeBridgeBlock(globalLayer);
+  if (read.error !== null) {
+    fail9(`claude_bridge block is invalid: ${read.error}`);
+    fix(`correct the block in ${read.path} (sp edit --global ${CLAUDE_BRIDGE_SWITCH_KEY}.<field>), or remove it`);
+    for (const name of read.listedNames) {
+      const decision = loader.getClaudeBridgeDecision(name);
+      fail9(`${name}: listed in ${CLAUDE_BRIDGE_SWITCH_KEY}.specialists but the block resolves no ` + `${CLAUDE_BRIDGE_PROVIDER}/... model${decision?.model ? ` (resolved ${JSON.stringify(decision.model)})` : ""} ` + "\u2014 a dispatch is refused, never run inert on another provider");
+    }
+    return false;
+  }
+  const block = read.block;
+  if (block === null) {
+    ok3("Claude Code route: off (no claude_bridge block)");
+    return true;
+  }
+  if (block.enabled !== true) {
+    ok3("Claude Code route: off (claude_bridge.enabled is false)");
+    return true;
+  }
+  if (block.specialists === undefined) {
+    warn3("Claude Code route: legacy shape \u2014 enabled without an allow list, so the merged definition flag decides");
+    fix(`sp edit --global ${CLAUDE_BRIDGE_SWITCH_KEY}.specialists '["<name>"]'   (explicit allow list; deals with the repository-writable flag)`);
+    return true;
+  }
+  if (block.specialists.length === 0) {
+    ok3("Claude Code route: enabled with an empty allow list \u2014 off for every Specialist");
+    return true;
+  }
+  const known = new Set(summaries.map((summary) => summary.name));
+  const unknown = block.specialists.filter((name) => !known.has(name));
+  ok3(`Claude Code route: allow list ${block.specialists.join(", ")}${block.default_model ? ` (default ${block.default_model})` : ""}`);
+  if (unknown.length > 0) {
+    warn3(`allow list names Specialist(s) that do not resolve: ${unknown.join(", ")}`);
+    fix(`remove them from ${read.path}, or fix the name`);
+  }
+  for (const summary of summaries) {
+    const decision = loader.getClaudeBridgeDecision(summary.name);
+    if (decision?.reason === "unlisted" && decision.shadowed.some((shadow) => shadow.field === "execution.claude_bridge")) {
+      warn3(`${summary.name}: requests the Claude Code route (execution.claude_bridge: true) but the operator ` + "allow list does not name it, so the route is off");
+      fix(`sp edit --global ${CLAUDE_BRIDGE_SWITCH_KEY}.specialists '["${summary.name}"]'   (only if intended)`);
+    }
+    for (const shadow of decision?.shadowed ?? []) {
+      if (shadow.field === "execution.claude_bridge" && decision?.reason === "unlisted")
+        continue;
+      warn3(`${summary.name}: allow list shadows ${shadow.field} ` + `(${JSON.stringify(shadow.layerValue)} -> ${JSON.stringify(shadow.blockValue)})`);
+    }
+    if (!isBridgedModel(summary.model))
+      continue;
+    const spec = await loader.getEffective(summary.name).catch(() => null);
+    const execution = spec?.specialist.execution;
+    const fallbacks = execution?.fallback_models ?? [];
+    if (fallbacks.length > 0 || execution?.fallback_model) {
+      warn3(`${summary.name}: primary ${summary.model} is bridged, so fallbacks never run`);
+      fix(`remove execution.fallback_model/fallback_models for ${summary.name}`);
+    }
+  }
+  const { config } = readValidatedGlobalUserConfig(globalLayer);
+  if (config !== null) {
+    const listed = new Set(block.specialists);
+    const redundant = Object.entries(config).filter(([name, entry]) => listed.has(name) && entry?.execution?.claude_bridge !== undefined).map(([name]) => name).sort();
+    if (redundant.length > 0) {
+      warn3(`${CLAUDE_BRIDGE_SWITCH_KEY}.specialists owns the route for: ${redundant.join(", ")}`);
+      fix(`sp edit --global <name>.execution.claude_bridge null   (the per-Specialist flag is now redundant)`);
+    }
+  }
+  return true;
 }
 function renderDriftTable(root, json = false) {
   const report = detectDriftUnderRoot(root);
@@ -61322,6 +61619,7 @@ var init_doctor = __esm(() => {
   init_dead_job_audit();
   init_loader();
   init_global_config();
+  init_claude_bridge();
   init_channel_doctor();
   init_tool_catalog();
   init_session();
@@ -91945,6 +92243,7 @@ var init_rejection = __esm(() => {
     "no_model_configured",
     "model_unavailable",
     "claude_bridge_unavailable",
+    "claude_bridge_route_model_mismatch",
     "extension_tool_shadowed",
     "extension_discovery_failed",
     "context_unresolvable",
@@ -91966,6 +92265,7 @@ var init_rejection = __esm(() => {
   FIX_BY_REASON = {
     unknown_specialist: "Check specialist_list for the exact Specialist name and re-dispatch with a known name.",
     claude_bridge_unavailable: "The definition enables the Claude Code route but the pi-claude-bridge extension was not found. Install it with `pi install npm:pi-claude-bridge@0.12.0` (pi writes it to <agentDir>/npm, e.g. ~/.pi/agent/npm), or set SPECIALISTS_CLAUDE_BRIDGE_PATH to an absolute entry, or clear execution.claude_bridge and re-dispatch. The operator must also enable the route in ~/.config/specialists/user.json. The refusal note lists every path searched.",
+    claude_bridge_route_model_mismatch: "The Specialist is named in the operator allow list (claude_bridge.specialists in ~/.config/specialists/user.json) but that block resolves no claude-bridge/... model for it. Fix claude_bridge.models.<name> or claude_bridge.default_model, or remove the name from the list, then re-dispatch. The run is refused rather than admitted and billed to another provider.",
     work_item_store_unavailable: "The Substrate work boundary could not be opened. Install or upgrade the Substrate package, or set SUBSTRATE_DB (fallback XTRM_STATE_DB) to a writable state file, then re-dispatch.",
     parent_ref_and_ref: "Provide exactly one work locator. parent_ref only parents an Issue created from an inline contract: re-dispatch with contract plus parent_ref, or with issue_ref alone.",
     kind_and_ref: "Provide exactly one work locator. kind only flavours an Issue created from an inline contract: re-dispatch with contract plus kind, or with issue_ref alone.",
@@ -95596,6 +95896,12 @@ class NativeActivationHost {
     };
     await this.republishOncePerProcess();
     const specialist = await this.loader.get(request.specialist).catch((error) => {
+      if (error instanceof ClaudeBridgeRouteModelMismatchError) {
+        return reject("claude_bridge_route_model_mismatch", {
+          requestedModel: error.model ?? undefined,
+          note: error.message
+        });
+      }
       return reject("unknown_specialist", {
         note: error instanceof Error ? error.message : String(error)
       });
@@ -95812,7 +96118,7 @@ class NativeActivationHost {
     if (!modelCheck.ok && !claudeBridge && modelChain[0]?.startsWith(`${CLAUDE_BRIDGE_PROVIDER}/`)) {
       return reject("model_unavailable", {
         requestedModel: modelChain[0],
-        note: `${modelCheck.reason ?? "No models match"} (the Claude Code route is off: ${claudeBridgeOffSwitches(execution).join(" and ")} is not enabled; not falling back to another provider)`
+        note: `${modelCheck.reason ?? "No models match"} (the Claude Code route is off: ${claudeBridgeOffSwitches(execution, operatorClaudeBridgeEnabled, request.specialist).join(" and ")} is not enabled; not falling back to another provider)`
       });
     }
     while ((!modelCheck.ok || !modelCheck.model) && modelIndex < modelChain.length - 1) {
@@ -96971,7 +97277,14 @@ class NativeActivationHost {
     if (overrideName) {
       const sdk = await this.loadSdk();
       const retryRuntime = await createGateModelRuntime(sdk);
-      const retrySpecialist = await this.loader.get(record.snapshot.specialist).catch(() => {
+      const retrySpecialist = await this.loader.get(record.snapshot.specialist).catch((error) => {
+        if (error instanceof ClaudeBridgeRouteModelMismatchError) {
+          throw new DispatchRejectedError("claude_bridge_route_model_mismatch", {
+            activationId,
+            requestedModel: error.model ?? undefined,
+            note: error.message
+          });
+        }
         return;
       });
       const retryBridge = retrySpecialist ? claudeBridgeRouteEnabled(retrySpecialist.specialist.execution) : false;

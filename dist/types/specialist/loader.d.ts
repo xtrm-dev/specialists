@@ -1,5 +1,5 @@
 import { type ScriptEntry, type Specialist, type BlockedFieldWarning } from './schema.js';
-import { type GlobalUserConfigPath } from './global-config.js';
+import { type ClaudeBridgeBlockRead, type GlobalUserConfigPath } from './global-config.js';
 export interface StallDetectionConfig {
     running_silence_warn_ms?: number;
     running_silence_error_ms?: number;
@@ -50,6 +50,64 @@ export declare class SpecialistMissingModelError extends Error {
     readonly specialistName: string;
     constructor(specialistName: string);
 }
+/**
+ * Thrown by SpecialistLoader.get when the operator's Claude Code allow list names a Specialist
+ * whose resolved model is not `claude-bridge/...` (SPECIALISTS-4442).
+ *
+ * The run is REFUSED, never run inert: loading the bridge and then billing another provider is the
+ * silent billing-surface swap the route exists to prevent. The message names the Specialist, the
+ * model and the block so an operator can fix the one entry instead of guessing.
+ */
+export declare class ClaudeBridgeRouteModelMismatchError extends Error {
+    readonly specialistName: string;
+    readonly model: string | null;
+    readonly blockPath: string;
+    readonly blockError: string | null;
+    readonly code = "claude_bridge_route_model_mismatch";
+    constructor(specialistName: string, model: string | null, blockPath: string, blockError: string | null);
+}
+/**
+ * The route decision for one Specialist, after every layer merged (SPECIALISTS-4442).
+ *
+ * One resolver, one answer: the native host (dispatch and retry), `sp run`, `sp script`, session
+ * start, `sp list` and `sp view` all read the merged spec it produced, so no runtime can disagree
+ * with another or silently change the model on a retry.
+ */
+export interface ClaudeBridgeRouteDecision {
+    /** `block` = the operator allow list decided; `legacy` = the merged definition flag decides. */
+    source: 'block' | 'legacy';
+    reason: 'block_absent' | 'block_invalid' | 'block_disabled' | 'legacy_no_list' | 'listed' | 'unlisted' | 'listed_model_mismatch';
+    /** The block's allow list names this Specialist. */
+    listed: boolean;
+    /** Effective route permission for this Specialist. */
+    enabled: boolean;
+    /** Effective bridge model the block supplies (listed only). */
+    model: string | null;
+    blockError: string | null;
+    blockPath: string;
+    /** Lower-layer values the block shadowed, for the provenance warning (and `sp doctor`). */
+    shadowed: Array<{
+        field: 'execution.claude_bridge' | 'execution.model';
+        layerValue: unknown;
+        blockValue: unknown;
+    }>;
+}
+/**
+ * Apply the operator block to a merged execution record. Pure: the loader is the only caller, and
+ * the caller writes the result back (see `buildMergedSpec`), so this can be unit-tested without a
+ * filesystem.
+ *
+ * Precedence, in order:
+ *   1. no block, or `enabled !== true`      -> no injection; the legacy rule stands (route off);
+ *   2. `specialists` absent                -> legacy rule, definition flag decides;
+ *   3. `specialists` present, name listed   -> flag true, model = models[name] ?? default_model;
+ *   4. `specialists` present, name unlisted -> flag FALSE even if a repo/home layer set it;
+ *   5. listed but no bridged model          -> `listed_model_mismatch` (dispatch refuses).
+ */
+export declare function resolveClaudeBridgeRoute(name: string, execution: {
+    claude_bridge?: unknown;
+    model?: unknown;
+} | undefined, read: ClaudeBridgeBlockRead): ClaudeBridgeRouteDecision;
 /** Thrown when config layers resolve two distinct enabled `npm:` specs for the same package. */
 export declare class SpecialistExtensionSourceCollisionError extends Error {
     constructor(specialistName: string, packageName: string);
@@ -64,6 +122,7 @@ interface LoaderOptions {
 export declare class SpecialistLoader {
     private cache;
     private blockedFieldWarnings;
+    private claudeBridgeDecisions;
     private projectDir;
     private homeDir;
     constructor(options?: LoaderOptions);
@@ -138,6 +197,12 @@ export declare class SpecialistLoader {
      */
     getCanonicalExtensions(name: string): Promise<Record<string, boolean>>;
     getBlockedFieldWarnings(name?: string): BlockedFieldWarning[];
+    /**
+     * The Claude Code route decision recorded for `name` by the most recent merge
+     * (SPECIALISTS-4442). Undefined until `list()`, `get()` or `getEffective()` merged it. Doctor
+     * reads it instead of re-deriving the precedence from the block.
+     */
+    getClaudeBridgeDecision(name: string): ClaudeBridgeRouteDecision | undefined;
     /** Resolution of the global user-config path. Returns null only if HOME is unset and XDG_CONFIG_HOME is empty. */
     getGlobalLayerPath(): GlobalUserConfigPath | null;
     invalidateCache(name?: string): void;

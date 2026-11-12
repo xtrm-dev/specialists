@@ -17,9 +17,10 @@
  */
 import { readFileSync } from 'node:fs';
 import {
-  ClaudeBridgeSwitchSchema,
   CLAUDE_BRIDGE_SWITCH_KEY,
   getGlobalUserConfigPath,
+  readClaudeBridgeBlock,
+  type ClaudeBridgeBlockRead,
   type GlobalUserConfigPath,
 } from '../specialist/global-config.js';
 
@@ -50,31 +51,26 @@ export function claudeBridgeEnabled(execution: { claude_bridge?: unknown } | und
 /**
  * Whether the OPERATOR enabled the route on this machine.
  *
- * Read from `~/.config/specialists/user.json` (`{ "claude_bridge": { "enabled": true } }`), the one
- * config file a repository cannot write. The definition flag alone must never be enough: a repo
- * can ship `.specialists/user/<name>.json`, a repo-defined specialist name can become the merge
- * base, and the repo layer may even be a symlink into the home layer — so provenance cannot be
- * inferred from the merged spec, and the decision has to live somewhere outside every repo.
+ * Read from the `claude_bridge` block of `~/.config/specialists/user.json`, the one config file a
+ * repository cannot write. The definition flag alone must never be enough: a repo can ship
+ * `.specialists/user/<name>.json`, a repo-defined specialist name can become the merge base, and
+ * the repo layer may even be a symlink into the home layer — so provenance cannot be inferred from
+ * the merged spec, and the decision has to live somewhere outside every repo.
  *
- * Fail closed: absent, unreadable or malformed is OFF, and so is any shape other than
- * `enabled: true`.
+ * This is the MACHINE gate. Which Specialists may use the route is the block's allow list, applied
+ * by the loader (SPECIALISTS-4442); this function answers only "did the operator consent on this
+ * machine".
+ *
+ * Fail closed: absent, unreadable, malformed or invalid is OFF, and so is any shape other than
+ * `enabled: true`. The same validated reader the loader uses is the only reader, so the two
+ * cannot report different failures.
  */
 export function operatorClaudeBridgeEnabled(
   location: GlobalUserConfigPath = getGlobalUserConfigPath(),
   readFile: (path: string) => string = path => readFileSync(path, 'utf-8'),
 ): boolean {
-  if (!location.exists) return false;
-  try {
-    const raw: unknown = JSON.parse(readFile(location.path));
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
-    const entry = (raw as Record<string, unknown>)[CLAUDE_BRIDGE_SWITCH_KEY];
-    // Same strict schema the validator reports on: an extra key is invalid input, and invalid
-    // input never enables a billing surface. The reader and the validator must not disagree.
-    const parsed = ClaudeBridgeSwitchSchema.safeParse(entry);
-    return parsed.success && parsed.data.enabled === true;
-  } catch {
-    return false;
-  }
+  const read = readClaudeBridgeBlock(location, readFile);
+  return read.error === null && read.block !== null && read.block.enabled === true;
 }
 
 /**
@@ -90,16 +86,45 @@ export function claudeBridgeRouteEnabled(
 }
 
 /**
- * Which half of the route is off, named for a refusal note. Never changes what enables the route:
+ * Which switch is off, named for a refusal note. Never changes what enables the route:
  * `claudeBridgeRouteEnabled` stays the decision, this only explains a "no".
+ *
+ * `specialistName` is what makes the note truthful after SPECIALISTS-4442: when the operator block
+ * carries an allow list, the reason a repo-selected Specialist stays off is the missing NAME, not
+ * the definition flag (a repo layer can still write that flag; the list is what it cannot write).
  */
 export function claudeBridgeOffSwitches(
   execution: { claude_bridge?: unknown } | undefined,
   operatorEnabled: () => boolean = operatorClaudeBridgeEnabled,
+  specialistName?: string,
+  blockRead: ClaudeBridgeBlockRead = readClaudeBridgeBlock(),
 ): string[] {
   const off: string[] = [];
-  if (!claudeBridgeEnabled(execution)) off.push('the definition flag execution.claude_bridge');
-  if (!operatorEnabled()) off.push(`the operator switch ${CLAUDE_BRIDGE_SWITCH_KEY} in ~/.config/specialists/user.json`);
+  const block = blockRead.block;
+  const allowListReason = (): string | null => {
+    if (specialistName === undefined || block === null || block.specialists === undefined) return null;
+    if (!block.specialists.includes(specialistName)) {
+      return (
+        `the operator allow list ${CLAUDE_BRIDGE_SWITCH_KEY}.specialists in ~/.config/specialists/user.json, ` +
+        `which does not name "${specialistName}"`
+      );
+    }
+    return (
+      `the operator allow list ${CLAUDE_BRIDGE_SWITCH_KEY}.specialists in ~/.config/specialists/user.json, ` +
+      `which resolves no ${CLAUDE_BRIDGE_PROVIDER}/... model for "${specialistName}"`
+    );
+  };
+
+  if (blockRead.error !== null) {
+    off.push(`the operator ${CLAUDE_BRIDGE_SWITCH_KEY} block in ${blockRead.path} is invalid (${blockRead.error})`);
+  } else {
+    const allowList = allowListReason();
+    if (allowList !== null) off.push(allowList);
+    else if (!claudeBridgeEnabled(execution)) off.push('the definition flag execution.claude_bridge');
+  }
+  if (!operatorEnabled()) {
+    off.push(`the operator switch ${CLAUDE_BRIDGE_SWITCH_KEY} in ~/.config/specialists/user.json`);
+  }
   return off;
 }
 

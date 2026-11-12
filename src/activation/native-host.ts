@@ -42,7 +42,13 @@
 import { randomUUID } from 'node:crypto';
 import { contractToMarkdown } from './contract-markdown.js';
 import { existsSync } from 'node:fs';
-import { SpecialistLoader, parseNpmSourceName, STALL_DETECTION_DEFAULTS, type StallDetectionConfig } from '../specialist/loader.js';
+import {
+  ClaudeBridgeRouteModelMismatchError,
+  SpecialistLoader,
+  parseNpmSourceName,
+  STALL_DETECTION_DEFAULTS,
+  type StallDetectionConfig,
+} from '../specialist/loader.js';
 import { buildSystemPrompt } from '../specialist/system-prompt.js';
 import { renderTaskPrompt } from '../specialist/task-prompt.js';
 import {
@@ -74,6 +80,7 @@ import {
   claudeBridgeOffSwitches,
   claudeBridgeRouteEnabled,
   isBridgedModel,
+  operatorClaudeBridgeEnabled,
 } from '../pi/claude-bridge.js';
 import { getPermissionGuardExtensionPath, resolvePermissionGuardForSpawn } from '../pi/permission-guard-extension.js';
 import {
@@ -1536,6 +1543,16 @@ export class NativeActivationHost {
     await this.republishOncePerProcess();
 
     const specialist = await this.loader.get(request.specialist).catch((error: unknown) => {
+      // SPECIALISTS-4442: a Specialist the operator allow list names but cannot give a bridged
+      // model is refused with its own code, never reported as an unknown name and never admitted.
+      if (error instanceof ClaudeBridgeRouteModelMismatchError) {
+        // Literal, not error.code: the refusal-reason set is asserted against the literal codes in
+        // this file (dispatch-refusal-fix.test.ts). The dispatch test pins the two together.
+        return reject('claude_bridge_route_model_mismatch', {
+          requestedModel: error.model ?? undefined,
+          note: error.message,
+        });
+      }
       return reject('unknown_specialist', {
         note: error instanceof Error ? error.message : String(error),
       });
@@ -1897,7 +1914,7 @@ export class NativeActivationHost {
     if (!modelCheck.ok && !claudeBridge && modelChain[0]?.startsWith(`${CLAUDE_BRIDGE_PROVIDER}/`)) {
       return reject('model_unavailable', {
         requestedModel: modelChain[0],
-        note: `${modelCheck.reason ?? 'No models match'} (the Claude Code route is off: ${claudeBridgeOffSwitches(execution).join(' and ')} is not enabled; not falling back to another provider)`,
+        note: `${modelCheck.reason ?? 'No models match'} (the Claude Code route is off: ${claudeBridgeOffSwitches(execution, operatorClaudeBridgeEnabled, request.specialist).join(' and ')} is not enabled; not falling back to another provider)`,
       });
     }
     while ((!modelCheck.ok || !modelCheck.model) && modelIndex < modelChain.length - 1) {
@@ -3778,7 +3795,18 @@ export class NativeActivationHost {
       const retryRuntime = await createGateModelRuntime(sdk);
       // SPECIALISTS-4405: the override must be able to name a bridged model too. The flag is a
       // property of the definition, so it is read from the definition rather than guessed.
-      const retrySpecialist = await this.loader.get(record.snapshot.specialist).catch(() => undefined);
+      // SPECIALISTS-4442: retry re-reads the SAME merged spec, so a retry of a listed
+      // Specialist cannot silently change the model, and a refused one stays refused.
+      const retrySpecialist = await this.loader.get(record.snapshot.specialist).catch((error: unknown) => {
+        if (error instanceof ClaudeBridgeRouteModelMismatchError) {
+          throw new DispatchRejectedError('claude_bridge_route_model_mismatch', {
+            activationId,
+            requestedModel: error.model ?? undefined,
+            note: error.message,
+          });
+        }
+        return undefined;
+      });
       // The same two halves as dispatch: the definition selects, the operator grants.
       const retryBridge = retrySpecialist
         ? claudeBridgeRouteEnabled(retrySpecialist.specialist.execution)
