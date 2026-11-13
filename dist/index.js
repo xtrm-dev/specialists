@@ -5534,38 +5534,36 @@ var require_Alias = __commonJS(function(exports) {
         if (node.anchor === this.source)
           found = node;
       }
-      if (found && ctx) {
-        const { anchors, doc, maxAliasCount } = ctx;
-        let data = anchors.get(found);
-        if (!data) {
-          toJS.toJS(found, null, ctx);
-          data = anchors.get(found);
-        }
-        if (data?.res === undefined) {
-          const msg = "This should not happen: Alias anchor was not resolved?";
-          throw new ReferenceError(msg);
-        }
-        if (maxAliasCount >= 0) {
-          data.count += 1;
-          if (data.aliasCount === 0)
-            data.aliasCount = getAliasCount(doc, found, anchors);
-          if (data.count * data.aliasCount > maxAliasCount) {
-            const msg = "Excessive alias count indicates a resource exhaustion attack";
-            throw new ReferenceError(msg);
-          }
-        }
-      }
       return found;
     }
     toJSON(_arg, ctx) {
       if (!ctx)
         return { source: this.source };
-      const source = this.resolve(ctx.doc, ctx);
+      const { anchors, doc, maxAliasCount } = ctx;
+      const source = this.resolve(doc, ctx);
       if (!source) {
         const msg = `Unresolved alias (the anchor must be set before the alias): ${this.source}`;
         throw new ReferenceError(msg);
       }
-      return ctx.anchors.get(source).res;
+      let data = anchors.get(source);
+      if (!data) {
+        toJS.toJS(source, null, ctx);
+        data = anchors.get(source);
+      }
+      if (data?.res === undefined) {
+        const msg = "This should not happen: Alias anchor was not resolved?";
+        throw new ReferenceError(msg);
+      }
+      if (maxAliasCount >= 0) {
+        data.count += 1;
+        if (data.aliasCount === 0)
+          data.aliasCount = getAliasCount(doc, source, anchors);
+        if (data.count * data.aliasCount > maxAliasCount) {
+          const msg = "Excessive alias count indicates a resource exhaustion attack";
+          throw new ReferenceError(msg);
+        }
+      }
+      return data.res;
     }
     toString(ctx, _onComment, _onChompKeep) {
       const src = `*${this.source}`;
@@ -9327,32 +9325,33 @@ var require_resolve_flow_scalar = __commonJS(function(exports) {
     }
     if (badChar)
       onError(0, "BAD_SCALAR_START", `Plain value cannot start with ${badChar}`);
-    return unfoldLines(source);
+    return foldLines(source);
   }
   function singleQuotedValue(source, onError) {
     if (source[source.length - 1] !== "'" || source.length === 1)
       onError(source.length, "MISSING_CHAR", "Missing closing 'quote");
-    return unfoldLines(source.slice(1, -1)).replace(/''/g, "'");
+    return foldLines(source.slice(1, -1)).replace(/''/g, "'");
   }
-  function unfoldLines(source) {
-    const line = /(.*?)\r?\n/sy;
-    let match = line.exec(source);
+  function foldLines(source) {
+    let first, line;
+    try {
+      first = new RegExp(`(.*?)(?<![ 	])[ 	]*\r?
+`, "sy");
+      line = new RegExp(`[ 	]*(.*?)(?:(?<![ 	])[ 	]*)?\r?
+`, "sy");
+    } catch {
+      first = /(.*?)[ \t]*\r?\n/sy;
+      line = /[ \t]*(.*?)[ \t]*\r?\n/sy;
+    }
+    let match = first.exec(source);
     if (!match)
       return source;
-    let trimEnd, trimBoth;
-    try {
-      trimEnd = new RegExp("(?<![ \t])[ \t]+$");
-      trimBoth = new RegExp("^[ \t]+|(?<![ \t])[ \t]+$", "g");
-    } catch {
-      trimEnd = /[ \t]+$/;
-      trimBoth = /^[ \t]+|[ \t]+$/g;
-    }
-    let res = match[1].replace(trimEnd, "");
+    let res = match[1];
     let sep = " ";
-    let pos = line.lastIndex;
+    let pos = first.lastIndex;
+    line.lastIndex = pos;
     while (match = line.exec(source)) {
-      const lm = match[1].replace(trimBoth, "");
-      if (lm === "") {
+      if (match[1] === "") {
         if (sep === `
 `)
           res += sep;
@@ -9360,7 +9359,7 @@ var require_resolve_flow_scalar = __commonJS(function(exports) {
           sep = `
 `;
       } else {
-        res += sep + lm;
+        res += sep + match[1];
         sep = " ";
       }
       pos = line.lastIndex;
@@ -21127,17 +21126,45 @@ function headingOf(line) {
   const whole = canonical(bare.replace(/:$/, "").trim());
   if (ALL_HEADINGS.has(whole))
     return { name: whole };
-  const split = bare.match(/^([A-Za-z][A-Za-z _-]*?)\s*:\s*(.*)$/);
+  const split = splitHeadingLabel(bare);
   if (!split)
     return;
-  const name = canonical(split[1].trim());
+  const name = canonical(split.label);
   if (!ALL_HEADINGS.has(name))
     return;
-  const inlineBody = split[2].trim();
+  const inlineBody = split.body.trim();
   return inlineBody ? { name, inlineBody } : { name };
 }
+function isSpaceChar(c) {
+  return c === " " || c === "\t" || c === `
+` || c === "\r" || c === "\v" || c === "\f";
+}
+function isHeadingLabel(text) {
+  const alpha = (code) => code >= 65 && code <= 90 || code >= 97 && code <= 122;
+  if (text.length === 0 || !alpha(text.charCodeAt(0)))
+    return false;
+  for (const c of text) {
+    if (!alpha(c.charCodeAt(0)) && c !== " " && c !== "_" && c !== "-")
+      return false;
+  }
+  return true;
+}
+function splitHeadingLabel(bare) {
+  const colon = bare.indexOf(":");
+  if (colon <= 0)
+    return;
+  let label = bare.slice(0, colon);
+  while (label.length > 0 && isSpaceChar(label[label.length - 1]))
+    label = label.slice(0, -1);
+  if (!isHeadingLabel(label))
+    return;
+  let start = colon + 1;
+  while (start < bare.length && isSpaceChar(bare[start]))
+    start++;
+  return { label, body: bare.slice(start) };
+}
 function scrutinyLevel(description) {
-  const match = description.match(/SCRUTINY\b[^\n]*\n?\s*\**\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i) ?? description.match(/SCRUTINY\b\s*[:\-\u2014]?\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
+  const match = description.match(/SCRUTINY\b[^\n]{0,200}\n?\s{0,20}\*{0,20}\s{0,20}(LOW|MEDIUM|HIGH|CRITICAL)\b/i) ?? description.match(/SCRUTINY\b\s{0,20}[:\-\u2014]?\s{0,20}(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
   return match?.[1]?.toUpperCase();
 }
 function validateContractText(contract) {
@@ -59808,10 +59835,20 @@ function resolveWorktreeBase(git) {
   git("fetch", "origin", defaultBranch);
   return `origin/${defaultBranch}`;
 }
+function slugify2(value) {
+  const lowered = value.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  let start = 0;
+  let end = lowered.length;
+  while (start < end && lowered[start] === "-")
+    start++;
+  while (end > start && lowered[end - 1] === "-")
+    end--;
+  return lowered.slice(start, end);
+}
 function provisionWriterWorkspace(cwd, issueRef, role) {
   const git = (...args) => execFileSync5("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-  const slug = issueRef.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  const roleSlug = role.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const slug = slugify2(issueRef);
+  const roleSlug = slugify2(role);
   const branch = `sp/${slug}`;
   try {
     const existing = git("worktree", "list", "--porcelain").split(`
@@ -64974,7 +65011,7 @@ var init_tool_schema = __esm(() => {
   STRIPPED_KEYS = new Set(["$schema", "default"]);
 });
 
-// node_modules/@modelcontextprotocol/server/dist/chunk-vYduTEsO.mjs
+// node_modules/@modelcontextprotocol/server/dist/chunk-Br0eD_fh.mjs
 var __create, __defProp2, __getOwnPropDesc, __getOwnPropNames, __getProtoOf, __hasOwnProp, __commonJSMin = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports), __exportAll = (all, symbols) => {
   let target = {};
   for (var name in all) {
@@ -65004,7 +65041,7 @@ var __create, __defProp2, __getOwnPropDesc, __getOwnPropNames, __getProtoOf, __h
   value: mod,
   enumerable: true
 }) : target, mod));
-var init_chunk_vYduTEsO = __esm(() => {
+var init_chunk_Br0eD_fh = __esm(() => {
   __create = Object.create;
   __defProp2 = Object.defineProperty;
   __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -65013,7 +65050,7 @@ var init_chunk_vYduTEsO = __esm(() => {
   __hasOwnProp = Object.prototype.hasOwnProperty;
 });
 
-// node_modules/@modelcontextprotocol/server/dist/dialects-CDpMbily.mjs
+// node_modules/@modelcontextprotocol/server/dist/dialects-DoSzNhcb.mjs
 function declares2019Dialect($schema) {
   return typeof $schema === "string" && DRAFT_2019_09_URIS.has($schema.replace(/#$/, ""));
 }
@@ -65030,7 +65067,7 @@ function declaredDialect(schema, remedy) {
   throw new Error(`JSON Schema declares an unsupported dialect ("$schema": "${schema.$schema.slice(0, 200)}"). The default validator supports JSON Schema 2020-12, 2019-09, draft-07, and draft-06; ${remedy}`);
 }
 var DRAFT_2020_12_URIS, DRAFT_2019_09_URIS, DRAFT_07_URIS, DRAFT_06_URIS;
-var init_dialects_CDpMbily = __esm(() => {
+var init_dialects_DoSzNhcb = __esm(() => {
   DRAFT_2020_12_URIS = new Set(["https://json-schema.org/draft/2020-12/schema", "http://json-schema.org/draft/2020-12/schema"]);
   DRAFT_2019_09_URIS = new Set(["https://json-schema.org/draft/2019-09/schema", "http://json-schema.org/draft/2019-09/schema"]);
   DRAFT_07_URIS = new Set(["https://json-schema.org/draft-07/schema", "http://json-schema.org/draft-07/schema"]);
@@ -65120,7 +65157,7 @@ function mergeDefs(...defs) {
 function esc(str) {
   return JSON.stringify(str);
 }
-function slugify2(input) {
+function slugify3(input) {
   return input.toLowerCase().trim().replace(/[^\w\s-]/g, "").replace(/[\s_-]+/g, "-").replace(/^-+|-+$/g, "");
 }
 function isObject2(data) {
@@ -68927,7 +68964,7 @@ function _toUpperCase() {
   return _overwrite((input) => input.toUpperCase());
 }
 function _slugify() {
-  return _overwrite((input) => slugify2(input));
+  return _overwrite((input) => slugify3(input));
 }
 function _array(Class, element, params) {
   return new Class({
@@ -71038,9 +71075,9 @@ var init_v4 = __esm(() => {
   init_classic();
 });
 
-// node_modules/@modelcontextprotocol/core/dist/schemas-DscsoNZN.mjs
-var LATEST_PROTOCOL_VERSION = "2025-11-25", SUPPORTED_PROTOCOL_VERSIONS, RELATED_TASK_META_KEY = "io.modelcontextprotocol/related-task", PROTOCOL_VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion", CLIENT_INFO_META_KEY = "io.modelcontextprotocol/clientInfo", SERVER_INFO_META_KEY = "io.modelcontextprotocol/serverInfo", CLIENT_CAPABILITIES_META_KEY = "io.modelcontextprotocol/clientCapabilities", SUBSCRIPTION_ID_META_KEY = "io.modelcontextprotocol/subscriptionId", LOG_LEVEL_META_KEY = "io.modelcontextprotocol/logLevel", JSONRPC_VERSION = "2.0", JSONValueSchema, JSONObjectSchema, JSONArraySchema, ProgressTokenSchema, CursorSchema, TaskMetadataSchema, RelatedTaskMetadataSchema, RequestMetaSchema, BaseRequestParamsSchema, TaskAugmentedRequestParamsSchema, RequestSchema, NotificationsParamsSchema, NotificationSchema, ResultMetaObjectSchema, ResultSchema, RequestIdSchema, JSONRPCRequestSchema, JSONRPCNotificationSchema, JSONRPCResultResponseSchema, JSONRPCErrorResponseSchema, JSONRPCMessageSchema, JSONRPCResponseSchema, EmptyResultSchema, CancelledNotificationParamsSchema, CancelledNotificationSchema, IconSchema, IconsSchema, BaseMetadataSchema, ImplementationSchema, FormElicitationCapabilitySchema, ElicitationCapabilitySchema, ClientTasksCapabilitySchema, ServerTasksCapabilitySchema, ClientCapabilitiesSchema, InitializeRequestParamsSchema, InitializeRequestSchema, ServerCapabilitiesSchema, InitializeResultSchema, InitializedNotificationSchema, DiscoverRequestSchema, DiscoverResultSchema, PingRequestSchema, ProgressSchema, ProgressNotificationParamsSchema, ProgressNotificationSchema, PaginatedRequestParamsSchema, PaginatedRequestSchema, PaginatedResultSchema, ResourceContentsSchema, TextResourceContentsSchema, Base64Schema, BlobResourceContentsSchema, RoleSchema, AnnotationsSchema, ResourceSchema, ResourceTemplateSchema, ListResourcesRequestSchema, ListResourcesResultSchema, ListResourceTemplatesRequestSchema, ListResourceTemplatesResultSchema, ResourceRequestParamsSchema, ReadResourceRequestParamsSchema, ReadResourceRequestSchema, ReadResourceResultSchema, ResourceListChangedNotificationSchema, SubscribeRequestParamsSchema, SubscribeRequestSchema, UnsubscribeRequestParamsSchema, UnsubscribeRequestSchema, SubscriptionFilterSchema, SubscriptionsListenRequestParamsSchema, SubscriptionsListenRequestSchema, SubscriptionsAcknowledgedNotificationParamsSchema, SubscriptionsAcknowledgedNotificationSchema, SubscriptionsListenResultMetaSchema, SubscriptionsListenResultSchema, ResourceUpdatedNotificationParamsSchema, ResourceUpdatedNotificationSchema, PromptArgumentSchema, PromptSchema2, ListPromptsRequestSchema, ListPromptsResultSchema, GetPromptRequestParamsSchema, GetPromptRequestSchema, TextContentSchema, ImageContentSchema, AudioContentSchema, ToolUseContentSchema, EmbeddedResourceSchema, ResourceLinkSchema, ContentBlockSchema, PromptMessageSchema, GetPromptResultSchema, PromptListChangedNotificationSchema, ToolAnnotationsSchema, ToolExecutionSchema, ToolSchema, ListToolsRequestSchema, ListToolsResultSchema, CallToolResultSchema, CompatibilityCallToolResultSchema, CallToolRequestParamsSchema, CallToolRequestSchema, ToolListChangedNotificationSchema, ListChangedOptionsBaseSchema, LoggingLevelSchema, SetLevelRequestParamsSchema, SetLevelRequestSchema, LoggingMessageNotificationParamsSchema, LoggingMessageNotificationSchema, ModelHintSchema, ModelPreferencesSchema, ToolChoiceSchema, ToolResultContentSchema, SamplingContentSchema, SamplingMessageContentBlockSchema, SamplingMessageSchema, CreateMessageRequestParamsSchema, CreateMessageRequestSchema, CreateMessageResultSchema, CreateMessageResultWithToolsSchema, BooleanSchemaSchema, StringSchemaSchema, NumberSchemaSchema, UntitledSingleSelectEnumSchemaSchema, TitledSingleSelectEnumSchemaSchema, LegacyTitledEnumSchemaSchema, SingleSelectEnumSchemaSchema, UntitledMultiSelectEnumSchemaSchema, TitledMultiSelectEnumSchemaSchema, MultiSelectEnumSchemaSchema, EnumSchemaSchema, PrimitiveSchemaDefinitionSchema, ElicitRequestFormParamsSchema, ElicitRequestURLParamsSchema, ElicitRequestParamsSchema, ElicitRequestSchema, ElicitationCompleteNotificationParamsSchema, ElicitationCompleteNotificationSchema, ElicitResultSchema, ResourceTemplateReferenceSchema, PromptReferenceSchema, CompleteRequestParamsSchema, CompleteRequestSchema, CompleteResultSchema, RootSchema, ListRootsRequestSchema, ListRootsResultSchema, RootsListChangedNotificationSchema, TaskCreationParamsSchema, TaskStatusSchema, TaskSchema, CreateTaskResultSchema, TaskStatusNotificationParamsSchema, TaskStatusNotificationSchema, GetTaskRequestSchema, GetTaskResultSchema, GetTaskPayloadRequestSchema, GetTaskPayloadResultSchema, ListTasksRequestSchema, ListTasksResultSchema, CancelTaskRequestSchema, CancelTaskResultSchema, ClientRequestSchema, ClientNotificationSchema, ClientResultSchema, ServerRequestSchema, ServerNotificationSchema, ServerResultSchema;
-var init_schemas_DscsoNZN = __esm(() => {
+// node_modules/@modelcontextprotocol/core/dist/auth-CUe6YdwF.mjs
+var LATEST_PROTOCOL_VERSION = "2025-11-25", SUPPORTED_PROTOCOL_VERSIONS, RELATED_TASK_META_KEY = "io.modelcontextprotocol/related-task", PROTOCOL_VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion", CLIENT_INFO_META_KEY = "io.modelcontextprotocol/clientInfo", SERVER_INFO_META_KEY = "io.modelcontextprotocol/serverInfo", CLIENT_CAPABILITIES_META_KEY = "io.modelcontextprotocol/clientCapabilities", SUBSCRIPTION_ID_META_KEY = "io.modelcontextprotocol/subscriptionId", LOG_LEVEL_META_KEY = "io.modelcontextprotocol/logLevel", JSONRPC_VERSION = "2.0", JSONValueSchema, JSONObjectSchema, JSONArraySchema, ProgressTokenSchema, CursorSchema, TaskMetadataSchema, RelatedTaskMetadataSchema, RequestMetaSchema, BaseRequestParamsSchema, TaskAugmentedRequestParamsSchema, RequestSchema, NotificationsParamsSchema, NotificationSchema, ResultMetaObjectSchema, ResultSchema, RequestIdSchema, JSONRPCRequestSchema, JSONRPCNotificationSchema, JSONRPCResultResponseSchema, JSONRPCErrorResponseSchema, JSONRPCMessageSchema, JSONRPCResponseSchema, EmptyResultSchema, CancelledNotificationParamsSchema, CancelledNotificationSchema, IconSchema, IconsSchema, BaseMetadataSchema, ImplementationSchema, FormElicitationCapabilitySchema, ElicitationCapabilitySchema, ClientTasksCapabilitySchema, ServerTasksCapabilitySchema, ClientCapabilitiesSchema, InitializeRequestParamsSchema, InitializeRequestSchema, ServerCapabilitiesSchema, InitializeResultSchema, InitializedNotificationSchema, DiscoverRequestSchema, DiscoverResultSchema, PingRequestSchema, ProgressSchema, ProgressNotificationParamsSchema, ProgressNotificationSchema, PaginatedRequestParamsSchema, PaginatedRequestSchema, PaginatedResultSchema, ResourceContentsSchema, TextResourceContentsSchema, Base64Schema, BlobResourceContentsSchema, RoleSchema, AnnotationsSchema, ResourceSchema, ResourceTemplateSchema, ListResourcesRequestSchema, ListResourcesResultSchema, ListResourceTemplatesRequestSchema, ListResourceTemplatesResultSchema, ResourceRequestParamsSchema, ReadResourceRequestParamsSchema, ReadResourceRequestSchema, ReadResourceResultSchema, ResourceListChangedNotificationSchema, SubscribeRequestParamsSchema, SubscribeRequestSchema, UnsubscribeRequestParamsSchema, UnsubscribeRequestSchema, SubscriptionFilterSchema, SubscriptionsListenRequestParamsSchema, SubscriptionsListenRequestSchema, SubscriptionsAcknowledgedNotificationParamsSchema, SubscriptionsAcknowledgedNotificationSchema, SubscriptionsListenResultMetaSchema, SubscriptionsListenResultSchema, ResourceUpdatedNotificationParamsSchema, ResourceUpdatedNotificationSchema, PromptArgumentSchema, PromptSchema2, ListPromptsRequestSchema, ListPromptsResultSchema, GetPromptRequestParamsSchema, GetPromptRequestSchema, TextContentSchema, ImageContentSchema, AudioContentSchema, ToolUseContentSchema, EmbeddedResourceSchema, ResourceLinkSchema, ContentBlockSchema, PromptMessageSchema, GetPromptResultSchema, PromptListChangedNotificationSchema, ToolAnnotationsSchema, ToolExecutionSchema, ToolSchema, ListToolsRequestSchema, ListToolsResultSchema, CallToolResultSchema, CompatibilityCallToolResultSchema, CallToolRequestParamsSchema, CallToolRequestSchema, ToolListChangedNotificationSchema, ListChangedOptionsBaseSchema, LoggingLevelSchema, SetLevelRequestParamsSchema, SetLevelRequestSchema, LoggingMessageNotificationParamsSchema, LoggingMessageNotificationSchema, ModelHintSchema, ModelPreferencesSchema, ToolChoiceSchema, ToolResultContentSchema, SamplingContentSchema, SamplingMessageContentBlockSchema, SamplingMessageSchema, CreateMessageRequestParamsSchema, CreateMessageRequestSchema, CreateMessageResultSchema, CreateMessageResultWithToolsSchema, BooleanSchemaSchema, StringSchemaSchema, NumberSchemaSchema, UntitledSingleSelectEnumSchemaSchema, TitledSingleSelectEnumSchemaSchema, LegacyTitledEnumSchemaSchema, SingleSelectEnumSchemaSchema, UntitledMultiSelectEnumSchemaSchema, TitledMultiSelectEnumSchemaSchema, MultiSelectEnumSchemaSchema, EnumSchemaSchema, PrimitiveSchemaDefinitionSchema, ElicitRequestFormParamsSchema, ElicitRequestURLParamsSchema, ElicitRequestParamsSchema, ElicitRequestSchema, ElicitationCompleteNotificationParamsSchema, ElicitationCompleteNotificationSchema, ElicitResultSchema, ResourceTemplateReferenceSchema, PromptReferenceSchema, CompleteRequestParamsSchema, CompleteRequestSchema, CompleteResultSchema, RootSchema, ListRootsRequestSchema, ListRootsResultSchema, RootsListChangedNotificationSchema, TaskCreationParamsSchema, TaskStatusSchema, TaskSchema, CreateTaskResultSchema, TaskStatusNotificationParamsSchema, TaskStatusNotificationSchema, GetTaskRequestSchema, GetTaskResultSchema, GetTaskPayloadRequestSchema, GetTaskPayloadResultSchema, ListTasksRequestSchema, ListTasksResultSchema, CancelTaskRequestSchema, CancelTaskResultSchema, ClientRequestSchema, ClientNotificationSchema, ClientResultSchema, ServerRequestSchema, ServerNotificationSchema, ServerResultSchema, SafeUrlSchema, OAuthProtectedResourceMetadataSchema, OAuthMetadataSchema, OpenIdProviderMetadataSchema, OpenIdProviderDiscoveryMetadataSchema, OAuthTokensSchema, IdJagTokenExchangeResponseSchema, OAuthErrorResponseSchema, OptionalSafeUrlSchema, OAuthClientMetadataSchema, OAuthClientInformationSchema, OAuthClientInformationFullSchema, OAuthClientRegistrationErrorSchema, OAuthTokenRevocationRequestSchema;
+var init_auth_CUe6YdwF = __esm(() => {
   init_v4();
   SUPPORTED_PROTOCOL_VERSIONS = [
     LATEST_PROTOCOL_VERSION,
@@ -71821,12 +71858,6 @@ var init_schemas_DscsoNZN = __esm(() => {
     ListToolsResultSchema,
     SubscriptionsListenResultSchema
   ]);
-});
-
-// node_modules/@modelcontextprotocol/core/dist/auth-UMQCo-ad.mjs
-var SafeUrlSchema, OAuthProtectedResourceMetadataSchema, OAuthMetadataSchema, OpenIdProviderMetadataSchema, OpenIdProviderDiscoveryMetadataSchema, OAuthTokensSchema, IdJagTokenExchangeResponseSchema, OAuthErrorResponseSchema, OptionalSafeUrlSchema, OAuthClientMetadataSchema, OAuthClientInformationSchema, OAuthClientInformationFullSchema, OAuthClientRegistrationErrorSchema, OAuthTokenRevocationRequestSchema;
-var init_auth_UMQCo_ad = __esm(() => {
-  init_v4();
   SafeUrlSchema = url().superRefine((val, ctx) => {
     if (!URL.canParse(val)) {
       ctx.addIssue({
@@ -71876,8 +71907,7 @@ var init_auth_UMQCo_ad = __esm(() => {
     introspection_endpoint_auth_signing_alg_values_supported: array2(string3()).optional(),
     code_challenge_methods_supported: array2(string3()).optional(),
     client_id_metadata_document_supported: boolean3().optional(),
-    authorization_response_iss_parameter_supported: boolean3().optional().catch(undefined),
-    dpop_signing_alg_values_supported: array2(string3()).optional()
+    authorization_response_iss_parameter_supported: boolean3().optional().catch(undefined)
   });
   OpenIdProviderMetadataSchema = looseObject({
     issuer: string3(),
@@ -71928,8 +71958,7 @@ var init_auth_UMQCo_ad = __esm(() => {
     token_type: string3(),
     expires_in: number4().optional(),
     scope: string3().optional(),
-    refresh_token: string3().optional(),
-    issuer: string3().optional().catch(undefined)
+    refresh_token: string3().optional()
   }).strip();
   IdJagTokenExchangeResponseSchema = object2({
     issued_token_type: literal2("urn:ietf:params:oauth:token-type:id-jag"),
@@ -71969,8 +71998,7 @@ var init_auth_UMQCo_ad = __esm(() => {
     client_id: string3(),
     client_secret: string3().optional(),
     client_id_issued_at: number3().optional(),
-    client_secret_expires_at: number3().optional(),
-    issuer: string3().optional().catch(undefined)
+    client_secret_expires_at: number3().optional()
   }).strip();
   OAuthClientInformationFullSchema = OAuthClientMetadataSchema.merge(OAuthClientInformationSchema);
   OAuthClientRegistrationErrorSchema = object2({
@@ -71985,8 +72013,7 @@ var init_auth_UMQCo_ad = __esm(() => {
 
 // node_modules/@modelcontextprotocol/core/dist/internal.mjs
 var init_internal = __esm(() => {
-  init_schemas_DscsoNZN();
-  init_auth_UMQCo_ad();
+  init_auth_CUe6YdwF();
 });
 
 // node_modules/@modelcontextprotocol/server/node_modules/zod/v4/core/util.js
@@ -72072,7 +72099,7 @@ function mergeDefs2(...defs) {
 function esc2(str) {
   return JSON.stringify(str);
 }
-function slugify3(input) {
+function slugify4(input) {
   return input.toLowerCase().trim().replace(/[^\w\s-]/g, "").replace(/[\s_-]+/g, "-").replace(/^-+|-+$/g, "");
 }
 function isObject3(data) {
@@ -75859,7 +75886,7 @@ function _toUpperCase2() {
   return _overwrite2((input) => input.toUpperCase());
 }
 function _slugify2() {
-  return _overwrite2((input) => slugify3(input));
+  return _overwrite2((input) => slugify4(input));
 }
 function _array2(Class, element, params) {
   return new Class({
@@ -78142,7 +78169,7 @@ var init_v42 = __esm(() => {
   init_classic2();
 });
 
-// node_modules/@modelcontextprotocol/server/dist/src-DdvbAHrR.mjs
+// node_modules/@modelcontextprotocol/server/dist/src-CX2iR2pK.mjs
 function stampErrorBrands(instance, ctor) {
   const brands = /* @__PURE__ */ new Set;
   let current = ctor;
@@ -80154,8 +80181,7 @@ function build() {
     ListResourceTemplatesResultResponseSchema: wireResultResponse(ListResourceTemplatesResultSchema$1),
     ReadResourceResultResponseSchema: wireResultResponse(union3([ReadResourceResultSchema$1, InputRequiredResultSchema])),
     CompleteResultResponseSchema: wireResultResponse(CompleteResultSchema$1),
-    DiscoverResultResponseSchema: wireResultResponse(DiscoverResultSchema$1),
-    SubscriptionsListenResultResponseSchema: wireResultResponse(SubscriptionsListenResultSchema$1)
+    DiscoverResultResponseSchema: wireResultResponse(DiscoverResultSchema$1)
   };
 }
 function buildSchemas2026() {
@@ -80394,9 +80420,6 @@ function isSpecRequestMethod(method) {
 function isSpecNotificationMethod(method) {
   return ALL_CODECS.some((codec) => codec.hasNotificationMethod(method));
 }
-function isExtensionReusedRequestMethod(method) {
-  return method === "tasks/get" || method === "tasks/cancel";
-}
 function isPlainObject$3(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -80428,7 +80451,6 @@ function assertCompleteRequestResourceTemplate(request) {
 function scanXMcpHeaderDeclarations(inputSchema) {
   const declarations = [];
   const seenLower = /* @__PURE__ */ new Map;
-  let numberFault;
   const visit = (node, path, reachable) => {
     if (node === null || typeof node !== "object")
       return;
@@ -80442,12 +80464,8 @@ function scanXMcpHeaderDeclarations(inputSchema) {
       if (!RFC9110_TOKEN.test(raw))
         return `${pathName(path)}: x-mcp-header '${raw}' is not a valid RFC 9110 token (no spaces, control characters or HTTP delimiters)`;
       const type = typeof schema.type === "string" ? schema.type : undefined;
-      if (type === undefined || !PERMITTED_X_MCP_HEADER_TYPES.has(type)) {
-        const fault$1 = `${pathName(path)}: x-mcp-header is only permitted on primitive-typed properties (string, integer, boolean); got ${type ?? "<none>"}`;
-        if (type !== "number")
-          return fault$1;
-        numberFault ??= fault$1;
-      }
+      if (type === undefined || !PERMITTED_X_MCP_HEADER_TYPES.has(type))
+        return `${pathName(path)}: x-mcp-header is only permitted on primitive-typed properties (string, integer, boolean); got ${type ?? "<none>"}`;
       const lower = raw.toLowerCase();
       const prior = seenLower.get(lower);
       if (prior !== undefined)
@@ -80479,18 +80497,12 @@ function scanXMcpHeaderDeclarations(inputSchema) {
     }
   };
   const fault = visit(inputSchema, [], true);
-  if (fault !== undefined)
-    return {
-      valid: false,
-      reason: numberFault ?? fault
-    };
-  return numberFault === undefined ? {
+  return fault === undefined ? {
     valid: true,
     declarations
   } : {
     valid: false,
-    reason: numberFault,
-    declarations
+    reason: fault
   };
 }
 function pathName(path) {
@@ -80586,11 +80598,8 @@ function standardSchemaToJsonSchema(schema, io = "input") {
     ...result
   };
 }
-function isProvablyObjectShapedRoot(schema, root = schema) {
+function isProvablyObjectShapedRoot(schema) {
   if ("properties" in schema || "patternProperties" in schema || "additionalProperties" in schema || "required" in schema)
-    return true;
-  const ref = typeof schema.$ref === "string" && LOCAL_DEFINITION_REF.exec(schema.$ref);
-  if (ref && root[ref[1]]?.[ref[2]]?.type === "object")
     return true;
   for (const key of [
     "oneOf",
@@ -80599,7 +80608,7 @@ function isProvablyObjectShapedRoot(schema, root = schema) {
   ]) {
     const members = schema[key];
     if (Array.isArray(members) && members.length > 0)
-      return members.every((m) => m !== null && typeof m === "object" && (m.type === "object" || isProvablyObjectShapedRoot(m, "$id" in m ? {} : root)));
+      return members.every((m) => m !== null && typeof m === "object" && (m.type === "object" || isProvablyObjectShapedRoot(m)));
   }
   return false;
 }
@@ -80943,8 +80952,7 @@ function manualInputRequiredValue(decoded) {
   return {
     resultType: "input_required",
     inputRequests: decoded.inputRequests,
-    ...decoded.requestState !== undefined && { requestState: decoded.requestState },
-    ...decoded._meta !== undefined && { _meta: decoded._meta }
+    ...decoded.requestState !== undefined && { requestState: decoded.requestState }
   };
 }
 function deserializeMessage(line) {
@@ -81044,7 +81052,7 @@ function fromJsonSchema(schema, validator) {
     }
   } };
 }
-var BRANDS, OAuthError, SdkErrorCode, SdkError, SdkHttpError, FIRST_MODERN_PROTOCOL_VERSION = "2026-07-28", SUPPORTED_MODERN_PROTOCOL_VERSIONS, TOOL_RESULT_FOREIGN_FAMILY_KEYS, memo$1, REF_REWRITE_DATA_POSITION_KEYS, REF_REWRITE_NAME_MAP_KEYS, requestMethodKeys$1, notificationMethodKeys$1, resultMethodKeys, maps$1, rev2025RequestMethods, rev2025NotificationMethods, NOT_IN_ERA$1, rev2025Codec, memo3, CACHEABLE_RESULT_METHODS, RESULT_CACHE_HINT_FALLBACK, ProtocolErrorCode, ProtocolError, ResourceNotFoundError, UrlElicitationRequiredError, UnsupportedProtocolVersionError, MissingRequiredClientCapabilityError, DEFAULT_CACHE_TTL_MS = 0, DEFAULT_CACHE_SCOPE = "private", EXTENDED_RESULT_TYPE_METHODS, INPUT_REQUEST_METHODS_2026, maps, requestMethodKeys, notificationMethodKeys, rev2026RequestMethods, rev2026NotificationMethods, NOT_IN_ERA, REQUIRED_ENVELOPE_KEYS, rev2026Codec, wireResultSchemasMemo, MODERN_WIRE_REVISION = "2026-07-28", ALL_CODECS, schemas_exports, isJSONRPCRequest = (value) => JSONRPCRequestSchema.safeParse(value).success, isJSONRPCNotification = (value) => JSONRPCNotificationSchema.safeParse(value).success, isJSONRPCResultResponse = (value) => JSONRPCResultResponseSchema.safeParse(value).success, isJSONRPCErrorResponse = (value) => JSONRPCErrorResponseSchema.safeParse(value).success, isInputRequiredResult = (value) => typeof value === "object" && value !== null && !Array.isArray(value) && value.resultType === "input_required", X_MCP_HEADER_KEY = "x-mcp-header", RFC9110_TOKEN, PERMITTED_X_MCP_HEADER_TYPES, NON_REACHABLE_SUBSCHEMA_KEYWORDS, OBJECT_VALUED_SUBSCHEMA_KEYWORDS, HEADER_MISMATCH_ERROR_CODE = -32020, INBOUND_VALIDATION_LADDER, LADDER_ERROR_HTTP_STATUS, warnedZodFallback = false, JSON_SCHEMA_CONVERSION_TARGET = "draft-2020-12", LOCAL_DEFINITION_REF, DATETIME_FRACTION_DIGITS, ANNOTATION_ONLY_JSON_SCHEMA_KEYWORDS, ROOT_KEYS, PROPERTY_KEYS_BY_TYPE, SUPPORTED_STRING_FORMATS, inputRequired, REQUEST_STATE_ONLY_LEG_PACING_MS = 250, SPEC_SCHEMA_KEYS, authSchemas, _specTypeSchemas, _isSpecType, specTypeSchemas, isSpecType, DEFAULT_REQUEST_TIMEOUT_MSEC = 60000, RESERVED_ENVELOPE_META_KEYS, RETRY_PARAMS_KEYS, NO_REQUEST_STATE, writeNegotiatedProtocolVersion, Protocol, require_content_type, import_content_type, STDIO_DEFAULT_MAX_BUFFER_SIZE, ReadBuffer = class {
+var BRANDS, OAuthError, SdkErrorCode, SdkError, SdkHttpError, FIRST_MODERN_PROTOCOL_VERSION = "2026-07-28", SUPPORTED_MODERN_PROTOCOL_VERSIONS, TOOL_RESULT_FOREIGN_FAMILY_KEYS, memo$1, REF_REWRITE_DATA_POSITION_KEYS, REF_REWRITE_NAME_MAP_KEYS, requestMethodKeys$1, notificationMethodKeys$1, resultMethodKeys, maps$1, rev2025RequestMethods, rev2025NotificationMethods, NOT_IN_ERA$1, rev2025Codec, memo3, CACHEABLE_RESULT_METHODS, RESULT_CACHE_HINT_FALLBACK, ProtocolErrorCode, ProtocolError, ResourceNotFoundError, UrlElicitationRequiredError, UnsupportedProtocolVersionError, MissingRequiredClientCapabilityError, DEFAULT_CACHE_TTL_MS = 0, DEFAULT_CACHE_SCOPE = "private", EXTENDED_RESULT_TYPE_METHODS, INPUT_REQUEST_METHODS_2026, maps, requestMethodKeys, notificationMethodKeys, rev2026RequestMethods, rev2026NotificationMethods, NOT_IN_ERA, REQUIRED_ENVELOPE_KEYS, rev2026Codec, wireResultSchemasMemo, MODERN_WIRE_REVISION = "2026-07-28", ALL_CODECS, schemas_exports, isJSONRPCRequest = (value) => JSONRPCRequestSchema.safeParse(value).success, isJSONRPCNotification = (value) => JSONRPCNotificationSchema.safeParse(value).success, isJSONRPCResultResponse = (value) => JSONRPCResultResponseSchema.safeParse(value).success, isJSONRPCErrorResponse = (value) => JSONRPCErrorResponseSchema.safeParse(value).success, isInputRequiredResult = (value) => typeof value === "object" && value !== null && !Array.isArray(value) && value.resultType === "input_required", X_MCP_HEADER_KEY = "x-mcp-header", RFC9110_TOKEN, PERMITTED_X_MCP_HEADER_TYPES, NON_REACHABLE_SUBSCHEMA_KEYWORDS, OBJECT_VALUED_SUBSCHEMA_KEYWORDS, HEADER_MISMATCH_ERROR_CODE = -32020, INBOUND_VALIDATION_LADDER, LADDER_ERROR_HTTP_STATUS, warnedZodFallback = false, JSON_SCHEMA_CONVERSION_TARGET = "draft-2020-12", DATETIME_FRACTION_DIGITS, ANNOTATION_ONLY_JSON_SCHEMA_KEYWORDS, ROOT_KEYS, PROPERTY_KEYS_BY_TYPE, SUPPORTED_STRING_FORMATS, inputRequired, REQUEST_STATE_ONLY_LEG_PACING_MS = 250, SPEC_SCHEMA_KEYS, authSchemas, _specTypeSchemas, _isSpecType, specTypeSchemas, isSpecType, DEFAULT_REQUEST_TIMEOUT_MSEC = 60000, RESERVED_ENVELOPE_META_KEYS, RETRY_PARAMS_KEYS, NO_REQUEST_STATE, writeNegotiatedProtocolVersion, Protocol, require_content_type, import_content_type, STDIO_DEFAULT_MAX_BUFFER_SIZE, ReadBuffer = class {
   _buffer;
   _maxBufferSize;
   constructor(options) {
@@ -81079,9 +81087,9 @@ var BRANDS, OAuthError, SdkErrorCode, SdkError, SdkHttpError, FIRST_MODERN_PROTO
     this._buffer = undefined;
   }
 }, TOOL_NAME_REGEX;
-var init_src_DdvbAHrR = __esm(() => {
-  init_chunk_vYduTEsO();
-  init_dialects_CDpMbily();
+var init_src_CX2iR2pK = __esm(() => {
+  init_chunk_Br0eD_fh();
+  init_dialects_DoSzNhcb();
   init_internal();
   init_v42();
   BRANDS = Symbol.for("mcp.sdk.errorBrands");
@@ -81151,8 +81159,8 @@ var init_src_DdvbAHrR = __esm(() => {
         throw new TypeError("isInstance must be called on the class (e.g. `SdkError.isInstance(value)`); for callbacks use `v => SdkError.isInstance(v)`");
       return brandedHasInstance(this, value);
     }
-    constructor(code, message, data, options) {
-      super(message, options);
+    constructor(code, message, data) {
+      super(message);
       this.code = code;
       this.data = data;
       this.name = "SdkError";
@@ -81163,8 +81171,8 @@ var init_src_DdvbAHrR = __esm(() => {
     static {
       Object.defineProperty(this, "mcpBrand", { value: "mcp.SdkHttpError" });
     }
-    constructor(code, message, data, options) {
-      super(code, message, data, options);
+    constructor(code, message, data) {
+      super(code, message, data);
       this.name = "SdkHttpError";
     }
     get status() {
@@ -81541,8 +81549,6 @@ var init_src_DdvbAHrR = __esm(() => {
         const rawInputRequests = raw["inputRequests"];
         const inputRequests = isPlainObject$4(rawInputRequests) ? rawInputRequests : {};
         const requestState = raw["requestState"];
-        const metaParse = raw["_meta"] === undefined ? undefined : buildSchemas2026().ResultMetaSchema.safeParse(raw["_meta"]);
-        const meta = metaParse?.success ? metaParse.data : undefined;
         if (Object.keys(inputRequests).length === 0 && typeof requestState !== "string")
           return {
             kind: "invalid",
@@ -81554,8 +81560,7 @@ var init_src_DdvbAHrR = __esm(() => {
         return {
           kind: "input_required",
           inputRequests,
-          ...typeof requestState === "string" && { requestState },
-          ...meta !== undefined && { _meta: meta }
+          ...typeof requestState === "string" && { requestState }
         };
       }
       if (rawResultType !== "complete")
@@ -81768,7 +81773,8 @@ var init_src_DdvbAHrR = __esm(() => {
   PERMITTED_X_MCP_HEADER_TYPES = new Set([
     "string",
     "integer",
-    "boolean"
+    "boolean",
+    "number"
   ]);
   NON_REACHABLE_SUBSCHEMA_KEYWORDS = [
     "items",
@@ -81855,7 +81861,7 @@ var init_src_DdvbAHrR = __esm(() => {
       evaluatedAt: "pre-dispatch",
       codes: [HEADER_MISMATCH_ERROR_CODE],
       conformance: ["http-header-validation"],
-      rationale: "SEP-2243 standard `MCP-Protocol-Version` / `Mcp-Method` / `Mcp-Name` headers \u2014 presence, sentinel decoding, and `Mcp-Name` \u2194 body cross-check \u2014 are validated by the HTTP entry on a modern-classified request after the supported-revision gate and before dispatch. The spec requires `MCP-Protocol-Version` and `Mcp-Method` on every modern *request* POST (`Mcp-Name` only for the methods that mirror `params.name` / `params.uri` / `params.taskId`, see `MCP_NAME_HEADER_SOURCE`) and names them in that order, so a request missing several is answered by the earliest. Notification POSTs are exempt: the presence half runs on requests only, so a modern-enveloped notification is dispatched even with no standard headers at all. The classifier\u2019s own header-mismatch cells (protocol-version, `Mcp-Method` mismatch) stay on the edge `era-classification` rung; this rung carries the entry-layer presence/`Mcp-Name` half \u2014 including the missing `MCP-Protocol-Version` cell, which cannot live on the edge rung without breaking body-primary classification. Evaluated before the capability gate, the factory call, and the `Mcp-Param-*` rung so a request that fails several rungs is answered by the standard-header rung first. The documented order (after method-registry 5 and request-params 6) is NOT the observed precedence: serveModern evaluates this rung immediately after the supported-revision gate, so a request that also fails a dispatch rung is answered here before the dispatch rungs (5\u20136) are consulted."
+      rationale: "SEP-2243 standard `Mcp-Method` / `Mcp-Name` headers \u2014 presence, sentinel decoding, and `Mcp-Name` \u2194 body cross-check \u2014 are validated by the HTTP entry on a modern-classified request after the supported-revision gate and before dispatch. The classifier\u2019s own header-mismatch cells (protocol-version, `Mcp-Method` mismatch) stay on the edge `era-classification` rung; this rung carries the entry-layer presence/`Mcp-Name` half. Evaluated before the capability gate, the factory call, and the `Mcp-Param-*` rung so a request that fails several rungs is answered by the standard-header rung first. The documented order (after method-registry 5 and request-params 6) is NOT the observed precedence: serveModern evaluates this rung immediately after the supported-revision gate, so a request that also fails a dispatch rung is answered here before the dispatch rungs (5\u20136) are consulted."
     },
     {
       rung: "client-capabilities",
@@ -81882,7 +81888,6 @@ var init_src_DdvbAHrR = __esm(() => {
     [ProtocolErrorCode.MissingRequiredClientCapability]: 400,
     [HEADER_MISMATCH_ERROR_CODE]: 400
   };
-  LOCAL_DEFINITION_REF = /^#\/(\$defs|definitions)\/([^/~%]+)$/;
   DATETIME_FRACTION_DIGITS = /\\\.\\d\{(\d+)\}/;
   ANNOTATION_ONLY_JSON_SCHEMA_KEYWORDS = new Set([
     "$comment",
@@ -82134,7 +82139,6 @@ var init_src_DdvbAHrR = __esm(() => {
     _transport;
     _requestMessageId = 0;
     _requestHandlers = /* @__PURE__ */ new Map;
-    _customSchemaRequestMethods = /* @__PURE__ */ new Set;
     _requestHandlerAbortControllers = /* @__PURE__ */ new Map;
     _notificationHandlers = /* @__PURE__ */ new Map;
     _responseHandlers = /* @__PURE__ */ new Map;
@@ -82191,7 +82195,7 @@ var init_src_DdvbAHrR = __esm(() => {
       return this._requestHandlers.get(method);
     }
     async _oncancel(notification) {
-      if (notification.params.requestId === undefined)
+      if (!notification.params.requestId)
         return;
       this._requestHandlerAbortControllers.get(notification.params.requestId)?.abort(notification.params.reason);
     }
@@ -82334,7 +82338,7 @@ var init_src_DdvbAHrR = __esm(() => {
           return;
         }
       }
-      if (isSpecRequestMethod(request.method) && !codec.hasRequestMethod(request.method) && !(isExtensionReusedRequestMethod(request.method) && this._customSchemaRequestMethods.has(request.method))) {
+      if (isSpecRequestMethod(request.method) && !codec.hasRequestMethod(request.method)) {
         sendErrorResponse(ProtocolErrorCode.MethodNotFound, "Method not found");
         return;
       }
@@ -82466,12 +82470,9 @@ var init_src_DdvbAHrR = __esm(() => {
     }
     request(request, schemaOrOptions, maybeOptions) {
       const codec = this._resolveOutboundCodec(request.method);
-      if (isStandardSchema(schemaOrOptions)) {
-        if (!isExtensionReusedRequestMethod(request.method))
-          this._assertOutboundRequestInEra(codec, request.method);
-        return this._requestWithSchemaViaCodec(codec, request, schemaOrOptions, maybeOptions);
-      }
       this._assertOutboundRequestInEra(codec, request.method);
+      if (isStandardSchema(schemaOrOptions))
+        return this._requestWithSchemaViaCodec(codec, request, schemaOrOptions, maybeOptions);
       const validate = codecResultValidator(codec, request.method);
       if (validate === undefined)
         throw new TypeError(`'${request.method}' is not a spec method; pass a result schema as the second argument to request().`);
@@ -82551,21 +82552,20 @@ var init_src_DdvbAHrR = __esm(() => {
           if (responseReceived)
             return;
           this._progressHandlers.delete(messageId);
-          if (requestAbort === undefined) {
-            if (request.method !== "initialize")
-              this._transport?.send(this._envelopeOutbound({
-                jsonrpc: "2.0",
-                method: "notifications/cancelled",
-                params: {
-                  requestId: messageId,
-                  reason: String(reason)
-                }
-              }), {
-                relatedRequestId,
-                resumptionToken,
-                onresumptiontoken
-              }).catch((error) => this._onerror(/* @__PURE__ */ new Error(`Failed to send cancellation: ${error}`)));
-          } else
+          if (requestAbort === undefined)
+            this._transport?.send(this._envelopeOutbound({
+              jsonrpc: "2.0",
+              method: "notifications/cancelled",
+              params: {
+                requestId: messageId,
+                reason: String(reason)
+              }
+            }), {
+              relatedRequestId,
+              resumptionToken,
+              onresumptiontoken
+            }).catch((error) => this._onerror(/* @__PURE__ */ new Error(`Failed to send cancellation: ${error}`)));
+          else
             requestAbort.abort();
           reject(reason instanceof SdkError ? reason : new SdkError(SdkErrorCode.RequestTimeout, String(reason)));
         };
@@ -82632,7 +82632,7 @@ var init_src_DdvbAHrR = __esm(() => {
       });
     }
     async notification(notification, options) {
-      return await this._notificationViaCodec(this._resolveOutboundCodec(notification.method), notification, options);
+      return this._notificationViaCodec(this._resolveOutboundCodec(notification.method), notification, options);
     }
     async _notificationViaCodec(codec, notification, options) {
       if (!this._transport)
@@ -82647,7 +82647,7 @@ var init_src_DdvbAHrR = __esm(() => {
         jsonrpc: "2.0",
         ...notification
       });
-      if ((this._options?.debouncedNotificationMethods ?? []).includes(notification.method) && !notification.params && options?.relatedRequestId === undefined) {
+      if ((this._options?.debouncedNotificationMethods ?? []).includes(notification.method) && !notification.params && !options?.relatedRequestId) {
         if (this._pendingDebouncedNotifications.has(notification.method))
           return;
         this._pendingDebouncedNotifications.add(notification.method);
@@ -82688,10 +82688,6 @@ var init_src_DdvbAHrR = __esm(() => {
         };
       else
         throw new TypeError("setRequestHandler: handler is required");
-      if (typeof schemasOrHandler === "function")
-        this._customSchemaRequestMethods.delete(method);
-      else
-        this._customSchemaRequestMethods.add(method);
       this._requestHandlers.set(method, this._wrapHandler(method, stored));
     }
     _wrapHandler(_method, handler) {
@@ -82700,7 +82696,6 @@ var init_src_DdvbAHrR = __esm(() => {
     _outboundServerInfo() {}
     removeRequestHandler(method) {
       this._requestHandlers.delete(method);
-      this._customSchemaRequestMethods.delete(method);
     }
     assertCanSetRequestHandler(method) {
       if (this._requestHandlers.has(method))
@@ -82798,7 +82793,7 @@ var init_src_DdvbAHrR = __esm(() => {
   TOOL_NAME_REGEX = /^[A-Za-z0-9._-]{1,128}$/;
 });
 
-// node_modules/@modelcontextprotocol/server/dist/ajvProvider-DyjnscPj.mjs
+// node_modules/@modelcontextprotocol/server/dist/ajvProvider-CEoC__sr.mjs
 function createDefaultAjvInstance(engineClass) {
   const ajv = new engineClass({
     strict: false,
@@ -82847,9 +82842,9 @@ var require_code$1, require_scope, require_codegen, require_util, require_names,
     };
   }
 }, Ajv;
-var init_ajvProvider_DyjnscPj = __esm(() => {
-  init_chunk_vYduTEsO();
-  init_dialects_CDpMbily();
+var init_ajvProvider_CEoC__sr = __esm(() => {
+  init_chunk_Br0eD_fh();
+  init_dialects_DoSzNhcb();
   require_code$1 = /* @__PURE__ */ __commonJSMin((exports) => {
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.regexpCode = exports.getEsmExportName = exports.getProperty = exports.safeStringify = exports.stringify = exports.strConcat = exports.addCodeArg = exports.str = exports._ = exports.nil = exports._Code = exports.Name = exports.IDENTIFIER = exports._CodeOrName = undefined;
@@ -85808,25 +85803,6 @@ var init_ajvProvider_DyjnscPj = __esm(() => {
   require_utils = /* @__PURE__ */ __commonJSMin((exports, module) => {
     const isUUID = RegExp.prototype.test.bind(/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/iu);
     const isIPv4 = RegExp.prototype.test.bind(/^(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)$/u);
-    const isPort = RegExp.prototype.test.bind(/^\d*$/u);
-    const isHexPair = RegExp.prototype.test.bind(/^[\da-f]{2}$/iu);
-    const isUnreserved = RegExp.prototype.test.bind(/^[\da-z\-._~]$/iu);
-    const isPathCharacter = RegExp.prototype.test.bind(/^[A-Za-z0-9\-._~!$&'()*+,;=:@/]$/u);
-    const isQueryFragmentCharacter = RegExp.prototype.test.bind(/^[A-Za-z0-9\-._~!$&'()*+,;=:@/?]$/u);
-    const isUserinfoCharacter = RegExp.prototype.test.bind(/^[A-Za-z0-9\-._~!$&'()*+,;=:]$/u);
-    const BYTE_HEX = new Array(256);
-    {
-      const HEX_DIGITS = "0123456789ABCDEF";
-      for (let i = 0;i < 256; i++)
-        BYTE_HEX[i] = "%" + HEX_DIGITS[i >> 4] + HEX_DIGITS[i & 15];
-    }
-    function percentEncodeNonAscii(cp) {
-      if (cp < 2048)
-        return BYTE_HEX[192 | cp >> 6] + BYTE_HEX[128 | cp & 63];
-      if (cp < 65536)
-        return BYTE_HEX[224 | cp >> 12] + BYTE_HEX[128 | cp >> 6 & 63] + BYTE_HEX[128 | cp & 63];
-      return BYTE_HEX[240 | cp >> 18] + BYTE_HEX[128 | cp >> 12 & 63] + BYTE_HEX[128 | cp >> 6 & 63] + BYTE_HEX[128 | cp & 63];
-    }
     function stringArrayToHexStripped(input) {
       let acc = "";
       let code = 0;
@@ -85848,140 +85824,96 @@ var init_ajvProvider_DyjnscPj = __esm(() => {
       }
       return acc;
     }
-    const isHextet = RegExp.prototype.test.bind(/^[\dA-Fa-f]{1,4}$/);
-    const isIPvFuture = RegExp.prototype.test.bind(/^[vV][\dA-Fa-f]+\.[A-Za-z\d\-._~!$&'()*+,;=:]+$/);
-    const isZoneCharacter = RegExp.prototype.test.bind(/^[A-Za-z\d\-._~]$/);
     const nonSimpleDomain = RegExp.prototype.test.bind(/[^!"$&'()*+,\-.;=_`a-z{}~]/u);
-    function isZoneIdentifier(zone) {
-      if (zone.length === 0)
-        return false;
-      for (let i = 0;i < zone.length; i++) {
-        if (isZoneCharacter(zone[i]))
-          continue;
-        if (zone[i] === "%" && i + 2 < zone.length && isHexPair(zone.slice(i + 1, i + 3))) {
-          i += 2;
-          continue;
+    function consumeIsZone(buffer) {
+      buffer.length = 0;
+      return true;
+    }
+    function consumeHextets(buffer, address, output) {
+      if (buffer.length) {
+        const hex = stringArrayToHexStripped(buffer);
+        if (hex !== "")
+          address.push(hex);
+        else {
+          output.error = true;
+          return false;
         }
-        return false;
+        buffer.length = 0;
       }
       return true;
     }
-    function compressIPv6ZeroRun(hextets) {
-      let bestStart = -1;
-      let bestLength = 0;
-      let runStart = -1;
-      let runLength = 0;
-      for (let i = 0;i < hextets.length; i++)
-        if (hextets[i] === "0") {
-          if (runStart === -1)
-            runStart = i;
-          runLength++;
-          if (runLength > bestLength) {
-            bestLength = runLength;
-            bestStart = runStart;
+    function getIPV6(input) {
+      let tokenCount = 0;
+      const output = {
+        error: false,
+        address: "",
+        zone: ""
+      };
+      const address = [];
+      const buffer = [];
+      let endipv6Encountered = false;
+      let endIpv6 = false;
+      let consume = consumeHextets;
+      for (let i = 0;i < input.length; i++) {
+        const cursor = input[i];
+        if (cursor === "[" || cursor === "]")
+          continue;
+        if (cursor === ":") {
+          if (endipv6Encountered === true)
+            endIpv6 = true;
+          if (!consume(buffer, address, output))
+            break;
+          if (++tokenCount > 7) {
+            output.error = true;
+            break;
           }
+          if (i > 0 && input[i - 1] === ":")
+            endipv6Encountered = true;
+          address.push(":");
+          continue;
+        } else if (cursor === "%") {
+          if (!consume(buffer, address, output))
+            break;
+          consume = consumeIsZone;
         } else {
-          runStart = -1;
-          runLength = 0;
-        }
-      if (bestLength < 2)
-        return hextets.join(":");
-      const head = hextets.slice(0, bestStart).join(":");
-      const tail = hextets.slice(bestStart + bestLength).join(":");
-      return head + "::" + tail;
-    }
-    function normalizeIPv6Address(input) {
-      const compression = input.indexOf("::");
-      if (compression !== -1 && input.indexOf("::", compression + 1) !== -1)
-        return;
-      const left = compression === -1 ? input.split(":") : input.slice(0, compression).split(":");
-      const right = compression === -1 ? [] : input.slice(compression + 2).split(":");
-      if (compression !== -1) {
-        if (left.length === 1 && left[0] === "")
-          left.length = 0;
-        if (right.length === 1 && right[0] === "")
-          right.length = 0;
-      }
-      const parts = left.concat(right);
-      let hextetCount = 0;
-      for (let i = 0;i < parts.length; i++) {
-        const part = parts[i];
-        if (part === "")
-          return;
-        if (part.indexOf(".") !== -1) {
-          if (i !== parts.length - 1 || compression !== -1 && right.length === 0 || !isIPv4(part))
-            return;
-          hextetCount += 2;
+          buffer.push(cursor);
           continue;
         }
-        if (!isHextet(part))
-          return;
-        parts[i] = parseInt(part, 16).toString(16);
-        hextetCount++;
       }
-      if (compression === -1) {
-        if (hextetCount !== 8)
-          return;
-        return compressIPv6ZeroRun(parts);
-      }
-      if (hextetCount >= 8)
-        return;
-      const expanded = parts.slice(0, left.length);
-      for (let i = hextetCount;i < 8; i++)
-        expanded.push("0");
-      for (let i = left.length;i < parts.length; i++)
-        expanded.push(parts[i]);
-      return compressIPv6ZeroRun(expanded);
+      if (buffer.length)
+        if (consume === consumeIsZone)
+          output.zone = buffer.join("");
+        else if (endIpv6)
+          address.push(buffer.join(""));
+        else
+          address.push(stringArrayToHexStripped(buffer));
+      output.address = address.join("");
+      return output;
     }
     function normalizeIPv6(host) {
-      const bracketed = host[0] === "[" && host[host.length - 1] === "]";
-      if ((host[0] === "[" || host[host.length - 1] === "]") && !bracketed)
+      if (findToken(host, ":") < 2)
         return {
           host,
-          isIPV6: false,
-          error: true
+          isIPV6: false
         };
-      let input = bracketed ? host.slice(1, -1) : host;
-      if (bracketed && isIPvFuture(input)) {
-        input = input.toLowerCase();
+      const ipv6 = getIPV6(host);
+      if (!ipv6.error) {
+        let newHost = ipv6.address;
+        let escapedHost = ipv6.address;
+        if (ipv6.zone) {
+          newHost += "%" + ipv6.zone;
+          escapedHost += "%25" + ipv6.zone;
+        }
         return {
-          host: `[${input}]`,
-          escapedHost: input,
-          isIPV6: false,
-          isIPVFuture: true
+          host: newHost,
+          isIPV6: true,
+          escapedHost
         };
-      }
-      if (findToken(input, ":") < 2)
-        return {
-          host,
-          isIPV6: false,
-          error: bracketed
-        };
-      let zoneIdentifier = "";
-      const zoneSeparator = input.indexOf("%");
-      if (zoneSeparator !== -1) {
-        const separatorLength = input.slice(zoneSeparator, zoneSeparator + 3).toLowerCase() === "%25" ? 3 : 1;
-        zoneIdentifier = input.slice(zoneSeparator + separatorLength);
-        if (!isZoneIdentifier(zoneIdentifier))
-          return {
-            host,
-            isIPV6: false,
-            error: true
-          };
-        input = input.slice(0, zoneSeparator);
-      }
-      const address = normalizeIPv6Address(input);
-      if (address === undefined)
+      } else
         return {
           host,
-          isIPV6: false,
-          error: true
+          isIPV6: false
         };
-      return {
-        host: address + (zoneIdentifier ? "%" + zoneIdentifier : ""),
-        escapedHost: address + (zoneIdentifier ? "%25" + zoneIdentifier : ""),
-        isIPV6: true
-      };
     }
     function findToken(str, token) {
       let ind = 0;
@@ -86063,256 +85995,49 @@ var init_ajvProvider_DyjnscPj = __esm(() => {
       }
       return output.join("");
     }
-    const HOST_DELIMS = {
-      "@": "%40",
-      "/": "%2F",
-      "?": "%3F",
-      "#": "%23",
-      ":": "%3A"
-    };
-    const HOST_DELIM_RE = /[@/?#:]/g;
-    const HOST_DELIM_NO_COLON_RE = /[@/?#]/g;
-    function reescapeHostDelimiters(host, isIP) {
-      const re = isIP ? HOST_DELIM_NO_COLON_RE : HOST_DELIM_RE;
-      re.lastIndex = 0;
-      return host.replace(re, (ch) => HOST_DELIMS[ch]);
-    }
-    function normalizePercentEncoding(input, decodeUnreserved = false) {
-      if (input.indexOf("%") === -1)
-        return input;
-      let output = "";
-      for (let i = 0;i < input.length; i++) {
-        if (input[i] === "%" && i + 2 < input.length) {
-          const hex = input.slice(i + 1, i + 3);
-          if (isHexPair(hex)) {
-            const normalizedHex = hex.toUpperCase();
-            const decoded = String.fromCharCode(parseInt(normalizedHex, 16));
-            if (decodeUnreserved && isUnreserved(decoded))
-              output += decoded;
-            else
-              output += "%" + normalizedHex;
-            i += 2;
-            continue;
-          }
-        }
-        output += input[i];
-      }
-      return output;
-    }
-    function normalizePathEncoding(input) {
-      let output = "";
-      for (let i = 0;i < input.length; i++) {
-        const ch = input[i];
-        if (ch === "%" && i + 2 < input.length) {
-          const hex = input.slice(i + 1, i + 3);
-          if (isHexPair(hex)) {
-            const normalizedHex = hex.toUpperCase();
-            const decoded = String.fromCharCode(parseInt(normalizedHex, 16));
-            if (decoded !== "." && isUnreserved(decoded))
-              output += decoded;
-            else
-              output += "%" + normalizedHex;
-            i += 2;
-            continue;
-          }
-        }
-        if (isPathCharacter(ch))
-          output += ch;
-        else {
-          const code = input.charCodeAt(i);
-          if (code < 128)
-            output += isEscapeSafe(code) ? ch : BYTE_HEX[code];
-          else if (code < 55296 || code > 57343)
-            output += percentEncodeNonAscii(code);
-          else if (code <= 56319 && i + 1 < input.length) {
-            const low = input.charCodeAt(i + 1);
-            if (low >= 56320 && low <= 57343) {
-              output += percentEncodeNonAscii(65536 + (code - 55296 << 10) + (low - 56320));
-              i++;
-            } else
-              output += percentEncodeNonAscii(65533);
-          } else
-            output += percentEncodeNonAscii(65533);
-        }
-      }
-      return output;
-    }
-    function serializePathEncoding(input, pathNoScheme = false) {
-      let output = "";
-      let firstSegment = pathNoScheme && input[0] !== "/";
-      for (let i = 0;i < input.length; i++) {
-        const ch = input[i];
-        if (ch === "%" && i + 2 < input.length) {
-          const hex = input.slice(i + 1, i + 3);
-          if (isHexPair(hex)) {
-            output += "%" + hex.toUpperCase();
-            i += 2;
-            continue;
-          }
-        }
-        if (ch === "/")
-          firstSegment = false;
-        if (isPathCharacter(ch) && (ch !== ":" || !firstSegment))
-          output += ch;
-        else {
-          const code = input.charCodeAt(i);
-          if (code < 128)
-            output += BYTE_HEX[code];
-          else if (code < 55296 || code > 57343)
-            output += percentEncodeNonAscii(code);
-          else if (code <= 56319 && i + 1 < input.length) {
-            const low = input.charCodeAt(i + 1);
-            if (low >= 56320 && low <= 57343) {
-              output += percentEncodeNonAscii(65536 + (code - 55296 << 10) + (low - 56320));
-              i++;
-            } else
-              output += percentEncodeNonAscii(65533);
-          } else
-            output += percentEncodeNonAscii(65533);
-        }
-      }
-      return output;
-    }
-    function encodeComponent(input, isAllowed) {
-      let output = "";
-      for (let i = 0;i < input.length; i++) {
-        const ch = input[i];
-        if (ch === "%" && i + 2 < input.length) {
-          const hex = input.slice(i + 1, i + 3);
-          if (isHexPair(hex)) {
-            output += "%" + hex.toUpperCase();
-            i += 2;
-            continue;
-          }
-        }
-        if (isAllowed(ch))
-          output += ch;
-        else {
-          const code = input.charCodeAt(i);
-          if (code < 128)
-            output += BYTE_HEX[code];
-          else if (code < 55296 || code > 57343)
-            output += percentEncodeNonAscii(code);
-          else if (code <= 56319 && i + 1 < input.length) {
-            const low = input.charCodeAt(i + 1);
-            if (low >= 56320 && low <= 57343) {
-              output += percentEncodeNonAscii(65536 + (code - 55296 << 10) + (low - 56320));
-              i++;
-            } else
-              output += percentEncodeNonAscii(65533);
-          } else
-            output += percentEncodeNonAscii(65533);
-        }
-      }
-      return output;
-    }
-    function encodeUserinfo(input) {
-      return encodeComponent(input, isUserinfoCharacter);
-    }
-    function encodeQuery(input) {
-      return encodeComponent(input, isQueryFragmentCharacter);
-    }
-    function encodeFragment(input) {
-      return encodeComponent(input, isQueryFragmentCharacter);
-    }
-    function isEscapeSafe(cp) {
-      return cp >= 48 && cp <= 57 || cp >= 65 && cp <= 90 || cp >= 97 && cp <= 122 || cp === 42 || cp === 43 || cp === 45 || cp === 46 || cp === 47 || cp === 64 || cp === 95;
-    }
-    function normalizeQueryFragmentEncoding(input) {
-      let output = "";
-      for (let i = 0;i < input.length; i++) {
-        const ch = input[i];
-        if (ch === "%" && i + 2 < input.length) {
-          const hex = input.slice(i + 1, i + 3);
-          if (isHexPair(hex)) {
-            const normalizedHex = hex.toUpperCase();
-            const decoded = String.fromCharCode(parseInt(normalizedHex, 16));
-            if (isUnreserved(decoded))
-              output += decoded;
-            else
-              output += "%" + normalizedHex;
-            i += 2;
-            continue;
-          }
-        }
-        if (isQueryFragmentCharacter(ch))
-          output += ch;
-        else {
-          const code = input.charCodeAt(i);
-          if (code < 128)
-            output += isEscapeSafe(code) ? ch : BYTE_HEX[code];
-          else if (code < 55296 || code > 57343)
-            output += percentEncodeNonAscii(code);
-          else if (code <= 56319 && i + 1 < input.length) {
-            const low = input.charCodeAt(i + 1);
-            if (low >= 56320 && low <= 57343) {
-              output += percentEncodeNonAscii(65536 + (code - 55296 << 10) + (low - 56320));
-              i++;
-            } else
-              output += percentEncodeNonAscii(65533);
-          } else
-            output += percentEncodeNonAscii(65533);
-        }
-      }
-      return output;
-    }
-    function escapePreservingEscapes(input) {
-      let output = "";
-      for (let i = 0;i < input.length; i++) {
-        if (input[i] === "%" && i + 2 < input.length) {
-          const hex = input.slice(i + 1, i + 3);
-          if (isHexPair(hex)) {
-            output += "%" + hex.toUpperCase();
-            i += 2;
-            continue;
-          }
-        }
-        output += escape(input[i]);
-      }
-      return output;
+    function normalizeComponentEncoding(component, esc) {
+      const func = esc !== true ? escape : unescape;
+      if (component.scheme !== undefined)
+        component.scheme = func(component.scheme);
+      if (component.userinfo !== undefined)
+        component.userinfo = func(component.userinfo);
+      if (component.host !== undefined)
+        component.host = func(component.host);
+      if (component.path !== undefined)
+        component.path = func(component.path);
+      if (component.query !== undefined)
+        component.query = func(component.query);
+      if (component.fragment !== undefined)
+        component.fragment = func(component.fragment);
+      return component;
     }
     function recomposeAuthority(component) {
       const uriTokens = [];
       if (component.userinfo !== undefined) {
-        uriTokens.push(encodeUserinfo(component.userinfo));
+        uriTokens.push(component.userinfo);
         uriTokens.push("@");
       }
       if (component.host !== undefined) {
-        let host = component.host;
+        let host = unescape(component.host);
         if (!isIPv4(host)) {
-          let ipV6res = normalizeIPv6(host);
-          if (ipV6res.isIPV6 !== true && ipV6res.isIPVFuture !== true) {
-            host = normalizePercentEncoding(host, true);
-            ipV6res = normalizeIPv6(host);
-          }
-          if (ipV6res.isIPV6 === true || ipV6res.isIPVFuture === true)
+          const ipV6res = normalizeIPv6(host);
+          if (ipV6res.isIPV6 === true)
             host = `[${ipV6res.escapedHost}]`;
           else
-            host = reescapeHostDelimiters(host, false);
+            host = component.host;
         }
         uriTokens.push(host);
       }
       if (typeof component.port === "number" || typeof component.port === "string") {
-        const port = String(component.port);
-        if (!isPort(port))
-          throw new TypeError("URI port is malformed.");
         uriTokens.push(":");
-        uriTokens.push(port);
+        uriTokens.push(String(component.port));
       }
       return uriTokens.length ? uriTokens.join("") : undefined;
     }
     module.exports = {
       nonSimpleDomain,
       recomposeAuthority,
-      reescapeHostDelimiters,
-      normalizePercentEncoding,
-      normalizePathEncoding,
-      serializePathEncoding,
-      normalizeQueryFragmentEncoding,
-      encodeUserinfo,
-      encodeQuery,
-      encodeFragment,
-      escapePreservingEscapes,
+      normalizeComponentEncoding,
       removeDotSegments,
       isIPv4,
       isUUID,
@@ -86322,7 +86047,7 @@ var init_ajvProvider_DyjnscPj = __esm(() => {
   });
   require_schemes = /* @__PURE__ */ __commonJSMin((exports, module) => {
     const { isUUID } = require_utils();
-    const URN_REG = /^([\da-z][\d\-a-z]{0,31}):((?:[\w!$'()*+,\-./:;=@]|%[\da-f]{2})+)$/iu;
+    const URN_REG = /([\da-z][\d\-a-z]{0,31}):((?:[\w!$'()*+,\-.:;=@]|%[\da-f]{2})+)/iu;
     const supportedSchemeNames = [
       "http",
       "https",
@@ -86372,10 +86097,9 @@ var init_ajvProvider_DyjnscPj = __esm(() => {
         wsComponent.secure = undefined;
       }
       if (wsComponent.resourceName) {
-        const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        const [path, query] = wsComponent.resourceName.split("?");
         wsComponent.path = path && path !== "/" ? path : undefined;
-        wsComponent.query = queryIndex === -1 ? undefined : wsComponent.resourceName.slice(queryIndex + 1);
+        wsComponent.query = query;
         wsComponent.resourceName = undefined;
       }
       wsComponent.fragment = undefined;
@@ -86387,7 +86111,7 @@ var init_ajvProvider_DyjnscPj = __esm(() => {
         return urnComponent;
       }
       const matches = urnComponent.path.match(URN_REG);
-      if (matches && matches[0] === urnComponent.path) {
+      if (matches) {
         const scheme = options.scheme || urnComponent.scheme || "urn";
         urnComponent.nid = matches[1].toLowerCase();
         urnComponent.nss = matches[2];
@@ -86482,37 +86206,18 @@ var init_ajvProvider_DyjnscPj = __esm(() => {
     };
   });
   require_fast_uri = /* @__PURE__ */ __commonJSMin((exports, module) => {
-    const { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizePercentEncoding, normalizePathEncoding, serializePathEncoding, normalizeQueryFragmentEncoding, encodeQuery, encodeFragment, reescapeHostDelimiters, isIPv4, nonSimpleDomain } = require_utils();
+    const { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizeComponentEncoding, isIPv4, nonSimpleDomain } = require_utils();
     const { SCHEMES, getSchemeHandler } = require_schemes();
-    const VALID_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*$/u;
-    const MALFORMED_SCHEME_ERROR = "URI scheme is malformed.";
-    function decodeValidScheme(scheme) {
-      const decodedScheme = unescape(String(scheme));
-      if (!VALID_SCHEME.test(decodedScheme))
-        throw new TypeError(MALFORMED_SCHEME_ERROR);
-      return decodedScheme;
-    }
     function normalize(uri, options) {
       if (typeof uri === "string")
-        uri = normalizeString(uri, options);
+        uri = serialize(parse(uri, options), options);
       else if (typeof uri === "object")
         uri = parse(serialize(uri, options), options);
       return uri;
     }
     function resolve(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
-      const { parsed: baseParsed, malformedAuthorityOrPort: baseMalformed, malformedPercentEncoding: baseMalformedPercentEncoding, malformedSchemeSpecific: baseMalformedSchemeSpecific, malformedHost: baseMalformedHost, malformedScheme: baseMalformedScheme } = parseWithStatus(baseURI, schemelessOptions);
-      const { parsed: relativeParsed, malformedAuthorityOrPort: relativeMalformed, malformedPercentEncoding: relativeMalformedPercentEncoding, malformedSchemeSpecific: relativeMalformedSchemeSpecific, malformedHost: relativeMalformedHost, malformedScheme: relativeMalformedScheme } = parseWithStatus(relativeURI, schemelessOptions);
-      if (baseMalformed || relativeMalformed || baseMalformedPercentEncoding || relativeMalformedPercentEncoding || baseMalformedSchemeSpecific || relativeMalformedSchemeSpecific || baseMalformedHost || relativeMalformedHost || baseMalformedScheme || relativeMalformedScheme)
-        throw new Error(baseParsed.error || relativeParsed.error || "URI is malformed.");
-      const resolved = resolveComponent(baseParsed, relativeParsed, schemelessOptions, true);
-      const resolvedSchemeHandler = getSchemeHandler(options && options.scheme || resolved.scheme);
-      const resolvedHost = resolved.host;
-      const resolvedHostIsIP = resolvedHost !== undefined && resolvedHost !== "" && (isIPv4(resolvedHost) || normalizeIPv6(resolvedHost).isIPV6);
-      canonicalizeHost(resolved, options || {}, resolvedSchemeHandler, resolvedHostIsIP);
-      const encodedASCIIHost = resolvedHost && resolvedHost.indexOf("%") !== -1 && !/\P{ASCII}/u.test(resolvedHost);
-      if (resolved.error && !encodedASCIIHost)
-        throw new Error(resolved.error);
+      const resolved = resolveComponent(parse(baseURI, schemelessOptions), parse(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
@@ -86568,9 +86273,29 @@ var init_ajvProvider_DyjnscPj = __esm(() => {
       return target;
     }
     function equal(uriA, uriB, options) {
-      const normalizedA = normalizeComparableURI(uriA, options);
-      const normalizedB = normalizeComparableURI(uriB, options);
-      return normalizedA !== undefined && normalizedB !== undefined && normalizedA === normalizedB;
+      if (typeof uriA === "string") {
+        uriA = unescape(uriA);
+        uriA = serialize(normalizeComponentEncoding(parse(uriA, options), true), {
+          ...options,
+          skipEscape: true
+        });
+      } else if (typeof uriA === "object")
+        uriA = serialize(normalizeComponentEncoding(uriA, true), {
+          ...options,
+          skipEscape: true
+        });
+      if (typeof uriB === "string") {
+        uriB = unescape(uriB);
+        uriB = serialize(normalizeComponentEncoding(parse(uriB, options), true), {
+          ...options,
+          skipEscape: true
+        });
+      } else if (typeof uriB === "object")
+        uriB = serialize(normalizeComponentEncoding(uriB, true), {
+          ...options,
+          skipEscape: true
+        });
+      return uriA.toLowerCase() === uriB.toLowerCase();
     }
     function serialize(cmpts, opts) {
       const component = {
@@ -86591,22 +86316,18 @@ var init_ajvProvider_DyjnscPj = __esm(() => {
       };
       const options = Object.assign({}, opts);
       const uriTokens = [];
-      if (component.scheme)
-        component.scheme = decodeValidScheme(component.scheme);
       const schemeHandler = getSchemeHandler(options.scheme || component.scheme);
       if (schemeHandler && schemeHandler.serialize)
         schemeHandler.serialize(component, options);
-      const hasAuthority = component.userinfo !== undefined || component.host !== undefined || component.port !== undefined;
-      const pathNoScheme = !options.skipEscape && component.scheme === undefined && !hasAuthority;
       if (component.path !== undefined)
-        if (!options.skipEscape)
-          component.path = serializePathEncoding(component.path, pathNoScheme);
-        else
-          component.path = normalizePercentEncoding(component.path);
-      if (options.reference !== "suffix" && component.scheme) {
-        component.scheme = decodeValidScheme(component.scheme);
+        if (!options.skipEscape) {
+          component.path = escape(component.path);
+          if (component.scheme !== undefined)
+            component.path = component.path.split("%3A").join(":");
+        } else
+          component.path = unescape(component.path);
+      if (options.reference !== "suffix" && component.scheme)
         uriTokens.push(component.scheme, ":");
-      }
       const authority = recomposeAuthority(component);
       if (authority !== undefined) {
         if (options.reference !== "suffix")
@@ -86619,56 +86340,18 @@ var init_ajvProvider_DyjnscPj = __esm(() => {
         let s = component.path;
         if (!options.absolutePath && (!schemeHandler || !schemeHandler.absolutePath))
           s = removeDotSegments(s);
-        if (pathNoScheme)
-          s = serializePathEncoding(s, true);
         if (authority === undefined && s[0] === "/" && s[1] === "/")
           s = "/%2F" + s.slice(2);
         uriTokens.push(s);
       }
       if (component.query !== undefined)
-        uriTokens.push("?", encodeQuery(component.query));
+        uriTokens.push("?", component.query);
       if (component.fragment !== undefined)
-        uriTokens.push("#", encodeFragment(component.fragment));
+        uriTokens.push("#", component.fragment);
       return uriTokens.join("");
     }
     const URI_PARSE = /^(?:([^#/:?]+):)?(?:\/\/((?:([^#/?@]*)@)?(\[[^#/?\]]+\]|[^#/:?]*)(?::(\d*))?))?([^#?]*)(?:\?([^#]*))?(?:#((?:.|[\n\r])*))?/u;
-    const AUTHORITY_PREFIX = /^(?:[^#/:?]+:)?\/\/([^/?#]*)/;
-    const AUTHORITY_INTRODUCER_REGION = /^(?:[^#/:?]+:)?([/\\\t\n\r]*)/;
-    function getParseError(parsed, matches) {
-      if (matches[2] !== undefined && parsed.path && parsed.path[0] !== "/")
-        return 'URI path must start with "/" when authority is present.';
-      if (typeof parsed.port === "number" && (parsed.port < 0 || parsed.port > 65535))
-        return "URI port is malformed.";
-    }
-    function hasMalformedPercentEncoding(component) {
-      if (component === undefined)
-        return false;
-      let percent = component.indexOf("%");
-      while (percent !== -1) {
-        if (percent + 2 >= component.length || !/^[\da-f]{2}$/iu.test(component.slice(percent + 1, percent + 3)))
-          return true;
-        percent = component.indexOf("%", percent + 3);
-      }
-      return false;
-    }
-    function isIPLiteral(host) {
-      return host[0] === "[" && host[host.length - 1] === "]";
-    }
-    function hasMalformedComponentPercentEncoding(matches) {
-      const host = matches[4];
-      return hasMalformedPercentEncoding(matches[3]) || host !== undefined && !isIPLiteral(host) && hasMalformedPercentEncoding(host) || hasMalformedPercentEncoding(matches[6]) || hasMalformedPercentEncoding(matches[7]) || hasMalformedPercentEncoding(matches[8]);
-    }
-    function canonicalizeHost(parsed, options, schemeHandler, isIP) {
-      if (!options.unicodeSupport && (!schemeHandler || !schemeHandler.unicodeSupport) && parsed.host && !isIPLiteral(parsed.host) && (options.domainHost || schemeHandler && schemeHandler.domainHost) && isIP === false && nonSimpleDomain(parsed.host))
-        try {
-          parsed.host = new URL("http://" + parsed.host).hostname;
-        } catch (e) {
-          parsed.error = parsed.error || "Host's domain name can not be converted to ASCII: " + e;
-          return true;
-        }
-      return false;
-    }
-    function parseWithStatus(uri, opts) {
+    function parse(uri, opts) {
       const options = Object.assign({}, opts);
       const parsed = {
         scheme: undefined,
@@ -86679,37 +86362,12 @@ var init_ajvProvider_DyjnscPj = __esm(() => {
         query: undefined,
         fragment: undefined
       };
-      let malformedAuthorityOrPort = false;
-      let malformedPercentEncoding = false;
-      let malformedSchemeSpecific = false;
-      let malformedHost = false;
-      let malformedIPLiteral = false;
-      let malformedScheme = false;
       let isIP = false;
       if (options.reference === "suffix")
         if (options.scheme)
           uri = options.scheme + ":" + uri;
         else
           uri = "//" + uri;
-      const authorityMatch = uri.match(AUTHORITY_PREFIX);
-      if (authorityMatch !== null && authorityMatch[1].indexOf("\\") !== -1) {
-        parsed.error = "URI authority must not contain a literal backslash.";
-        malformedAuthorityOrPort = true;
-      }
-      const introducerMatch = uri.match(AUTHORITY_INTRODUCER_REGION);
-      if (introducerMatch !== null) {
-        const region = introducerMatch[1];
-        const normalizedRegion = region.replace(/[\t\n\r]/g, "");
-        if (normalizedRegion.length >= 2) {
-          if (normalizedRegion.slice(0, 2) !== "//") {
-            parsed.error = parsed.error || "URI authority must not contain a literal backslash.";
-            malformedAuthorityOrPort = true;
-          } else if (region.length !== normalizedRegion.length) {
-            parsed.error = parsed.error || "URI authority introducer must not contain whitespace.";
-            malformedAuthorityOrPort = true;
-          }
-        }
-      }
       const matches = uri.match(URI_PARSE);
       if (matches) {
         parsed.scheme = matches[1];
@@ -86719,37 +86377,13 @@ var init_ajvProvider_DyjnscPj = __esm(() => {
         parsed.path = matches[6] || "";
         parsed.query = matches[7];
         parsed.fragment = matches[8];
-        if (parsed.scheme !== undefined) {
-          const decodedScheme = unescape(parsed.scheme);
-          if (VALID_SCHEME.test(decodedScheme))
-            parsed.scheme = decodedScheme.toLowerCase();
-          else {
-            parsed.error = parsed.error || MALFORMED_SCHEME_ERROR;
-            malformedScheme = true;
-          }
-        }
-        malformedPercentEncoding = hasMalformedComponentPercentEncoding(matches);
-        if (malformedPercentEncoding)
-          parsed.error = parsed.error || "URI contains malformed percent-encoding.";
         if (isNaN(parsed.port))
           parsed.port = matches[5];
-        const parseError = getParseError(parsed, matches);
-        if (parseError !== undefined) {
-          parsed.error = parsed.error || parseError;
-          malformedAuthorityOrPort = true;
-        }
         if (parsed.host)
           if (isIPv4(parsed.host) === false) {
-            const bracketedIPLiteral = isIPLiteral(parsed.host);
-            const hasIPLiteralBracket = parsed.host.indexOf("[") !== -1 || parsed.host.indexOf("]") !== -1;
             const ipv6result = normalizeIPv6(parsed.host);
-            isIP = ipv6result.isIPV6 || ipv6result.isIPVFuture === true;
-            malformedIPLiteral = hasIPLiteralBracket && (!bracketedIPLiteral || ipv6result.error === true);
-            parsed.host = isIP ? ipv6result.host : ipv6result.host.toLowerCase();
-            if (malformedIPLiteral) {
-              parsed.error = parsed.error || "URI host is malformed.";
-              malformedAuthorityOrPort = true;
-            }
+            parsed.host = ipv6result.host.toLowerCase();
+            isIP = ipv6result.isIPV6;
           } else
             isIP = true;
         if (parsed.scheme === undefined && parsed.userinfo === undefined && parsed.host === undefined && parsed.port === undefined && parsed.query === undefined && !parsed.path)
@@ -86763,66 +86397,31 @@ var init_ajvProvider_DyjnscPj = __esm(() => {
         if (options.reference && options.reference !== "suffix" && options.reference !== parsed.reference)
           parsed.error = parsed.error || "URI is not a " + options.reference + " reference.";
         const schemeHandler = getSchemeHandler(options.scheme || parsed.scheme);
-        if (!malformedIPLiteral)
-          malformedHost = canonicalizeHost(parsed, options, schemeHandler, isIP);
-        if (uri.indexOf("%") !== -1 && parsed.host !== undefined && !malformedIPLiteral) {
-          let host = isIP ? parsed.host : normalizePercentEncoding(parsed.host, true);
-          if (!isIP)
-            host = normalizePercentEncoding(host.toLowerCase());
-          parsed.host = reescapeHostDelimiters(host, isIP);
+        if (!options.unicodeSupport && (!schemeHandler || !schemeHandler.unicodeSupport)) {
+          if (parsed.host && (options.domainHost || schemeHandler && schemeHandler.domainHost) && isIP === false && nonSimpleDomain(parsed.host))
+            try {
+              parsed.host = URL.domainToASCII(parsed.host.toLowerCase());
+            } catch (e) {
+              parsed.error = parsed.error || "Host's domain name can not be converted to ASCII: " + e;
+            }
         }
         if (!schemeHandler || schemeHandler && !schemeHandler.skipNormalize) {
+          if (uri.indexOf("%") !== -1) {
+            if (parsed.scheme !== undefined)
+              parsed.scheme = unescape(parsed.scheme);
+            if (parsed.host !== undefined)
+              parsed.host = unescape(parsed.host);
+          }
           if (parsed.path)
-            parsed.path = normalizePathEncoding(parsed.path);
-          if (parsed.query)
-            parsed.query = normalizeQueryFragmentEncoding(parsed.query);
+            parsed.path = escape(unescape(parsed.path));
           if (parsed.fragment)
-            parsed.fragment = normalizeQueryFragmentEncoding(parsed.fragment);
+            parsed.fragment = encodeURI(decodeURIComponent(parsed.fragment));
         }
-        if (schemeHandler && schemeHandler.parse) {
+        if (schemeHandler && schemeHandler.parse)
           schemeHandler.parse(parsed, options);
-          if (schemeHandler === SCHEMES.urn && parsed.nid === undefined)
-            malformedSchemeSpecific = true;
-        }
       } else
         parsed.error = parsed.error || "URI can not be parsed.";
-      return {
-        parsed,
-        malformedAuthorityOrPort,
-        malformedPercentEncoding,
-        malformedSchemeSpecific,
-        malformedHost,
-        malformedScheme
-      };
-    }
-    function parse(uri, opts) {
-      return parseWithStatus(uri, opts).parsed;
-    }
-    function normalizeString(uri, opts) {
-      return normalizeStringWithStatus(uri, opts).normalized;
-    }
-    function normalizeStringWithStatus(uri, opts) {
-      const { parsed, malformedAuthorityOrPort, malformedPercentEncoding, malformedSchemeSpecific, malformedHost, malformedScheme } = parseWithStatus(uri, opts);
-      return {
-        normalized: malformedAuthorityOrPort || malformedPercentEncoding || malformedSchemeSpecific || malformedHost || malformedScheme ? uri : serialize(parsed, opts),
-        malformedAuthorityOrPort,
-        malformedPercentEncoding,
-        malformedSchemeSpecific,
-        malformedHost,
-        malformedScheme
-      };
-    }
-    function normalizeComparableURI(uri, opts) {
-      if (typeof uri !== "string" && typeof uri !== "object")
-        return;
-      let value;
-      try {
-        value = typeof uri === "string" ? uri : serialize(uri, opts);
-      } catch {
-        return;
-      }
-      const { normalized, malformedAuthorityOrPort, malformedPercentEncoding, malformedSchemeSpecific, malformedHost, malformedScheme } = normalizeStringWithStatus(value, opts);
-      return malformedAuthorityOrPort || malformedPercentEncoding || malformedSchemeSpecific || malformedHost || malformedScheme ? undefined : normalized;
+      return parsed;
     }
     const fastUri = {
       SCHEMES,
@@ -90775,28 +90374,71 @@ var init_ajvProvider_DyjnscPj = __esm(() => {
 // node_modules/@modelcontextprotocol/server/dist/shimsNode.mjs
 import process4 from "process";
 var init_shimsNode = __esm(() => {
-  init_ajvProvider_DyjnscPj();
+  init_ajvProvider_CEoC__sr();
 });
 
-// node_modules/@modelcontextprotocol/server/dist/mcp-oHn3ureC.mjs
+// node_modules/@modelcontextprotocol/server/dist/mcp-DXXb3Vv3.mjs
 function isCompletable(schema) {
   return !!schema && typeof schema === "object" && COMPLETABLE_SYMBOL in schema;
 }
 function getCompleter(schema) {
   return schema[COMPLETABLE_SYMBOL]?.complete;
 }
-function armSseKeepAlive(intervalMs, onTick) {
-  if (!Number.isFinite(intervalMs) || intervalMs < 1)
-    return;
-  const timer = setInterval(onTick, Math.min(intervalMs, MAX_TIMER_DELAY_MS));
-  timer.unref?.();
-  return timer;
+function listenFilterAccepts(filter, event) {
+  switch (event.kind) {
+    case "tools_list_changed":
+      return filter.toolsListChanged === true;
+    case "prompts_list_changed":
+      return filter.promptsListChanged === true;
+    case "resources_list_changed":
+      return filter.resourcesListChanged === true;
+    case "resource_updated":
+      return filter.resourceSubscriptions !== undefined && filter.resourceSubscriptions.includes(event.uri);
+  }
 }
-function perRequestClassificationOf(transport) {
-  return transport instanceof PerRequestHTTPServerTransport ? readClassification(transport) : undefined;
+function honoredSubset(requested, capabilities) {
+  const honored = {};
+  const allow = (bit) => capabilities === undefined || bit === true;
+  if (requested.toolsListChanged === true && allow(capabilities?.tools?.listChanged))
+    honored.toolsListChanged = true;
+  if (requested.promptsListChanged === true && allow(capabilities?.prompts?.listChanged))
+    honored.promptsListChanged = true;
+  if (requested.resourcesListChanged === true && allow(capabilities?.resources?.listChanged))
+    honored.resourcesListChanged = true;
+  if (requested.resourceSubscriptions !== undefined && requested.resourceSubscriptions.length > 0 && allow(capabilities?.resources?.subscribe))
+    honored.resourceSubscriptions = [...requested.resourceSubscriptions];
+  return honored;
 }
-function supportsScopeChallengeResolver(transport) {
-  return typeof transport === "object" && transport !== null && "setScopeChallengeResolver" in transport && typeof transport.setScopeChallengeResolver === "function";
+function stampSubscriptionId(notification, subscriptionId) {
+  return {
+    method: notification.method,
+    params: {
+      ...notification.params,
+      _meta: {
+        ...notification.params?._meta,
+        [SUBSCRIPTION_ID_META_KEY]: subscriptionId
+      }
+    }
+  };
+}
+function parseListenFilter(message) {
+  const outcome = codecForVersion(MODERN_WIRE_REVISION).validateRequest("subscriptions/listen", message);
+  return outcome.ok ? outcome.value.params?.notifications : undefined;
+}
+function notificationToServerEvent(method, uri) {
+  switch (method) {
+    case "notifications/tools/list_changed":
+      return { kind: "tools_list_changed" };
+    case "notifications/prompts/list_changed":
+      return { kind: "prompts_list_changed" };
+    case "notifications/resources/list_changed":
+      return { kind: "resources_list_changed" };
+    default:
+      return {
+        kind: "resource_updated",
+        uri: uri ?? ""
+      };
+  }
 }
 function resolveLegacyShimOptions(options) {
   if (options?.maxRounds !== undefined && (!Number.isInteger(options.maxRounds) || options.maxRounds < 1))
@@ -90852,40 +90494,6 @@ function serverIdentityOf(server) {
 function discoverAdvertisedCapabilities(capabilities) {
   return { ...capabilities };
 }
-function toolInputElementCount(value, max) {
-  let count = 0;
-  const stack = [value];
-  while (stack.length > 0) {
-    const node = stack.pop();
-    if (node === null || typeof node !== "object")
-      continue;
-    if (Array.isArray(node))
-      for (const child of node) {
-        if (++count > max)
-          return count;
-        if (child !== null && typeof child === "object")
-          stack.push(child);
-      }
-    else
-      for (const key in node) {
-        if (!Object.prototype.hasOwnProperty.call(node, key))
-          continue;
-        if (++count > max)
-          return count;
-        const child = node[key];
-        if (child !== null && typeof child === "object")
-          stack.push(child);
-      }
-  }
-  return count;
-}
-function resolveMaxToolInputElements(value) {
-  if (value === undefined || value === Infinity)
-    return;
-  if (typeof value !== "number" || Number.isNaN(value) || value < 1)
-    throw new RangeError(`maxToolInputElements must be a number of at least 1, or Infinity, got ${String(value)}`);
-  return value;
-}
 function createToolExecutor(inputSchema, handler) {
   if (inputSchema) {
     const callback$1 = handler;
@@ -90893,13 +90501,6 @@ function createToolExecutor(inputSchema, handler) {
   }
   const callback = handler;
   return async (_args, ctx) => callback(ctx);
-}
-function convertListedInputSchema(name, inputSchema) {
-  const json = standardSchemaToJsonSchema(inputSchema, "input");
-  const scan = scanXMcpHeaderDeclarations(json);
-  if (!scan.valid)
-    console.warn(`[mcp-sdk] tool '${name}' carries an invalid x-mcp-header declaration and will be excluded by conforming Streamable HTTP clients: ${scan.reason}`);
-  return json;
 }
 function convertOutputSchemaJson(outputSchema) {
   if (outputSchema === undefined)
@@ -90914,7 +90515,7 @@ function createPromptHandler(name, argsSchema, callback) {
   if (argsSchema) {
     const typedCallback = callback;
     return async (args, ctx) => {
-      const parseResult = await validateStandardSchema(argsSchema, args ?? {});
+      const parseResult = await validateStandardSchema(argsSchema, args);
       if (!parseResult.success)
         throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Invalid arguments for prompt ${name}: ${parseResult.error}`);
       return typedCallback(parseResult.data, ctx);
@@ -90946,7 +90547,88 @@ function unwrapOptionalSchema(schema) {
     return schema;
   return schema.def?.innerType ?? schema;
 }
-var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, readClassification, PerRequestHTTPServerTransport, DEFAULT_LEGACY_SHIM_MAX_ROUNDS = 8, DEFAULT_LEGACY_SHIM_ROUND_TIMEOUT_MS = 600000, LegacyInputRequiredShim = class {
+var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CHANGE_NOTIFICATION_METHODS, StdioListenRouter = class {
+  _subs = /* @__PURE__ */ new Map;
+  _serverCapabilities;
+  _serverInfo;
+  constructor(_maxSubscriptions = DEFAULT_MAX_SUBSCRIPTIONS, serverCapabilities, serverInfo) {
+    this._maxSubscriptions = _maxSubscriptions;
+    this._serverCapabilities = serverCapabilities;
+    this._serverInfo = serverInfo;
+  }
+  setServerCapabilities(capabilities, serverInfo) {
+    this._serverCapabilities = capabilities;
+    if (serverInfo !== undefined)
+      this._serverInfo = serverInfo;
+  }
+  has(id) {
+    return this._subs.has(id);
+  }
+  serve(message) {
+    if (this._serverCapabilities === undefined)
+      throw new Error("StdioListenRouter.serve() called before setServerCapabilities(); refusing to honor a filter without capabilities");
+    if (this._subs.size >= this._maxSubscriptions)
+      return {
+        jsonrpc: "2.0",
+        id: message.id,
+        error: {
+          code: -32603,
+          message: "Subscription limit reached"
+        }
+      };
+    const filter = parseListenFilter(message);
+    if (filter === undefined)
+      return {
+        jsonrpc: "2.0",
+        id: message.id,
+        error: {
+          code: -32602,
+          message: "Invalid params: 'notifications' is required and must be a valid SubscriptionFilter"
+        }
+      };
+    const honored = honoredSubset(filter, this._serverCapabilities);
+    this._subs.set(message.id, honored);
+    return stampSubscriptionId({
+      method: "notifications/subscriptions/acknowledged",
+      params: { notifications: honored }
+    }, message.id);
+  }
+  cancel(id) {
+    return this._subs.delete(id);
+  }
+  routeOutbound(message) {
+    if (!CHANGE_NOTIFICATION_METHODS.has(message.method))
+      return "passthrough";
+    const uriParam = message.params?.["uri"];
+    const uri = typeof uriParam === "string" ? uriParam : undefined;
+    const event = notificationToServerEvent(message.method, uri);
+    const out = [];
+    for (const [subscriptionId, filter] of this._subs)
+      if (listenFilterAccepts(filter, event))
+        out.push(stampSubscriptionId({
+          method: message.method,
+          params: message.params ?? {}
+        }, subscriptionId));
+    return out;
+  }
+  teardownAll() {
+    const out = [];
+    for (const id of this._subs.keys())
+      out.push({
+        jsonrpc: "2.0",
+        id,
+        result: {
+          resultType: "complete",
+          _meta: {
+            [SUBSCRIPTION_ID_META_KEY]: id,
+            ...this._serverInfo !== undefined && { [SERVER_INFO_META_KEY]: this._serverInfo }
+          }
+        }
+      });
+    this._subs.clear();
+    return out;
+  }
+}, DEFAULT_LEGACY_SHIM_MAX_ROUNDS = 8, DEFAULT_LEGACY_SHIM_ROUND_TIMEOUT_MS = 600000, LegacyInputRequiredShim = class {
   constructor(_host) {
     this._host = _host;
   }
@@ -91042,7 +90724,6 @@ var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, r
   }
 }, INPUT_REQUIRED_CAPABLE_METHODS, writeClientIdentity, installDiscoverHandler, readServerIdentity, Server, McpServer = class {
   server;
-  _maxToolInputElements;
   _registeredResources = {};
   _registeredResourceTemplates = {};
   _registeredTools = {};
@@ -91066,7 +90747,6 @@ var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, r
   }
   constructor(serverInfo, options) {
     this.server = new Server(serverInfo, options);
-    this._maxToolInputElements = resolveMaxToolInputElements(options?.maxToolInputElements);
     if (options?.capabilities?.tools)
       this.setToolRequestHandlers();
     if (options?.capabilities?.resources)
@@ -91075,55 +90755,11 @@ var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, r
       this.setPromptRequestHandlers();
   }
   async connect(transport) {
-    if (supportsScopeChallengeResolver(transport))
-      transport.setScopeChallengeResolver((context) => this.resolveScopeChallenge(context));
     return await this.server.connect(transport);
   }
   async close() {
     await this.server.close();
   }
-  resolveScopeChallenge = (context) => {
-    switch (context.request.method) {
-      case "tools/call": {
-        const toolName = context.request.params?.name;
-        if (typeof toolName !== "string")
-          return;
-        const tool = this._registeredTools[toolName];
-        if (tool === undefined || !tool.enabled)
-          return;
-        return tool.scopeChallenge?.(context);
-      }
-      case "resources/read": {
-        const resourceUri = context.request.params?.uri;
-        if (typeof resourceUri !== "string")
-          return;
-        let uri;
-        try {
-          uri = new URL(resourceUri);
-        } catch {
-          return;
-        }
-        const resource = this._registeredResources[uri.toString()];
-        if (resource !== undefined)
-          return resource.enabled ? resource.scopeChallenge?.(context) : undefined;
-        for (const template of Object.values(this._registeredResourceTemplates))
-          if (template.resourceTemplate.uriTemplate.match(uri.toString()))
-            return template.enabled ? template.scopeChallenge?.(context) : undefined;
-        return;
-      }
-      case "prompts/get": {
-        const promptName = context.request.params?.name;
-        if (typeof promptName !== "string")
-          return;
-        const prompt = this._registeredPrompts[promptName];
-        if (prompt === undefined || !prompt.enabled)
-          return;
-        return prompt.scopeChallenge?.(context);
-      }
-      default:
-        return;
-    }
-  };
   _toolHandlersInitialized = false;
   setToolRequestHandlers() {
     if (this._toolHandlersInitialized)
@@ -91136,7 +90772,7 @@ var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, r
         name,
         title: tool.title,
         description: tool.description,
-        inputSchema: tool.inputSchema ? convertListedInputSchema(name, tool.inputSchema) : EMPTY_OBJECT_JSON_SCHEMA,
+        inputSchema: tool.inputSchema ? standardSchemaToJsonSchema(tool.inputSchema, "input") : EMPTY_OBJECT_JSON_SCHEMA,
         annotations: tool.annotations,
         icons: tool.icons,
         execution: tool.execution,
@@ -91177,8 +90813,6 @@ var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, r
     };
   }
   async validateToolInput(tool, args, toolName) {
-    if (this._maxToolInputElements !== undefined && toolInputElementCount(args, this._maxToolInputElements) > this._maxToolInputElements)
-      throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Invalid arguments for tool ${toolName}: arguments contain more than the maximum of ${this._maxToolInputElements} elements`);
     if (!tool.inputSchema)
       return;
     const parseResult = await validateStandardSchema(tool.inputSchema, args ?? {});
@@ -91302,11 +90936,8 @@ var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, r
       }
       for (const template of Object.values(this._registeredResourceTemplates)) {
         const variables = template.resourceTemplate.uriTemplate.match(uri.toString());
-        if (variables) {
-          if (!template.enabled)
-            throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Resource template ${template.resourceTemplate.uriTemplate} disabled`);
+        if (variables)
           return attachCacheHintFallback(await template.readCallback(uri, variables, ctx), template.cacheHint);
-        }
       }
       throw new ResourceNotFoundError(request.params.uri);
     });
@@ -91340,14 +90971,18 @@ var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, r
     this._promptHandlersInitialized = true;
   }
   registerResource(name, uriOrTemplate, config, readCallback) {
-    const { cacheHint, scopeChallenge, ...resourceMetadata } = config;
-    const metadata = resourceMetadata;
-    if (cacheHint !== undefined)
+    const cacheHint = config.cacheHint;
+    let metadata = config;
+    if (cacheHint !== undefined) {
       assertValidCacheHint(cacheHint, `resource ${name}`);
+      const rest = { ...config };
+      delete rest.cacheHint;
+      metadata = rest;
+    }
     if (typeof uriOrTemplate === "string") {
       if (this._registeredResources[uriOrTemplate])
         throw new Error(`Resource ${uriOrTemplate} is already registered`);
-      const registeredResource = this._createRegisteredResource(name, config.title, uriOrTemplate, metadata, scopeChallenge, readCallback);
+      const registeredResource = this._createRegisteredResource(name, config.title, uriOrTemplate, metadata, readCallback);
       if (cacheHint !== undefined)
         registeredResource.cacheHint = cacheHint;
       this.setResourceRequestHandlers();
@@ -91356,7 +90991,7 @@ var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, r
     } else {
       if (this._registeredResourceTemplates[name])
         throw new Error(`Resource template ${name} is already registered`);
-      const registeredResourceTemplate = this._createRegisteredResourceTemplate(name, config.title, uriOrTemplate, metadata, scopeChallenge, readCallback);
+      const registeredResourceTemplate = this._createRegisteredResourceTemplate(name, config.title, uriOrTemplate, metadata, readCallback);
       if (cacheHint !== undefined)
         registeredResourceTemplate.cacheHint = cacheHint;
       this.setResourceRequestHandlers();
@@ -91364,13 +90999,12 @@ var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, r
       return registeredResourceTemplate;
     }
   }
-  _createRegisteredResource(name, title, uri, metadata, scopeChallenge, readCallback) {
+  _createRegisteredResource(name, title, uri, metadata, readCallback) {
     const registeredResource = {
       name,
       title,
       metadata,
       readCallback,
-      scopeChallenge,
       enabled: true,
       disable: () => registeredResource.update({ enabled: false }),
       enable: () => registeredResource.update({ enabled: true }),
@@ -91383,19 +91017,12 @@ var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, r
         }
         if (updates.name !== undefined)
           registeredResource.name = updates.name;
+        if (updates.title !== undefined)
+          registeredResource.title = updates.title;
         if (updates.metadata !== undefined)
           registeredResource.metadata = updates.metadata;
-        if (updates.title !== undefined) {
-          registeredResource.title = updates.title;
-          registeredResource.metadata = {
-            ...registeredResource.metadata,
-            title: updates.title
-          };
-        }
         if (updates.callback !== undefined)
           registeredResource.readCallback = updates.callback;
-        if (updates.scopeChallenge !== undefined)
-          registeredResource.scopeChallenge = updates.scopeChallenge === null ? undefined : updates.scopeChallenge;
         if (updates.enabled !== undefined)
           registeredResource.enabled = updates.enabled;
         this.sendResourceListChanged();
@@ -91404,13 +91031,12 @@ var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, r
     this._registeredResources[uri] = registeredResource;
     return registeredResource;
   }
-  _createRegisteredResourceTemplate(name, title, template, metadata, scopeChallenge, readCallback) {
+  _createRegisteredResourceTemplate(name, title, template, metadata, readCallback) {
     const registeredResourceTemplate = {
       resourceTemplate: template,
       title,
       metadata,
       readCallback,
-      scopeChallenge,
       enabled: true,
       disable: () => registeredResourceTemplate.update({ enabled: false }),
       enable: () => registeredResourceTemplate.update({ enabled: true }),
@@ -91421,21 +91047,14 @@ var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, r
           if (updates.name)
             this._registeredResourceTemplates[updates.name] = registeredResourceTemplate;
         }
+        if (updates.title !== undefined)
+          registeredResourceTemplate.title = updates.title;
         if (updates.template !== undefined)
           registeredResourceTemplate.resourceTemplate = updates.template;
         if (updates.metadata !== undefined)
           registeredResourceTemplate.metadata = updates.metadata;
-        if (updates.title !== undefined) {
-          registeredResourceTemplate.title = updates.title;
-          registeredResourceTemplate.metadata = {
-            ...registeredResourceTemplate.metadata,
-            title: updates.title
-          };
-        }
         if (updates.callback !== undefined)
           registeredResourceTemplate.readCallback = updates.callback;
-        if (updates.scopeChallenge !== undefined)
-          registeredResourceTemplate.scopeChallenge = updates.scopeChallenge === null ? undefined : updates.scopeChallenge;
         if (updates.enabled !== undefined)
           registeredResourceTemplate.enabled = updates.enabled;
         this.sendResourceListChanged();
@@ -91447,7 +91066,7 @@ var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, r
       this.setCompletionRequestHandler();
     return registeredResourceTemplate;
   }
-  _createRegisteredPrompt(name, title, description, argsSchema, callback, icons, scopeChallenge, _meta) {
+  _createRegisteredPrompt(name, title, description, argsSchema, callback, icons, _meta) {
     let currentArgsSchema = argsSchema;
     let currentCallback = callback;
     const registeredPrompt = {
@@ -91455,7 +91074,6 @@ var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, r
       description,
       argsSchema,
       icons,
-      scopeChallenge,
       _meta,
       handler: createPromptHandler(name, argsSchema, callback),
       enabled: true,
@@ -91474,8 +91092,6 @@ var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, r
           registeredPrompt.description = updates.description;
         if (updates.icons !== undefined)
           registeredPrompt.icons = updates.icons;
-        if (updates.scopeChallenge !== undefined)
-          registeredPrompt.scopeChallenge = updates.scopeChallenge === null ? undefined : updates.scopeChallenge;
         if (updates._meta !== undefined)
           registeredPrompt._meta = updates._meta;
         let needsHandlerRegen = false;
@@ -91507,25 +91123,26 @@ var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, r
     }
     return registeredPrompt;
   }
-  _createRegisteredTool(name, title, description, inputSchema, outputSchema, annotations, icons, execution, scopeChallenge, _meta, handler) {
+  _createRegisteredTool(name, title, description, inputSchema, outputSchema, annotations, icons, execution, _meta, handler) {
     validateAndWarnToolName(name);
+    if (inputSchema !== undefined)
+      try {
+        const json = standardSchemaToJsonSchema(inputSchema, "input");
+        this._toolInputSchemaJson[name] = json;
+        const scan = scanXMcpHeaderDeclarations(json);
+        if (!scan.valid)
+          console.warn(`[mcp-sdk] tool '${name}' carries an invalid x-mcp-header declaration and will be excluded by conforming Streamable HTTP clients: ${scan.reason}`);
+      } catch {}
     let currentHandler = handler;
-    let outputSchemaJson;
     const registeredTool = {
       title,
       description,
       inputSchema,
       outputSchema,
-      get outputSchemaJson() {
-        return outputSchemaJson ??= convertOutputSchemaJson(registeredTool.outputSchema);
-      },
-      set outputSchemaJson(value) {
-        outputSchemaJson = value;
-      },
+      outputSchemaJson: convertOutputSchemaJson(outputSchema),
       annotations,
       icons,
       execution,
-      scopeChallenge,
       _meta,
       handler,
       executor: createToolExecutor(inputSchema, handler),
@@ -91570,8 +91187,6 @@ var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, r
           registeredTool.annotations = updates.annotations;
         if (updates.icons !== undefined)
           registeredTool.icons = updates.icons;
-        if (updates.scopeChallenge !== undefined)
-          registeredTool.scopeChallenge = updates.scopeChallenge === null ? undefined : updates.scopeChallenge;
         if (updates._meta !== undefined)
           registeredTool._meta = updates._meta;
         if (updates.enabled !== undefined)
@@ -91587,14 +91202,14 @@ var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, r
   registerTool(name, config, cb) {
     if (this._registeredTools[name])
       throw new Error(`Tool ${name} is already registered`);
-    const { title, description, inputSchema, outputSchema, annotations, icons, scopeChallenge, _meta } = config;
-    return this._createRegisteredTool(name, title, description, normalizeRawShapeSchema(inputSchema), normalizeRawShapeSchema(outputSchema), annotations, icons, undefined, scopeChallenge, _meta, cb);
+    const { title, description, inputSchema, outputSchema, annotations, icons, _meta } = config;
+    return this._createRegisteredTool(name, title, description, normalizeRawShapeSchema(inputSchema), normalizeRawShapeSchema(outputSchema), annotations, icons, undefined, _meta, cb);
   }
   registerPrompt(name, config, cb) {
     if (this._registeredPrompts[name])
       throw new Error(`Prompt ${name} is already registered`);
-    const { title, description, argsSchema, icons, scopeChallenge, _meta } = config;
-    const registeredPrompt = this._createRegisteredPrompt(name, title, description, normalizeRawShapeSchema(argsSchema), cb, icons, scopeChallenge, _meta);
+    const { title, description, argsSchema, icons, _meta } = config;
+    const registeredPrompt = this._createRegisteredPrompt(name, title, description, normalizeRawShapeSchema(argsSchema), cb, icons, _meta);
     this.setPromptRequestHandlers();
     this.sendPromptListChanged();
     return registeredPrompt;
@@ -91618,223 +91233,17 @@ var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, r
       this.server.sendPromptListChanged();
   }
 }, EMPTY_OBJECT_JSON_SCHEMA, EMPTY_COMPLETION_RESULT;
-var init_mcp_oHn3ureC = __esm(() => {
-  init_src_DdvbAHrR();
+var init_mcp_DXXb3Vv3 = __esm(() => {
+  init_src_CX2iR2pK();
   init_shimsNode();
   COMPLETABLE_SYMBOL = Symbol.for("mcp.completable");
   MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
-  PerRequestHTTPServerTransport = class {
-    static {
-      readClassification = (transport) => transport._classification;
-    }
-    onclose;
-    onerror;
-    onmessage;
-    _classification;
-    _responseMode;
-    _started = false;
-    _used = false;
-    _closed = false;
-    _terminalDelivered = false;
-    _dispatchWindowOpen = false;
-    _requestId;
-    _deferredResponse;
-    _sse;
-    _abortCleanup;
-    _keepAliveMs;
-    constructor(options) {
-      this._classification = options.classification;
-      this._responseMode = options.responseMode ?? "auto";
-      this._keepAliveMs = options.keepAliveMs ?? DEFAULT_SSE_KEEP_ALIVE_MS;
-    }
-    async start() {
-      if (this._started)
-        throw new Error("PerRequestHTTPServerTransport is already started");
-      this._started = true;
-    }
-    async handleMessage(message, extra) {
-      if (this._used)
-        throw new Error("PerRequestHTTPServerTransport serves exactly one exchange; construct a new transport per request");
-      if (!this._started || this.onmessage === undefined)
-        throw new Error("PerRequestHTTPServerTransport is not connected: connect a server to this transport before handling a message");
-      if (this._closed)
-        throw new Error("PerRequestHTTPServerTransport is closed");
-      this._used = true;
-      const signal = extra?.request?.signal;
-      if (signal?.aborted) {
-        await this.close();
-        throw new SdkError(SdkErrorCode.ConnectionClosed, "The request was aborted before it could be handled");
-      }
-      const messageExtra = {
-        classification: this._classification,
-        ...extra?.request !== undefined && { request: extra.request },
-        ...extra?.authInfo !== undefined && { authInfo: extra.authInfo }
-      };
-      if (isJSONRPCRequest(message)) {
-        this._requestId = message.id;
-        let resolve;
-        let reject;
-        const promise = new Promise((promiseResolve, promiseReject) => {
-          resolve = promiseResolve;
-          reject = promiseReject;
-        });
-        this._deferredResponse = {
-          promise,
-          resolve,
-          reject,
-          settled: false
-        };
-        if (signal !== undefined) {
-          const onAbort = () => void this.close();
-          signal.addEventListener("abort", onAbort, { once: true });
-          this._abortCleanup = () => signal.removeEventListener("abort", onAbort);
-        }
-        this._dispatchWindowOpen = true;
-        try {
-          this.onmessage(message, messageExtra);
-        } finally {
-          this._dispatchWindowOpen = false;
-        }
-        if (this._responseMode === "sse" && !this._closed && !this._deferredResponse.settled)
-          this.upgradeToSse();
-        return promise;
-      }
-      this.onmessage(message, messageExtra);
-      return new Response(null, { status: 202 });
-    }
-    async send(message, options) {
-      if (this._closed)
-        return;
-      const isResponse = isJSONRPCResultResponse(message) || isJSONRPCErrorResponse(message);
-      const relatedId = isResponse ? message.id : options?.relatedRequestId;
-      if (this._requestId === undefined || relatedId === undefined || relatedId !== this._requestId) {
-        if (isResponse)
-          this.onerror?.(/* @__PURE__ */ new Error(`Received a response for an unknown request id: ${String(message.id)}`));
-        return;
-      }
-      if (isResponse) {
-        if (this._terminalDelivered)
-          return;
-        this._terminalDelivered = true;
-        const errorCode = isJSONRPCErrorResponse(message) ? message.error.code : undefined;
-        const ladderStatus = errorCode !== undefined && (this._dispatchWindowOpen || errorCode === ProtocolErrorCode.MissingRequiredClientCapability) ? LADDER_ERROR_HTTP_STATUS[errorCode] : undefined;
-        if (ladderStatus !== undefined && this._sse === undefined) {
-          this.settleResponse(Response.json(message, {
-            status: ladderStatus,
-            headers: { "Content-Type": "application/json" }
-          }));
-          queueMicrotask(() => void this.close());
-          return;
-        }
-        if (this._sse !== undefined || this._responseMode === "sse") {
-          if (this._sse === undefined)
-            this.upgradeToSse();
-          this.writeMessageFrame(message);
-          this.finalizeStream();
-          return;
-        }
-        this.settleResponse(Response.json(message, {
-          status: 200,
-          headers: { "Content-Type": "application/json" }
-        }));
-        queueMicrotask(() => void this.close());
-        return;
-      }
-      if (this._responseMode === "json")
-        return;
-      if (this._sse === undefined)
-        this.upgradeToSse();
-      this.writeMessageFrame(message);
-    }
-    writeCommentFrame(comment) {
-      if (this._closed || this._sse === undefined || this._sse.closed)
-        return;
-      const frame = comment.split(`
-`).map((line) => `: ${line}`).join(`
-`);
-      this.writeFrame(`${frame}
-
-`);
-    }
-    async close() {
-      if (this._closed)
-        return;
-      this._closed = true;
-      this._abortCleanup?.();
-      this._abortCleanup = undefined;
-      if (this._sse?.keepAliveTimer !== undefined)
-        clearInterval(this._sse.keepAliveTimer);
-      if (this._sse !== undefined && !this._sse.closed) {
-        this._sse.closed = true;
-        try {
-          this._sse.controller.close();
-        } catch {}
-      }
-      if (this._deferredResponse !== undefined && !this._deferredResponse.settled) {
-        this._deferredResponse.settled = true;
-        this._deferredResponse.reject(new SdkError(SdkErrorCode.ConnectionClosed, "Connection closed before a response was produced"));
-      }
-      this.onclose?.();
-    }
-    settleResponse(response) {
-      if (this._deferredResponse === undefined || this._deferredResponse.settled)
-        return;
-      this._deferredResponse.settled = true;
-      this._deferredResponse.resolve(response);
-    }
-    upgradeToSse() {
-      let controller;
-      const readable = new ReadableStream({
-        start: (streamController) => {
-          controller = streamController;
-        },
-        cancel: () => {
-          this.close();
-        }
-      });
-      this._sse = {
-        controller,
-        encoder: new TextEncoder,
-        closed: false
-      };
-      this._sse.keepAliveTimer = armSseKeepAlive(this._keepAliveMs, () => this.writeCommentFrame("keepalive"));
-      this.settleResponse(new Response(readable, {
-        status: 200,
-        headers: {
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache, no-transform",
-          Connection: "keep-alive",
-          "X-Accel-Buffering": "no"
-        }
-      }));
-    }
-    finalizeStream() {
-      if (this._sse?.keepAliveTimer !== undefined)
-        clearInterval(this._sse.keepAliveTimer);
-      if (this._sse !== undefined && !this._sse.closed) {
-        this._sse.closed = true;
-        try {
-          this._sse.controller.close();
-        } catch {}
-      }
-      queueMicrotask(() => void this.close());
-    }
-    writeMessageFrame(message) {
-      this.writeFrame(`event: message
-data: ${JSON.stringify(message)}
-
-`);
-    }
-    writeFrame(frame) {
-      if (this._sse === undefined || this._sse.closed)
-        return;
-      try {
-        this._sse.controller.enqueue(this._sse.encoder.encode(frame));
-      } catch (error) {
-        this.onerror?.(/* @__PURE__ */ new Error(`Failed to write to the response stream: ${error}`));
-      }
-    }
-  };
+  CHANGE_NOTIFICATION_METHODS = new Set([
+    "notifications/tools/list_changed",
+    "notifications/prompts/list_changed",
+    "notifications/resources/list_changed",
+    "notifications/resources/updated"
+  ]);
   INPUT_REQUIRED_CAPABLE_METHODS = new Set([
     "tools/call",
     "prompts/get",
@@ -91865,7 +91274,6 @@ data: ${JSON.stringify(message)}
     _requestStateVerify;
     _inputRequiredServing;
     _legacyShim;
-    _boundFromTransport = false;
     _legacyInputRequiredShim() {
       return this._legacyShim ??= new LegacyInputRequiredShim({
         maxRounds: this._inputRequiredServing.maxRounds,
@@ -91898,20 +91306,6 @@ data: ${JSON.stringify(message)}
         this.setRequestHandler("server/discover", () => this._ondiscover());
       if (this._capabilities.logging)
         this._registerLoggingHandler();
-    }
-    async connect(transport) {
-      if (this.transport !== undefined)
-        throw new SdkError(SdkErrorCode.AlreadyConnected, "Use a separate Server instance per connection: this instance is already connected to a transport. To connect it to a new transport, call close() first.");
-      if (this._boundFromTransport) {
-        this._boundFromTransport = false;
-        this._negotiatedProtocolVersion = undefined;
-      }
-      const revision = perRequestClassificationOf(transport)?.revision;
-      if (revision !== undefined && !this._servedModernEra() && SUPPORTED_MODERN_PROTOCOL_VERSIONS.includes(revision) && modernProtocolVersions(this._supportedProtocolVersions).includes(revision)) {
-        this._negotiatedProtocolVersion = revision;
-        this._boundFromTransport = true;
-      }
-      await super.connect(transport);
     }
     _registerLoggingHandler() {
       this.setRequestHandler("logging/setLevel", async (request, ctx) => {
@@ -92331,167 +91725,15 @@ data: ${JSON.stringify(message)}
   } };
 });
 
-// node_modules/@modelcontextprotocol/server/dist/listenRouter-Bartj63y.mjs
-function listenFilterAccepts(filter, event) {
-  switch (event.kind) {
-    case "tools_list_changed":
-      return filter.toolsListChanged === true;
-    case "prompts_list_changed":
-      return filter.promptsListChanged === true;
-    case "resources_list_changed":
-      return filter.resourcesListChanged === true;
-    case "resource_updated":
-      return filter.resourceSubscriptions !== undefined && filter.resourceSubscriptions.includes(event.uri);
-  }
-}
-function honoredSubset(requested, capabilities) {
-  const honored = {};
-  const allow = (bit) => capabilities === undefined || bit === true;
-  if (requested.toolsListChanged === true && allow(capabilities?.tools?.listChanged))
-    honored.toolsListChanged = true;
-  if (requested.promptsListChanged === true && allow(capabilities?.prompts?.listChanged))
-    honored.promptsListChanged = true;
-  if (requested.resourcesListChanged === true && allow(capabilities?.resources?.listChanged))
-    honored.resourcesListChanged = true;
-  if (requested.resourceSubscriptions !== undefined && requested.resourceSubscriptions.length > 0 && allow(capabilities?.resources?.subscribe))
-    honored.resourceSubscriptions = [...requested.resourceSubscriptions];
-  return honored;
-}
-function stampSubscriptionId(notification, subscriptionId) {
-  return {
-    method: notification.method,
-    params: {
-      ...notification.params,
-      _meta: {
-        ...notification.params?._meta,
-        [SUBSCRIPTION_ID_META_KEY]: subscriptionId
-      }
-    }
-  };
-}
-function parseListenFilter(message) {
-  const outcome = codecForVersion(MODERN_WIRE_REVISION).validateRequest("subscriptions/listen", message);
-  return outcome.ok ? outcome.value.params?.notifications : undefined;
-}
-function notificationToServerEvent(method, uri) {
-  switch (method) {
-    case "notifications/tools/list_changed":
-      return { kind: "tools_list_changed" };
-    case "notifications/prompts/list_changed":
-      return { kind: "prompts_list_changed" };
-    case "notifications/resources/list_changed":
-      return { kind: "resources_list_changed" };
-    default:
-      return {
-        kind: "resource_updated",
-        uri: uri ?? ""
-      };
-  }
-}
-var DEFAULT_MAX_SUBSCRIPTIONS = 1024, CHANGE_NOTIFICATION_METHODS, StdioListenRouter = class {
-  _subs = /* @__PURE__ */ new Map;
-  _serverCapabilities;
-  _serverInfo;
-  constructor(_maxSubscriptions = DEFAULT_MAX_SUBSCRIPTIONS, serverCapabilities, serverInfo) {
-    this._maxSubscriptions = _maxSubscriptions;
-    this._serverCapabilities = serverCapabilities;
-    this._serverInfo = serverInfo;
-  }
-  setServerCapabilities(capabilities, serverInfo) {
-    this._serverCapabilities = capabilities;
-    if (serverInfo !== undefined)
-      this._serverInfo = serverInfo;
-  }
-  has(id) {
-    return this._subs.has(id);
-  }
-  serve(message) {
-    if (this._serverCapabilities === undefined)
-      throw new Error("StdioListenRouter.serve() called before setServerCapabilities(); refusing to honor a filter without capabilities");
-    if (this._subs.size >= this._maxSubscriptions)
-      return {
-        jsonrpc: "2.0",
-        id: message.id,
-        error: {
-          code: -32603,
-          message: "Subscription limit reached"
-        }
-      };
-    const filter = parseListenFilter(message);
-    if (filter === undefined)
-      return {
-        jsonrpc: "2.0",
-        id: message.id,
-        error: {
-          code: -32602,
-          message: "Invalid params: 'notifications' is required and must be a valid SubscriptionFilter"
-        }
-      };
-    const honored = honoredSubset(filter, this._serverCapabilities);
-    this._subs.set(message.id, honored);
-    return stampSubscriptionId({
-      method: "notifications/subscriptions/acknowledged",
-      params: { notifications: honored }
-    }, message.id);
-  }
-  cancel(id) {
-    return this._subs.delete(id);
-  }
-  routeOutbound(message) {
-    if (!CHANGE_NOTIFICATION_METHODS.has(message.method))
-      return "passthrough";
-    const uriParam = message.params?.["uri"];
-    const uri = typeof uriParam === "string" ? uriParam : undefined;
-    const event = notificationToServerEvent(message.method, uri);
-    const out = [];
-    for (const [subscriptionId, filter] of this._subs)
-      if (listenFilterAccepts(filter, event))
-        out.push(stampSubscriptionId({
-          method: message.method,
-          params: message.params ?? {}
-        }, subscriptionId));
-    return out;
-  }
-  teardownAll() {
-    const out = [];
-    for (const id of this._subs.keys())
-      out.push({
-        jsonrpc: "2.0",
-        id,
-        result: {
-          resultType: "complete",
-          _meta: {
-            [SUBSCRIPTION_ID_META_KEY]: id,
-            ...this._serverInfo !== undefined && { [SERVER_INFO_META_KEY]: this._serverInfo }
-          }
-        }
-      });
-    this._subs.clear();
-    return out;
-  }
-};
-var init_listenRouter_Bartj63y = __esm(() => {
-  init_mcp_oHn3ureC();
-  init_src_DdvbAHrR();
-  CHANGE_NOTIFICATION_METHODS = new Set([
-    "notifications/tools/list_changed",
-    "notifications/prompts/list_changed",
-    "notifications/resources/list_changed",
-    "notifications/resources/updated"
-  ]);
-});
-
 // node_modules/@modelcontextprotocol/server/dist/index.mjs
 function fromJsonSchema2(schema, validator) {
   return fromJsonSchema(schema, validator ?? (_defaultValidator ??= new AjvJsonSchemaValidator));
 }
-var DEFAULT_MAX_REQUEST_BODY_SIZE, _defaultValidator;
+var _defaultValidator;
 var init_dist4 = __esm(() => {
-  init_mcp_oHn3ureC();
-  init_src_DdvbAHrR();
-  init_listenRouter_Bartj63y();
+  init_mcp_DXXb3Vv3();
+  init_src_CX2iR2pK();
   init_shimsNode();
-  DEFAULT_MAX_REQUEST_BODY_SIZE = 4 * 1024 * 1024;
 });
 
 // node_modules/@modelcontextprotocol/server/dist/stdio.mjs
@@ -92669,8 +91911,6 @@ function serveStdio(factory, options = {}) {
       }
       if (state.era === "modern" && await tryServeListen(message))
         return;
-      if (isTornDown())
-        return;
       state.instance.channel.deliver(message);
       return;
     }
@@ -92740,8 +91980,6 @@ function serveStdio(factory, options = {}) {
           };
         }
         if (await tryServeListen(message))
-          return;
-        if (isTornDown())
           return;
         state.instance.channel.deliver(message, { classification: opening.classification });
         return;
@@ -92836,7 +92074,7 @@ function serveStdio(factory, options = {}) {
 function toError(value) {
   return value instanceof Error ? value : new Error(String(value));
 }
-var swallowsErrorsAfterClose, StdioServerTransport = class {
+var StdioServerTransport = class {
   _readBuffer;
   _started = false;
   _closed = false;
@@ -92861,27 +92099,15 @@ var swallowsErrorsAfterClose, StdioServerTransport = class {
     this.onerror?.(error);
   };
   _onstdouterror = (error) => {
-    if (this._closed)
-      return;
     this.onerror?.(error);
-    this.close().catch(() => {});
-  };
-  _onstdinclose = () => {
     this.close().catch(() => {});
   };
   async start() {
     if (this._started)
       throw new Error("StdioServerTransport already started! If using Server class, note that connect() calls start() automatically.");
     this._started = true;
-    for (const listener of this._stdout.listeners("error"))
-      if (listener[swallowsErrorsAfterClose])
-        this._stdout.off("error", listener);
-    if (this._stdin.readableEnded || this._stdin.destroyed)
-      setImmediate(this._onstdinclose);
     this._stdin.on("data", this._ondata);
     this._stdin.on("error", this._onerror);
-    this._stdin.on("end", this._onstdinclose);
-    this._stdin.on("close", this._onstdinclose);
     this._stdout.on("error", this._onstdouterror);
   }
   processReadBuffer() {
@@ -92901,9 +92127,7 @@ var swallowsErrorsAfterClose, StdioServerTransport = class {
     this._closed = true;
     this._stdin.off("data", this._ondata);
     this._stdin.off("error", this._onerror);
-    this._stdin.off("end", this._onstdinclose);
-    this._stdin.off("close", this._onstdinclose);
-    this._onstdouterror[swallowsErrorsAfterClose] = true;
+    this._stdout.off("error", this._onstdouterror);
     if (this._stdin.listenerCount("data") === 0)
       this._stdin.pause();
     this._readBuffer.clear();
@@ -93022,11 +92246,9 @@ var swallowsErrorsAfterClose, StdioServerTransport = class {
   }
 };
 var init_stdio = __esm(() => {
-  init_mcp_oHn3ureC();
-  init_src_DdvbAHrR();
-  init_listenRouter_Bartj63y();
+  init_mcp_DXXb3Vv3();
+  init_src_CX2iR2pK();
   init_shimsNode();
-  swallowsErrorsAfterClose = Symbol("swallowsErrorsAfterClose");
 });
 
 // src/mcp/channel.ts

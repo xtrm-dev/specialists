@@ -578,38 +578,36 @@ var require_Alias = __commonJS(function(exports) {
         if (node.anchor === this.source)
           found = node;
       }
-      if (found && ctx) {
-        const { anchors, doc, maxAliasCount } = ctx;
-        let data = anchors.get(found);
-        if (!data) {
-          toJS.toJS(found, null, ctx);
-          data = anchors.get(found);
-        }
-        if (data?.res === undefined) {
-          const msg = "This should not happen: Alias anchor was not resolved?";
-          throw new ReferenceError(msg);
-        }
-        if (maxAliasCount >= 0) {
-          data.count += 1;
-          if (data.aliasCount === 0)
-            data.aliasCount = getAliasCount(doc, found, anchors);
-          if (data.count * data.aliasCount > maxAliasCount) {
-            const msg = "Excessive alias count indicates a resource exhaustion attack";
-            throw new ReferenceError(msg);
-          }
-        }
-      }
       return found;
     }
     toJSON(_arg, ctx) {
       if (!ctx)
         return { source: this.source };
-      const source = this.resolve(ctx.doc, ctx);
+      const { anchors, doc, maxAliasCount } = ctx;
+      const source = this.resolve(doc, ctx);
       if (!source) {
         const msg = `Unresolved alias (the anchor must be set before the alias): ${this.source}`;
         throw new ReferenceError(msg);
       }
-      return ctx.anchors.get(source).res;
+      let data = anchors.get(source);
+      if (!data) {
+        toJS.toJS(source, null, ctx);
+        data = anchors.get(source);
+      }
+      if (data?.res === undefined) {
+        const msg = "This should not happen: Alias anchor was not resolved?";
+        throw new ReferenceError(msg);
+      }
+      if (maxAliasCount >= 0) {
+        data.count += 1;
+        if (data.aliasCount === 0)
+          data.aliasCount = getAliasCount(doc, source, anchors);
+        if (data.count * data.aliasCount > maxAliasCount) {
+          const msg = "Excessive alias count indicates a resource exhaustion attack";
+          throw new ReferenceError(msg);
+        }
+      }
+      return data.res;
     }
     toString(ctx, _onComment, _onChompKeep) {
       const src = `*${this.source}`;
@@ -4371,32 +4369,33 @@ var require_resolve_flow_scalar = __commonJS(function(exports) {
     }
     if (badChar)
       onError(0, "BAD_SCALAR_START", `Plain value cannot start with ${badChar}`);
-    return unfoldLines(source);
+    return foldLines(source);
   }
   function singleQuotedValue(source, onError) {
     if (source[source.length - 1] !== "'" || source.length === 1)
       onError(source.length, "MISSING_CHAR", "Missing closing 'quote");
-    return unfoldLines(source.slice(1, -1)).replace(/''/g, "'");
+    return foldLines(source.slice(1, -1)).replace(/''/g, "'");
   }
-  function unfoldLines(source) {
-    const line = /(.*?)\r?\n/sy;
-    let match = line.exec(source);
+  function foldLines(source) {
+    let first, line;
+    try {
+      first = new RegExp(`(.*?)(?<![ 	])[ 	]*\r?
+`, "sy");
+      line = new RegExp(`[ 	]*(.*?)(?:(?<![ 	])[ 	]*)?\r?
+`, "sy");
+    } catch {
+      first = /(.*?)[ \t]*\r?\n/sy;
+      line = /[ \t]*(.*?)[ \t]*\r?\n/sy;
+    }
+    let match = first.exec(source);
     if (!match)
       return source;
-    let trimEnd, trimBoth;
-    try {
-      trimEnd = new RegExp("(?<![ \t])[ \t]+$");
-      trimBoth = new RegExp("^[ \t]+|(?<![ \t])[ \t]+$", "g");
-    } catch {
-      trimEnd = /[ \t]+$/;
-      trimBoth = /^[ \t]+|[ \t]+$/g;
-    }
-    let res = match[1].replace(trimEnd, "");
+    let res = match[1];
     let sep = " ";
-    let pos = line.lastIndex;
+    let pos = first.lastIndex;
+    line.lastIndex = pos;
     while (match = line.exec(source)) {
-      const lm = match[1].replace(trimBoth, "");
-      if (lm === "") {
+      if (match[1] === "") {
         if (sep === `
 `)
           res += sep;
@@ -4404,7 +4403,7 @@ var require_resolve_flow_scalar = __commonJS(function(exports) {
           sep = `
 `;
       } else {
-        res += sep + lm;
+        res += sep + match[1];
         sep = " ";
       }
       pos = line.lastIndex;
@@ -17524,17 +17523,45 @@ function headingOf(line) {
   const whole = canonical(bare.replace(/:$/, "").trim());
   if (ALL_HEADINGS.has(whole))
     return { name: whole };
-  const split = bare.match(/^([A-Za-z][A-Za-z _-]*?)\s*:\s*(.*)$/);
+  const split = splitHeadingLabel(bare);
   if (!split)
     return;
-  const name = canonical(split[1].trim());
+  const name = canonical(split.label);
   if (!ALL_HEADINGS.has(name))
     return;
-  const inlineBody = split[2].trim();
+  const inlineBody = split.body.trim();
   return inlineBody ? { name, inlineBody } : { name };
 }
+function isSpaceChar(c) {
+  return c === " " || c === "\t" || c === `
+` || c === "\r" || c === "\v" || c === "\f";
+}
+function isHeadingLabel(text) {
+  const alpha = (code) => code >= 65 && code <= 90 || code >= 97 && code <= 122;
+  if (text.length === 0 || !alpha(text.charCodeAt(0)))
+    return false;
+  for (const c of text) {
+    if (!alpha(c.charCodeAt(0)) && c !== " " && c !== "_" && c !== "-")
+      return false;
+  }
+  return true;
+}
+function splitHeadingLabel(bare) {
+  const colon = bare.indexOf(":");
+  if (colon <= 0)
+    return;
+  let label = bare.slice(0, colon);
+  while (label.length > 0 && isSpaceChar(label[label.length - 1]))
+    label = label.slice(0, -1);
+  if (!isHeadingLabel(label))
+    return;
+  let start = colon + 1;
+  while (start < bare.length && isSpaceChar(bare[start]))
+    start++;
+  return { label, body: bare.slice(start) };
+}
 function scrutinyLevel(description) {
-  const match = description.match(/SCRUTINY\b[^\n]*\n?\s*\**\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i) ?? description.match(/SCRUTINY\b\s*[:\-—]?\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
+  const match = description.match(/SCRUTINY\b[^\n]{0,200}\n?\s{0,20}\*{0,20}\s{0,20}(LOW|MEDIUM|HIGH|CRITICAL)\b/i) ?? description.match(/SCRUTINY\b\s{0,20}[:\-—]?\s{0,20}(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
   return match?.[1]?.toUpperCase();
 }
 function validateContractText(contract) {
@@ -23225,10 +23252,20 @@ function resolveWorktreeBase(git) {
   git("fetch", "origin", defaultBranch);
   return `origin/${defaultBranch}`;
 }
+function slugify(value) {
+  const lowered = value.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  let start = 0;
+  let end = lowered.length;
+  while (start < end && lowered[start] === "-")
+    start++;
+  while (end > start && lowered[end - 1] === "-")
+    end--;
+  return lowered.slice(start, end);
+}
 function provisionWriterWorkspace(cwd, issueRef, role) {
   const git = (...args) => execFileSync2("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-  const slug = issueRef.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  const roleSlug = role.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const slug = slugify(issueRef);
+  const roleSlug = slugify(role);
   const branch = `sp/${slug}`;
   try {
     const existing = git("worktree", "list", "--porcelain").split(`
