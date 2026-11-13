@@ -87,17 +87,6 @@ export function warnIdentityEnv(message: string): void {
 const launcherWarning = warnIdentityEnv;
 
 /**
- * Every key one identity env OWNS. PATH is deliberately not here: the launched
- * PATH is one process-wide value by design (CORE-2524.4), while these keys name a
- * holder and a transport and must never outlive the activation that set them.
- */
-const IDENTITY_MANAGED_KEY = /^(?:SUBSTRATE_HOLDER|XTRM_ROLE|GIT_AUTHOR_NAME|GIT_AUTHOR_EMAIL|GIT_COMMITTER_NAME|GIT_COMMITTER_EMAIL|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+)$/;
-
-export function isIdentityManagedKey(key: string): boolean {
-  return IDENTITY_MANAGED_KEY.test(key);
-}
-
-/**
  * `GIT_CONFIG_COUNT` is authoritative for git: it reads exactly that many
  * KEY_i/VALUE_i pairs and dies with `fatal: unable to parse command-line config`
  * when one is absent, which breaks EVERY git command in the session. So the
@@ -248,11 +237,15 @@ export function specialistPath(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /**
- * The full env one launched Specialist process receives: the agent identity env
- * plus the PATH that makes the shim reachable. Both launch paths call this — the
- * legacy runner's session env and the native host's process.env — so a Specialist
- * never gets the holder without the shim. Without a holder nothing is fabricated,
- * PATH included.
+ * The full env one launched Specialist receives: the agent identity env plus the PATH that
+ * makes the shim reachable. Two callers:
+ *
+ * - the legacy runner, whose child process takes this env whole;
+ * - the native host, whose SHELLS take it through the spawn hook (SPECIALISTS-4456). The host
+ *   itself does not use the PATH half — it composes PATH per spawn from what pi resolved, so
+ *   pi's managed bin directory survives — and it drops the key before handing the rest over.
+ *
+ * Without a holder nothing is fabricated, PATH included.
  */
 export function resolveAgentLaunchEnv(input: IdentityEnvInput = {}): Record<string, string> {
   const identity = resolveAgentIdentityEnv(input);

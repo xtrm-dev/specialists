@@ -113,7 +113,7 @@ describe('the READ_ONLY sandbox drops the activation identity (documented limit)
    * This test exists to make that limit explicit rather than implied: if a future change makes
    * the guard honour a per-session env, this test is the one that should start failing.
    */
-  it('does not pass the identity keys into the sandbox, and passes the host PATH', async () => {
+  it('does not pass the identity keys into the sandbox, and passes the host PATH value', async () => {
     const guard = await import('../../../config/pi-extensions/permission-guard/index.mjs');
     const hostEnv = {
       PATH: ['/host/bin', '/usr/bin'].join(delimiter),
@@ -125,8 +125,16 @@ describe('the READ_ONLY sandbox drops the activation identity (documented limit)
 
     const args = guard.buildClearenvArgs(hostEnv) as string[];
     const passed = args.filter((entry, index) => args[index - 1] === '--setenv');
+    const setenv = (name: string): string | undefined => {
+      const index = args.indexOf(name);
+      return index > 0 && args[index - 1] === '--setenv' ? args[index + 1] : undefined;
+    };
 
     expect(passed).toContain('PATH');
+    // The VALUE is the host PATH, and the shim is not in it: the sandbox does not receive the
+    // composed, shim-first PATH the spawn hook applies to its own outer process.
+    expect(setenv('PATH')).toBe(hostEnv.PATH);
+    expect(String(setenv('PATH'))).not.toContain('/.local/bin');
     expect(passed).toContain('HOME');
     expect(passed).not.toContain('XTRM_ROLE');
     expect(passed).not.toContain('SUBSTRATE_HOLDER');

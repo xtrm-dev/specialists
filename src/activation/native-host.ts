@@ -87,9 +87,24 @@ import {
   resolveAgentLaunchEnv,
   shimBinDir,
   specialistHolderName,
+  warnIdentityEnv,
   type IdentityEnvRun,
 } from '../pi/identity-env.js';
+import { hasActivationEnv } from './activation-bash-env.js';
 import { formatResolvedToolContract, withDiscoveredExtensionTools, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
+
+/**
+ * Tools that spawn a child process from the HOST environment, which the activation's own
+ * identity does not reach (SPECIALISTS-4456 channel, SPECIALISTS-4487 fix). Named here rather
+ * than in a comment so a dispatch can say so out loud: a contract that grants one of these
+ * lets the activation act as whoever dispatched it, from a tool the identity hook cannot see.
+ */
+const HOST_ENV_SPAWNING_TOOLS = ['python'] as const;
+
+/** The granted tools whose child processes the activation's identity cannot reach. */
+export function uncoveredHostEnvSpawns(toolsList: readonly string[]): string[] {
+  return HOST_ENV_SPAWNING_TOOLS.filter((tool) => toolsList.includes(tool));
+}
 import { resolveModelChain } from '../specialist/model-chain.js';
 import { extractPurposeExcerpt, extractSections } from './contract-sections.js';
 import {
@@ -2209,6 +2224,16 @@ export class NativeActivationHost {
     // therefore stripped and only the shim directory is passed on.
     const { PATH: _launchPath, ...activationEnv } = activationLaunchEnv;
     const activationShimDir = shimBinDir(process.env);
+    // Visibility for the one limit the hook cannot cover: a tool whose child inherits the
+    // host env runs as the dispatcher, not as this activation (SPECIALISTS-4487).
+    const uncoveredSpawns = uncoveredHostEnvSpawns(effectiveToolContract.toolsList);
+    if (uncoveredSpawns.length > 0 && hasActivationEnv(activationEnv, activationShimDir)) {
+      warnIdentityEnv(
+        `activation ${activationId} grants ${uncoveredSpawns.join(', ')}, whose child processes ` +
+        `inherit the dispatching session's identity rather than the activation's ` +
+        `(SPECIALISTS-4487); its bash and powershell calls carry the activation's`,
+      );
+    }
     // The tier channel stays on the CLI-spawn path only. In process the guard is loaded
     // for READ_ONLY sessions and sandboxes every bash call unconditionally, which is what
     // authorizes them; its `tierRefusal` would refuse a NON-read-only tier, and a
@@ -2684,10 +2709,9 @@ export class NativeActivationHost {
       result,
     };
     } catch (error) {
-      // N1: from here on, anything that ends this dispatch early — a refusal, an SDK that
-      // throws while creating the session, a failed producer — must leave no watcher,
-      // claim or lease behind. The refusals above own their own cleanup; this covers the
-      // rest.
+      // No cleanup of its own: every early end is already handled by `reject()` above, and a
+      // throw here has nothing left to unwind. Kept as an explicit re-throw so the boundary
+      // is visible rather than implied by the absence of a catch.
       throw error;
     }
   }
@@ -2817,10 +2841,8 @@ export class NativeActivationHost {
         break;
       case 'agent_start':
         this.noteWakeTurnStart(snapshot);
-        // N1's re-assert is gone with the process env channel (SPECIALISTS-4456): the
-        // activation's identity travels on the bash tool's spawn hook, which every leg of
-        // the activation shares because the tool is built once per dispatch. There is
-        // nothing to disturb between legs, so there is nothing to re-assert.
+        // Every leg — first turn, fallback, retry, wake, resume — shares the shell tools built
+        // once per dispatch, so the activation's identity needs no per-leg handling here.
         snapshot.state = 'running';
         this.save(snapshot);
         emit('turn_started');
@@ -2855,10 +2877,8 @@ export class NativeActivationHost {
         snapshot.state = 'settled';
         this.save(snapshot);
         this.releaseIfWriter(snapshot, 'settled');
-        // agent_settled is a TURN boundary, not the activation's end — a fallback leg, a
-        // retry or a background wake starts another leg from here, and every leg shares the
-        // same hooked shell tools, so there is no identity state to carry between them
-        // (SPECIALISTS-4456 removed the process env stack this comment used to describe).
+        // agent_settled is a TURN boundary, not the activation's end: a fallback leg, a retry
+        // or a background wake starts another leg from here.
         if (unframedWake) {
           this.wakeDirty.delete(snapshot.activationId);
           const record = this.registry.get(snapshot.activationId);
@@ -2867,11 +2887,6 @@ export class NativeActivationHost {
             void this.finalizeWakeTurn(snapshot, record, emit).finally(() => {
               this.wakeFinalising.delete(snapshot.activationId);
             });
-          } else if (this.registry.get(snapshot.activationId) === undefined) {
-            // A wake settle with no registry record: nothing to finalise, and nothing owns
-            // the wake flags, so clear them here rather than leaving a dead id behind.
-            this.wakeDirty.delete(snapshot.activationId);
-            this.wakeFinalising.delete(snapshot.activationId);
           }
         }
         break;
@@ -3368,9 +3383,6 @@ export class NativeActivationHost {
     } catch {
       // Finalisation is diagnostic plumbing on top of an already-settled turn:
       // it must never throw into the session fan-out.
-    } finally {
-      // A wake turn is unframed, so nothing else will take this activation off the
-      // stack: its settle is the activation's terminal point.
     }
   }
 
@@ -3507,7 +3519,7 @@ export class NativeActivationHost {
     } finally {
       flushFailure(false);
       // The framed walk is over: no further leg is pending, so this is terminal for the
-      // activation's identity even though the activation itself stays resumable.
+      // activation even though it stays resumable.
     }
   }
 
@@ -3801,8 +3813,7 @@ export class NativeActivationHost {
       reused_session: reusedSession,
     });
 
-    const result = this.runToSettled(record.snapshot, record.session, opts?.prompt ?? record.initialPrompt, emit, record)
-
+    const result = this.runToSettled(record.snapshot, record.session, opts?.prompt ?? record.initialPrompt, emit, record);
     record.result = result;
 
     return {

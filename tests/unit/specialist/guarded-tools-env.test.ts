@@ -73,8 +73,13 @@ describe('createGuardedTools — activation env channel (SPECIALISTS-4456)', () 
 
     expect(calls.find((call) => call.factory === 'createEditTool')!.args).toEqual(['/w']);
     expect(calls.find((call) => call.factory === 'createWriteTool')!.args).toEqual(['/w']);
-    expect(calls.find((call) => call.factory === 'createBashTool')!.args).toHaveLength(2);
-    expect(calls.find((call) => call.factory === 'createPowerShellTool')!.args).toHaveLength(2);
+    const bashArgs = calls.find((call) => call.factory === 'createBashTool')!.args;
+    const psArgs = calls.find((call) => call.factory === 'createPowerShellTool')!.args;
+    expect(bashArgs).toHaveLength(2);
+    expect(psArgs).toHaveLength(2);
+    // The argument must BE an options object with a hook; `{}` would satisfy a length check.
+    expect(typeof (bashArgs[1] as { spawnHook?: unknown }).spawnHook).toBe('function');
+    expect(typeof (psArgs[1] as { spawnHook?: unknown }).spawnHook).toBe('function');
   });
 
   it('installs the hook for the shim alone, because gh would otherwise be the real binary', () => {
@@ -87,7 +92,9 @@ describe('createGuardedTools — activation env channel (SPECIALISTS-4456)', () 
       shimDir: '/shim',
     });
 
-    expect(calls.find((call) => call.factory === 'createBashTool')!.args).toHaveLength(2);
+    const args = calls.find((call) => call.factory === 'createBashTool')!.args;
+    expect(args).toHaveLength(2);
+    expect(typeof (args[1] as { spawnHook?: unknown }).spawnHook).toBe('function');
   });
 
   it('still consults the lease before running the shell', async () => {

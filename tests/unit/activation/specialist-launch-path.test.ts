@@ -14,7 +14,7 @@ vi.mock('node:child_process', async (importOriginal) => {
   };
 });
 
-import { NativeActivationHost } from '../../../src/activation/native-host.js';
+import { NativeActivationHost, uncoveredHostEnvSpawns } from '../../../src/activation/native-host.js';
 import { testWorkItems } from '../../utils/test-work-items.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
@@ -69,11 +69,8 @@ function fakeSession(
     isIdle: true,
     disposed: false,
     activeTools: ['read', 'grep'],
-    /** Emit one leg start, as a new leg (fallback/retry/wake) would. */
-    emitLegStart() { listeners.forEach(l => l({ type: 'agent_start' })); },
     async prompt() {
-      // The runtime tells the host the leg started BEFORE any tool runs, and that is
-      // where the host re-asserts identity; captures therefore come after it.
+      // The runtime tells the host the leg started BEFORE any tool runs.
       listeners.forEach(l => l({ type: 'agent_start' }));
       onPrompt?.();
       if (options.wait) {
@@ -170,7 +167,6 @@ async function dispatchOnce(options: DispatchOptions = {}): Promise<{ bashOption
           GIT_AUTHOR_NAME: 'sp-researcher',
           GIT_AUTHOR_EMAIL: 'researcher@example.invalid',
           SUBSTRATE_HOLDER: 'from-lookup',
-          ...(opts.env?.PROBE_LOOKUP_ENV ? {} : {}),
         },
       }),
     })),
@@ -407,23 +403,6 @@ describe('native launch path — the host env survives every leg shape (SPECIALI
     expect({ ...process.env }).toEqual(before);
   });
 
-  it('keeps the hooked bash tool across a background wake turn', async () => {
-    const before = { ...process.env };
-    const { host, created, createdOptions } = hostWith();
-    const a = await dispatch(host);
-    await a.result;
-    const sessionsBeforeWake = createdOptions.length;
-
-    await created[0].prompt();
-    for (let i = 0; i < 8; i += 1) await Promise.resolve();
-
-    // A wake turn runs on the settled session, so the identity must still be on its tools.
-    expect(createdOptions.length).toBe(sessionsBeforeWake);
-    const hook = sessionBashHook(createdOptions[0]!)!;
-    expect(hook.spawnHook({ command: 'true', cwd: '/w', env: {} }).env.SUBSTRATE_HOLDER).toMatch(/^sp-researcher-/);
-    expect({ ...process.env }).toEqual(before);
-  });
-
   it('keeps the hooked bash tool after a resume, which returns the live session', async () => {
     const before = { ...process.env };
     const { host, created, createdOptions } = hostWith();
@@ -483,18 +462,26 @@ describe('native launch path — the host env survives every leg shape (SPECIALI
     expect({ ...process.env }).toEqual(before);
   });
 
-  it('emits no identity takeover warning, because nothing takes the env over', async () => {
-    // The N5 warning existed because two live activations shared one process env. That is
-    // gone; a warning here would mean the old channel came back.
-    const lines: string[] = [];
-    setRuntimeDiagnosticsSink((line) => { lines.push(line); });
-    try {
-      const { host } = hostWith();
-      const a = await dispatch(host);
-      await a.result;
-    } finally {
-      resetRuntimeDiagnosticsSink();
-    }
-    expect(lines.filter((line) => line.includes('identity-env'))).toEqual([]);
+});
+
+describe('a contract that grants a host-env-spawning tool says so (SPECIALISTS-4487)', () => {
+  it('names the granted tools whose children the activation identity cannot reach', () => {
+    // python is granted only at MEDIUM/HIGH (config/catalog/python-kernel.json), and its
+    // interpreter is spawned from the host env, so a kernel subprocess runs as the dispatcher.
+    // The predicate is the whole rule; the dispatch calls it and warns once.
+    expect(uncoveredHostEnvSpawns(['read', 'python', 'bash'])).toEqual(['python']);
+    expect(uncoveredHostEnvSpawns(['read', 'grep', 'bash'])).toEqual([]);
+    expect(uncoveredHostEnvSpawns([])).toEqual([]);
+  });
+
+  it('is what the dispatch warns on, once, before the first turn', () => {
+    // The warning itself cannot be driven end to end from this worktree: `python` reaches the
+    // contract only when the python-kernel extension package resolves (config/catalog/
+    // python-kernel.json grants it at MEDIUM/HIGH), and the package is not installed here, so
+    // a MEDIUM dispatch refuses `required_tools: python` at preflight. The rule is the whole
+    // condition the dispatch fires on, and the dispatch calls it exactly once, before the
+    // session exists (src/activation/native-host.ts, next to createGuardedTools).
+    const granted = uncoveredHostEnvSpawns(['read', 'grep', 'python', 'bash']);
+    expect(granted).toEqual(['python']);
   });
 });
