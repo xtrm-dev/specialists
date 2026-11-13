@@ -304,10 +304,13 @@ describe('package-payload release contract', () => {
   it('builds reproducibly and validates a detached receipt before pinned upload', async () => {
     const workflow = await readFile('.github/workflows/package-payload.yml', 'utf8');
     const validation = workflow.indexOf('EXPECTED_SOURCE_COMMIT=');
-    const upload = workflow.indexOf('uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02');
+    // Match the upload step by action, not by its pinned SHA: the pin moves with dependency
+    // updates, and hard-coding it turned a routine action bump into a test failure.
+    const uploadMatch = /uses: actions\/upload-artifact@[0-9a-f]{40}/.exec(workflow);
 
     expect(validation).toBeGreaterThan(-1);
-    expect(upload).toBeGreaterThan(validation);
+    expect(uploadMatch).not.toBeNull();
+    expect(uploadMatch?.index ?? -1).toBeGreaterThan(validation);
     // The raw build + diff pair moved into one guard (SPECIALISTS-4445); this pins the property the
     // lines existed for — BOTH payload jobs check dist/ reproducibility, and drift fails the job —
     // rather than the literal commands that implemented it.
