@@ -56,6 +56,14 @@ describe('provisionWriterWorkspace', () => {
     expect(run(ws.worktreePath, 'rev-parse', 'HEAD')).toBe(remoteTip);
   });
 
+  it('slugifies an Issue ref with leading and trailing punctuation (CORE-2694)', () => {
+    // The slug trim is a scan, not `/^-+|-+$/`; behaviour must stay identical.
+    const { clone } = cloneBehindRemote();
+    const ws = provisionWriterWorkspace(clone, '--CORE-42--', '--Executor--');
+    expect(ws.branch).toBe('sp/core-42');
+    expect(ws.worktreePath).toBe(join(clone, '.xtrm', 'worktrees', `${basename(clone)}-sp-executor-core-42`));
+  });
+
   it('keeps .xtrm/worktrees out of the dispatcher status without touching tracked files', () => {
     const { clone } = cloneBehindRemote();
     provisionWriterWorkspace(clone, 'CORE-2513', 'executor');

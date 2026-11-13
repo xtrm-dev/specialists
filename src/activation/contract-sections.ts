@@ -17,6 +17,9 @@ export const REQUIRED_SECTIONS = [
 
 export const SCRUTINY_LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
 
+/** How far past the SCRUTINY heading its level may appear on the same line. */
+export const SCRUTINY_LEVEL_WINDOW = 200;
+
 /** Every heading this parser recognises as terminating the previous section. */
 const ALL_HEADINGS = new Set<string>([...REQUIRED_SECTIONS, 'SCRUTINY']);
 
@@ -52,14 +55,51 @@ function headingOf(line: string): Heading | undefined {
   const whole = canonical(bare.replace(/:$/, '').trim());
   if (ALL_HEADINGS.has(whole)) return { name: whole };
 
-  const split = bare.match(/^([A-Za-z][A-Za-z _-]*?)\s*:\s*(.*)$/);
+  const split = splitHeadingLabel(bare);
   if (!split) return undefined;
-  const name = canonical(split[1].trim());
+  const name = canonical(split.label);
   if (!ALL_HEADINGS.has(name)) return undefined;
   // The text after the colon is this section's first body line. Discarding it would turn
   // "missing" into "declared but empty" — a distinction this parser deliberately keeps.
-  const inlineBody = split[2].trim();
+  const inlineBody = split.body.trim();
   return inlineBody ? { name, inlineBody } : { name };
+}
+
+// `\s` semantics, not ASCII-only: the pattern this scan replaced used `\s*`, so a
+// heading written with NBSP, U+2028 or U+FEFF around the colon was a heading
+// before and must stay one (a narrowing here refuses a valid contract).
+const SPACE_CHAR = /\s/;
+
+function isSpaceChar(c: string): boolean {
+  return SPACE_CHAR.test(c);
+}
+
+/** `A-Za-z`, space, `_`, `-`; must start with a letter. */
+function isHeadingLabel(text: string): boolean {
+  const alpha = (code: number): boolean => (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a);
+  if (text.length === 0 || !alpha(text.charCodeAt(0))) return false;
+  for (const c of text) {
+    if (!alpha(c.charCodeAt(0)) && c !== ' ' && c !== '_' && c !== '-') return false;
+  }
+  return true;
+}
+
+/**
+ * `<label>: <body>` split at the first colon, by scan rather than
+ * `/^([A-Za-z][A-Za-z _-]*?)\s*:\s*(.*)$/`: heading text is caller input, so a
+ * backtracking pattern here is a ReDoS surface (CodeQL js/polynomial-redos).
+ * Label = letters/space/underscore/dash starting with a letter, with any trailing
+ * whitespace before the colon dropped; body = everything after the colon.
+ */
+function splitHeadingLabel(bare: string): { label: string; body: string } | undefined {
+  const colon = bare.indexOf(':');
+  if (colon <= 0) return undefined;
+  let label = bare.slice(0, colon);
+  while (label.length > 0 && isSpaceChar(label[label.length - 1]!)) label = label.slice(0, -1);
+  if (!isHeadingLabel(label)) return undefined;
+  let start = colon + 1;
+  while (start < bare.length && isSpaceChar(bare[start]!)) start++;
+  return { label, body: bare.slice(start) };
 }
 
 /**
@@ -72,8 +112,14 @@ function headingOf(line: string): Heading | undefined {
  */
 /** Extract the declared SCRUTINY level, if any. */
 export function scrutinyLevel(description: string): string | undefined {
-  const match = description.match(/SCRUTINY\b[^\n]*\n?\s*\**\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i)
-    ?? description.match(/SCRUTINY\b\s*[:\-—]?\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
+  // Bounded runs instead of `[^\n]*`/`\s*`: the contract text is caller input
+  // (CodeQL js/polynomial-redos). The two bounds are a deliberate narrowing: the
+  // level must be declared within SCRUTINY_LEVEL_WINDOW characters of the
+  // heading. Before, an unbounded `[^\n]*` accepted a level anywhere on the
+  // line — and 4000 tabs cost 6.8 s, which is the alert.
+  const match = description.match(
+    new RegExp(`SCRUTINY\\b[^\\n]{0,${SCRUTINY_LEVEL_WINDOW}}\\n?\\s{0,20}\\*{0,20}\\s{0,20}(LOW|MEDIUM|HIGH|CRITICAL)\\b`, 'i'),
+  ) ?? description.match(/SCRUTINY\b\s{0,20}[:\-—]?\s{0,20}(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
   return match?.[1]?.toUpperCase();
 }
 
