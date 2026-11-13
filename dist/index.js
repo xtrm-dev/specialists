@@ -59613,16 +59613,23 @@ function provisionWriterWorkspace(cwd, issueRef, role) {
       const mainRoot = dirname25(git("rev-parse", "--path-format=absolute", "--git-common-dir"));
       worktreePath = join53(mainRoot, ".xtrm", "worktrees", `${basename12(mainRoot)}-sp-${roleSlug}-${slug}`);
       const excludePath = git("rev-parse", "--path-format=absolute", "--git-path", "info/exclude");
-      let additions = "";
-      if (spawnSync27("git", ["check-ignore", "-q", join53(mainRoot, ".xtrm", "worktrees", "x")], { cwd: mainRoot }).status !== 0)
-        additions += `/.xtrm/worktrees/
-`;
-      if (spawnSync27("git", ["check-ignore", "-q", join53(mainRoot, ".specialists", "x")], { cwd: mainRoot }).status !== 0)
-        additions += `/.specialists/
-`;
+      const runtimePatterns = [
+        "/.xtrm/worktrees/",
+        "/.specialists/settlements/",
+        "/.specialists/leases/",
+        "/.specialists/logs/",
+        "/.specialists/db/",
+        "/.specialists/jobs/",
+        "/.specialists/ready/",
+        "/.specialists/interactions/",
+        "/.specialists/trace.jsonl"
+      ];
+      const additions = runtimePatterns.filter((pattern) => spawnSync27("git", ["check-ignore", "-q", join53(mainRoot, pattern.replace(/^\//, ""), "x")], { cwd: mainRoot }).status !== 0).join(`
+`);
       if (additions)
         appendFileSync7(excludePath, `
-` + additions);
+` + additions + `
+`);
       const branchExists = spawnSync27("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd }).status === 0;
       const base = branchExists ? undefined : resolveWorktreeBase(git);
       git("worktree", "add", ...base ? ["-b", branch, worktreePath, base] : [worktreePath, branch]);

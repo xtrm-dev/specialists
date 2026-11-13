@@ -170,13 +170,26 @@ export function provisionWriterWorkspace(cwd: string, issueRef: string, role: st
     if (!worktreePath) {
       const mainRoot = dirname(git('rev-parse', '--path-format=absolute', '--git-common-dir'));
       worktreePath = join(mainRoot, '.xtrm', 'worktrees', `${basename(mainRoot)}-sp-${roleSlug}-${slug}`);
-      // An unignored nested worktree or runtime state dir would show up as `?? ...` in the
-      // dispatcher's status. Keep both out of git's view via info/exclude (per-repo, not tracked).
+      // An unignored nested worktree or runtime state directory would show up as `?? ...` in
+      // the dispatcher's status. Keep them out of git's view via info/exclude (per-repo, not
+      // tracked). The patterns are the RUNTIME paths only: `.specialists/` also holds authored
+      // project config (`user/`, `default/`, `catalog/`), which must stay visible to git.
       const excludePath = git('rev-parse', '--path-format=absolute', '--git-path', 'info/exclude');
-      let additions = '';
-      if (spawnSync('git', ['check-ignore', '-q', join(mainRoot, '.xtrm', 'worktrees', 'x')], { cwd: mainRoot }).status !== 0) additions += '/.xtrm/worktrees/\n';
-      if (spawnSync('git', ['check-ignore', '-q', join(mainRoot, '.specialists', 'x')], { cwd: mainRoot }).status !== 0) additions += '/.specialists/\n';
-      if (additions) appendFileSync(excludePath, '\n' + additions);
+      const runtimePatterns = [
+        '/.xtrm/worktrees/',
+        '/.specialists/settlements/',
+        '/.specialists/leases/',
+        '/.specialists/logs/',
+        '/.specialists/db/',
+        '/.specialists/jobs/',
+        '/.specialists/ready/',
+        '/.specialists/interactions/',
+        '/.specialists/trace.jsonl',
+      ];
+      const additions = runtimePatterns
+        .filter((pattern) => spawnSync('git', ['check-ignore', '-q', join(mainRoot, pattern.replace(/^\//, ''), 'x')], { cwd: mainRoot }).status !== 0)
+        .join('\n');
+      if (additions) appendFileSync(excludePath, '\n' + additions + '\n');
       const branchExists = spawnSync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], { cwd }).status === 0;
       const base = branchExists ? undefined : resolveWorktreeBase(git);
       git('worktree', 'add', ...(base ? ['-b', branch, worktreePath, base] : [worktreePath, branch]));
