@@ -4717,6 +4717,7 @@ function mergeGlobalUserConfig(existing, template) {
   const merged = { _doc: GLOBAL_USER_CONFIG_DOC };
   const added = [];
   const extended = [];
+  const notInstalledHere = [];
   const removed = [];
   for (const [name, rawExisting] of Object.entries(existing)) {
     if (name.startsWith("_"))
@@ -4726,13 +4727,13 @@ function mergeGlobalUserConfig(existing, template) {
       continue;
     }
     const templateOverride = template[name];
-    if (templateOverride && typeof templateOverride === "object") {
-      const normalized = fillMissingDefaults(rawExisting && typeof rawExisting === "object" ? { ...rawExisting } : {}, templateOverride);
-      merged[name] = normalized;
-      extended.push(name);
-    } else {
-      merged[name] = rawExisting;
-      removed.push(name);
+    const isResolvable = Boolean(templateOverride && typeof templateOverride === "object");
+    const shape = isResolvable ? templateOverride : buildSpecialistOverrideTemplate();
+    const normalized = fillMissingDefaults(rawExisting && typeof rawExisting === "object" ? { ...rawExisting } : {}, shape);
+    merged[name] = normalized;
+    extended.push(name);
+    if (!isResolvable) {
+      notInstalledHere.push(name);
     }
   }
   for (const [name, override] of Object.entries(template)) {
@@ -4743,7 +4744,7 @@ function mergeGlobalUserConfig(existing, template) {
       added.push(name);
     }
   }
-  return { config: merged, added, extended, removed };
+  return { config: merged, added, extended, notInstalledHere, removed };
 }
 function missingTemplatePaths(target, template, prefix, out) {
   if (template === null || typeof template !== "object" || Array.isArray(template))
@@ -4770,13 +4771,14 @@ function analyzeGlobalUserConfigDrift(existing, template, options = {}) {
   for (const [specialist, entry] of Object.entries(existing)) {
     if (specialist.startsWith("_"))
       continue;
+    if (specialist === CLAUDE_BRIDGE_SWITCH_KEY)
+      continue;
     const templateEntry = template[specialist];
-    if (templateEntry && typeof templateEntry === "object") {
-      const missing = [];
-      missingTemplatePaths(entry, templateEntry, "", missing);
-      if (missing.length > 0)
-        report.missingFields[specialist] = missing;
-    }
+    const shape = templateEntry && typeof templateEntry === "object" ? templateEntry : buildSpecialistOverrideTemplate();
+    const missing = [];
+    missingTemplatePaths(entry, shape, "", missing);
+    if (missing.length > 0)
+      report.missingFields[specialist] = missing;
     const extensions = entry?.execution?.extensions;
     if (!extensions || typeof extensions !== "object")
       continue;
@@ -26509,8 +26511,8 @@ ${bold5("specialists init --global")}
     if (result.extended.length > 0) {
       ok(`preserved ${result.extended.length} existing specialist${result.extended.length === 1 ? "" : "s"} (user values kept)`);
     }
-    for (const removedName of result.removed) {
-      warn(`${removedName} is no longer shipped but kept in file (remove manually if unwanted)`);
+    for (const missingName of result.notInstalledHere) {
+      warn(`${missingName} is not installed on this machine; its entry is kept in the full template shape`);
     }
   } else {
     writeGlobalUserConfig(location, template);
@@ -61100,6 +61102,7 @@ async function checkSpecialistOverrides() {
     if (config === null) {
       if (invalidReason !== null) {
         warn3(`global user config ${invalidReason}; mandatory-rules selection report skipped`);
+        fix("sp init --global   (backfills the full override template into every entry; keeps every value you set)");
       }
       return null;
     }

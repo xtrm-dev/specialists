@@ -834,8 +834,10 @@ export async function runGlobal(): Promise<void> {
     if (result.extended.length > 0) {
       ok(`preserved ${result.extended.length} existing specialist${result.extended.length === 1 ? '' : 's'} (user values kept)`);
     }
-    for (const removedName of result.removed) {
-      warn(`${removedName} is no longer shipped but kept in file (remove manually if unwanted)`);
+    for (const missingName of result.notInstalledHere) {
+      // Kept and backfilled, never removed: deleting it would drop this machine's setting for a
+      // specialist another machine installs (SPECIALISTS-4448).
+      warn(`${missingName} is not installed on this machine; its entry is kept in the full template shape`);
     }
   } else {
     writeGlobalUserConfig(location, template);

@@ -524,6 +524,12 @@ export interface GlobalConfigMergeResult {
     config: GlobalUserConfig;
     added: string[];
     extended: string[];
+    /** Entries whose definition cannot be resolved on this machine. Kept, and backfilled. */
+    notInstalledHere: string[];
+    /**
+     * @deprecated Always empty now: an unresolvable entry is backfilled and kept, never treated as
+     * removed (SPECIALISTS-4448). Retained so callers compiling against the old shape keep working.
+     */
     removed: string[];
 }
 /**
