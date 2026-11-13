@@ -36,6 +36,9 @@ export function withForensicObservability(runtime: RuntimeClient): RuntimeClient
               ? { after: { seq: args.fromSeq - 1 } }
               : {}),
             limit: args.limit,
+            // The console LOG shows every family, as the timeline read on master did; the
+            // agent-internal filter stays in `sp log` (SPECIALISTS-4479 review F5).
+            allEvents: true,
           });
           return window.events.map((event, index) => forensicEventToFeedRow(
             event,

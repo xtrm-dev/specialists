@@ -150,7 +150,7 @@ XTRM-96 routes its forensic source to persisted `xtrm.forensic.v1` through the s
 
 ## Native Pi overlay
 
-`config/pi-extensions/specialist-subagents/fleet-overlay.mjs` is the pure state/layout model for:
+`config/pi-extensions/native-specialists/fleet-overlay.mjs` is the pure state/layout model for:
 
 - persisted hierarchy;
 - ancestor-preserving filtering;

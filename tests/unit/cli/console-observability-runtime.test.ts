@@ -60,9 +60,12 @@ describe('console forensic observability adapter', () => {
     });
 
     expect(fallback).not.toHaveBeenCalled();
-    expect(rows.map((row) => row.type)).toEqual(['job', 'job']);
+    expect(rows.map((row) => row.type)).toEqual(['job', 'tool', 'job']);
     expect(rows[0]?.line).toContain('job.started');
-    expect(rows[1]?.line).toContain('job.status_changed');
+    // Every family stays visible in the console LOG, as the timeline read on master showed
+    // them; the agent-internal filter remains in `sp log` (SPECIALISTS-4479 review F5).
+    expect(rows[1]?.line).toContain('tool.call.started');
+    expect(rows[2]?.line).toContain('job.status_changed');
   });
 
   it('uses fromSeq as a real persisted forensic continuation cursor', async () => {

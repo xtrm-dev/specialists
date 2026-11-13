@@ -157,6 +157,53 @@ describe('XTRM-96 reconciled observability read model', () => {
     expect(resumed.events.map((ev) => ev.event_name)).toEqual(['job.completed']);
   });
 
+  it('reads the admission event by name, so DETAIL keeps model identity past the inspect window', () => {
+    // SPECIALISTS-4479 review F3: finding the admission event inside the newest 1,000 rows
+    // silently dropped configured/requested/resolved model identity on a long activation.
+    const admitted = event('act:vol', 1, 'control.activation_admitted.recorded', 'control', {
+      body: {
+        legacy_timeline_event: {
+          configured_model: 'cfg/model',
+          requested_model: 'alias/model',
+          resolved_model: 'canon/model',
+          model_override: true,
+          thinking_level: 'high',
+        },
+      },
+    });
+    const source = new FakeSource([
+      record(admitted, 1),
+      ...Array.from({ length: 1_499 }, (_, i) =>
+        record(event('act:vol', i + 2, 'tool.call.started', 'tool'), i + 2)),
+    ], [status('act:vol', 'reviewer', 'running')]);
+
+    const inspect = readActivationInspect(source, 'act:vol');
+
+    expect(inspect?.configuredModel).toBe('cfg/model');
+    expect(inspect?.requestedModel).toBe('alias/model');
+    expect(inspect?.resolvedModel).toBe('canon/model');
+    expect(inspect?.thinkingLevel).toBe('high');
+  });
+
+  it('advances the follow cursor across a long run of hidden agent-internal rows', () => {
+    // SPECIALISTS-4479 review F4: the cursor came from the last VISIBLE row, so a follower
+    // stalled behind more hidden rows than the read-ahead cap.
+    const source = new FakeSource([
+      record(event('act:stall', 1, 'job.started'), 1),
+      ...Array.from({ length: 2_100 }, (_, i) =>
+        record(event('act:stall', i + 2, 'tool.call.started', 'tool'), i + 2)),
+      record(event('act:stall', 2_102, 'job.completed'), 2_102),
+    ]);
+
+    const first = readForensicWindow(source, { jobId: 'act:stall', after: { seq: 1 }, limit: 5 });
+    expect(first.events).toHaveLength(0);
+    expect(first.cursor?.seq).toBeGreaterThan(1);
+    expect(first.hasMore).toBe(true);
+
+    const resumed = readForensicWindow(source, { jobId: 'act:stall', after: first.cursor, limit: 5 });
+    expect(resumed.events.map((ev) => ev.event_name)).toEqual(['job.completed']);
+  });
+
   it('uses the SQL-bounded status window and treats stale_warning as warning, not failure', () => {
     const source = new FakeSource([], [
       status('act:warn', 'reviewer', 'running', 'stale_warning'),

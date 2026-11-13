@@ -226,10 +226,18 @@ export function readForensicWindow(
 
   const page = options.after ? visible.slice(0, limit) : visible.slice(-limit);
   const last = page[page.length - 1];
+  // Forward continuation advances past every row that was scanned, not only the last one
+  // that was delivered: a long run of hidden agent-internal rows used to leave the cursor
+  // unmoved and the follower stuck (SPECIALISTS-4479 review F4). While visible rows remain
+  // undelivered, the cursor stays on the last delivered row so nothing is skipped.
+  const lastScanned = raw[raw.length - 1];
+  const cursorSeq = options.after && visible.length <= page.length && lastScanned
+    ? Math.max(last?.record.seq ?? 0, lastScanned.seq)
+    : last?.record.seq;
   return {
     events: page.map(({ event }) => event),
     rows: page.map(({ event }) => forensicEventToRow(event)),
-    ...(last ? { cursor: { seq: last.record.seq } } : {}),
+    ...(cursorSeq !== undefined ? { cursor: { seq: cursorSeq } } : {}),
     invalidRecords,
     hasMore: visible.length > page.length || raw.length >= readAhead,
   };
@@ -381,9 +389,16 @@ export function readActivationInspect(source: ObservabilityReadSource, jobId: st
   const attempts = source.listForensicAttemptIds(jobId);
 
   const latest = parsed[parsed.length - 1]?.event;
-  const admitted = [...parsed]
-    .reverse()
-    .find(({ event }) => event.event_name === 'control.activation_admitted.recorded')?.event;
+  // The admission event is read by name, not found inside the newest INSPECT_EVENT_LIMIT
+  // rows: DETAIL silently lost configured/requested/resolved model identity once an
+  // activation produced more than 1,000 rows after admission (SPECIALISTS-4479 review F3).
+  const admittedRows = source.readForensicEvents({
+    jobId,
+    eventName: 'control.activation_admitted.recorded',
+    limit: 1,
+    order: 'asc',
+  });
+  const admitted = parseForensicRecords(admittedRows).parsed[0]?.event;
   const admittedEnvelope = admitted?.body ?? {};
   const admittedBody = recordBodyField(admittedEnvelope, 'legacy_timeline_event') ?? admittedEnvelope;
   const startRows = source.readForensicEvents({ jobId, eventName: 'job.started', limit: 1, order: 'asc' });
