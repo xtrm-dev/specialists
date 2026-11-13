@@ -97,38 +97,6 @@ export function isIdentityManagedKey(key: string): boolean {
   return IDENTITY_MANAGED_KEY.test(key);
 }
 
-/** Every identity-managed key present in `env`, with its value (or undefined when absent). */
-export function snapshotIdentityEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string | undefined> {
-  const snapshot: Record<string, string | undefined> = {};
-  for (const key of Object.keys(env)) {
-    if (isIdentityManagedKey(key)) snapshot[key] = env[key];
-  }
-  return snapshot;
-}
-
-/**
- * Remove every identity-managed key from `env`. Called BEFORE an activation's
- * own identity is applied: a smaller answer must not leave a bigger answer's
- * GIT_CONFIG index or author behind, and the host's own git/gh calls must not
- * inherit a settled activation's identity.
- */
-export function clearIdentityEnv(env: NodeJS.ProcessEnv = process.env): void {
-  for (const key of Object.keys(env)) {
-    if (isIdentityManagedKey(key)) delete env[key];
-  }
-}
-
-/** Put `env` back to a snapshot: managed keys cleared first, then the snapshot's values. */
-export function restoreIdentityEnv(
-  snapshot: Record<string, string | undefined>,
-  env: NodeJS.ProcessEnv = process.env,
-): void {
-  clearIdentityEnv(env);
-  for (const [key, value] of Object.entries(snapshot)) {
-    if (typeof value === 'string') env[key] = value;
-  }
-}
-
 /**
  * `GIT_CONFIG_COUNT` is authoritative for git: it reads exactly that many
  * KEY_i/VALUE_i pairs and dies with `fatal: unable to parse command-line config`

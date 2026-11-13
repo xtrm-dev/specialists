@@ -120,8 +120,11 @@ function makeSdk(session: PiAgentSessionLike, bashOptions: unknown[] = []): PiSd
     // place the activation's identity can be attached without touching process.env. The
     // recorded options are therefore the assertion surface for this whole file.
     createBashTool: (...factoryArgs: unknown[]) => {
-      bashOptions.push(factoryArgs[1]);
-      return { name: 'bash', execute: async () => 'ran' };
+      // Models pi: the factory applies the spawn hook, so the tool object carries it here and
+      // a test can ask a SESSION which hook its shell would use.
+      const options = factoryArgs[1] as { spawnHook?: unknown } | undefined;
+      bashOptions.push(options);
+      return { name: 'bash', execute: async () => 'ran', spawnHook: options?.spawnHook };
     },
     createPowerShellTool: () => ({ name: 'powershell', execute: async () => 'ran' }),
   };
@@ -213,9 +216,6 @@ function hooks(bashOptions: unknown[]): SpawnHook[] {
 }
 
 describe('native launch path — the activation identity reaches the shells, not the host (SPECIALISTS-4456)', () => {
-  const shim = join(process.env.HOME ?? homedir(), '.local', 'bin');
-  const delimiter = process.platform === 'win32' ? ';' : ':';
-
   it('gives the activation PATH with the gh shim first, and leaves the host PATH alone', async () => {
     // CORE-2524.4: without the shim first, the activation's `gh` is the real binary and a
     // review posts under the operator identity. SPECIALISTS-4456: that PATH belongs to the
@@ -226,11 +226,15 @@ describe('native launch path — the activation identity reaches the shells, not
 
     const [hook] = hooks(bashOptions);
     expect(hook).toBeDefined();
-    const launched = String(hook!.spawnHook({ command: 'gh pr view 1', cwd: '/w', env: { PATH: hostPath } }).env.PATH)
+    // The inherited PATH is what pi resolved for THIS spawn, which is not the host's: pi
+    // prepends its own managed bin directory. Asserting with a context PATH identical to the
+    // host's is what let a hook that never touched PATH stay green (review finding 4d).
+    const spawnPath = ['/pi/agent/bin', '/usr/bin'].join(delimiter);
+    const launched = String(hook!.spawnHook({ command: 'gh pr view 1', cwd: '/w', env: { PATH: spawnPath } }).env.PATH)
       .split(delimiter);
     expect(launched[0]).toBe(shim);
+    expect(launched).toContain('/pi/agent/bin');
     expect(launched).toContain('/usr/bin');
-    expect(launched).toContain('/bin');
     expect(process.env.PATH).toBe(hostPath);
   });
 
@@ -239,10 +243,11 @@ describe('native launch path — the activation identity reaches the shells, not
     process.env.PATH = hostPath;
     const { bashOptions } = await dispatchOnce({ grantBash: true });
 
+    const inherited = [shim, '/pi/agent/bin', '/usr/bin'].join(delimiter);
     const launched = String(
-      hooks(bashOptions)[0]!.spawnHook({ command: 'true', cwd: '/w', env: { PATH: hostPath } }).env.PATH,
+      hooks(bashOptions)[0]!.spawnHook({ command: 'true', cwd: '/w', env: { PATH: inherited } }).env.PATH,
     ).split(delimiter);
-    expect(launched).toEqual([shim, '/usr/bin']);
+    expect(launched).toEqual([shim, '/pi/agent/bin', '/usr/bin']);
     expect(process.env.PATH).toBe(hostPath);
   });
 
@@ -295,6 +300,7 @@ describe('native launch path — the host env survives every leg shape (SPECIALI
     throwOnCreate?: boolean;
   } = {}) {
     const created: PiAgentSessionLike[] = [];
+    const createdOptions: Array<Record<string, unknown>> = [];
     let sessionIndex = 0;
     const bashOptions: unknown[] = [];
     const sdk = {
@@ -306,6 +312,7 @@ describe('native launch path — the host env survives every leg shape (SPECIALI
         const session = fakeSession(undefined, { wait, stopReason: plan.stopReason });
         if (Array.isArray(options?.tools)) session.getActiveToolNames = () => options!.tools as string[];
         created.push(session);
+        createdOptions.push(options ?? {});
         return { session };
       },
     } as PiSdk;
@@ -319,7 +326,7 @@ describe('native launch path — the host env survives every leg shape (SPECIALI
       }),
       cwd: process.cwd(),
     });
-    return { host, created, bashOptions };
+    return { host, created, createdOptions, bashOptions };
   }
 
   const dispatch = (host: NativeActivationHost) =>
@@ -367,31 +374,68 @@ describe('native launch path — the host env survives every leg shape (SPECIALI
     expect({ ...process.env }).toEqual(before);
   });
 
-  it('a retry leg keeps the identity and never touches the host env', async () => {
+  /** The bash custom tool this session was built with, if any. */
+  const sessionBashHook = (options: Record<string, unknown>): SpawnHook | undefined => {
+    const customTools = (options.customTools ?? []) as Array<{ name?: string; spawnHook?: SpawnHook['spawnHook'] }>;
+    const bash = customTools.find((tool) => tool?.name === 'bash');
+    if (!bash?.spawnHook) return undefined;
+    return { spawnHook: bash.spawnHook };
+  };
+
+  it('gives every attempt the same hooked bash tool, so no leg can lose the identity', async () => {
+    // The structural property the deleted N1 test existed for: the tools are built ONCE per
+    // dispatch and every session — first, fallback/retry, wake, resume — is created from that
+    // same array. Asserting the hook on one session would pass even if a later attempt built
+    // its own tools without it (review finding 4a).
     const before = { ...process.env };
-    const { host, bashOptions } = hostWith({ stopReason: 'error' });
+    const { host, createdOptions, bashOptions } = hostWith({ stopReason: 'error' });
     const a = await dispatch(host);
     await a.result;
-    const retried = await host.retry(a.activationId, { prompt: 'try again' });
+    const retried = await host.retry(a.activationId, { modelOverride: 'testprov/other-model' });
     await retried.result;
 
-    // Every attempt is built from the same identity, so the hook carries the same holder.
-    const holders = new Set(hooks(bashOptions).map((hook) =>
-      hook.spawnHook({ command: 'true', cwd: '/w', env: {} }).env.SUBSTRATE_HOLDER));
+    expect(createdOptions.length).toBeGreaterThanOrEqual(2);
+    const hookObjects = createdOptions.map((options) => sessionBashHook(options));
+    expect(hookObjects.every((hook) => hook !== undefined)).toBe(true);
+    // Same tool, same overlay: identities cannot differ between attempts of one activation.
+    const holders = new Set(hookObjects.map((hook) =>
+      hook!.spawnHook({ command: 'true', cwd: '/w', env: {} }).env.SUBSTRATE_HOLDER));
     expect(holders.size).toBe(1);
     expect([...holders][0]).toMatch(/^sp-researcher-/);
+    // Built once, not once per attempt.
+    expect(hooks(bashOptions)).toHaveLength(1);
     expect({ ...process.env }).toEqual(before);
   });
 
-  it('a wake turn on the settled session leaves the host env untouched', async () => {
+  it('keeps the hooked bash tool across a background wake turn', async () => {
     const before = { ...process.env };
-    const { host, created } = hostWith();
+    const { host, created, createdOptions } = hostWith();
     const a = await dispatch(host);
     await a.result;
+    const sessionsBeforeWake = createdOptions.length;
 
     await created[0].prompt();
     for (let i = 0; i < 8; i += 1) await Promise.resolve();
 
+    // A wake turn runs on the settled session, so the identity must still be on its tools.
+    expect(createdOptions.length).toBe(sessionsBeforeWake);
+    const hook = sessionBashHook(createdOptions[0]!)!;
+    expect(hook.spawnHook({ command: 'true', cwd: '/w', env: {} }).env.SUBSTRATE_HOLDER).toMatch(/^sp-researcher-/);
+    expect({ ...process.env }).toEqual(before);
+  });
+
+  it('keeps the hooked bash tool after a resume, which returns the live session', async () => {
+    const before = { ...process.env };
+    const { host, created, createdOptions } = hostWith();
+    const a = await dispatch(host);
+    await a.result;
+
+    const resumed = await host.resume(a.activationId, 'keep going');
+    await resumed.result;
+
+    expect(createdOptions.length).toBe(1);
+    const hook = sessionBashHook(createdOptions[0]!)!;
+    expect(hook.spawnHook({ command: 'true', cwd: '/w', env: {} }).env.XTRM_ROLE).toBe('researcher');
     expect({ ...process.env }).toEqual(before);
   });
 

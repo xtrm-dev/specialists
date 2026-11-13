@@ -59,8 +59,16 @@ const FACTORY_NAMES: Record<string, string> = {
   powershell: 'createPowerShellTool',
 };
 
-/** The one factory that takes `{ spawnHook }` here: shells are what an identity reaches. */
-const BASH_FACTORY = 'createBashTool';
+/**
+ * The factories that accept `{ spawnHook }`: the two that spawn a shell, which is the only
+ * way an identity reaches `git` and the `gh`/`xt` shim. `edit` and `write` take no options
+ * and attribute nothing to a role.
+ *
+ * Measured on the installed pi 1.5.2: `createPowerShellTool` forwards its options to the
+ * shared shell tool, so the hook works there too; leaving it out would have left every
+ * Windows activation without an identity and without a word about it.
+ */
+const SHELL_FACTORIES = new Set(['createBashTool', 'createPowerShellTool']);
 
 /**
  * The tool names the native runtime reconstructs as lease-guarded custom tools.
@@ -103,13 +111,18 @@ export function createGuardedTools(
     /**
      * Env this activation's shells get on top of the inherited one (SPECIALISTS-4456).
      *
-     * Applied through the bash tool's `spawnHook`, never through `process.env`: the host
+     * Applied through the shell tools' `spawnHook`, never through `process.env`: the host
      * process is shared with the dispatcher, and writing there gave a coordinator the
      * dispatched Specialist's identity (a reviewer role, so `git push` refused with "the
-     * reviewer role does not push"). Omitted means the shell inherits exactly what pi
-     * gives it, which is the previous behaviour.
+     * reviewer role does not push"). Its `PATH` is ignored here — the hook composes PATH
+     * from what pi resolved for the spawn so pi's managed bin directory survives.
      */
     env?: Record<string, string>;
+    /**
+     * Directory holding the gh/xt identity shim, put first on each shell's PATH. Separate
+     * from `env` because PATH must be composed per spawn, not precomputed from the host.
+     */
+    shimDir?: string;
   },
 ): GuardedToolsResult {
   const sdkAny = sdk as unknown as Record<string, ((cwd: string, options?: unknown) => ToolLike) | undefined>;
@@ -125,11 +138,8 @@ export function createGuardedTools(
     const factory = sdkAny[factoryName];
     if (!factory) { unguardable.push(name); continue; }
 
-    // Only bash spawns shells, and the identity overlay exists to reach `git` and the `gh`
-    // shim. The other factories take no options on the SDKs this host supports, so passing
-    // them a second argument would open a surface nothing needs.
-    const original = factoryName === BASH_FACTORY && input.env && hasActivationEnv(input.env)
-      ? factory(input.cwd, { spawnHook: bashSpawnHookWith(input.env) })
+    const original = SHELL_FACTORIES.has(factoryName) && hasActivationEnv(input.env ?? {}, input.shimDir)
+      ? factory(input.cwd, { spawnHook: bashSpawnHookWith(input.env ?? {}, { shimDir: input.shimDir }) })
       : factory(input.cwd);
     const originalExecute = original.execute.bind(original);
 

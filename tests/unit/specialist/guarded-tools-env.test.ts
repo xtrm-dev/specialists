@@ -33,6 +33,7 @@ describe('createGuardedTools — activation env channel (SPECIALISTS-4456)', () 
       cwd: '/w',
       admit: admitAll,
       env: { XTRM_ROLE: 'reviewer', SUBSTRATE_HOLDER: 'sp-pr-reviewer-abc' },
+      shimDir: '/shim',
     });
 
     const bash = calls.find((call) => call.factory === 'createBashTool')!;
@@ -42,9 +43,11 @@ describe('createGuardedTools — activation env channel (SPECIALISTS-4456)', () 
     const applied = options.spawnHook({ command: 'git push', cwd: '/w', env: { XTRM_ROLE: 'worker' } });
     expect(applied.env.XTRM_ROLE).toBe('reviewer');
     expect(applied.env.SUBSTRATE_HOLDER).toBe('sp-pr-reviewer-abc');
+    // PATH is composed with the shim first, never taken from the overlay.
+    expect(String(applied.env.PATH).startsWith('/shim')).toBe(true);
   });
 
-  it('leaves the bash factory optionless when the activation has no identity', () => {
+  it('leaves the bash factory optionless when the activation has no identity and no shim', () => {
     const calls: Array<{ factory: string; args: unknown[] }> = [];
     createGuardedTools(recordingSdk(calls), {
       toolNames: ['bash'],
@@ -56,19 +59,34 @@ describe('createGuardedTools — activation env channel (SPECIALISTS-4456)', () 
     expect(calls.find((call) => call.factory === 'createBashTool')!.args).toEqual(['/w']);
   });
 
-  it('never passes options to a non-shell factory', () => {
-    // edit/write take no options on the SDKs this host supports; a second argument there
-    // would be an untested surface for no gain (the identity reaches git and gh, not files).
+  it('passes the hook to both shell factories and to no other', () => {
+    // bash and powershell both accept `{ spawnHook }` on the installed pi (measured on 1.5.2);
+    // edit and write take no options, and a file tool attributes nothing to a role.
     const calls: Array<{ factory: string; args: unknown[] }> = [];
     createGuardedTools(recordingSdk(calls), {
-      toolNames: ['bash', 'edit', 'write'],
+      toolNames: ['bash', 'powershell', 'edit', 'write'],
       cwd: '/w',
       admit: admitAll,
       env: { XTRM_ROLE: 'reviewer' },
+      shimDir: '/shim',
     });
 
     expect(calls.find((call) => call.factory === 'createEditTool')!.args).toEqual(['/w']);
     expect(calls.find((call) => call.factory === 'createWriteTool')!.args).toEqual(['/w']);
+    expect(calls.find((call) => call.factory === 'createBashTool')!.args).toHaveLength(2);
+    expect(calls.find((call) => call.factory === 'createPowerShellTool')!.args).toHaveLength(2);
+  });
+
+  it('installs the hook for the shim alone, because gh would otherwise be the real binary', () => {
+    const calls: Array<{ factory: string; args: unknown[] }> = [];
+    createGuardedTools(recordingSdk(calls), {
+      toolNames: ['bash'],
+      cwd: '/w',
+      admit: admitAll,
+      env: {},
+      shimDir: '/shim',
+    });
+
     expect(calls.find((call) => call.factory === 'createBashTool')!.args).toHaveLength(2);
   });
 
@@ -88,6 +106,7 @@ describe('createGuardedTools — activation env channel (SPECIALISTS-4456)', () 
       cwd: '/w',
       admit: () => ({ allow: false, reason: 'lease held by another activation' }),
       env: { XTRM_ROLE: 'reviewer' },
+      shimDir: '/shim',
     });
     const result = await (refused.tools[0] as { execute: (...args: unknown[]) => Promise<{ details: unknown }> })
       .execute('id', { command: 'git push' });

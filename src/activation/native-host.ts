@@ -84,13 +84,9 @@ import {
 } from '../pi/claude-bridge.js';
 import { getPermissionGuardExtensionPath } from '../pi/permission-guard-extension.js';
 import {
-  clearIdentityEnv,
-  isIdentityManagedKey,
   resolveAgentLaunchEnv,
-  restoreIdentityEnv,
-  snapshotIdentityEnv,
+  shimBinDir,
   specialistHolderName,
-  warnIdentityEnv,
   type IdentityEnvRun,
 } from '../pi/identity-env.js';
 import { formatResolvedToolContract, withDiscoveredExtensionTools, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
@@ -2194,11 +2190,12 @@ export class NativeActivationHost {
     // push; no credential is offered" (SPECIALISTS-4456). One process env cannot carry two
     // identities, and the dispatcher's identity is the one that must not move.
     //
-    // CORE-2524.4 still holds, and is now scoped to the child: the launch env carries PATH
-    // with the gh shim directory first, so the activation's `gh` is the shim and not the
-    // real binary. The host's own PATH is untouched, which is the point — the dispatcher's
-    // `gh` must resolve to the dispatcher's identity.
-    const activationEnv = resolveAgentLaunchEnv({
+    // CORE-2524.4 still holds, and is now scoped to the child: each shell's PATH is composed
+    // with the gh shim directory first (inside the spawn hook, from the PATH pi resolved for
+    // that spawn, so pi's own managed bin directory survives), so the activation's `gh` is
+    // the shim and not the real binary. The host's own PATH is untouched, which is the point
+    // — the dispatcher's `gh` must resolve to the dispatcher's identity.
+    const activationLaunchEnv = resolveAgentLaunchEnv({
       holder: specialistHolderName(specialist.specialist.metadata.name, activationId),
       roleName: specialist.specialist.metadata.name,
       cwd: workspace.worktreePath,
@@ -2207,6 +2204,11 @@ export class NativeActivationHost {
       env: process.env,
       run: this.identityEnvRun,
     });
+    // PATH cannot be precomputed here: the hook must compose it from the PATH pi gives the
+    // spawn, or it would drop pi's managed bin directory (fd, rg). The launcher's PATH is
+    // therefore stripped and only the shim directory is passed on.
+    const { PATH: _launchPath, ...activationEnv } = activationLaunchEnv;
+    const activationShimDir = shimBinDir(process.env);
     // The tier channel stays on the CLI-spawn path only. In process the guard is loaded
     // for READ_ONLY sessions and sandboxes every bash call unconditionally, which is what
     // authorizes them; its `tierRefusal` would refuse a NON-read-only tier, and a
@@ -2220,6 +2222,7 @@ export class NativeActivationHost {
       toolNames: effectiveToolContract.toolsList,
       cwd: workspace.worktreePath,
       env: activationEnv,
+      shimDir: activationShimDir,
       // Lease admission with the phase-1 guard carve-out: sandboxed bash in a
       // guard-loaded session is not a mutation, so the lease does not refuse it.
       admit: createNativeToolAdmission({
@@ -2681,6 +2684,10 @@ export class NativeActivationHost {
       result,
     };
     } catch (error) {
+      // N1: from here on, anything that ends this dispatch early — a refusal, an SDK that
+      // throws while creating the session, a failed producer — must leave no watcher,
+      // claim or lease behind. The refusals above own their own cleanup; this covers the
+      // rest.
       throw error;
     }
   }
@@ -2848,10 +2855,10 @@ export class NativeActivationHost {
         snapshot.state = 'settled';
         this.save(snapshot);
         this.releaseIfWriter(snapshot, 'settled');
-        // N1: agent_settled is a TURN boundary, not the activation's end — a fallback
-        // leg, a retry or a background wake starts another leg from here. The identity
-        // stays on the stack until a terminal state; the leg entry (agent_start)
-        // re-asserts it in case something else took the env in between.
+        // agent_settled is a TURN boundary, not the activation's end — a fallback leg, a
+        // retry or a background wake starts another leg from here, and every leg shares the
+        // same hooked shell tools, so there is no identity state to carry between them
+        // (SPECIALISTS-4456 removed the process env stack this comment used to describe).
         if (unframedWake) {
           this.wakeDirty.delete(snapshot.activationId);
           const record = this.registry.get(snapshot.activationId);
@@ -2860,12 +2867,12 @@ export class NativeActivationHost {
             void this.finalizeWakeTurn(snapshot, record, emit).finally(() => {
               this.wakeFinalising.delete(snapshot.activationId);
             });
-          } else {
-            // N6 (defensive): no finaliser will run for this settle, so nothing else
-            // would ever take the activation off the identity stack — a lost registry
-            // record or a settle redelivered while finalisation is in flight. The
-            // finaliser owns its own removal on the paths it does run.
-                }
+          } else if (this.registry.get(snapshot.activationId) === undefined) {
+            // A wake settle with no registry record: nothing to finalise, and nothing owns
+            // the wake flags, so clear them here rather than leaving a dead id behind.
+            this.wakeDirty.delete(snapshot.activationId);
+            this.wakeFinalising.delete(snapshot.activationId);
+          }
         }
         break;
       case 'auto_retry_start':
@@ -3157,7 +3164,7 @@ export class NativeActivationHost {
     } catch (error) {
       snapshot.state = 'failed';
       this.save(snapshot);
-      // A throw is a terminal state too: the identity must not outlive it.
+      // A throw is a terminal state too: nothing of this activation may outlive it.
       const message = error instanceof Error ? error.message : String(error);
       // The run failed by THROWING, not by settling: without this the terminal event would be
       // the only record, and a reader could not tell "Pi never reported totals" from "the
@@ -4061,8 +4068,8 @@ export class NativeActivationHost {
       // The per-activation threshold dies with the registry entry (same lifetime).
       this.stopToolDurationWatch(activationId);
       this.toolDurationWarnMsByActivation.delete(activationId);
-      // N3: abort() is not guaranteed to emit agent_settled, so the disposal path owns
-      // the removal itself; otherwise a stopped activation keeps the process env.
+      // abort() is not guaranteed to emit agent_settled, so the disposal path owns the
+      // bookkeeping itself; otherwise a stopped activation keeps its watchers alive.
       this.forgetBackgroundTasks(activationId);
       this.wakeDirty.delete(activationId);
       this.wakeFinalising.delete(activationId);
@@ -4206,10 +4213,9 @@ export class NativeActivationHost {
     record.unsubscribe();
     record.unsubscribe = record.session.subscribe((event) => this.onSessionEvent(record.snapshot, event, emit));
 
-    // One path re-applies the identity: the leg entry (agent_start). This owns only the
-    // terminal side, because resume runs a leg without the fallback walk that would
-    // otherwise take the activation off the stack.
-    const result = this.runToSettled(record.snapshot, record.session, prompt, emit, record)
+    // Resume runs one leg on the live session. It shares the dispatch's hooked shell tools,
+    // so it needs no identity bookkeeping of its own — only the terminal side belongs here.
+    const result = this.runToSettled(record.snapshot, record.session, prompt, emit, record);
 
     record.result = result;
 
