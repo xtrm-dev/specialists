@@ -149,9 +149,9 @@ jobs:
       - name: Build, pack, and smoke installed tarball
         run: |
           set -euo pipefail
-          NODE_ENV=test bun run build
-          git diff --exit-code -- dist/
-          test -z "$(git status --porcelain --untracked-files=all -- dist/)"
+          # The same guard payload-contract uses, so a bundle built by the wrong bun names the cause
+          # here too instead of reporting a raw diff (SPECIALISTS-4445).
+          node scripts/check-dist-reproducible.mjs --write
           tarball_name=$(npm pack --pack-destination /tmp --json | jq -r '.[0].filename')
           tarball="/tmp/$tarball_name"
           test "$tarball_name" = "jaggerxtrm-specialists-$(node -p "require('./package.json').version").tgz"

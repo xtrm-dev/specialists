@@ -11,7 +11,6 @@ import {
   mismatchMessage,
   parseArgs,
   parseBunVersion,
-  unquotePorcelainPath,
   wrongBunMessage,
 } from '../../../scripts/check-dist-reproducible.mjs';
 
@@ -92,40 +91,41 @@ describe('dist reproducibility guard (SPECIALISTS-4445)', () => {
     it('reads modified files and keeps the full path', () => {
       // Regression: an earlier version trimmed leading whitespace first, which shifted the
       // porcelain columns and dropped every path.
-      expect(changedDistPaths(' M dist/index.js\n M dist/lib.js\n')).toEqual(['dist/index.js', 'dist/lib.js']);
+      expect(changedDistPaths(' M dist/index.js\0 M dist/lib.js\0')).toEqual(['dist/index.js', 'dist/lib.js']);
     });
 
     it('reads added, deleted and untracked entries', () => {
-      expect(changedDistPaths('A  dist/new.js\n D dist/old.js\n?? dist/types/x.d.ts\n'))
+      expect(changedDistPaths('A  dist/new.js\0 D dist/old.js\0?? dist/types/x.d.ts\0'))
         .toEqual(['dist/new.js', 'dist/old.js', 'dist/types/x.d.ts']);
     });
 
     it('takes the new path of a rename', () => {
-      expect(changedDistPaths('R  dist/a.js -> dist/b.js\n')).toEqual(['dist/b.js']);
+      // `-z` puts the original path in its own NUL-terminated field after the entry.
+      expect(changedDistPaths('R  dist/b.js\0dist/a.js\0')).toEqual(['dist/b.js']);
     });
 
     it('ignores changes outside dist/', () => {
-      expect(changedDistPaths(' M src/index.ts\n M dist/index.js\n')).toEqual(['dist/index.js']);
+      expect(changedDistPaths(' M src/index.ts\0 M dist/index.js\0')).toEqual(['dist/index.js']);
     });
 
     it('reports nothing for a clean tree', () => {
       expect(changedDistPaths('')).toEqual([]);
-      expect(changedDistPaths('\n')).toEqual([]);
+      expect(changedDistPaths('\0')).toEqual([]);
     });
 
-    it('decodes the C-escaped form git really emits', () => {
-      // `core.quotePath` (on by default) leaves a space alone and escapes non-ASCII bytes, so the
-      // shape to support is octal escapes, not `"a b"`. Both are covered here.
-      expect(changedDistPaths(' M "dist/caf\\303\\251.js"\n')).toEqual(['dist/café.js']);
+    it('reads NUL-separated entries verbatim, quotes and all', () => {
+      // `-z` never quotes, so a name with a quote or an astral character arrives exactly as it is
+      // on disk. The decoded-quoting design this replaced left such a file behind on restore.
+      expect(changedDistPaths(' M dist/a"b.js\0')).toEqual(['dist/a"b.js']);
+      expect(changedDistPaths('?? dist/a😀.js\0')).toEqual(['dist/a😀.js']);
     });
 
-    it('decodes quoted escapes for tab and backslash', () => {
-      expect(unquotePorcelainPath('"dist/a\\tb.js"')).toBe('dist/a\tb.js');
-      expect(unquotePorcelainPath('"dist/a\\\\b.js"')).toBe('dist/a\\b.js');
+    it('reads rename entries by taking the new path and skipping the original', () => {
+      expect(changedDistPaths('R  dist/new.js\0dist/old.js\0')).toEqual(['dist/new.js']);
     });
 
-    it('leaves an unquoted path untouched', () => {
-      expect(unquotePorcelainPath('dist/index.js')).toBe('dist/index.js');
+    it('reads several entries in one status', () => {
+      expect(changedDistPaths(' M dist/a.js\0?? dist/b.js\0')).toEqual(['dist/a.js', 'dist/b.js']);
     });
   });
 

@@ -135,58 +135,18 @@ export function wrongBunMessage(input) {
  * @returns {string[]}
  */
 export function changedDistPaths(statusOutput) {
-  return statusOutput
-    .split('\n')
-    // Trailing whitespace only: porcelain encodes the index/worktree state in the FIRST two
-    // columns, so trimming the leading space shifts every path by one and silently drops them.
-    .map((line) => line.replace(/\s+$/, ''))
-    .filter((line) => line.length > 3)
-    // Renames carry "old -> new"; the new path is what a worker has to look at.
-    .map((line) => (line.includes(' -> ') ? line.slice(line.indexOf(' -> ') + 4) : line.slice(3)))
-    .map((path) => unquotePorcelainPath(path.trim()))
-    .filter((path) => path === 'dist' || path.startsWith('dist/'));
-}
-
-/**
- * Decode a porcelain path into the byte sequence git means.
- *
- * `core.quotePath` makes git wrap a path in double quotes and C-escape the bytes it cannot print
- * (`"dist/caf\303\251.js"` for a non-ASCII name). Stripping the quotes is not enough: the escaped
- * form then fails to match the same path from `git ls-files`, so a restore leaves the file behind.
- * This decodes the escapes; the git calls also pass `-c core.quotePath=false`, so a quoted form is
- * the exception rather than the rule.
- *
- * @param {string} path
- * @returns {string}
- */
-export function unquotePorcelainPath(path) {
-  if (!path.startsWith('"') || !path.endsWith('"')) return path;
-  const body = path.slice(1, -1);
-  const bytes = [];
-  for (let index = 0; index < body.length; index += 1) {
-    const char = body[index];
-    if (char !== '\\') {
-      bytes.push(...Buffer.from(char, 'utf-8'));
-      continue;
-    }
-    const next = body[index + 1];
-    if (next === undefined) break;
-    if (/[0-7]/.test(next)) {
-      // Octal escapes are three digits and carry one byte of the original UTF-8 sequence.
-      const octal = body.slice(index + 1, index + 4);
-      bytes.push(Number.parseInt(octal, 8) & 0xff);
-      index += 3;
-      continue;
-    }
-    const simple = { n: 10, t: 9, r: 13, '"': 34, '\\': 92, a: 7, b: 8, f: 12, v: 11 }[next];
-    if (simple === undefined) {
-      bytes.push(...Buffer.from(next, 'utf-8'));
-    } else {
-      bytes.push(simple);
-    }
-    index += 1;
+  const entries = statusOutput.split('\0');
+  const paths = [];
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    // `-z` emits "XY <path>" per entry and, for a rename or copy, the ORIGINAL path as the next
+    // NUL-terminated field. Only the new path is a path a worker has to look at.
+    if (entry.length < 4) continue;
+    const status = entry.slice(0, 2);
+    paths.push(entry.slice(3));
+    if (status.includes('R') || status.includes('C')) index += 1;
   }
-  return Buffer.from(bytes).toString('utf-8');
+  return paths.filter((path) => path === 'dist' || path.startsWith('dist/') || path === 'dist');
 }
 
 /**
@@ -220,7 +180,10 @@ function run(cwd, args, env = process.env) {
 
 /** @param {string} cwd */
 function readDistStatus(cwd) {
-  const result = run(cwd, ['git', '-c', 'core.quotePath=false', 'status', '--porcelain', '-uall', '--', 'dist/']);
+  // `-z` is the only form with no quoting: git cannot escape a path it never quotes. Parsing the
+  // escaped form was fragile (`"` and tab still get quoted under core.quotePath=false, and decoding
+  // octet by octet broke astral characters), so the paths are read NUL-separated instead.
+  const result = run(cwd, ['git', 'status', '--porcelain', '-z', '-uall', '--', 'dist/']);
   if (result.status !== 0) {
     throw new Error(`git status failed: ${result.stderr || result.stdout}`);
   }
@@ -232,8 +195,8 @@ function restoreDist(cwd, paths) {
   // Tracked files go back to HEAD; only files THIS build created are removed, so a worker's own
   // uncommitted work is never deleted by a check.
   run(cwd, ['git', 'checkout', '--', 'dist/']);
-  const untracked = run(cwd, ['git', '-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '--', 'dist/']).stdout
-    .split('\n').map((line) => line.trim()).filter(Boolean);
+  const untracked = run(cwd, ['git', 'ls-files', '-z', '--others', '--exclude-standard', '--', 'dist/']).stdout
+    .split('\0').filter(Boolean);
   for (const path of untracked) {
     if (paths.includes(path)) run(cwd, ['rm', '-f', '--', path]);
   }
@@ -315,7 +278,7 @@ function main() {
       if (before.trim() !== '') {
         console.error(
           '\nNote: dist/ had uncommitted changes before this check and the fresh build replaced them. ' +
-            'If you wanted to keep that rebuild, it is gone — rebuild with --write and commit dist/.',
+            'If you wanted to keep that rebuild, it is gone: rebuild and commit dist/ in the same change.',
         );
       }
     }
