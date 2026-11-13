@@ -154,7 +154,7 @@ export default function extensionToolPolicy(pi) {
     }
   });
 
-  pi.on("before_agent_start", (event) => {
+  pi.on("before_agent_start", (event, ctx) => {
     try {
       // Runtime-confirmed active set — reflects the session_start policy
       // resolution (granted natives + active extension tools). Never list a
