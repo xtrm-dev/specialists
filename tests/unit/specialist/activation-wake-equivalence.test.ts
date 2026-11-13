@@ -13,11 +13,10 @@
 // Claude Channel transport = delivery adapter, whole-object projections, no prose
 // summaries as instructions). Push stays a projection of the validated result;
 // completion/finding terminals stay sent_unconfirmed (asserted as not-delivered here).
-
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { rmSync } from 'node:fs';
+
+
 
 import {
   RuntimeEventPusher,
@@ -27,13 +26,14 @@ import { PeerAdapter } from '../../../src/activation/transport/peer-adapter.js';
 import { read } from '../../../src/activation/transport/pending-store.js';
 import type { ActivationResult } from '../../../src/activation/types.js';
 import { toActivationResultView } from '../../../src/tools/specialist/activation.tool.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 let root: string;
 let rosterDir: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'sp-wake-equiv-'));
-  rosterDir = mkdtempSync(join(tmpdir(), 'sp-wake-equiv-roster-'));
+  root = tempDir('sp-wake-equiv-');
+  rosterDir = tempDir('sp-wake-equiv-roster-');
 });
 
 afterEach(() => {

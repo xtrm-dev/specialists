@@ -4,11 +4,12 @@
 // Covers: unitAI-hgpu.3, unitAI-hgpu.4
 
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, rm, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, rm, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { spawnSync, execSync } from 'node:child_process';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 const specialistsBin = join(repoRoot, 'src/index.ts');
@@ -130,7 +131,7 @@ describe('integration: worktree CLI flows', () => {
   const skipIfNoGitWorktree = !hasGitWorktree();
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-worktree-'));
+    tempDir = createTempDir('specialists-worktree-');
     await initGitRepo(tempDir);
     jobsDir = join(tempDir, '.specialists', 'jobs');
     await mkdir(jobsDir, { recursive: true });

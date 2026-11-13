@@ -1,10 +1,11 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, rm, readFile, mkdir, writeFile, readdir } from 'node:fs/promises';
+import { rm, readFile, mkdir, writeFile, readdir } from 'node:fs/promises';
 import { existsSync, lstatSync, readlinkSync, symlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import type { InitOptions } from '../../../src/cli/init.js';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 async function importInitModule() {
   return import('../../../src/cli/init.js');
 }
@@ -36,7 +37,7 @@ async function runInit(cwd: string, opts: InitOptions = {}) {
 describe('init CLI — run()', () => {
   let tempDir: string;
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-init-test-'));
+    tempDir = createTempDir('specialists-init-test-');
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
   afterEach(async () => {

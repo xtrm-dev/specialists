@@ -14,8 +14,8 @@
 //
 // If ANY of these diverges in future, this test trips.
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { rm, writeFile } from 'node:fs/promises';
+
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -30,6 +30,7 @@ vi.mock('@earendil-works/pi-coding-agent', () => ({
 
 import { readVerifiedCitationWindow } from '../../../src/specialist/citation-evidence.js';
 import { getReadLineNumbersExtensionPath } from '../../../src/pi/read-line-numbers-extension.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 type MjsModule = {
   numberReadText: (text: string, startLine: number, truncated: boolean) => string;
@@ -69,7 +70,7 @@ describe('EOF parity across Pi / vendored fork / citation-evidence', () => {
   });
 
   it('citation-evidence: reads line 3 of "one\\ntwo\\n" as the EOF empty', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'eof-parity-'));
+    const directory = tempDir('eof-parity-');
     temporaryDirectories.push(directory);
     const path = 'fixture.txt';
     await writeFile(join(directory, path), FIXTURE, 'utf8');
@@ -90,7 +91,7 @@ describe('EOF parity across Pi / vendored fork / citation-evidence', () => {
     const numbered = vendoredFork.numberReadText(FIXTURE, 1, false);
     const numberedLines = numbered.split('\n');
 
-    const directory = await mkdtemp(join(tmpdir(), 'eof-parity-'));
+    const directory = tempDir('eof-parity-');
     temporaryDirectories.push(directory);
     const path = 'fixture.txt';
     await writeFile(join(directory, path), FIXTURE, 'utf8');

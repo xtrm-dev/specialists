@@ -3,8 +3,8 @@ import { mock } from 'bun:test';
 import { appendFileSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { resolveObservabilityDbLocation } from '../../../src/specialist/observability-db.js';
 import { join } from 'node:path';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+
+import { tempDir } from '../../utils/temp-dir.js';
 
 // Use a temp directory — never the real .specialists/ which contains live job state
 let tempRoot: string;
@@ -18,7 +18,7 @@ describe('feed CLI', () => {
 
   beforeEach(() => {
     // Use a fresh temp directory per test — never touch the real .specialists/
-    tempRoot = mkdtempSync(join(tmpdir(), 'sp-feed-test-'));
+    tempRoot = tempDir('sp-feed-test-');
     specialistsDir = join(tempRoot, '.specialists');
     jobsDir = join(specialistsDir, 'jobs');
     mkdirSync(jobsDir, { recursive: true });

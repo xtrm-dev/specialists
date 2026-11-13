@@ -4,8 +4,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { mkdtemp, mkdir, writeFile, rm, chmod, symlink } from 'node:fs/promises';
-import { tmpdir, homedir } from 'node:os';
+import { mkdir, writeFile, rm, chmod, symlink } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   isBareLogicalSkillName,
@@ -15,6 +15,7 @@ import {
   RESERVED_SKILL_ROOTS,
 } from '../../../src/specialist/project-pack-skill-resolver.js';
 import { SpecialistLoader } from '../../../src/specialist/loader.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const MANIFEST = (name: string, paths: string[]): string => JSON.stringify({
   specialist: {
@@ -27,7 +28,7 @@ const MANIFEST = (name: string, paths: string[]): string => JSON.stringify({
 
 let sandbox: string;
 beforeEach(async () => {
-  sandbox = await mkdtemp(join(tmpdir(), 'pp-resolver-'));
+  sandbox = tempDir('pp-resolver-');
 });
 afterEach(async () => {
   await rm(sandbox, { recursive: true, force: true });
@@ -347,7 +348,7 @@ describe('resolveBareLogicalSkill — symlink and readability hardening', () => 
   it('rejects a .xtrm/skills root symlinked outside the consumer root', async () => {
     // The symlink target must genuinely sit outside the consumer root for the
     // containment assertion to be meaningful.
-    const external = await mkdtemp(join(tmpdir(), 'pp-ext-'));
+    const external = tempDir('pp-ext-');
     try {
       await mkdir(join(external, 'infra', 'service-knowledge'), { recursive: true });
       await writeFile(join(external, 'infra', 'service-knowledge', 'SKILL.md'), '# external\n');

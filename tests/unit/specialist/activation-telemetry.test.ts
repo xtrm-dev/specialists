@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 /** Same guard as the other activation suites: the native path must never spawn. */
@@ -13,13 +12,13 @@ vi.mock('node:child_process', async (importOriginal) => {
     },
   };
 });
-
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import { testWorkItems } from '../../utils/test-work-items.js';
 import type { ActivationSnapshot } from '../../../src/activation/types.js';
 import { toActivationView } from '../../../src/tools/specialist/activation.tool.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * Fleet telemetry (unitAI-beqby.3): elapsed runtime, token spend, thinking level and
@@ -79,7 +78,7 @@ describe('toActivationView telemetry projection', () => {
 
 const hostWorkspaces: string[] = [];
 function hostWorkspace(): string {
-  const root = mkdtempSync(join(tmpdir(), 'telemetry-ws-'));
+  const root = tempDir('telemetry-ws-');
   hostWorkspaces.push(root);
   return root;
 }

@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { SpecialistLoader } from '../../../src/specialist/loader.js';
 import { buildMandatoryRulesInjection } from '../../../src/specialist/mandatory-rules.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 describe('integration: SpecialistLoader global Phase 1 overlay', () => {
   let tempHome = '';
@@ -23,7 +24,7 @@ describe('integration: SpecialistLoader global Phase 1 overlay', () => {
   }
 
   it('merges all six Phase 1 global user overlay fields into executor runtime spec', async () => {
-    tempHome = await mkdtemp(join(tmpdir(), 'specialists-loader-global-'));
+    tempHome = tempDir('specialists-loader-global-');
     originalHome = process.env.HOME;
     originalXdg = process.env.XDG_CONFIG_HOME;
     process.env.HOME = tempHome;
@@ -56,7 +57,7 @@ describe('integration: SpecialistLoader global Phase 1 overlay', () => {
   });
 
   it('strips blocked global field override and records warning', async () => {
-    tempHome = await mkdtemp(join(tmpdir(), 'specialists-loader-global-'));
+    tempHome = tempDir('specialists-loader-global-');
     originalHome = process.env.HOME;
     originalXdg = process.env.XDG_CONFIG_HOME;
     process.env.HOME = tempHome;
@@ -91,7 +92,7 @@ describe('integration: SpecialistLoader global Phase 1 overlay', () => {
   });
 
   it('global empty template_sets selection clears specialist-specific sets end-to-end but required/default index sets still load (unitAI-klo6k)', async () => {
-    tempHome = await mkdtemp(join(tmpdir(), 'specialists-loader-global-'));
+    tempHome = tempDir('specialists-loader-global-');
     originalHome = process.env.HOME;
     originalXdg = process.env.XDG_CONFIG_HOME;
     process.env.HOME = tempHome;
@@ -122,7 +123,7 @@ describe('integration: SpecialistLoader global Phase 1 overlay', () => {
   });
 
   it('global replaced template_sets selection swaps specialist-specific sets end-to-end while index sets stay (unitAI-klo6k)', async () => {
-    tempHome = await mkdtemp(join(tmpdir(), 'specialists-loader-global-'));
+    tempHome = tempDir('specialists-loader-global-');
     originalHome = process.env.HOME;
     originalXdg = process.env.XDG_CONFIG_HOME;
     process.env.HOME = tempHome;

@@ -3,11 +3,10 @@
 // The property under test is that a lease never frees itself on uncertainty. A lease that
 // frees when it cannot establish liveness is worse than no lease, because it grants a
 // confidence that is not warranted and two writers in one worktree is data loss.
-
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+
 import { join } from 'node:path';
 
 import {
@@ -21,11 +20,12 @@ import {
   type LeaseProcessProbe,
 } from '../../../src/activation/workspace-lease.js';
 import { DispatchRejectedError, type WorkspaceIdentity } from '../../../src/activation/types.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 let root: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'sp-lease-'));
+  root = tempDir('sp-lease-');
 });
 
 afterEach(() => {

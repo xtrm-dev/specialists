@@ -1,7 +1,6 @@
 // tests/unit/specialist/supervisor-empty-output-fallback.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 // Keep the real synchronous process helpers so the SQLite-backed supervisor
@@ -11,6 +10,7 @@ vi.mock('node:child_process', async (importOriginal) => ({
   spawn: vi.fn(() => ({ pid: 1234, unref: vi.fn() })),
 }));
 import { Supervisor } from '../../../src/specialist/supervisor.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 function makeRunOptions(name = 'test-specialist') {
   return { name, prompt: 'do something' };
@@ -42,7 +42,7 @@ describe('Supervisor: empty final-turn output fallback', () => {
   beforeEach(() => {
     originalJobFileOutputEnv = process.env.SPECIALISTS_JOB_FILE_OUTPUT;
     process.env.SPECIALISTS_JOB_FILE_OUTPUT = 'on';
-    tmpDir = mkdtempSync(join(tmpdir(), 'supervisor-empty-output-test-'));
+    tmpDir = tempDir('supervisor-empty-output-test-');
     jobsDir = join(tmpDir, 'jobs');
     mkdirSync(jobsDir, { recursive: true });
     supervisors = [];

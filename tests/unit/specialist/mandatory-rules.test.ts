@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { writeFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { tempDir as trackedTempDir } from '../../utils/temp-dir.js';
 
 const packageCanonicalDirs = new Map<string, string | null>();
@@ -51,7 +51,7 @@ describe('mandatory rules resolution', () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'mandatory-rules-test-'));
+    tempDir = trackedTempDir('mandatory-rules-test-');
     packageCanonicalDirs.clear();
   });
 

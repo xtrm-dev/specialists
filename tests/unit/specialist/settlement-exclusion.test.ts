@@ -1,7 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 /**
  * Exactly-once settlement publication ACROSS PROCESSES (SPECIALISTS-66).
@@ -61,6 +60,7 @@ import type {
   SpecialistWorkItemBoundary,
   WorkReceiptView,
 } from '../../../src/activation/workitem-store.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const ACTIVATION = 'act:exactly-once';
 const ATTEMPT = 'att:exactly-once:1';
@@ -69,7 +69,7 @@ const ISSUE = 'SPECIALISTS-66';
 
 const roots: string[] = [];
 function tempRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), 'settlement-exclusion-'));
+  const root = tempDir('settlement-exclusion-');
   roots.push(root);
   return root;
 }

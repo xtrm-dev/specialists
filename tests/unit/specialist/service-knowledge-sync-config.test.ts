@@ -1,12 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SpecialistLoader } from '../../../src/specialist/loader.js';
 import { SpecialistSchema, validateSpecialist } from '../../../src/specialist/schema.js';
 import { findRequiredPreScriptFailure, formatRequiredPreScriptFailure, formatScriptOutput, runScript, validateBeforeRun } from '../../../src/specialist/runner.js';
 import { buildSkillPrefix } from '../../../src/specialist/task-prompt.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const REPO = resolve(__dirname, '../../..');
 const CONFIG_PATH = join(REPO, 'config/specialists/service-knowledge-sync.specialist.json');
@@ -25,7 +26,7 @@ beforeEach(async () => {
   // Hermetic HOME (unitAI-o1fs4): the real ~/.config/specialists/user.json must never leak into
   // loader-driven tests — a legacy unpinned npm key there now fails closed at the merge boundary.
   originalHome = process.env.HOME;
-  homeSandbox = await mkdtemp(join(tmpdir(), 'sks-home-'));
+  homeSandbox = tempDir('sks-home-');
   sandboxes.push(homeSandbox);
   process.env.HOME = homeSandbox;
 });
@@ -37,7 +38,7 @@ afterEach(async () => {
 });
 
 async function seedConsumer(packs: string[]): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), 'service-knowledge-sync-'));
+  const root = tempDir('service-knowledge-sync-');
   sandboxes.push(root);
   const configDir = join(root, 'config', 'specialists');
   await mkdir(configDir, { recursive: true });

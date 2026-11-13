@@ -1,9 +1,10 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { spawnSync } from 'node:child_process';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 const entry = join(repoRoot, 'src/index.ts');
@@ -45,7 +46,7 @@ describe('integration: specialists edit ownership flow', () => {
   });
 
   it('forks default specialist into .specialists/user and edits only user layer', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-edit-'));
+    tempDir = createTempDir('specialists-int-edit-');
     await mkdir(join(tempDir, '.specialists', 'default'), { recursive: true });
     await mkdir(join(tempDir, '.specialists', 'user'), { recursive: true });
 
@@ -74,7 +75,7 @@ describe('integration: specialists edit ownership flow', () => {
   });
 
   it('returns clear error when specialist name missing from ownership layers', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-edit-'));
+    tempDir = createTempDir('specialists-int-edit-');
     await mkdir(join(tempDir, '.specialists', 'default'), { recursive: true });
     await mkdir(join(tempDir, '.specialists', 'user'), { recursive: true });
 
@@ -87,7 +88,7 @@ describe('integration: specialists edit ownership flow', () => {
   });
 
   it('suggests --fork-from when target exists only in package tier', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-edit-'));
+    tempDir = createTempDir('specialists-int-edit-');
     await mkdir(join(tempDir, '.specialists', 'default'), { recursive: true });
     await mkdir(join(tempDir, '.specialists', 'user'), { recursive: true });
 

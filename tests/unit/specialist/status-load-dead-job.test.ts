@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeOriginV1 } from '../../../src/specialist/runtime-origin.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const { xtmuxSpawnMock } = vi.hoisted(() => ({ xtmuxSpawnMock: vi.fn() }));
 
@@ -79,7 +79,7 @@ describe('status-load dead-job reconciliation', () => {
     }));
 
     ({ loadStatuses } = await import('../../../src/specialist/status-load.js'));
-    tmpDir = mkdtempSync(join(tmpdir(), 'status-load-dead-job-'));
+    tmpDir = tempDir('status-load-dead-job-');
     previousCwd = process.cwd();
     process.chdir(tmpDir);
   });

@@ -1,12 +1,12 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DispatchRejectedError } from '../../../src/activation/types.js';
 import { provisionWriterWorkspace } from '../../../src/activation/workspace-lease.js';
 import { setRuntimeDiagnosticsSink, resetRuntimeDiagnosticsSink } from '../../../src/utils/runtime-diagnostics.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /** SPECIALISTS-4393: writer worktrees live under .xtrm/worktrees and branch from origin/<default>. */
 
@@ -21,7 +21,7 @@ const run = (cwd: string, ...args: string[]): string =>
   execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf-8' }).trim();
 
 function scratch(): string {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'wt-provision-')));
+  const dir = realpathSync(tempDir('wt-provision-'));
   dirs.push(dir);
   return dir;
 }

@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, writeFile, rm, readFile } from 'node:fs/promises';
+
 import path from 'node:path';
 import { postprocessBuild } from '../../../scripts/postprocess-build.mjs';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * unitAI-rrdnt.41. Building inside a worktree whose node_modules is incomplete made bun resolve
@@ -23,7 +24,7 @@ async function build(indexSource: string) {
   return postprocessBuild(root);
 }
 
-beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), 'postprocess-')); });
+beforeEach(async () => { root = tempDir('postprocess-'); });
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
 describe('postprocessBuild dependency-tree guard (unitAI-rrdnt.41)', () => {

@@ -8,11 +8,10 @@
 // that: the pushed body is compared to the polled object field by field rather than by
 // summary, the peer channel is deliberately made unroutable to prove the result survives
 // without it, and a push with no validated result behind it must be refused.
-
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { rmSync } from 'node:fs';
+
+
 
 import {
   RuntimeEventPusher,
@@ -28,14 +27,15 @@ import {
   toActivationResultView,
 } from '../../../src/tools/specialist/activation.tool.js';
 import type { NativeActivationHost } from '../../../src/activation/native-host.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 let root: string;
 /** An empty roster directory: no registration can match, so no route is ever selected. */
 let rosterDir: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'sp-async-events-'));
-  rosterDir = mkdtempSync(join(tmpdir(), 'sp-async-roster-'));
+  root = tempDir('sp-async-events-');
+  rosterDir = tempDir('sp-async-roster-');
 });
 
 afterEach(() => {

@@ -1,11 +1,12 @@
 // ISSUE: xtrm-wiy5n.4.11 — capability-gated skip is intentional.
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { spawnSync } from 'node:child_process';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 const hasTmuxBinary = spawnSync('which', ['tmux'], { stdio: 'ignore' }).status === 0;
@@ -103,7 +104,7 @@ describe('integration: specialists run', () => {
   });
 
   it('rejects using --prompt and --bead together through the real CLI boundary', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-run-'));
+    tempDir = createTempDir('specialists-int-run-');
 
     const result = runCli(['run', 'code-review', '--prompt', 'hello', '--bead', 'unitAI-55d'], tempDir);
 
@@ -112,7 +113,7 @@ describe('integration: specialists run', () => {
   });
 
   it('rejects missing prompt, stdin, and bead through the real CLI boundary', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-run-'));
+    tempDir = createTempDir('specialists-int-run-');
 
     const result = runCli(['run', 'code-review'], tempDir);
 
@@ -121,7 +122,7 @@ describe('integration: specialists run', () => {
   });
 
   it('fails early when bead lookup cannot be resolved before any pi session starts', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-run-'));
+    tempDir = createTempDir('specialists-int-run-');
     await mkdir(join(tempDir, '.specialists'), { recursive: true });
     await mkdir(join(tempDir, 'specialists'), { recursive: true });
     await writeFile(
@@ -153,7 +154,7 @@ describe('integration: specialists run', () => {
   });
 
   (hasTmux ? it : it.skip)('uses tmux for --background, prints job id, and cleans the tmux session after exit', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-run-bg-tmux-'));
+    tempDir = createTempDir('specialists-int-run-bg-tmux-');
     await mkdir(join(tempDir, '.specialists', 'jobs'), { recursive: true });
     await writeSpecialist(tempDir, 'nonexistent');
 
@@ -192,7 +193,7 @@ describe('integration: specialists run', () => {
   }, 45_000);
 
   it('falls back to detached spawn when tmux is unavailable, prints job id, and does not set tmux session', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-run-bg-fallback-'));
+    tempDir = createTempDir('specialists-int-run-bg-fallback-');
     await mkdir(join(tempDir, '.specialists', 'jobs'), { recursive: true });
     await writeSpecialist(tempDir, 'fallback-no-tmux');
 

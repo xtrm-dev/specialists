@@ -3,11 +3,10 @@
 // Registration was approved on two binding conditions — deregistration on exit, and orphan
 // cleanup that does not worsen the measured 128-sockets-for-20-registrations baseline.
 // Most of what is asserted here is those conditions, not the happy path.
-
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+
 import { join } from 'node:path';
 
 import {
@@ -16,13 +15,14 @@ import {
   REGISTRATION_VERSION,
 } from '../../../src/activation/transport/peer-registration.js';
 import { evaluateRegistration, procProbe, scanRoster, type ProcessProbe } from '../../../src/activation/transport/roster.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 let root: string;
 let rosterDir: string;
 let socketDir: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'sp-reg-'));
+  root = tempDir('sp-reg-');
   rosterDir = join(root, 'sessions');
   socketDir = join(root, 'socks');
   mkdirSync(rosterDir, { recursive: true });

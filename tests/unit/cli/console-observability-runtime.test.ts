@@ -1,11 +1,12 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
+
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createForensicEvent } from '../../../src/specialist/forensic-events.js';
 import { createObservabilitySqliteClientAtPath } from '../../../src/specialist/observability-sqlite.js';
 import { withForensicObservability } from '../../../src/cli/console/observability-runtime.js';
 import type { RuntimeClient } from '../../../src/cli/console/types.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const tempDirs: string[] = [];
 afterEach(() => {
@@ -38,7 +39,7 @@ function forensic(seq: number, family = 'job') {
 
 describe('console forensic observability adapter', () => {
   it('reads forensic source from persisted xtrm.forensic.v1 without timeline fallback', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'specialists-console-observability-'));
+    const dir = tempDir('specialists-console-observability-');
     tempDirs.push(dir);
     const dbPath = join(dir, 'observability.db');
     const client = createObservabilitySqliteClientAtPath(dbPath);
@@ -69,7 +70,7 @@ describe('console forensic observability adapter', () => {
   });
 
   it('uses fromSeq as a real persisted forensic continuation cursor', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'specialists-console-observability-'));
+    const dir = tempDir('specialists-console-observability-');
     tempDirs.push(dir);
     const dbPath = join(dir, 'observability.db');
     const client = createObservabilitySqliteClientAtPath(dbPath);

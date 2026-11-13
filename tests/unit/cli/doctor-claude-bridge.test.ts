@@ -9,10 +9,11 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+
 import { join } from 'node:path';
-import { mkdtemp } from 'node:fs/promises';
+
 import { buildSpecialistOverrideTemplate } from '../../../src/specialist/global-config.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 // Each test sees only the fixtures it writes: no installed package canonical dir.
 vi.mock('../../../src/specialist/canonical-asset-resolver.js', () => ({
@@ -35,8 +36,8 @@ describe('doctor --specialists: claude_bridge block (SPECIALISTS-4442)', () => {
   let originalCwd: string;
 
   beforeEach(async () => {
-    project = await mkdtemp(join(tmpdir(), 'doctor-bridge-proj-'));
-    home = await mkdtemp(join(tmpdir(), 'doctor-bridge-home-'));
+    project = tempDir('doctor-bridge-proj-');
+    home = tempDir('doctor-bridge-home-');
     mkdirSync(join(project, 'config', 'specialists'), { recursive: true });
     originalHome = process.env.HOME;
     originalXdg = process.env.XDG_CONFIG_HOME;

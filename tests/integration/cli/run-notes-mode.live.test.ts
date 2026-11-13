@@ -3,7 +3,7 @@
 // Live HOME strategy for smoke: keep real HOME (and ~/.pi credentials) intact and set XDG_CONFIG_HOME
 // to a temp directory so specialist overrides stay isolated.
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';

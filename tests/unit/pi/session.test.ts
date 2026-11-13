@@ -1,8 +1,8 @@
 // tests/unit/pi/session.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { resolve, join } from 'node:path';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { mapSpecialistBackend, getProviderArgs } from '../../../src/pi/backendMap.js';
 
 // ── Mock node:child_process before importing session ──────────────────────────
@@ -10,13 +10,13 @@ vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
   execFileSync: vi.fn(),
 }));
-
 import { execFileSync, spawn } from 'node:child_process';
 import { PiAgentSession, StallTimeoutError, applyExtensionToolPolicyGate, deduplicateExtensionSources, resolveCuratedExtensionPaths, resolveExecutionExtensionSelection, resolveRuntimeToolContract, validateWriteToolPathAgainstBoundary } from '../../../src/pi/session.js';
 import { __resetPiExtensionsPythonKernelPathCacheForTest } from '../../../src/pi/python-kernel-extension.js';
 import { catalogVersion } from '../../utils/catalog-pin.js';
 import { getExtensionToolPolicyExtensionPath, NATIVE_TOOLS_ENV_KEY } from '../../../src/pi/extension-tool-policy-extension.js';
 import { SESSION_STATS_TIMEOUT_MS } from '../../../src/specialist/session-metrics-contract.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const mockSpawn = spawn as ReturnType<typeof vi.fn>;
 const mockExecFileSync = execFileSync as ReturnType<typeof vi.fn>;
@@ -159,7 +159,7 @@ afterEach(() => {
 });
 
 async function withNpmGlobal<T>(setup: (npmGlobalDir: string) => void, run: (npmGlobalDir: string) => Promise<T>): Promise<T> {
-  const npmGlobalDir = mkdtempSync(join(tmpdir(), 'pi-npm-global-'));
+  const npmGlobalDir = tempDir('pi-npm-global-');
   const prevGlobalDir = process.env.PI_NPM_GLOBAL_DIR;
   try {
     setup(npmGlobalDir);
@@ -494,7 +494,7 @@ describe('PiAgentSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     fake = makeFakeProc();
-    npmGlobalDir = mkdtempSync(join(tmpdir(), 'pi-npm-global-installed-'));
+    npmGlobalDir = tempDir('pi-npm-global-installed-');
     for (const pkg of ['pi-gitnexus', 'pi-serena-tools']) {
       mkdirSync(join(npmGlobalDir, pkg), { recursive: true });
       writeFileSync(join(npmGlobalDir, pkg, 'package.json'), JSON.stringify({ name: pkg, version: '0.0.0' }));
@@ -527,7 +527,7 @@ describe('PiAgentSession', () => {
 
 
   it('never spawns serena-pool or injects SERENA_MCP_PORT, even when the pool module is installed', async () => {
-    const npmGlobalDir = mkdtempSync(join(tmpdir(), 'pi-npm-global-'));
+    const npmGlobalDir = tempDir('pi-npm-global-');
     const serenaPoolPath = join(npmGlobalDir, '@jaggerxtrm', 'pi-extensions', 'extensions', 'serena-pool', 'index.ts');
     const prevGlobalDir = process.env.PI_NPM_GLOBAL_DIR;
     // Isolate from operator environments that already carry a foreign pool port:
@@ -890,7 +890,7 @@ describe('PiAgentSession', () => {
   describe('extension tool exposure (unitAI-34pyf)', () => {
     /** Hermetic local extension source dir (no catalog involvement). */
     function makeExtensionDir(): { dir: string; cleanup: () => void } {
-      const dir = mkdtempSync(join(tmpdir(), 'pi-ext-src-'));
+      const dir = tempDir('pi-ext-src-');
       writeFileSync(join(dir, 'index.mjs'), 'export default function () {}\n');
       return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
     }
@@ -1133,7 +1133,7 @@ describe('PiAgentSession', () => {
   });
 
   it('skips GitNexus when runtime contract is missing even if package is installed', async () => {
-    const npmGlobalDir = mkdtempSync(join(tmpdir(), 'pi-npm-global-'));
+    const npmGlobalDir = tempDir('pi-npm-global-');
     const prevGlobalDir = process.env.PI_NPM_GLOBAL_DIR;
     try {
       mkdirSync(join(npmGlobalDir, 'pi-gitnexus'), { recursive: true });
@@ -1157,7 +1157,7 @@ describe('PiAgentSession', () => {
   });
 
   it('skips excluded npm extensions', async () => {
-    const npmGlobalDir = mkdtempSync(join(tmpdir(), 'pi-npm-global-'));
+    const npmGlobalDir = tempDir('pi-npm-global-');
     const prevGlobalDir = process.env.PI_NPM_GLOBAL_DIR;
     try {
       mkdirSync(join(npmGlobalDir, 'pi-gitnexus'), { recursive: true });
@@ -1189,7 +1189,7 @@ describe('PiAgentSession', () => {
   });
 
   it('restores native fallbacks and suppresses GitNexus tools on catalog mismatch before --tools emission', async () => {
-    const npmGlobalDir = mkdtempSync(join(tmpdir(), 'pi-npm-global-'));
+    const npmGlobalDir = tempDir('pi-npm-global-');
     const prevGlobalDir = process.env.PI_NPM_GLOBAL_DIR;
     try {
       mkdirSync(join(npmGlobalDir, 'pi-gitnexus'), { recursive: true });
@@ -1842,7 +1842,7 @@ describe('kill()', () => {
 // ── python-kernel double-load dedup (unitAI-il2io) ────────────────────────────
 describe('deduplicateExtensionSources (unitAI-il2io)', () => {
   it('drops a directory-form duplicate of the managed python-kernel file copy', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'py-kernel-dir-'));
+    const dir = tempDir('py-kernel-dir-');
     try {
       const extDir = join(dir, 'extensions', 'python-kernel');
       mkdirSync(extDir, { recursive: true });
@@ -1866,7 +1866,7 @@ describe('deduplicateExtensionSources (unitAI-il2io)', () => {
   });
 
   it('drops a symlinked dev-checkout duplicate of the managed copy', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'py-kernel-link-'));
+    const dir = tempDir('py-kernel-link-');
     try {
       const managedDir = join(dir, 'managed', 'extensions', 'python-kernel');
       mkdirSync(managedDir, { recursive: true });
@@ -1884,7 +1884,7 @@ describe('deduplicateExtensionSources (unitAI-il2io)', () => {
 
   it('start() forwards the managed python-kernel once and logs the dropped dev copy', async () => {
     vi.clearAllMocks();
-    const npmGlobalDir = mkdtempSync(join(tmpdir(), 'pi-npm-global-pykernel-'));
+    const npmGlobalDir = tempDir('pi-npm-global-pykernel-');
     const prevGlobalDir = process.env.PI_NPM_GLOBAL_DIR;
     const fake = makeFakeProc();
     const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true as unknown as boolean);
@@ -1893,7 +1893,7 @@ describe('deduplicateExtensionSources (unitAI-il2io)', () => {
       mkdirSync(managedDir, { recursive: true });
       const managedIndex = join(managedDir, 'index.ts');
       writeFileSync(managedIndex, 'export default function () {}\n');
-      const devDir = mkdtempSync(join(tmpdir(), 'py-kernel-dev-'));
+      const devDir = tempDir('py-kernel-dev-');
       try {
         const devExtDir = join(devDir, 'python-kernel');
         mkdirSync(devExtDir, { recursive: true });

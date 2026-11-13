@@ -6,11 +6,11 @@
 // that suite is quarantined (SPECIALISTS-121) and therefore cannot carry a
 // regression test the default baseline actually runs.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { run as runView } from '../../../src/cli/view.js';
 import { run as runListRules } from '../../../src/cli/list-rules.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 // Force the loader to ignore the installed package's canonical-asset dir so each
 // test sees ONLY the fixtures written into tmpProject/config. Without this the
@@ -43,8 +43,8 @@ describe('mandatory-rules introspection (SPECIALISTS-4205)', () => {
   let stderr: string;
 
   beforeEach(() => {
-    project = mkdtempSync(join(tmpdir(), 'rules-inspectable-proj-'));
-    home = mkdtempSync(join(tmpdir(), 'rules-inspectable-home-'));
+    project = tempDir('rules-inspectable-proj-');
+    home = tempDir('rules-inspectable-home-');
     originalHome = process.env.HOME;
     originalXdg = process.env.XDG_CONFIG_HOME;
     originalCwd = process.cwd();

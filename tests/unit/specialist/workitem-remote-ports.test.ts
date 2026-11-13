@@ -14,10 +14,9 @@
 // The unreachable-remote test needs a real Substrate module tree, like substrate-parity and the
 // stale-store guard test: set XTRM_SUBSTRATE_DIR=<abs path to @jaggerxtrm/substrate>. The rest use
 // a structural fake and run everywhere.
-
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
+
 import { join } from 'node:path';
 import {
   createWorkItemBoundary,
@@ -32,6 +31,7 @@ import {
   createReopeningService,
   type RemoteWorkItemService,
 } from '../../../src/activation/workitem-remote.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const SUBSTRATE_DIR = (process.env['XTRM_SUBSTRATE_DIR'] ?? '').trim();
 const substrateSuite = SUBSTRATE_DIR ? describe : describe.skip;
@@ -41,15 +41,15 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function scratchDir(prefix: string): string {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
+function createScratchDir(prefix: string): string {
+  const dir = tempDir(prefix);
   dirs.push(dir);
   return dir;
 }
 
 /** A remote config file naming an unreachable host, with the absolute server sb path it requires. */
 function unreachableRemoteConfig(): string {
-  const dir = scratchDir('wi-remote-config-');
+  const dir = createScratchDir('wi-remote-config-');
   const path = join(dir, 'substrate.json');
   writeFileSync(
     path,
@@ -106,7 +106,7 @@ function boundaryOver(issues: IssueServicePort): ReturnType<typeof createWorkIte
 
 substrateSuite('the remote store the operator chose', () => {
   it('refuses a dispatch when the configured remote cannot be reached, and opens no local store', async () => {
-    const home = scratchDir('wi-remote-home-');
+    const home = createScratchDir('wi-remote-home-');
     const env = {
       PATH: process.env['PATH'],
       LANG: process.env['LANG'],
@@ -127,7 +127,7 @@ substrateSuite('the remote store the operator chose', () => {
   }, 30_000);
 
   it('names the transport code on the error, not only inside the service error field', async () => {
-    const home = scratchDir('wi-remote-home-');
+    const home = createScratchDir('wi-remote-home-');
     const env = {
       PATH: process.env['PATH'],
       LANG: process.env['LANG'],
@@ -146,7 +146,7 @@ substrateSuite('the remote store the operator chose', () => {
 
 describe('choosing the store', () => {
   it('keeps the local store when no remote is configured', async () => {
-    const dir = scratchDir('wi-local-env-');
+    const dir = createScratchDir('wi-local-env-');
     const env = { SUBSTRATE_REMOTE_CONFIG: join(dir, 'absent.json') };
     expect(await selectWorkItemStore(env, { substrateDir: dir })).toEqual({
       kind: 'local',

@@ -1,14 +1,14 @@
 // tests/unit/tools/specialist-result.test.ts
 // SPECIALISTS-4247 (MCP half): specialist_result reads ONE activation's complete result.
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { Database } from 'bun:sqlite';
 import { createSpecialistResultTool } from '../../../src/tools/specialist/specialist_result.tool.js';
 import { createObservabilitySqliteClientAtPath } from '../../../src/specialist/observability-sqlite.js';
 import { buildChannelFrame } from '../../../src/mcp/channel.js';
 import { checkObservabilityDb } from '../../../src/cli/doctor.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const LONG = 'line\n'.repeat(5000);
 
@@ -77,7 +77,7 @@ describe('specialist_result', () => {
   });
 
   it('falls back to the durable observability.db row, with source observability_db', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'sp-result-'));
+    const dir = tempDir('sp-result-');
     dirs.push(dir);
     const dbPath = join(dir, 'observability.db');
     createObservabilitySqliteClientAtPath(dbPath)?.close();
@@ -105,7 +105,7 @@ describe('channel actions', () => {
 
 describe('doctor observability check', () => {
   it('reports a missing observability.db with the fix and does not create it', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'sp-doctor-'));
+    const dir = tempDir('sp-doctor-');
     dirs.push(dir);
     const lines: string[] = [];
     const log = console.log;

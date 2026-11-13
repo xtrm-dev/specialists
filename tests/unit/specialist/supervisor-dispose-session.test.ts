@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Supervisor } from '../../../src/specialist/supervisor.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 function makeMockRunner() {
   return {
@@ -21,7 +21,7 @@ describe('Supervisor dispose session reap', () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'supervisor-dispose-session-'));
+    tmpDir = tempDir('supervisor-dispose-session-');
   });
 
   afterEach(() => {

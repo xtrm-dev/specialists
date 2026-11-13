@@ -3,16 +3,17 @@
 // All paths are injected temp fixtures — never the real /etc or ~/.claude.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { mkdtemp } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+
+
 import { join } from 'node:path';
 import { runChannelDoctorChecks, type ChannelDoctorInputs } from '../../../src/specialist/channel-doctor.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 describe('runChannelDoctorChecks', () => {
   let root: string;
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'channel-doctor-'));
+    root = tempDir('channel-doctor-');
   });
 
   afterEach(() => {

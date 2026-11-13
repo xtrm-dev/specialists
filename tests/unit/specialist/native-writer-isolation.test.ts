@@ -1,6 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { realpathSync, rmSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -12,6 +11,7 @@ import { workspaceIdentityFor } from '../../../src/activation/workspace-lease.js
 import type { PiAgentSessionEvent, PiAgentSessionLike, PiSdk } from '../../../src/activation/pi-sdk.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import { testWorkItems } from '../../utils/test-work-items.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * SPECIALISTS-4310. A write-capable activation dispatched over MCP ran in the coordinator's
@@ -25,7 +25,7 @@ afterEach(() => {
 });
 
 function scratch(prefix: string): string {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  const dir = realpathSync(tempDir(prefix));
   dirs.push(dir);  return dir;
 }
 

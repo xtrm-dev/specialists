@@ -1,11 +1,12 @@
 import { Database } from 'bun:sqlite';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
+
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createForensicEvent } from '../../../src/specialist/forensic-events.js';
 import { createObservabilitySqliteClientAtPath } from '../../../src/specialist/observability-sqlite.js';
 import type { SupervisorStatus } from '../../../src/specialist/status-contract.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -13,7 +14,7 @@ afterEach(() => {
 });
 
 function store() {
-  const dir = mkdtempSync(join(tmpdir(), 'specialists-xtrm96-store-'));
+  const dir = tempDir('specialists-xtrm96-store-');
   dirs.push(dir);
   const dbPath = join(dir, 'observability.db');
   const client = createObservabilitySqliteClientAtPath(dbPath);

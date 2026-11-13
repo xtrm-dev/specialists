@@ -1,8 +1,8 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { Supervisor } from '../../../src/specialist/supervisor.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 function makeRunOptions() {
   return { name: 'ordering-specialist', prompt: 'do something' };
@@ -16,7 +16,7 @@ describe('payload ordering', () => {
 
   it('emits run_start before payload_breakdown and persists payload JSON', async () => {
     process.env.SPECIALISTS_JOB_FILE_OUTPUT = 'on';
-    const tmpDir = mkdtempSync(join(tmpdir(), 'payload-ordering-'));
+    const tmpDir = tempDir('payload-ordering-');
     const jobsDir = join(tmpDir, 'jobs');
     mkdirSync(jobsDir, { recursive: true });
 

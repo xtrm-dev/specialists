@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+
 
 import { CircuitBreaker } from '../../../src/utils/circuitBreaker.js';
 import { resolveWorkspace } from '../../../src/activation/native-host.js';
@@ -18,6 +18,7 @@ import {
 } from '../../../src/activation/workspace-reconcile.js';
 import { createSpecialistStatusTool } from '../../../src/tools/specialist/specialist_status.tool.js';
 import type { SpecialistLoader } from '../../../src/specialist/loader.js';
+import { scratchDir } from '../../utils/temp-dir.js';
 
 const temporaryRoots: string[] = [];
 
@@ -27,7 +28,7 @@ afterEach(() => {
 
 describe('workspace identity across runtime and operator surfaces', () => {
   it('projects and reconciles a dead runtime lease, including specialist_status full', async () => {
-    const root = mkdtempSync(join(process.cwd(), '.tmp-specialists-4250-'));
+    const root = scratchDir(process.cwd(), '.tmp-specialists-4250-');
     temporaryRoots.push(root);
 
     const liveHolderProbe: LeaseProcessProbe = {

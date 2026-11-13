@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { spawnSync } from 'node:child_process';
 import { SpecialistLoader } from '../../../src/specialist/loader.js';
 import {
   GLOBAL_USER_CONFIG_DOC,
   buildSpecialistOverrideTemplate,
 } from '../../../src/specialist/global-config.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 
@@ -41,7 +42,7 @@ describe('integration: specialists init --global', () => {
   });
 
   it('writes doc sentinel, full override templates, discovery hints, and stays idempotent', async () => {
-    tempHome = await mkdtemp(join(tmpdir(), 'specialists-int-init-global-'));
+    tempHome = tempDir('specialists-int-init-global-');
     // Hermetic HOME (unitAI-o1fs4): list() must see only the package layer, never the live
     // user.json — a legacy unpinned npm key there now fails closed at the merge boundary.
     const originalHome = process.env.HOME;
@@ -116,7 +117,7 @@ describe('integration: short user.json entries (SPECIALISTS-4448)', () => {
   };
 
   it('sp init --global backfills a short entry for a Specialist this machine cannot resolve, keeping values', async () => {
-    tempHome = await mkdtemp(join(tmpdir(), 'specialists-int-short-entry-'));
+    tempHome = tempDir('specialists-int-short-entry-');
     // `frontend-auditor` is deliberately a name no layer here defines: the defect was that such an
     // entry was copied verbatim while resolvable ones were backfilled.
     await writeShort(tempHome, {
@@ -144,7 +145,7 @@ describe('integration: short user.json entries (SPECIALISTS-4448)', () => {
   });
 
   it('sp init --global keeps an unresolvable entry instead of dropping it', async () => {
-    tempHome = await mkdtemp(join(tmpdir(), 'specialists-int-short-keep-'));
+    tempHome = tempDir('specialists-int-short-keep-');
     await writeShort(tempHome, { 'frontend-auditor': { execution: { timeout_ms: 900_000 } } });
     expect(runInitGlobal(tempHome).status).toBe(0);
     const parsed = await readConfig(tempHome);
@@ -152,7 +153,7 @@ describe('integration: short user.json entries (SPECIALISTS-4448)', () => {
   });
 
   it('repairs the file end to end: doctor reports the short entry, init fixes it, edit writes again', async () => {
-    tempHome = await mkdtemp(join(tmpdir(), 'specialists-int-short-e2e-'));
+    tempHome = tempDir('specialists-int-short-e2e-');
     await writeShort(tempHome, {
       'pr-reviewer': { execution: { model: 'anthropic/claude-opus-4-6' } },
       'sre-coordinator': {},

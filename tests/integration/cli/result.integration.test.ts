@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { spawnSync } from 'node:child_process';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 
@@ -43,7 +44,7 @@ describe('integration: specialists result', () => {
   });
 
   it('prints result for a done job without --wait', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-result-'));
+    tempDir = createTempDir('specialists-int-result-');
     const jobsDir = join(tempDir, '.specialists', 'jobs');
     await writeJobFiles(jobsDir, 'abc123', { status: 'done' }, 'hello world\n');
 
@@ -54,7 +55,7 @@ describe('integration: specialists result', () => {
   });
 
   it('exits 1 and prints error for a failed job without --wait', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-result-'));
+    tempDir = createTempDir('specialists-int-result-');
     const jobsDir = join(tempDir, '.specialists', 'jobs');
     await writeJobFiles(jobsDir, 'err123', { status: 'error', error: 'something blew up' });
 
@@ -65,7 +66,7 @@ describe('integration: specialists result', () => {
   });
 
   it('exits 1 when job does not exist', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-result-'));
+    tempDir = createTempDir('specialists-int-result-');
 
     const result = runCli(['result', 'nonexistent'], tempDir);
 
@@ -74,7 +75,7 @@ describe('integration: specialists result', () => {
   });
 
   it('--wait prints result immediately when job is already done', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-result-'));
+    tempDir = createTempDir('specialists-int-result-');
     const jobsDir = join(tempDir, '.specialists', 'jobs');
     await writeJobFiles(jobsDir, 'done99', { status: 'done' }, 'finished output\n');
 
@@ -85,7 +86,7 @@ describe('integration: specialists result', () => {
   });
 
   it('--wait exits 1 when job is already in error state', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-result-'));
+    tempDir = createTempDir('specialists-int-result-');
     const jobsDir = join(tempDir, '.specialists', 'jobs');
     await writeJobFiles(jobsDir, 'err99', { status: 'error', error: 'fatal error' });
 
@@ -96,7 +97,7 @@ describe('integration: specialists result', () => {
   });
 
   it('--wait with --timeout exits 1 when job stays running past timeout', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-result-'));
+    tempDir = createTempDir('specialists-int-result-');
     const jobsDir = join(tempDir, '.specialists', 'jobs');
     await writeJobFiles(jobsDir, 'run99', { status: 'running' });
 
@@ -108,7 +109,7 @@ describe('integration: specialists result', () => {
   });
 
   it('--timeout with invalid value exits 1', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-result-'));
+    tempDir = createTempDir('specialists-int-result-');
 
     const result = runCli(['result', 'somejob', '--timeout', '-5'], tempDir);
 

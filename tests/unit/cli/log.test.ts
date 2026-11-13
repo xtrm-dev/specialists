@@ -1,10 +1,10 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
 import type { TimelineEvent } from '../../../src/specialist/timeline-events.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 let tempRoot: string;
 
@@ -50,7 +50,7 @@ describe('log CLI', () => {
   const originalArgv = process.argv;
 
   beforeEach(() => {
-    tempRoot = mkdtempSync(join(tmpdir(), 'sp-log-test-'));
+    tempRoot = tempDir('sp-log-test-');
     sqliteState.statuses = [];
     sqliteState.events.clear();
     mkdirSync(join(tempRoot, '.specialists', 'db'), { recursive: true });

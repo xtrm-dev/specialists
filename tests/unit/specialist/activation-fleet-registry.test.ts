@@ -10,16 +10,16 @@ vi.mock('node:child_process', async (importOriginal) => {
     },
   };
 });
-
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
+
 import { join } from 'node:path';
 import { testWorkItems } from '../../utils/test-work-items.js';
 import { DispatchRejectedError } from '../../../src/activation/types.js';
 import { nextAttemptId } from '../../../src/activation/registry.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * Phase 2 acceptance: a persistent Fleet registry and attach/return/resume over the
@@ -154,7 +154,7 @@ describe('NativeActivationHost — Fleet registry projection', () => {
    * the code — and it is fixed here by fixing the environment, not by loosening the assertion.
    */
   function withEmptyGlobalDir<T>(run: () => Promise<T>): Promise<T> {
-    const dir = mkdtempSync(join(tmpdir(), 'fleet-registry-npm-global-'));
+    const dir = tempDir('fleet-registry-npm-global-');
     const previous = process.env.PI_NPM_GLOBAL_DIR;
     process.env.PI_NPM_GLOBAL_DIR = dir;
     return run().finally(() => {

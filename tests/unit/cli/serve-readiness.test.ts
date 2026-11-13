@@ -1,12 +1,13 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import {
   createReadinessState,
   recordAuditFailure,
   evaluateReadiness,
 } from '../../../src/cli/serve.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const VALID_SPEC = JSON.stringify({
   specialist: {
@@ -33,7 +34,7 @@ describe('serve readiness', () => {
   let piConfigPath: string;
 
   beforeEach(() => {
-    tempRoot = mkdtempSync(join(tmpdir(), 'serve-readiness-'));
+    tempRoot = tempDir('serve-readiness-');
     mkdirSync(join(tempRoot, '.specialists', 'user'), { recursive: true });
     dbPath = join(tempRoot, 'observability.db');
     writeFileSync(dbPath, '');
