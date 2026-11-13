@@ -24,6 +24,7 @@
 
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
+import { runtimeWarn } from '../utils/runtime-diagnostics.js';
 import path from 'node:path';
 
 /** Keys the session may take from `xt identity env --json`. */
@@ -80,7 +81,7 @@ function isAllowed(key: string): boolean {
  */
 /** One `[specialists] identity-env:` line: the launcher's warning channel, and the only one. */
 export function warnIdentityEnv(message: string): void {
-  process.stderr.write(`[specialists] identity-env: ${message}\n`);
+  runtimeWarn('identity-env', `[specialists] identity-env: ${message}`);
 }
 
 const launcherWarning = warnIdentityEnv;

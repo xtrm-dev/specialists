@@ -12591,8 +12591,7 @@ class SpecialistLoader {
         if (typeof rawId === "string" && /^[a-z][a-z0-9-]*$/.test(rawId)) {
           safeIds.push(rawId);
         } else {
-          process.stderr.write(`[specialists] mandatory_rules.template_sets: dropping invalid set id '${String(rawId)}' for '${name}' (must be kebab-case)
-`);
+          runtimeWarn("loader", `[specialists] mandatory_rules.template_sets: dropping invalid set id '${String(rawId)}' for '${name}' (must be kebab-case)`);
         }
       }
       baseMandatoryRules[field] = safeIds;
@@ -12616,15 +12615,13 @@ class SpecialistLoader {
     const homeHit = hits.find((h) => h.dir.scope === "home");
     const repoHit = hits.find((h) => h.dir.scope === "user");
     if (homeHit && repoHit && realpathOr(repoHit.resolved.filePath) !== realpathOr(homeHit.resolved.filePath)) {
-      process.stderr.write(`[specialists] warning: '${name}' resolved from repo '${repoHit.resolved.filePath}' shadows home '${homeHit.resolved.filePath}'
-`);
+      runtimeWarn("loader", `[specialists] warning: '${name}' resolved from repo '${repoHit.resolved.filePath}' shadows home '${homeHit.resolved.filePath}'`);
     }
     const baseHit = hits[0];
     const baseContent = await readFile(baseHit.resolved.filePath, "utf-8");
     const base = await parseSpecialist(this.toJson(baseContent, baseHit.resolved.deprecatedYaml));
     if (baseHit.resolved.deprecatedYaml) {
-      process.stderr.write(`[specialists] DEPRECATED: YAML specialist config detected at ${baseHit.resolved.filePath}. Please migrate to .specialist.json
-`);
+      runtimeWarn("loader", `[specialists] DEPRECATED: YAML specialist config detected at ${baseHit.resolved.filePath}. Please migrate to .specialist.json`);
     }
     this.resolveCanonicalPresetReferences(name, base);
     const warnings = [];
@@ -12641,13 +12638,11 @@ class SpecialistLoader {
         overrideRaw = JSON.parse(this.toJson(content, hit.resolved.deprecatedYaml));
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        process.stderr.write(`[specialists] skipping override ${hit.resolved.filePath}: ${msg}
-`);
+        runtimeWarn("loader", `[specialists] skipping override ${hit.resolved.filePath}: ${msg}`);
         continue;
       }
       if (hit.resolved.deprecatedYaml) {
-        process.stderr.write(`[specialists] DEPRECATED: YAML specialist config detected at ${hit.resolved.filePath}. Please migrate to .specialist.json
-`);
+        runtimeWarn("loader", `[specialists] DEPRECATED: YAML specialist config detected at ${hit.resolved.filePath}. Please migrate to .specialist.json`);
       }
       warnings.push(...this.applyOverrideFields(name, base, overrideRaw, "user"));
     }
@@ -12665,8 +12660,7 @@ class SpecialistLoader {
       }
     }
     for (const shadow of claudeBridgeDecision.shadowed) {
-      process.stderr.write(`[specialists] claude_bridge allow list in ${claudeBridgeDecision.blockPath} overrides '${name}' ` + `${shadow.field}: layer value ${JSON.stringify(shadow.layerValue)} ignored, using ` + `${JSON.stringify(shadow.blockValue)}
-`);
+      runtimeWarn("loader", `[specialists] claude_bridge allow list in ${claudeBridgeDecision.blockPath} overrides '${name}' ${shadow.field}: layer value ${JSON.stringify(shadow.layerValue)} ignored, using ${JSON.stringify(shadow.blockValue)}`);
     }
     const top = hits[hits.length - 1];
     resolveSkillsPaths(base, baseHit.dir.path, this.projectDir);
@@ -12743,8 +12737,7 @@ class SpecialistLoader {
           });
         } catch (e) {
           const reason = e instanceof Error ? e.message : String(e);
-          process.stderr.write(`[specialists] skipping ${file} (${specialistName}): ${reason}
-`);
+          runtimeWarn("loader", `[specialists] skipping ${file} (${specialistName}): ${reason}`);
         }
       }
     }
@@ -12901,15 +12894,14 @@ function writeDottedPath(obj, dotted, value) {
   cur[leaf] = value;
 }
 function emitPresetResolved(specialist, field, presetName, resolvedValue, depth) {
-  process.stderr.write(`${JSON.stringify({
+  runtimeWarn("loader", JSON.stringify({
     event: "preset_resolved",
     specialist,
     field,
     preset_name: presetName,
     resolved_value: resolvedValue,
     depth
-  })}
-`);
+  }));
 }
 function resolveSkillsPaths(spec, fileDir, consumerRoot) {
   const rawPaths = spec.specialist.skills?.paths;
@@ -12920,6 +12912,7 @@ function resolveSkillsPaths(spec, fileDir, consumerRoot) {
 }
 var STALL_DETECTION_DEFAULTS, SpecialistMissingModelError, ClaudeBridgeRouteModelMismatchError, SpecialistExtensionSourceCollisionError, PROTOTYPE_POLLUTION_KEYS, NPM_NAME_RE, NPM_SCOPED_NAME_RE;
 var init_loader = __esm(() => {
+  init_runtime_diagnostics();
   init_dist();
   init_schema();
   init_canonical_asset_resolver();
@@ -21573,12 +21566,12 @@ function getReadLineNumbersExtensionPath() {
     }
   }
   cached = null;
-  process.stderr.write("[read-line-numbers] WARN: bundled extension not found alongside package. " + `Model-facing read output will not be line-numbered for this session.
-`);
+  runtimeWarn("read-line-numbers", "bundled extension not found alongside package. Model-facing read output will not be line-numbered for this session.");
   return cached;
 }
 var HERE, REL, CANDIDATES, cached;
 var init_read_line_numbers_extension = __esm(() => {
+  init_runtime_diagnostics();
   HERE = dirname8(fileURLToPath3(import.meta.url));
   REL = join15("config", "pi-extensions", "read-line-numbers");
   CANDIDATES = [
@@ -21602,12 +21595,12 @@ function getExtensionToolPolicyExtensionPath() {
     }
   }
   cached2 = null;
-  process.stderr.write("[xtrm-tool-policy] WARN: bundled policy extension not found alongside package. " + `Enabled extension sources will load without the tool-policy gate.
-`);
+  runtimeWarn("xtrm-tool-policy", "bundled policy extension not found alongside package. Enabled extension sources will load without the tool-policy gate.");
   return cached2;
 }
 var HERE2, REL2, CANDIDATES2, cached2, NATIVE_TOOLS_ENV_KEY = "PI_SPECIALIST_ALLOWED_NATIVE_TOOLS", REQUIRED_EXTENSION_TOOLS_ENV_KEY = "PI_SPECIALIST_REQUIRED_EXTENSION_TOOLS";
 var init_extension_tool_policy_extension = __esm(() => {
+  init_runtime_diagnostics();
   HERE2 = dirname9(fileURLToPath4(import.meta.url));
   REL2 = join16("config", "pi-extensions", "extension-tool-policy");
   CANDIDATES2 = [
@@ -23112,8 +23105,7 @@ function getWorktreeBoundaryExtensionPath(worktreeBoundary) {
   try {
     mkdirSync8(extensionsDir, { recursive: true });
   } catch (err) {
-    process.stderr.write(`[worktree-boundary] WARN: could not create extensions directory at ${extensionsDir}: ${err.message}. ` + `Boundary enforcement will NOT apply for this session.
-`);
+    runtimeWarn("worktree-boundary", `could not create extensions directory at ${extensionsDir}: ${err.message}. Boundary enforcement will NOT apply for this session.`);
     return null;
   }
   const extensionPath = join19(extensionsDir, `worktree-boundary-${boundaryHash}.mjs`);
@@ -23158,8 +23150,7 @@ export default function(pi) {
   try {
     writeFileSync6(extensionPath, extensionSource, "utf-8");
   } catch (err) {
-    process.stderr.write(`[worktree-boundary] WARN: could not write extension file at ${extensionPath}: ${err.message}. ` + `Boundary enforcement will NOT apply for this session.
-`);
+    runtimeWarn("worktree-boundary", `could not write extension file at ${extensionPath}: ${err.message}. Boundary enforcement will NOT apply for this session.`);
     return null;
   }
   return extensionPath;
@@ -23260,8 +23251,7 @@ class PiAgentSession {
     }
     const { kept: dedupedSources, dropped: droppedSources } = deduplicateExtensionSources(curatedExtensions.dedupeAgainstDynamic, this.options.extensionSources ?? []);
     for (const { dropped, keptAs } of droppedSources) {
-      process.stderr.write(`[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').
-`);
+      runtimeWarn("python-kernel", `DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').`);
     }
     for (const source of dedupedSources) {
       args.push("-e", source);
@@ -27745,8 +27735,7 @@ function isAllowed(key) {
   return GIT_CONFIG_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 function warnIdentityEnv(message) {
-  process.stderr.write(`[specialists] identity-env: ${message}
-`);
+  runtimeWarn("identity-env", `[specialists] identity-env: ${message}`);
 }
 function isIdentityManagedKey(key) {
   return IDENTITY_MANAGED_KEY.test(key);
@@ -27893,6 +27882,7 @@ function specialistHolderName(specialistName, jobId, pid = process.pid) {
 }
 var IDENTITY_ENV_ALLOWLIST, GIT_CONFIG_PREFIXES, GIT_CONFIG_COUNT_KEY = "GIT_CONFIG_COUNT", GIT_CONFIG_KEY_PREFIX = "GIT_CONFIG_KEY_", GIT_CONFIG_VALUE_PREFIX = "GIT_CONFIG_VALUE_", launcherWarning, IDENTITY_MANAGED_KEY;
 var init_identity_env = __esm(() => {
+  init_runtime_diagnostics();
   IDENTITY_ENV_ALLOWLIST = [
     "SUBSTRATE_HOLDER",
     "XTRM_ROLE",
@@ -96997,12 +96987,11 @@ class NativeActivationHost {
       piAgentDir: () => sdk.getAgentDir()
     });
     for (const source of skippedDeclaredSources) {
-      process.stderr.write(formatSkippedExtensionSourceMessage(source));
+      runtimeWarn("extension-discovery", formatSkippedExtensionSourceMessage(source).trim());
     }
     const { kept: dynamicExtensions, dropped: droppedExtensions } = deduplicateExtensionSources(curatedExtensions.dedupeAgainstDynamic, declaredLocalExtensions);
     for (const { dropped, keptAs } of droppedExtensions) {
-      process.stderr.write(`[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').
-`);
+      runtimeWarn("python-kernel", `DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').`);
     }
     const emitDiscoverySessionsSignal = () => {
       emit("extension_discovery_sessions", {
@@ -97135,8 +97124,7 @@ class NativeActivationHost {
         resolved_tool_contract: formatResolvedToolContract(effectiveToolContract, "discover-then-pin")
       },
       ...isReviewer ? {
-        appendExecutionContext: createReviewerDiffAppendHook((message) => process.stderr.write(`${message}
-`))
+        appendExecutionContext: createReviewerDiffAppendHook((message) => runtimeWarn("reviewer-diff", message))
       } : {}
     });
     if (rendered.mandatoryRulesError) {
@@ -97537,12 +97525,10 @@ class NativeActivationHost {
       });
       const unresolved = outcomes.filter((outcome) => outcome.outcome !== "published");
       if (unresolved.length > 0) {
-        process.stderr.write(`[specialists] ${unresolved.length} settlement(s) still unpublished after republish: ` + `${unresolved.map((o) => `${o.activationId}/${o.attemptId}=${o.outcome}`).join(", ")}
-`);
+        runtimeWarn("settlement-republish", `[specialists] ${unresolved.length} settlement(s) still unpublished after republish: ` + `${unresolved.map((o) => `${o.activationId}/${o.attemptId}=${o.outcome}`).join(", ")}`);
       }
     } catch (error) {
-      process.stderr.write(`[specialists] settlement republish pass failed: ${error instanceof Error ? error.message : String(error)}
-`);
+      runtimeWarn("settlement-republish", `[specialists] settlement republish pass failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   onSessionEvent(snapshot, event, emit) {

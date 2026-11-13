@@ -2,6 +2,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { existsSync, realpathSync } from 'node:fs';
+import { runtimeWarn } from '../utils/runtime-diagnostics.js';
 import { homedir } from 'node:os';
 import { parse as parseYaml } from 'yaml';
 import {
@@ -553,9 +554,7 @@ export class SpecialistLoader {
         if (typeof rawId === 'string' && /^[a-z][a-z0-9-]*$/.test(rawId)) {
           safeIds.push(rawId);
         } else {
-          process.stderr.write(
-            `[specialists] mandatory_rules.template_sets: dropping invalid set id '${String(rawId)}' for '${name}' (must be kebab-case)\n`,
-          );
+          runtimeWarn('loader', `[specialists] mandatory_rules.template_sets: dropping invalid set id '${String(rawId)}' for '${name}' (must be kebab-case)`);
         }
       }
       baseMandatoryRules[field] = safeIds;
@@ -600,9 +599,7 @@ export class SpecialistLoader {
     const homeHit = hits.find(h => h.dir.scope === 'home');
     const repoHit = hits.find(h => h.dir.scope === 'user');
     if (homeHit && repoHit && realpathOr(repoHit.resolved.filePath) !== realpathOr(homeHit.resolved.filePath)) {
-      process.stderr.write(
-        `[specialists] warning: '${name}' resolved from repo '${repoHit.resolved.filePath}' shadows home '${homeHit.resolved.filePath}'\n`,
-      );
+      runtimeWarn('loader', `[specialists] warning: '${name}' resolved from repo '${repoHit.resolved.filePath}' shadows home '${homeHit.resolved.filePath}'`);
     }
 
     // Layer 1: package canonical (always lowest hit; full spec).
@@ -610,9 +607,7 @@ export class SpecialistLoader {
     const baseContent = await readFile(baseHit.resolved.filePath, 'utf-8');
     const base = await parseSpecialist(this.toJson(baseContent, baseHit.resolved.deprecatedYaml));
     if (baseHit.resolved.deprecatedYaml) {
-      process.stderr.write(
-        `[specialists] DEPRECATED: YAML specialist config detected at ${baseHit.resolved.filePath}. Please migrate to .specialist.json\n`,
-      );
+      runtimeWarn('loader', `[specialists] DEPRECATED: YAML specialist config detected at ${baseHit.resolved.filePath}. Please migrate to .specialist.json`);
     }
     this.resolveCanonicalPresetReferences(name, base);
 
@@ -642,13 +637,11 @@ export class SpecialistLoader {
         overrideRaw = JSON.parse(this.toJson(content, hit.resolved.deprecatedYaml));
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
-        process.stderr.write(`[specialists] skipping override ${hit.resolved.filePath}: ${msg}\n`);
+        runtimeWarn('loader', `[specialists] skipping override ${hit.resolved.filePath}: ${msg}`);
         continue;
       }
       if (hit.resolved.deprecatedYaml) {
-        process.stderr.write(
-          `[specialists] DEPRECATED: YAML specialist config detected at ${hit.resolved.filePath}. Please migrate to .specialist.json\n`,
-        );
+        runtimeWarn('loader', `[specialists] DEPRECATED: YAML specialist config detected at ${hit.resolved.filePath}. Please migrate to .specialist.json`);
       }
       warnings.push(
         ...this.applyOverrideFields(name, base, overrideRaw as Record<string, unknown>, 'user'),
@@ -676,11 +669,7 @@ export class SpecialistLoader {
       }
     }
     for (const shadow of claudeBridgeDecision.shadowed) {
-      process.stderr.write(
-        `[specialists] claude_bridge allow list in ${claudeBridgeDecision.blockPath} overrides '${name}' ` +
-          `${shadow.field}: layer value ${JSON.stringify(shadow.layerValue)} ignored, using ` +
-          `${JSON.stringify(shadow.blockValue)}\n`,
-      );
+      runtimeWarn('loader', `[specialists] claude_bridge allow list in ${claudeBridgeDecision.blockPath} overrides '${name}' ${shadow.field}: layer value ${JSON.stringify(shadow.layerValue)} ignored, using ${JSON.stringify(shadow.blockValue)}`);
     }
 
     // The TOP layer (highest-priority hit) drives the SpecialistSummary scope/source.
@@ -759,7 +748,7 @@ export class SpecialistLoader {
           });
         } catch (e: unknown) {
           const reason = e instanceof Error ? e.message : String(e);
-          process.stderr.write(`[specialists] skipping ${file} (${specialistName}): ${reason}\n`);
+          runtimeWarn('loader', `[specialists] skipping ${file} (${specialistName}): ${reason}`);
         }
       }
     }
@@ -984,14 +973,14 @@ function emitPresetResolved(
   resolvedValue: unknown,
   depth: number,
 ): void {
-  process.stderr.write(`${JSON.stringify({
+  runtimeWarn('loader', JSON.stringify({
     event: 'preset_resolved',
     specialist,
     field,
     preset_name: presetName,
     resolved_value: resolvedValue,
     depth,
-  })}\n`);
+  }));
 }
 
 function resolveSkillsPaths(spec: Specialist, fileDir: string, consumerRoot: string): void {
