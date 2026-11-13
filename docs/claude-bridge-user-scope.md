@@ -279,9 +279,8 @@ Resolution for Specialist `N`, applied in the loader after every other layer:
    provider is the silent billing-surface swap the route exists to prevent (§9, Q4).
 6. When the block changes a value a lower layer set (a home or repo layer asked for a different
    model or flag), the loader records a provenance warning that `sp doctor` and the loader's own
-   stderr line show,
-   so the operator sees that their selection shadowed a layer rather than silently observing a
-   different model (§9, amendment 1).
+   stderr line show, so the operator sees that their selection shadowed a layer rather than
+   silently observing a different model (§9, amendment 1).
 
 Invariants:
 
@@ -486,7 +485,9 @@ be written through `sp edit --global`, and `sp init --global` reports it as an u
   default; legacy behaviour when the key is absent. Every route reader (native host dispatch and
   retry, `sp run`, `sp script`, session start) consumes that resolver.
 - No repository layer can enable the route or redirect the model of a listed Specialist; a shadowed
-  layer produces a provenance warning visible in `sp doctor` and `sp list`.
+  layer produces a provenance warning visible in `sp doctor` and on the loader's own stderr line.
+  (`sp list` does not read the decision: `getClaudeBridgeDecision` has two consumers, both in
+  `sp doctor`.)
 - Native host, `sp run`, `sp script`, `sp list`, `sp view` observe the same decision.
 - A listed Specialist whose resolved model is not `claude-bridge/...` is refused with a dedicated
   rejection code naming the Specialist, the model and the `claude_bridge` block; the refusal is

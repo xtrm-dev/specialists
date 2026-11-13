@@ -186,18 +186,20 @@ Both live at `~/.pi/agent/extensions/`. Run `specialists status` to see which ex
 
 ## The Claude Code route (opt-in)
 
-A definition may set `execution.claude_bridge: true` to run its Claude models through the Claude
-Code CLI and the Agent SDK on the operator's subscription login, instead of an API-key provider.
-
-Two switches must both be on: the definition field (the per-Specialist selector) **and** the
-operator switch, which lives outside every repository:
+A Specialist may run its Claude models through the Claude Code CLI and the Agent SDK on the
+operator's subscription login, instead of an API-key provider. The operator selects it in the one
+file that lives outside every repository, naming the Specialists that may use it:
 
 ```json
 // ~/.config/specialists/user.json  (or $XDG_CONFIG_HOME/specialists/user.json)
-{ "claude_bridge": { "enabled": true } }
+{ "claude_bridge": { "enabled": true, "default_model": "claude-bridge/claude-sonnet-5-5",
+                     "specialists": ["advisor"] } }
 ```
 
-The flag is off by default, requires `pi-claude-bridge` to be installed where Pi resolves global
-packages (or an absolute `SPECIALISTS_CLAUDE_BRIDGE_PATH`), and is not for fleet-scale or
-unattended bulk runs. With either switch off, no part of the route is loaded and a
-`claude-bridge/...` model is refused exactly as it is today. See [claude-bridge.md](./claude-bridge.md).
+The loader derives `execution.claude_bridge` and the model per Specialist from that block, so no
+shipped or repository definition carries them. A definition flag is still read when the block has no
+allow list — the legacy shape — and the route is off by default otherwise. It requires
+`pi-claude-bridge` to be installed where Pi resolves global packages (or an absolute
+`SPECIALISTS_CLAUDE_BRIDGE_PATH`), and is not for fleet-scale or unattended bulk runs. With the
+route off, no part of it is loaded and a `claude-bridge/...` model is refused exactly as before. See
+[claude-bridge.md](./claude-bridge.md).

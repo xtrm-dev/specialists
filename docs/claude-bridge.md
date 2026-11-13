@@ -79,7 +79,10 @@ For Specialist `N`:
    `sp doctor` and the loader's stderr line show, so an operator sees that the selection shadowed a
    layer rather than silently observing a different model.
 6. An explicit `--model` override keeps its meaning: it replaces the candidate chain for that run.
-   It does not grant the route.
+   It does not grant the route — and it does not revoke it either, so overriding a listed Specialist
+   to a non-bridged model runs on that model for that run only. The "never billed to another
+   provider" rule above is about refusing a run the block did not authorise; it is not a claim that
+   an explicit operator override is refused.
 
 This precedence exception is the point: a repository can write `execution.claude_bridge` and
 `execution.model` (both are override-allowed), and it can ship a Specialist whose definition becomes
