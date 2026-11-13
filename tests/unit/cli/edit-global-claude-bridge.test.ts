@@ -151,10 +151,15 @@ describe('sp init --global preserves the reserved block', () => {
     const result = mergeGlobalUserConfig(existing as Record<string, unknown>, template);
 
     expect(result.removed).not.toContain(CLAUDE_BRIDGE_SWITCH_KEY);
+    expect(result.notInstalledHere).not.toContain(CLAUDE_BRIDGE_SWITCH_KEY);
     expect(result.config[CLAUDE_BRIDGE_SWITCH_KEY]).toEqual(block);
-    // A real missing Specialist is still reported: the fix narrows the classification, it does not
-    // silence the notice.
+    // A Specialist this machine cannot resolve is still reported — against its own list, since the
+    // entry is kept and backfilled rather than treated as retired (SPECIALISTS-4448).
     const withRetired = { ...existing, 'retired-name': { execution: { model: 'x' } } };
-    expect(mergeGlobalUserConfig(withRetired as Record<string, unknown>, template).removed).toContain('retired-name');
+    const retiredResult = mergeGlobalUserConfig(withRetired as Record<string, unknown>, template);
+    expect(retiredResult.notInstalledHere).toContain('retired-name');
+    expect(retiredResult.removed).not.toContain('retired-name');
+    // ...and its one set value survives the backfill.
+    expect((retiredResult.config['retired-name'] as { execution: { model: unknown } }).execution.model).toBe('x');
   });
 });
