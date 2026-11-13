@@ -308,9 +308,13 @@ describe('package-payload release contract', () => {
 
     expect(validation).toBeGreaterThan(-1);
     expect(upload).toBeGreaterThan(validation);
-    expect(workflow).toContain('NODE_ENV=test bun run build');
-    expect(workflow).toContain('git diff --exit-code -- dist/');
-    expect(workflow).toContain('git status --porcelain --untracked-files=all -- dist/');
+    // The raw build + diff pair moved into one guard (SPECIALISTS-4445); this pins the property the
+    // lines existed for — the payload jobs check dist/ reproducibility with the pinned bun and fail
+    // on drift — rather than the literal commands that implemented it.
+    expect(workflow).toContain('node scripts/check-dist-reproducible.mjs');
+    // Drift must FAIL the payload jobs: a --write invocation returns 0 after a mismatch and would
+    // pack a bundle nobody committed.
+    expect(workflow).not.toContain('check-dist-reproducible.mjs --write');
     expect(workflow).toContain("tarball_name=$(npm pack --pack-destination /tmp --json | jq -r '.[0].filename')");
     expect(workflow).toContain('tarball="/tmp/$tarball_name"');
     expect(workflow).not.toContain('cp "$tarball" /tmp/sp-test.tgz');

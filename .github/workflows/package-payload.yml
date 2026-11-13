@@ -150,8 +150,11 @@ jobs:
         run: |
           set -euo pipefail
           # The same guard payload-contract uses, so a bundle built by the wrong bun names the cause
-          # here too instead of reporting a raw diff (SPECIALISTS-4445).
-          node scripts/check-dist-reproducible.mjs --write
+          # here too instead of reporting a raw diff (SPECIALISTS-4445). Check-only on purpose: it
+          # restores dist/ and exits 1 on drift, so this job still FAILS on a non-reproducible bundle
+          # and packs the committed bytes. `--write` would return 0 after a mismatch and pack a bundle
+          # nobody committed.
+          node scripts/check-dist-reproducible.mjs
           tarball_name=$(npm pack --pack-destination /tmp --json | jq -r '.[0].filename')
           tarball="/tmp/$tarball_name"
           test "$tarball_name" = "jaggerxtrm-specialists-$(node -p "require('./package.json').version").tgz"

@@ -146,7 +146,7 @@ export function changedDistPaths(statusOutput) {
     paths.push(entry.slice(3));
     if (status.includes('R') || status.includes('C')) index += 1;
   }
-  return paths.filter((path) => path === 'dist' || path.startsWith('dist/') || path === 'dist');
+  return paths.filter((path) => path === 'dist' || path.startsWith('dist/'));
 }
 
 /**
@@ -312,11 +312,22 @@ function main() {
 }
 
 /**
+ * Whether this module is the entry point.
+ *
  * `import.meta.main` only exists on Node >= 24.2. Without the fallback, an older Node evaluates this
  * module, skips main() and exits 0 — a green guard that checked nothing, which is the one failure
- * mode this script must not have.
+ * mode this script must not have. Exported so that fallback is pinned by a test rather than by the
+ * Node version the test happens to run on.
+ *
+ * @param {boolean | undefined} metaMain
+ * @param {string | undefined} argv1
+ * @param {string} moduleUrl
+ * @returns {boolean}
  */
-const invokedDirectly =
-  import.meta.main ??
-  (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href);
-if (invokedDirectly) process.exit(main());
+export function isDirectInvocation(metaMain, argv1, moduleUrl) {
+  if (typeof metaMain === 'boolean') return metaMain;
+  if (argv1 === undefined || argv1 === '') return false;
+  return moduleUrl === pathToFileURL(argv1).href;
+}
+
+if (isDirectInvocation(import.meta.main, process.argv[1], import.meta.url)) process.exit(main());

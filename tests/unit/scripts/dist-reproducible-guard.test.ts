@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   changedDistPaths,
   evaluateBunSelection,
+  isDirectInvocation,
   mismatchMessage,
   parseArgs,
   parseBunVersion,
@@ -170,6 +171,25 @@ describe('dist reproducibility guard (SPECIALISTS-4445)', () => {
     });
   });
 
+  describe('isDirectInvocation', () => {
+    // The Node < 24.2 fallback: `import.meta.main` is undefined there, and a false negative means a
+    // green guard that checked nothing.
+    it('prefers import.meta.main when the runtime provides it', () => {
+      expect(isDirectInvocation(true, '/somewhere/else.mjs', 'file:///guard.mjs')).toBe(true);
+      expect(isDirectInvocation(false, '/abs/guard.mjs', 'file:///abs/guard.mjs')).toBe(false);
+    });
+
+    it('falls back to comparing the module URL with argv[1]', () => {
+      expect(isDirectInvocation(undefined, '/abs/guard.mjs', 'file:///abs/guard.mjs')).toBe(true);
+      expect(isDirectInvocation(undefined, '/abs/other.mjs', 'file:///abs/guard.mjs')).toBe(false);
+    });
+
+    it('returns false when there is no argv[1] at all', () => {
+      expect(isDirectInvocation(undefined, undefined, 'file:///abs/guard.mjs')).toBe(false);
+      expect(isDirectInvocation(undefined, '', 'file:///abs/guard.mjs')).toBe(false);
+    });
+  });
+
   describe('parseArgs', () => {
     it('defaults to check-only in the working directory', () => {
       const parsed = parseArgs([]);
@@ -292,6 +312,31 @@ describe('CLI end to end (main)', () => {
     expect(status).toBe(0);
     expect(out).toContain('had uncommitted changes before this check');
     expect(readFileSync(join(repo, 'dist', 'index.js'), 'utf-8')).toBe('committed\n');
+  });
+
+  it('removes a build artefact whose name git would have to quote', () => {
+    // The restore compares paths from `git status` with paths from `git ls-files`; a name containing
+    // a double quote is quoted in every non -z form, so the old comparison missed it and left the
+    // file in a tree it had just called restored.
+    const root = mkdtempSync(join(tmpdir(), 'dist-guard-quote-'));
+    dirs.push(root);
+    const repo = join(root, 'repo');
+    mkdirSync(join(repo, 'dist'), { recursive: true });
+    writeFileSync(join(repo, 'dist', 'index.js'), 'committed\n');
+    writeFileSync(join(repo, '.bun-version'), '1.4.2\n');
+    git(repo, 'init', '-q');
+    git(repo, 'config', 'user.email', 'guard@example.test');
+    git(repo, 'config', 'user.name', 'guard');
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-qm', 'init');
+    const bun = join(root, 'bin', 'bun');
+    mkdirSync(join(root, 'bin'), { recursive: true });
+    writeFileSync(bun, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 1.4.2; exit 0; fi\ntouch \'dist/a"b.js\'\n');
+    chmodSync(bun, 0o755);
+
+    const { status } = runGuard(repo, bun);
+    expect(status).toBe(1);
+    expect(git(repo, 'status', '--porcelain', '-uall', '--', 'dist/')).toBe('');
   });
 
   it('refuses to build with a bun that is not the pinned one', () => {
