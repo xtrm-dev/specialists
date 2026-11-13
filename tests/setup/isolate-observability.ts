@@ -28,11 +28,10 @@ import { rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { resolveObservabilityDbLocation } from '../../src/specialist/observability-db.js';
 import { createObservabilitySqliteClientAtPath } from '../../src/specialist/observability-sqlite.js';
-import { registerTempDir } from './tmp-registry.js';
 import { tempDir } from '../utils/temp-dir.js';
 
+// `tempDir` registers with the CORE-2612 sweep itself; registering again here was redundant.
 const isolated = tempDir('specialists-test-db-');
-registerTempDir(isolated);
 
 // Keep `sp init --global` off the operator's live Pi settings. Bun's os.homedir() ignores a
 // runtime HOME change, so tests that only swap process.env.HOME still resolved

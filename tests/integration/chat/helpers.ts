@@ -1,14 +1,15 @@
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { spawnSync } from 'node:child_process';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 export const repoRoot = resolve(import.meta.dirname, '../../..');
 
 export async function createTempWorkspace(prefix: string): Promise<string> {
-  return mkdtemp(join(tmpdir(), prefix));
+  return tempDir(prefix);
 }
 
 export async function cleanupTempWorkspace(path: string | undefined): Promise<void> {

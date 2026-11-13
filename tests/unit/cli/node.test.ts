@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+
 
 const sqliteClientMock = {
   close: vi.fn(),
@@ -49,6 +49,7 @@ vi.mock('../../../src/specialist/node-supervisor.js', () => ({
 
 import { BeadsClient } from '../../../src/specialist/beads.js';
 import { handleNodeCommand } from '../../../src/cli/node.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 describe('node CLI run wiring', () => {
   beforeEach(() => {
@@ -111,7 +112,7 @@ describe('node CLI run wiring', () => {
   });
 
   it('keeps explicit path ahead of discovery dirs', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'sp-node-explicit-'));
+    const cwd = tempDir('sp-node-explicit-');
     const originalCwd = process.cwd();
     await writeFile(join(cwd, 'custom.node.json'), '{"name":"explicit","coordinator":"node-coordinator","members":[],"initialPrompt":"Explicit"}');
     await mkdir(join(cwd, 'config', 'nodes'), { recursive: true });
@@ -130,7 +131,7 @@ describe('node CLI run wiring', () => {
   });
 
   it('lists node configs with repo-over-default source labels', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'sp-node-list-'));
+    const cwd = tempDir('sp-node-list-');
     const originalCwd = process.cwd();
     await mkdir(join(cwd, 'config', 'nodes'), { recursive: true });
     await mkdir(join(cwd, '.specialists', 'default', 'nodes'), { recursive: true });
@@ -152,7 +153,7 @@ describe('node CLI run wiring', () => {
   });
 
   it('lists package-live node configs when repo dirs absent', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'sp-node-package-live-'));
+    const cwd = tempDir('sp-node-package-live-');
     const originalCwd = process.cwd();
 
     process.chdir(cwd);

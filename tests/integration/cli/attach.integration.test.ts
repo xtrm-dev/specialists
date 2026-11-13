@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { spawnSync } from 'node:child_process';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 
@@ -131,7 +132,7 @@ describe('integration: specialists attach', () => {
   });
 
   it('exits 1 and prints usage when no job id is provided', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-attach-'));
+    tempDir = createTempDir('specialists-int-attach-');
 
     const result = runCli(['attach'], tempDir);
 
@@ -140,7 +141,7 @@ describe('integration: specialists attach', () => {
   });
 
   it('exits 1 and prints usage without a TTY even when a job id is given', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-attach-'));
+    tempDir = createTempDir('specialists-int-attach-');
     await writeStatus(tempDir, 'running-job', { status: 'running' });
 
     const result = runCli(['attach', 'running-job'], tempDir, { SPECIALISTS_JOB_FILE_OUTPUT: 'on' });
@@ -150,7 +151,7 @@ describe('integration: specialists attach', () => {
   });
 
   (canPty ? it : it.skip)('exits 1 with not found message for missing job', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-attach-'));
+    tempDir = createTempDir('specialists-int-attach-');
 
     const result = attachInPty(['attach', 'nonexistent-job'], tempDir, { SPECIALISTS_JOB_FILE_OUTPUT: 'on' });
 
@@ -159,7 +160,7 @@ describe('integration: specialists attach', () => {
   }, 30_000);
 
   (canPty ? it : it.skip)('exits 1 with terminal message for done jobs', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-attach-'));
+    tempDir = createTempDir('specialists-int-attach-');
     await writeStatus(tempDir, 'done-job', { status: 'done' });
 
     const result = attachInPty(['attach', 'done-job'], tempDir, { SPECIALISTS_JOB_FILE_OUTPUT: 'on' });
@@ -169,7 +170,7 @@ describe('integration: specialists attach', () => {
   }, 30_000);
 
   (canPty ? it : it.skip)('attaches a running job and exits 0 when the operator quits', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-attach-live-'));
+    tempDir = createTempDir('specialists-int-attach-live-');
     await writeStatus(tempDir, 'running-job', { status: 'running' });
 
     const startedAt = Date.now();
@@ -183,7 +184,7 @@ describe('integration: specialists attach', () => {
   }, 30_000);
 
   ((canPty && canPgrep) ? it : it.skip)('bounds a stuck attach and leaves no orphan process', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-attach-stuck-'));
+    tempDir = createTempDir('specialists-int-attach-stuck-');
     await writeStatus(tempDir, 'stuck-attach-job', { status: 'running' });
     // No input: the TUI waits forever. This is the regression the bound exists for.
     const stuckLimitSeconds = 5;
@@ -208,7 +209,7 @@ describe('integration: specialists list --live', () => {
   });
 
   it('prints no sessions message and exits 0 when no running tmux jobs exist', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-list-live-'));
+    tempDir = createTempDir('specialists-int-list-live-');
     await mkdir(join(tempDir, '.specialists', 'jobs'), { recursive: true });
 
     const result = runCli(['list', '--live'], tempDir, { SPECIALISTS_JOB_FILE_OUTPUT: 'on' });
@@ -218,7 +219,7 @@ describe('integration: specialists list --live', () => {
   });
 
   it('prints plain-text job list in non-interactive mode', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-list-live-'));
+    tempDir = createTempDir('specialists-int-list-live-');
     await writeStatus(tempDir, 'job-a', {
       status: 'running',
       tmux_session: 'sp-job-a-111111',
@@ -238,7 +239,7 @@ describe('integration: specialists list --live', () => {
   });
 
   it('keeps specialists list output unchanged when --live is not used', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-list-live-'));
+    tempDir = createTempDir('specialists-int-list-live-');
     await writeSpecialist(tempDir, 'alpha-specialist');
 
     const result = runCli(['list'], tempDir);

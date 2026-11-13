@@ -164,7 +164,7 @@ describe('tmux live feed command', () => {
 
 describe('run JSON tailer', () => {
   it('reads SQLite timeline events and emits pi-compatible NDJSON', () => {
-    const root = fs.tempDir('sp-run-json-');
+    const root = tempDir('sp-run-json-');
     const jobsDir = join(root, '.specialists', 'jobs');
     fs.mkdirSync(jobsDir, { recursive: true });
     const location = resolveObservabilityDbLocation(root);
@@ -228,7 +228,7 @@ describe('run JSON tailer', () => {
 
   it('does not replay SQLite events when file fallback activates', () => {
     vi.useFakeTimers();
-    const root = fs.tempDir('sp-run-json-fallback-');
+    const root = tempDir('sp-run-json-fallback-');
     const jobsDir = join(root, '.specialists', 'jobs');
     const jobDir = join(jobsDir, 'job-json');
     fs.mkdirSync(jobDir, { recursive: true });

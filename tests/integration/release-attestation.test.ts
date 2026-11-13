@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { cp, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { cp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { tempDir } from '../utils/temp-dir.js';
 
 const run = promisify(execFile);
 const script = path.resolve('scripts/generate-release-attestation.mjs');
@@ -60,7 +61,7 @@ afterEach(async () => {
 });
 
 async function makeFixture(opts: { version?: string } = {}) {
-  const dir = await mkdtemp(path.join(tmpdir(), 'release-attestation-'));
+  const dir = tempDir('release-attestation-');
   dirs.push(dir);
   const repo = path.join(dir, 'repo');
   const version = opts.version ?? '4.2.0';
@@ -382,7 +383,7 @@ describe('package-payload release contract', () => {
 
   it('fails closed on symlinked declarations without mutating outside files', async () => {
     const { postprocessBuild } = await loadPostprocessor();
-    const dir = await mkdtemp(path.join(tmpdir(), 'postprocess-build-'));
+    const dir = tempDir('postprocess-build-');
     dirs.push(dir);
     const repo = path.join(dir, 'repo');
     const distTypes = path.join(repo, 'dist', 'types');
@@ -402,7 +403,7 @@ describe('package-payload release contract', () => {
 
   it('fails closed on symlinked dist root without mutating outside files', async () => {
     const { postprocessBuild } = await loadPostprocessor();
-    const dir = await mkdtemp(path.join(tmpdir(), 'postprocess-build-'));
+    const dir = tempDir('postprocess-build-');
     dirs.push(dir);
     const repo = path.join(dir, 'repo');
     const outsideDir = path.join(dir, 'outside-dist');
@@ -424,7 +425,7 @@ describe('package-payload release contract', () => {
 
   it('fails closed on symlinked dist/types root without mutating outside files and without partially rewriting the cli', async () => {
     const { postprocessBuild } = await loadPostprocessor();
-    const dir = await mkdtemp(path.join(tmpdir(), 'postprocess-build-'));
+    const dir = tempDir('postprocess-build-');
     dirs.push(dir);
     const repo = path.join(dir, 'repo');
     const distPath = path.join(repo, 'dist');

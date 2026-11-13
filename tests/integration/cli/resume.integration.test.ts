@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { spawnSync } from 'node:child_process';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 
@@ -40,7 +41,7 @@ describe('integration: specialists resume', () => {
   });
 
   it('exits 1 with usage when job-id or task are missing', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-resume-'));
+    tempDir = createTempDir('specialists-int-resume-');
 
     const result = runCli(['resume'], tempDir);
     expect(result.status).toBe(1);
@@ -48,7 +49,7 @@ describe('integration: specialists resume', () => {
   });
 
   it('exits 1 with clear error when job does not exist', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-resume-'));
+    tempDir = createTempDir('specialists-int-resume-');
 
     const result = runCli(['resume', 'nosuchjob', 'do more'], tempDir);
     expect(result.status).toBe(1);
@@ -56,7 +57,7 @@ describe('integration: specialists resume', () => {
   });
 
   it('exits 1 with clear error when job is not in waiting state (running)', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-resume-'));
+    tempDir = createTempDir('specialists-int-resume-');
     const jobsDir = join(tempDir, '.specialists', 'jobs');
     await writeJobFiles(jobsDir, 'run1', { status: 'running' });
 
@@ -66,7 +67,7 @@ describe('integration: specialists resume', () => {
   });
 
   it('exits 1 with clear error when job is not in waiting state (done)', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-resume-'));
+    tempDir = createTempDir('specialists-int-resume-');
     const jobsDir = join(tempDir, '.specialists', 'jobs');
     await writeJobFiles(jobsDir, 'done1', { status: 'done' });
 
@@ -77,7 +78,7 @@ describe('integration: specialists resume', () => {
   });
 
   it('exits 1 with clear error when waiting job has no fifo_path', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-resume-'));
+    tempDir = createTempDir('specialists-int-resume-');
     const jobsDir = join(tempDir, '.specialists', 'jobs');
     await writeJobFiles(jobsDir, 'wait1', { status: 'waiting' });
 
@@ -87,7 +88,7 @@ describe('integration: specialists resume', () => {
   });
 
   it('writes {type:"resume"} payload to fifo and prints success on happy path', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-resume-'));
+    tempDir = createTempDir('specialists-int-resume-');
     const jobsDir = join(tempDir, '.specialists', 'jobs');
     const fifoPath = join(tempDir, 'test.fifo');
     // Pre-create the file so writeFileSync can append to it
@@ -115,7 +116,7 @@ describe('integration: specialists follow-up (deprecated)', () => {
   });
 
   it('prints deprecation notice to stderr', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-followup-'));
+    tempDir = createTempDir('specialists-int-followup-');
 
     // Even an invalid invocation should still show the deprecation notice first
     const result = runCli(['follow-up'], tempDir);
@@ -124,7 +125,7 @@ describe('integration: specialists follow-up (deprecated)', () => {
   });
 
   it('delegates to resume — same error for missing args', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-followup-'));
+    tempDir = createTempDir('specialists-int-followup-');
 
     const result = runCli(['follow-up'], tempDir);
     expect(result.status).toBe(1);
@@ -134,7 +135,7 @@ describe('integration: specialists follow-up (deprecated)', () => {
   });
 
   it('delegates to resume — same error for unknown job', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-followup-'));
+    tempDir = createTempDir('specialists-int-followup-');
 
     const result = runCli(['follow-up', 'nosuchjob', 'task'], tempDir);
     expect(result.status).toBe(1);

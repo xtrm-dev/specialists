@@ -4,6 +4,7 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tempDir } from '../utils/temp-dir.js';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const transcriptDir = tempDir('sp-chat-smoke-');
@@ -243,7 +244,6 @@ test('sp chat cleanup still fires on induced TUI crash', async () => {
   const preloadPath = join(transcriptDir, 'chat-crash.preload.ts');
   writeFileSync(preloadPath, `
 import { ChatStatus } from ${JSON.stringify(join(repoRoot, 'src/cli/chat/status.js'))};
-import { tempDir } from '../utils/temp-dir.js';
 const original = ChatStatus.prototype.render;
 ChatStatus.prototype.render = function renderCrash(width: number): string {
   if (width > 0) throw new Error('intentional smoke crash');

@@ -1,9 +1,10 @@
 // ISSUE: xtrm-wiy5n.4.11 — static skip remains tracked.
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { spawnSync } from 'node:child_process';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 const resolvedCheapModel = 'nano-gpt/moonshotai/kimi-k2.5';
@@ -68,7 +69,7 @@ describe.skip('integration: config show preset resolution', () => {
   }
 
   it('shows resolved literal for @preset/cheap override', async () => {
-    tempHome = await mkdtemp(join(tmpdir(), 'specialists-preset-config-show-'));
+    tempHome = tempDir('specialists-preset-config-show-');
     originalHome = process.env.HOME;
     originalXdg = process.env.XDG_CONFIG_HOME;
     process.env.HOME = tempHome;
@@ -91,7 +92,7 @@ describe.skip('integration: config show preset resolution', () => {
   });
 
   it('fails with specialist, field, preset, and known preset names on unknown preset', async () => {
-    tempHome = await mkdtemp(join(tmpdir(), 'specialists-preset-config-show-'));
+    tempHome = tempDir('specialists-preset-config-show-');
     originalHome = process.env.HOME;
     originalXdg = process.env.XDG_CONFIG_HOME;
     process.env.HOME = tempHome;

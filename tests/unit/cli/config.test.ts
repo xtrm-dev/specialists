@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const REPO_ROOT = process.cwd();
 
@@ -13,7 +14,7 @@ describe('config CLI', () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-config-test-'));
+    tempDir = createTempDir('specialists-config-test-');
     const configDir = join(tempDir, 'config', 'specialists');
     await mkdir(configDir, { recursive: true });
     await writeFile(join(configDir, 'executor.specialist.json'), await readFile(join(REPO_ROOT, 'config', 'specialists', 'executor.specialist.json'), 'utf-8'), 'utf-8');

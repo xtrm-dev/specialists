@@ -2,9 +2,10 @@
 // tests/unit/cli/edit.test.ts
 // Tests the parseArgs logic in edit.ts by shimming process.exit + process.argv.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, writeFile, mkdir, readFile } from 'node:fs/promises';
+import { rm, writeFile, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -93,7 +94,7 @@ describe('edit CLI — run() YAML mutations', () => {
   let specPath: string;
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-edit-test-'));
+    tempDir = createTempDir('specialists-edit-test-');
     const specialistsDir = join(tempDir, 'specialists');
     await mkdir(specialistsDir, { recursive: true });
     specPath = join(specialistsDir, 'test-spec.specialist.json');

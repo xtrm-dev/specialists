@@ -52,9 +52,6 @@ vi.mock('../../../src/utils/runtime-diagnostics.js', async importOriginal => {
   };
 });
 
-afterEach(() => {
-});
-
 describe('claudeBridgeEnabled / claudeBridgeExtensionProviders', () => {
   it('is off by default and for every non-true value', () => {
     expect(claudeBridgeEnabled(undefined)).toBe(false);

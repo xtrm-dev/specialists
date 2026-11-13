@@ -7,9 +7,9 @@
  * operator's consent record as "no longer shipped", inviting its removal.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import {
   CLAUDE_BRIDGE_SWITCH_KEY,
   buildGlobalUserConfigTemplate,
@@ -18,6 +18,7 @@ import {
   mergeGlobalUserConfig,
   readClaudeBridgeBlock,
 } from '../../../src/specialist/global-config.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 async function importEdit() {
   return import('../../../src/cli/edit.js');
@@ -58,7 +59,7 @@ describe('sp edit --global claude_bridge.*', () => {
   let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
-    home = await mkdtemp(join(tmpdir(), 'edit-global-bridge-'));
+    home = tempDir('edit-global-bridge-');
     previousHome = process.env.HOME;
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});

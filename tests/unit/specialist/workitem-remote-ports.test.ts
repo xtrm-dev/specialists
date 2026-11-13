@@ -31,7 +31,7 @@ import {
   createReopeningService,
   type RemoteWorkItemService,
 } from '../../../src/activation/workitem-remote.js';
-import { scratchDir as createScratchDir, tempDir } from '../../utils/temp-dir.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const SUBSTRATE_DIR = (process.env['XTRM_SUBSTRATE_DIR'] ?? '').trim();
 const substrateSuite = SUBSTRATE_DIR ? describe : describe.skip;

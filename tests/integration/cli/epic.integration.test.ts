@@ -1,12 +1,13 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { execSync, spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { createObservabilitySqliteClient } from '../../../src/specialist/observability-sqlite.js';
 import { ensureObservabilityDbFile, resolveObservabilityDbLocation } from '../../../src/specialist/observability-db.js';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 const entry = join(repoRoot, 'src/index.ts');
@@ -120,8 +121,8 @@ describe('integration: epic and merge CLI', () => {
 
   beforeEach(async () => {
     originalCwd = process.cwd();
-    tempDir = await mkdtemp(join(tmpdir(), 'sp-epic-integration-'));
-    binDir = await mkdtemp(join(tmpdir(), 'sp-epic-bin-'));
+    tempDir = createTempDir('sp-epic-integration-');
+    binDir = createTempDir('sp-epic-bin-');
     await initRepo(tempDir);
     process.chdir(tempDir);
 

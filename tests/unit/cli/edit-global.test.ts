@@ -2,10 +2,10 @@
 // Covers `sp edit --global` (src/cli/edit.ts runGlobalEdit): --get, --set,
 // $EDITOR flow, mutual exclusion with --scope.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { rm, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { getGlobalUserConfigPath } from '../../../src/specialist/global-config.js';
 import { tempDir } from '../../utils/temp-dir.js';
 
@@ -41,7 +41,7 @@ describe('edit CLI — --global --get / --set', () => {
   let originalHome: string | undefined;
 
   beforeEach(async () => {
-    tempHome = await mkdtemp(join(tmpdir(), 'sp-edit-global-'));
+    tempHome = tempDir('sp-edit-global-');
     originalHome = process.env.HOME;
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -315,7 +315,7 @@ describe('edit CLI — --global + --scope rejection (run path)', () => {
   let originalHome: string | undefined;
 
   beforeEach(async () => {
-    tempHome = await mkdtemp(join(tmpdir(), 'sp-edit-global-mutex-'));
+    tempHome = tempDir('sp-edit-global-mutex-');
     originalHome = process.env.HOME;
     process.env.HOME = tempHome;
     delete process.env.XDG_CONFIG_HOME;
