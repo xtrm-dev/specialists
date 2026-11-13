@@ -312,6 +312,10 @@ export declare function createActivationResourceLoader(sdk: PiSdk, options: {
     cwd: string;
     skillPaths: string[];
     extensionPaths?: string[];
+    rolePrompt?: {
+        text: string;
+        mode?: 'append' | 'replace';
+    };
 }): PiResourceLoaderLike;
 /**
  * Lease admission for the native session's reconstructed tools (SPECIALISTS-4294).
