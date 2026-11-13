@@ -23064,6 +23064,28 @@ import { createHash as createHash5 } from "node:crypto";
 import { appendFileSync as appendFileSync2, existsSync as existsSync19, linkSync, mkdirSync as mkdirSync7, readFileSync as readFileSync12, realpathSync as realpathSync5, renameSync as renameSync3, rmSync as rmSync2, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "node:fs";
 import { basename as basename4, dirname as dirname12, join as join18 } from "node:path";
 
+// src/utils/runtime-ignore.ts
+var RUNTIME_IGNORE_PATTERNS = [
+  ".xtrm/worktrees/",
+  ".specialists/jobs/",
+  ".specialists/ready/",
+  ".specialists/settlements/",
+  ".specialists/db/*.db",
+  ".specialists/db/*.db-wal",
+  ".specialists/db/*.db-shm",
+  ".specialists/leases/",
+  ".specialists/interactions/",
+  ".specialists/logs/",
+  ".specialists/trace.jsonl",
+  ".specialists/version-check.json",
+  ".specialists/executor-result.md",
+  ".specialists/*-result.md",
+  ".specialists/sync-docs-report.md"
+];
+function runtimeIgnoreExcludePatterns() {
+  return RUNTIME_IGNORE_PATTERNS.map((pattern) => `/${pattern}`);
+}
+
 // src/activation/types.ts
 var THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
@@ -23151,11 +23173,15 @@ function provisionWriterWorkspace(cwd, issueRef, role) {
     if (!worktreePath) {
       const mainRoot = dirname12(git("rev-parse", "--path-format=absolute", "--git-common-dir"));
       worktreePath = join18(mainRoot, ".xtrm", "worktrees", `${basename4(mainRoot)}-sp-${roleSlug}-${slug}`);
-      if (spawnSync5("git", ["check-ignore", "-q", join18(worktreePath, "x")], { cwd: mainRoot }).status !== 0) {
-        appendFileSync2(git("rev-parse", "--path-format=absolute", "--git-path", "info/exclude"), `
-/.xtrm/worktrees/
+      const excludePath = git("rev-parse", "--path-format=absolute", "--git-path", "info/exclude");
+      const existing = existsSync19(excludePath) ? readFileSync12(excludePath, "utf-8").split(`
+`) : [];
+      const additions = runtimeIgnoreExcludePatterns().filter((pattern) => !existing.includes(pattern)).filter((pattern) => pattern.includes("*") || spawnSync5("git", ["check-ignore", "-q", join18(mainRoot, pattern.slice(1), "x")], { cwd: mainRoot }).status !== 0).join(`
 `);
-      }
+      if (additions)
+        appendFileSync2(excludePath, `
+` + additions + `
+`);
       const branchExists = spawnSync5("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd }).status === 0;
       const base = branchExists ? undefined : resolveWorktreeBase(git);
       git("worktree", "add", ...base ? ["-b", branch, worktreePath, base] : [worktreePath, branch]);
