@@ -20234,6 +20234,8 @@ async function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assista
         }));
       },
       onMetric: (event) => {
+        if (event.type === "api_error" && event.errorMessage)
+          lastApiError = event.errorMessage;
         if (event.type === "token_usage")
           appendTimelineEvent?.(createTokenUsageEvent(event.token_usage, event.source));
         if (event.type === "finish_reason")
@@ -20264,6 +20266,7 @@ async function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assista
     let outputTooLargeReason;
     let currentAssistantMessage = "";
     let lastCompletedAssistantMessage = "";
+    let lastApiError = "";
     const markAssistantMessageStart = () => {
       currentAssistantMessage = "";
     };
@@ -20290,7 +20293,7 @@ async function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assista
       await session.prompt(prompt);
       await session.waitForDone(timeoutMs);
       assistantText = await resolveAssistantText();
-      stderr = session.getStderr();
+      stderr = session.getStderr() || lastApiError;
       if (requiredJsonKeys.length > 0 && !outputSatisfiesJsonContract(assistantText, requiredJsonKeys)) {
         const repairPrompt = [
           "Return FINAL answer now as JSON only.",
@@ -20301,7 +20304,7 @@ async function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assista
         markAssistantMessageStart();
         await session.resume(repairPrompt, timeoutMs);
         assistantText = await resolveAssistantText();
-        stderr = session.getStderr();
+        stderr = session.getStderr() || lastApiError;
       }
       if (Buffer.byteLength(assistantText, "utf8") > assistantTextLimitBytes) {
         outputTooLarge = true;
@@ -20322,7 +20325,7 @@ async function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assista
       if (timedOut)
         session.kill(error instanceof Error ? error : new Error(message));
       assistantText = await session.getLastOutput().catch(() => "");
-      stderr = session.getStderr() || message;
+      stderr = session.getStderr() || lastApiError || message;
       return {
         model,
         text: assistantText,
