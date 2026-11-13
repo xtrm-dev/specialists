@@ -21137,8 +21137,7 @@ function headingOf(line) {
   return inlineBody ? { name, inlineBody } : { name };
 }
 function isSpaceChar(c) {
-  return c === " " || c === "\t" || c === `
-` || c === "\r" || c === "\v" || c === "\f";
+  return SPACE_CHAR.test(c);
 }
 function isHeadingLabel(text) {
   const alpha = (code) => code >= 65 && code <= 90 || code >= 97 && code <= 122;
@@ -21165,7 +21164,7 @@ function splitHeadingLabel(bare) {
   return { label, body: bare.slice(start) };
 }
 function scrutinyLevel(description) {
-  const match = description.match(/SCRUTINY\b[^\n]{0,200}\n?\s{0,20}\*{0,20}\s{0,20}(LOW|MEDIUM|HIGH|CRITICAL)\b/i) ?? description.match(/SCRUTINY\b\s{0,20}[:\-\u2014]?\s{0,20}(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
+  const match = description.match(new RegExp(`SCRUTINY\\b[^\\n]{0,${SCRUTINY_LEVEL_WINDOW}}\\n?\\s{0,20}\\*{0,20}\\s{0,20}(LOW|MEDIUM|HIGH|CRITICAL)\\b`, "i")) ?? description.match(/SCRUTINY\b\s{0,20}[:\-\u2014]?\s{0,20}(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
   return match?.[1]?.toUpperCase();
 }
 function validateContractText(contract) {
@@ -21223,7 +21222,7 @@ function extractPurposeExcerpt(description) {
   }
   return;
 }
-var REQUIRED_SECTIONS, SCRUTINY_LEVELS, ALL_HEADINGS, PURPOSE_EXCERPT_MAX = 60;
+var REQUIRED_SECTIONS, SCRUTINY_LEVELS, SCRUTINY_LEVEL_WINDOW = 200, ALL_HEADINGS, SPACE_CHAR, PURPOSE_EXCERPT_MAX = 60;
 var init_contract_sections = __esm(() => {
   REQUIRED_SECTIONS = [
     "PROBLEM",
@@ -21236,6 +21235,7 @@ var init_contract_sections = __esm(() => {
   ];
   SCRUTINY_LEVELS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
   ALL_HEADINGS = new Set([...REQUIRED_SECTIONS, "SCRUTINY"]);
+  SPACE_CHAR = /\s/;
 });
 
 // src/specialist/beads.ts
