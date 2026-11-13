@@ -5,8 +5,8 @@
  * then require `git diff --exit-code -- dist/`. A bundle built with a different bun is not that
  * bundle: 1.4.0 emits `var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res)` where 1.4.2
  * emits `var __esm = (fn, res, err) => () => {`, and the two retain different `exports_*` helper
- * blocks. Three PRs in a row (#553, #554, #556) failed on it, and each worker rediscovered the
- * cause from a raw diff.
+ * blocks. Two PRs in a row (#553, #554) failed on it, and each worker rediscovered the cause from
+ * a raw diff.
  *
  * So this script does what CI does, locally, and says what the raw diff never did: which bun built
  * the committed bundle, which bun the repository pins, and the one command that fixes it without
@@ -23,8 +23,13 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
-/** The pin file is the single source of truth; CI's setup-bun step reads the same value. */
+/**
+ * The pin the guard builds with. `.bun-version` is the source this script reads; the workflows pass
+ * the same version to `setup-bun` as a literal, and `toolchain-pin.yml` ties those literals to
+ * `package.json` `packageManager`. Three pins, one value — change them together.
+ */
 export const PIN_FILE = '.bun-version';
 
 /** Env override for a pinned bun binary, so a contributor never has to change their global bun. */
@@ -138,8 +143,50 @@ export function changedDistPaths(statusOutput) {
     .filter((line) => line.length > 3)
     // Renames carry "old -> new"; the new path is what a worker has to look at.
     .map((line) => (line.includes(' -> ') ? line.slice(line.indexOf(' -> ') + 4) : line.slice(3)))
-    .map((path) => path.replace(/^"|"$/g, '').trim())
+    .map((path) => unquotePorcelainPath(path.trim()))
     .filter((path) => path === 'dist' || path.startsWith('dist/'));
+}
+
+/**
+ * Decode a porcelain path into the byte sequence git means.
+ *
+ * `core.quotePath` makes git wrap a path in double quotes and C-escape the bytes it cannot print
+ * (`"dist/caf\303\251.js"` for a non-ASCII name). Stripping the quotes is not enough: the escaped
+ * form then fails to match the same path from `git ls-files`, so a restore leaves the file behind.
+ * This decodes the escapes; the git calls also pass `-c core.quotePath=false`, so a quoted form is
+ * the exception rather than the rule.
+ *
+ * @param {string} path
+ * @returns {string}
+ */
+export function unquotePorcelainPath(path) {
+  if (!path.startsWith('"') || !path.endsWith('"')) return path;
+  const body = path.slice(1, -1);
+  const bytes = [];
+  for (let index = 0; index < body.length; index += 1) {
+    const char = body[index];
+    if (char !== '\\') {
+      bytes.push(...Buffer.from(char, 'utf-8'));
+      continue;
+    }
+    const next = body[index + 1];
+    if (next === undefined) break;
+    if (/[0-7]/.test(next)) {
+      // Octal escapes are three digits and carry one byte of the original UTF-8 sequence.
+      const octal = body.slice(index + 1, index + 4);
+      bytes.push(Number.parseInt(octal, 8) & 0xff);
+      index += 3;
+      continue;
+    }
+    const simple = { n: 10, t: 9, r: 13, '"': 34, '\\': 92, a: 7, b: 8, f: 12, v: 11 }[next];
+    if (simple === undefined) {
+      bytes.push(...Buffer.from(next, 'utf-8'));
+    } else {
+      bytes.push(simple);
+    }
+    index += 1;
+  }
+  return Buffer.from(bytes).toString('utf-8');
 }
 
 /**
@@ -173,7 +220,7 @@ function run(cwd, args, env = process.env) {
 
 /** @param {string} cwd */
 function readDistStatus(cwd) {
-  const result = run(cwd, ['git', 'status', '--porcelain', '-uall', '--', 'dist/']);
+  const result = run(cwd, ['git', '-c', 'core.quotePath=false', 'status', '--porcelain', '-uall', '--', 'dist/']);
   if (result.status !== 0) {
     throw new Error(`git status failed: ${result.stderr || result.stdout}`);
   }
@@ -185,7 +232,7 @@ function restoreDist(cwd, paths) {
   // Tracked files go back to HEAD; only files THIS build created are removed, so a worker's own
   // uncommitted work is never deleted by a check.
   run(cwd, ['git', 'checkout', '--', 'dist/']);
-  const untracked = run(cwd, ['git', 'ls-files', '--others', '--exclude-standard', '--', 'dist/']).stdout
+  const untracked = run(cwd, ['git', '-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '--', 'dist/']).stdout
     .split('\n').map((line) => line.trim()).filter(Boolean);
   for (const path of untracked) {
     if (paths.includes(path)) run(cwd, ['rm', '-f', '--', path]);
@@ -259,9 +306,18 @@ function main() {
 
   if (files.length === 0) {
     if (options.json) {
-      console.log(JSON.stringify({ ok: true, pinned, running: running ?? pinned, files: [] }));
+      console.log(JSON.stringify({ ok: true, pinned, running: running ?? pinned, files: [], overwritten: before.trim() !== '' }));
     } else {
       console.log(`dist/ is reproducible with bun ${pinned}: a fresh build changed nothing.`);
+      // A clean verdict is not the same as "nothing was there": if dist/ carried uncommitted work,
+      // this build replaced it with the committed content. Say so, or a worker who rebuilt before
+      // re-checking loses that rebuild and commits src/ without it.
+      if (before.trim() !== '') {
+        console.error(
+          '\nNote: dist/ had uncommitted changes before this check and the fresh build replaced them. ' +
+            'If you wanted to keep that rebuild, it is gone — rebuild with --write and commit dist/.',
+        );
+      }
     }
     return 0;
   }
@@ -276,16 +332,28 @@ function main() {
 
   if (options.write) {
     if (!options.json) console.error('\n--write: leaving the rebuilt dist/ in place. Review and commit it.');
-  } else {
-    restoreDist(cwd, files);
-    if (!options.json) {
-      console.error('\nRestored your dist/ so this check did not modify the tree. Re-run with --write to keep the rebuild.');
-    }
-    if (before.trim() !== '' && !options.json) {
+    // --write asked for the rebuild; producing it is the success this mode reports. Exit 1 here
+    // would break `check:dist-reproducible --write && git commit ...` for the exact worker the flag
+    // exists to help.
+    return 0;
+  }
+
+  restoreDist(cwd, files);
+  if (!options.json) {
+    console.error('\nRestored your dist/ so this check did not modify the tree. Re-run with --write to keep the rebuild.');
+    if (before.trim() !== '') {
       console.error('Note: dist/ already had changes before this check; they were restored with it.');
     }
   }
   return 1;
 }
 
-if (import.meta.main) process.exit(main());
+/**
+ * `import.meta.main` only exists on Node >= 24.2. Without the fallback, an older Node evaluates this
+ * module, skips main() and exits 0 — a green guard that checked nothing, which is the one failure
+ * mode this script must not have.
+ */
+const invokedDirectly =
+  import.meta.main ??
+  (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href);
+if (invokedDirectly) process.exit(main());

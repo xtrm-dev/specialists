@@ -80,8 +80,10 @@ jobs:
       - name: Build package payload
         # One implementation for CI and for contributors (SPECIALISTS-4445): the script rebuilds with
         # the bun .bun-version pins and fails with the cause (__esm wrapper) and the fix, instead of
-        # a raw bundle diff that three PRs in a row had to reverse-engineer. setup-bun already
-        # provides the pin here, so the version refusal never fires in CI; the message is the value.
+        # a raw bundle diff that two PRs in a row had to reverse-engineer. setup-bun below is given
+        # the same version as a literal, so the version refusal never fires in CI here; the message
+        # is the value. Keep .bun-version, these literals and package.json packageManager in step —
+        # toolchain-pin.yml checks the latter two, nothing checks .bun-version.
         run: node scripts/check-dist-reproducible.mjs
       - name: Generate npm pack manifest
         run: |

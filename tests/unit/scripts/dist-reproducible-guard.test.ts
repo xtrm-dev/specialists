@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   changedDistPaths,
@@ -6,8 +11,11 @@ import {
   mismatchMessage,
   parseArgs,
   parseBunVersion,
+  unquotePorcelainPath,
   wrongBunMessage,
 } from '../../../scripts/check-dist-reproducible.mjs';
+
+const GUARD = resolve(import.meta.dirname, '../../../scripts/check-dist-reproducible.mjs');
 
 describe('dist reproducibility guard (SPECIALISTS-4445)', () => {
   describe('parseBunVersion', () => {
@@ -105,8 +113,19 @@ describe('dist reproducibility guard (SPECIALISTS-4445)', () => {
       expect(changedDistPaths('\n')).toEqual([]);
     });
 
-    it('unquotes paths git quotes for special characters', () => {
-      expect(changedDistPaths(' M "dist/a b.js"\n')).toEqual(['dist/a b.js']);
+    it('decodes the C-escaped form git really emits', () => {
+      // `core.quotePath` (on by default) leaves a space alone and escapes non-ASCII bytes, so the
+      // shape to support is octal escapes, not `"a b"`. Both are covered here.
+      expect(changedDistPaths(' M "dist/caf\\303\\251.js"\n')).toEqual(['dist/café.js']);
+    });
+
+    it('decodes quoted escapes for tab and backslash', () => {
+      expect(unquotePorcelainPath('"dist/a\\tb.js"')).toBe('dist/a\tb.js');
+      expect(unquotePorcelainPath('"dist/a\\\\b.js"')).toBe('dist/a\\b.js');
+    });
+
+    it('leaves an unquoted path untouched', () => {
+      expect(unquotePorcelainPath('dist/index.js')).toBe('dist/index.js');
     });
   });
 
@@ -174,5 +193,114 @@ describe('dist reproducibility guard (SPECIALISTS-4445)', () => {
     it('rejects --cwd without a value', () => {
       expect(() => parseArgs(['--cwd'])).toThrow(/requires a path/);
     });
+  });
+});
+
+/**
+ * End-to-end coverage of `main()` — the four claims the PR makes (refusal exit 1, restore on
+ * mismatch, keep on --write, and the pre-existing-rebuild warning) were only verified by hand
+ * before this suite existed, which the REVIEW named as the coverage gap.
+ *
+ * A fake pinned bun keeps it honest and hermetic: it answers `--version` with the pin and, for
+ * `run build`, copies a fixture over dist/index.js. No real build, no network, no operator bun.
+ */
+describe('CLI end to end (main)', () => {
+  const dirs: string[] = [];
+
+  afterEach(() => {
+    while (dirs.length > 0) {
+      const dir = dirs.pop();
+      if (dir) rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function git(cwd: string, ...args: string[]): string {
+    const result = spawnSync('git', args, { cwd, encoding: 'utf-8' });
+    if (result.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr}`);
+    return result.stdout;
+  }
+
+  /** A temp repo with a committed dist/ and a fake bun that writes `built` on `run build`. */
+  function fixture(committed: string, built: string) {
+    const root = mkdtempSync(join(tmpdir(), 'dist-guard-'));
+    dirs.push(root);
+    const repo = join(root, 'repo');
+    mkdirSync(join(repo, 'dist'), { recursive: true });
+    writeFileSync(join(repo, 'dist', 'index.js'), committed);
+    writeFileSync(join(repo, '.bun-version'), '1.4.2\n');
+    git(repo, 'init', '-q');
+    git(repo, 'config', 'user.email', 'guard@example.test');
+    git(repo, 'config', 'user.name', 'guard');
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-qm', 'init');
+
+    const buildOutput = join(root, 'built.js');
+    writeFileSync(buildOutput, built);
+    const bun = join(root, 'bin', 'bun');
+    mkdirSync(join(root, 'bin'), { recursive: true });
+    writeFileSync(
+      bun,
+      `#!/bin/sh\nif [ "$1" = "--version" ]; then echo 1.4.2; exit 0; fi\ncp "${buildOutput}" "$PWD/dist/index.js"\n`,
+    );
+    chmodSync(bun, 0o755);
+    return { repo, bun };
+  }
+
+  function runGuard(repo: string, bun: string, ...args: string[]) {
+    const result = spawnSync(process.execPath, [GUARD, '--cwd', repo, ...args], {
+      cwd: repo,
+      encoding: 'utf-8',
+      env: { ...process.env, SPECIALISTS_PINNED_BUN: bun },
+    });
+    return { status: result.status, out: `${result.stdout}${result.stderr}` };
+  }
+
+  it('exits 0 when the committed bundle is what the pinned bun builds', () => {
+    const { repo, bun } = fixture('committed\n', 'committed\n');
+    const { status, out } = runGuard(repo, bun);
+    expect(status).toBe(0);
+    expect(out).toContain('a fresh build changed nothing');
+  });
+
+  it('exits 1 and restores the tree when the build differs from the committed bundle', () => {
+    const { repo, bun } = fixture('committed\n', 'rebuilt\n');
+    const { status, out } = runGuard(repo, bun);
+    expect(status).toBe(1);
+    expect(out).toContain('dist/index.js');
+    expect(out).toContain('Restored your dist/');
+    // The check must not leave the rebuild behind: the worker's next commit stays reviewable.
+    expect(readFileSync(join(repo, 'dist', 'index.js'), 'utf-8')).toBe('committed\n');
+    expect(git(repo, 'status', '--porcelain', '--', 'dist/')).toBe('');
+  });
+
+  it('exits 0 with --write and keeps the rebuild, so a fix loop can chain it', () => {
+    const { repo, bun } = fixture('committed\n', 'rebuilt\n');
+    const { status, out } = runGuard(repo, bun, '--write');
+    expect(status).toBe(0);
+    expect(out).toContain('leaving the rebuilt dist/ in place');
+    expect(readFileSync(join(repo, 'dist', 'index.js'), 'utf-8')).toBe('rebuilt\n');
+    expect(git(repo, 'status', '--porcelain', '--', 'dist/')).toContain('dist/index.js');
+  });
+
+  it('warns when it replaced a rebuild that was already in the working tree', () => {
+    // The reproduction of the REVIEW's silent-loss finding: dist/ carries an uncommitted rebuild
+    // that the fresh build overwrites with the committed bytes. Exit 0 is correct — the tree now
+    // matches the committed bundle — but losing the worker's work without a word is not.
+    const { repo, bun } = fixture('committed\n', 'committed\n');
+    writeFileSync(join(repo, 'dist', 'index.js'), 'worker rebuild\n');
+    const { status, out } = runGuard(repo, bun);
+    expect(status).toBe(0);
+    expect(out).toContain('had uncommitted changes before this check');
+    expect(readFileSync(join(repo, 'dist', 'index.js'), 'utf-8')).toBe('committed\n');
+  });
+
+  it('refuses to build with a bun that is not the pinned one', () => {
+    const { repo } = fixture('committed\n', 'rebuilt\n');
+    const wrong = join(repo, 'bin-wrong-bun');
+    writeFileSync(wrong, '#!/bin/sh\necho 1.4.0\n');
+    chmodSync(wrong, 0o755);
+    const { status, out } = runGuard(repo, wrong);
+    expect(status).toBe(1);
+    expect(out).toContain('pins 1.4.2');
   });
 });
