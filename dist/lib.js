@@ -25111,6 +25111,8 @@ function processAlive(pid) {
   }
 }
 function createActivationResourceLoader(sdk, options) {
+  const rolePromptText = options.rolePrompt?.text ?? "";
+  const rolePromptOptions = rolePromptText.length === 0 ? {} : options.rolePrompt?.mode === "replace" ? { systemPrompt: rolePromptText } : { appendSystemPrompt: [rolePromptText] };
   const wantsCodemode = (options.extensionPaths ?? []).includes(BUILTIN_CODEMODE_EXTENSION);
   const codemodeFactory = wantsCodemode && typeof sdk.createCodemodeExtension === "function" ? sdk.createCodemodeExtension() : undefined;
   const codemodeName = BUILTIN_CODEMODE_EXTENSION.replace("builtin:", "");
@@ -25124,7 +25126,8 @@ function createActivationResourceLoader(sdk, options) {
     ...codemodeFactory !== undefined ? { extensionFactories: [{ name: codemodeName, factory: codemodeFactory, replaceable: true, builtin: true }] } : {},
     noContextFiles: true,
     noPromptTemplates: true,
-    noThemes: true
+    noThemes: true,
+    ...rolePromptOptions
   });
 }
 function createNativeToolAdmission(input) {
@@ -25863,9 +25866,17 @@ class NativeActivationHost {
       const resourceLoader = createActivationResourceLoader(sdk, {
         cwd: workspace.worktreePath,
         skillPaths: specialist.specialist.skills?.paths ?? [],
-        extensionPaths: [...curatedExtensions.all, ...dynamicExtensions]
+        extensionPaths: [...curatedExtensions.all, ...dynamicExtensions],
+        rolePrompt: { text: systemPrompt.text, mode: specialist.specialist.prompt.system_prompt_mode }
       });
       await resourceLoader.reload();
+      const loaderPrompts = [resourceLoader.getSystemPrompt?.() ?? "", ...resourceLoader.getAppendSystemPrompt?.() ?? []];
+      if (systemPrompt.text.length > 0 && !loaderPrompts.some((text) => text.includes(systemPrompt.text))) {
+        return reject("system_prompt_not_applied", {
+          ...autoCreatedRef ? { created_ref: autoCreatedRef } : {},
+          note: "the resource loader does not carry the built role prompt; a native activation never runs without its role prompt"
+        });
+      }
       const baseSessionOptions = {
         customTools: [...askTools, ...guardedTools.tools],
         cwd: workspace.worktreePath,
@@ -25874,8 +25885,7 @@ class NativeActivationHost {
         model: modelCheck.model,
         ...thinkingLevel ? { thinkingLevel } : {},
         noTools: "builtin",
-        tools: [...effectiveToolContract.toolsList, ASK_TOOL, ESCALATE_TOOL],
-        systemPrompt: systemPrompt.text
+        tools: [...effectiveToolContract.toolsList, ASK_TOOL, ESCALATE_TOOL]
       };
       const PROMISED_TOOLS = [...effectiveToolContract.toolsList];
       const missingPromisedTools = (candidate) => {
@@ -25993,6 +26003,22 @@ class NativeActivationHost {
               }
             }
           }
+        }
+        const livePrompt = created.session.systemPrompt;
+        if (systemPrompt.text.length > 0 && typeof livePrompt === "string" && !livePrompt.includes(systemPrompt.text)) {
+          created.session.dispose();
+          const detail = {
+            ...autoCreatedRef ? { created_ref: autoCreatedRef } : {},
+            note: "the session system prompt does not contain the built role prompt; a native activation never runs without its role prompt"
+          };
+          if (options.viaFallback) {
+            throw new DispatchRejectedError("system_prompt_not_applied", {
+              specialist: request.specialist,
+              issueRef: request.issueRef,
+              ...detail
+            });
+          }
+          return reject("system_prompt_not_applied", detail);
         }
         return created.session;
       };
@@ -27269,6 +27295,7 @@ var DISPATCH_REFUSAL_REASONS = [
   "unguardable_mutating_tools",
   "permission_guard_unavailable",
   "tool_contract_unsatisfied",
+  "system_prompt_not_applied",
   "issue_binding_failed",
   "context_changed",
   "workspace_isolation_unavailable",
@@ -27310,6 +27337,7 @@ var FIX_BY_REASON = {
   unguardable_mutating_tools: "Some mutating tools cannot be fenced by the workspace lease on this runtime. Remove them from the contract or run on a runtime that can guard them.",
   permission_guard_unavailable: "READ_ONLY bash was granted without the permission guard in the loaded set. Load the guard extension or remove bash from the READ_ONLY contract and re-dispatch.",
   tool_contract_unsatisfied: "The live session did not expose every promised tool. Fix the extension and resource-loader setup so the session exposes the full contract, then re-dispatch.",
+  system_prompt_not_applied: "The live session system prompt did not contain the role prompt. Check the pi SDK resource-loader wiring (systemPrompt / appendSystemPrompt), then re-dispatch.",
   issue_binding_failed: "Binding the Issue to this activation failed. Re-read the Issue and re-dispatch.",
   context_changed: "contextRefs changed between prompt render and binding. Re-dispatch to render the current contextRefs.",
   workspace_isolation_unavailable: "A write-capable activation needs its own git worktree and none could be created. Fix the git worktree setup and re-dispatch.",

@@ -130,11 +130,11 @@ import { GUARDED_TOOL_NAMES } from '../../../src/activation/guarded-tools.js';
  * carry it. The parity sweep asserts the host sets nothing that is absent from this map.
  */
 const SESSION_OPTION_TO_PROFILE_KEY: Record<string, readonly string[]> = {
-  resourceLoader: ['skills', 'resources', 'extensions'],
+  // The loader also carries the role prompt: pi ignores a `systemPrompt` session option (HIRYUEN-774).
+  resourceLoader: ['skills', 'resources', 'extensions', 'outputContractSchema'],
   model: ['model'],
   customTools: ['customTools'],
   tools: ['tools'],
-  systemPrompt: ['outputContractSchema'],
   cwd: ['cwd'],
   thinkingLevel: ['thinking'],
   noTools: ['builtinToolsFenced'],
@@ -153,7 +153,7 @@ import {
 } from '../../../src/pi/session.js';
 import type { PiAgentSessionEvent, PiAgentSessionLike, PiSdk } from '../../../src/activation/pi-sdk.js';
 import type { JsonSchema } from '../../../src/specialist/system-prompt.js';
-import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
+import { FAKE_AGENT_DIR, FakeResourceLoader, loaderRolePrompt } from '../../utils/pi-resource-loader-double.js';
 import { testWorkItems } from '../../utils/test-work-items.js';
 
 // ------------------------------------------------------------------ the contract block
@@ -639,7 +639,7 @@ async function compileNativeProfile(
     .specialist.capabilities ?? {});
   const specSkills = ((spec as { specialist: { skills?: { paths?: string[]; scripts?: Array<{ phase?: string; inject_output?: boolean }> } } })
     .specialist.skills ?? {});
-  const systemPrompt = String(createArgs.systemPrompt ?? '');
+  const systemPrompt = loaderRolePrompt(loader);
   const model = createArgs.model as { id?: string; provider?: string } | undefined;
 
   return {

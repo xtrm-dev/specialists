@@ -25,10 +25,11 @@ function mcpRefusalFor(reason: DispatchRefusalReason) {
 }
 
 describe('dispatch refusal reasons carry a corrective fix (SPECIALISTS-4341)', () => {
-  it('lists exactly the 39 wire reasons on master 2a450f5b8 plus the Claude Code route', () => {
+  it('lists exactly the 40 wire reasons on master 2a450f5b8 plus the Claude Code route and system_prompt_not_applied', () => {
     // 37 on master; SPECIALISTS-4405 adds `claude_bridge_unavailable`; SPECIALISTS-4442 adds
-    // `claude_bridge_route_model_mismatch`.
-    expect(DISPATCH_REFUSAL_REASONS).toHaveLength(39);
+    // `claude_bridge_route_model_mismatch`; HIRYUEN-774 adds `system_prompt_not_applied`.
+    expect(DISPATCH_REFUSAL_REASONS).toHaveLength(40);
+    expect([...DISPATCH_REFUSAL_REASONS]).toContain('system_prompt_not_applied');
     // Written by reason name, not derived by counting call sites.
     expect([...DISPATCH_REFUSAL_REASONS]).toContain('unknown_specialist');
     expect([...DISPATCH_REFUSAL_REASONS]).toContain('workspace_isolation_unavailable');
