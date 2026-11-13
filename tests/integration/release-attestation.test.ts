@@ -308,9 +308,32 @@ describe('package-payload release contract', () => {
 
     expect(validation).toBeGreaterThan(-1);
     expect(upload).toBeGreaterThan(validation);
-    expect(workflow).toContain('NODE_ENV=test bun run build');
-    expect(workflow).toContain('git diff --exit-code -- dist/');
-    expect(workflow).toContain('git status --porcelain --untracked-files=all -- dist/');
+    // The raw build + diff pair moved into one guard (SPECIALISTS-4445); this pins the property the
+    // lines existed for — BOTH payload jobs check dist/ reproducibility, and drift fails the job —
+    // rather than the literal commands that implemented it.
+    //
+    // Asserted per job, not per file: a whole-file `toContain` is satisfied by whichever job still
+    // has the invocation, so replacing it in the other job mutated this test green (review round 4,
+    // mutations A and B), and the same weakness let `--json --write` and `|| true` through.
+    const jobSlice = (start: string, end?: string): string => {
+      const from = workflow.indexOf(`\n  ${start}:`);
+      expect(from).toBeGreaterThan(-1);
+      const to = end ? workflow.indexOf(`\n  ${end}:`) : workflow.length;
+      expect(to).toBeGreaterThan(from);
+      return workflow.slice(from, end ? to : workflow.length);
+    };
+
+    for (const job of ['payload-contract', 'packed-smoke']) {
+      const slice = jobSlice(job, job === 'payload-contract' ? 'packed-smoke' : undefined);
+      expect(slice, `${job} must invoke the reproducibility guard`).toContain(
+        'node scripts/check-dist-reproducible.mjs',
+      );
+      // `--write` returns 0 after a mismatch, so a job that passes it packs a bundle nobody
+      // committed. `|| true` and `continue-on-error` would have the same effect.
+      expect(slice, `${job} must not pass --write`).not.toMatch(/-dist-reproducible\.mjs[^\n]*--write/);
+      expect(slice, `${job} must not swallow the guard failure`).not.toMatch(/-dist-reproducible\.mjs[^\n]*\|\|/);
+      expect(slice, `${job} must not ignore the step failure`).not.toContain('continue-on-error: true');
+    }
     expect(workflow).toContain("tarball_name=$(npm pack --pack-destination /tmp --json | jq -r '.[0].filename')");
     expect(workflow).toContain('tarball="/tmp/$tarball_name"');
     expect(workflow).not.toContain('cp "$tarball" /tmp/sp-test.tgz');

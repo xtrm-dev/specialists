@@ -78,12 +78,13 @@ jobs:
           bun install --frozen-lockfile
           echo 'package-payload: install succeeded'
       - name: Build package payload
-        run: |
-          echo 'package-payload: verifying reproducible distributable payload'
-          NODE_ENV=test bun run build
-          git diff --exit-code -- dist/
-          test -z "$(git status --porcelain --untracked-files=all -- dist/)"
-          echo 'package-payload: build verification succeeded'
+        # One implementation for CI and for contributors (SPECIALISTS-4445): the script rebuilds with
+        # the bun .bun-version pins and fails with the cause (__esm wrapper) and the fix, instead of
+        # a raw bundle diff that two PRs in a row had to reverse-engineer. setup-bun below is given
+        # the same version as a literal, so the version refusal never fires in CI here; the message
+        # is the value. Keep .bun-version, these literals and package.json packageManager in step —
+        # toolchain-pin.yml checks the latter two, nothing checks .bun-version.
+        run: node scripts/check-dist-reproducible.mjs
       - name: Generate npm pack manifest
         run: |
           echo 'package-payload: generating npm pack dry-run manifest'
@@ -148,9 +149,12 @@ jobs:
       - name: Build, pack, and smoke installed tarball
         run: |
           set -euo pipefail
-          NODE_ENV=test bun run build
-          git diff --exit-code -- dist/
-          test -z "$(git status --porcelain --untracked-files=all -- dist/)"
+          # The same guard payload-contract uses, so a bundle built by the wrong bun names the cause
+          # here too instead of reporting a raw diff (SPECIALISTS-4445). Check-only on purpose: it
+          # restores dist/ and exits 1 on drift, so this job still FAILS on a non-reproducible bundle
+          # and packs the committed bytes. `--write` would return 0 after a mismatch and pack a bundle
+          # nobody committed.
+          node scripts/check-dist-reproducible.mjs
           tarball_name=$(npm pack --pack-destination /tmp --json | jq -r '.[0].filename')
           tarball="/tmp/$tarball_name"
           test "$tarball_name" = "jaggerxtrm-specialists-$(node -p "require('./package.json').version").tgz"
