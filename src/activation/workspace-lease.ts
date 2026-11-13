@@ -156,11 +156,25 @@ function resolveWorktreeBase(git: (...args: string[]) => string): string {
   return `origin/${defaultBranch}`;
 }
 
+/**
+ * Lower-case path slug: non-alphanumerics collapse to `-`, then leading and
+ * trailing `-` are dropped. The trim is a scan rather than `/^-+|-+$/`: the
+ * Issue ref and role are caller input (CodeQL js/polynomial-redos).
+ */
+function slugify(value: string): string {
+  const lowered = value.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  let start = 0;
+  let end = lowered.length;
+  while (start < end && lowered[start] === '-') start++;
+  while (end > start && lowered[end - 1] === '-') end--;
+  return lowered.slice(start, end);
+}
+
 export function provisionWriterWorkspace(cwd: string, issueRef: string, role: string): ProvisionedWorkspace {
   const git = (...args: string[]): string =>
     execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-  const slug = issueRef.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  const roleSlug = role.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const slug = slugify(issueRef);
+  const roleSlug = slugify(role);
   const branch = `sp/${slug}`;
   try {
     const existing = git('worktree', 'list', '--porcelain')

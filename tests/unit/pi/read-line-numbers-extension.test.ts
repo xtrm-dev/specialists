@@ -259,4 +259,18 @@ describe('read-line-numbers extension hook', () => {
     }) as { content: Array<{ text: string }> };
     expect(result.content[0]?.text).toBe('1 | one\n2 | two\n3 | ');
   });
+
+  it('notice patterns stay linear on adversarial notice-shaped input (CORE-2694)', () => {
+    // Same bounded quantifiers as the Core source this file forks; an open
+    // `.*` next to a digit run made each pattern a ReDoS surface.
+    const start = performance.now();
+    mjs.numberReadText('[Showing lines ' + '0'.repeat(200000) + '\nbody line', 1, false);
+    mjs.numberReadText('[Line 5 is ' + 'x'.repeat(100000) + '\nexceeds', 1, false);
+    expect(performance.now() - start).toBeLessThan(100);
+    // Behaviour: the three Pi notices are still recognised verbatim.
+    const showing = 'foo\nbar\n\n[Showing lines 1-2 of 5000. Use offset=3 to continue.]';
+    expect(mjs.numberReadText(showing, 1, true)).toBe('1 | foo\n2 | bar\n\n[Showing lines 1-2 of 5000. Use offset=3 to continue.]');
+    const banner = "[Line 5 is 60KB, exceeds 50KB limit. Use bash: sed -n '5p' /a/b.txt | head -c 51200]";
+    expect(mjs.numberReadText(banner, 1, false)).toBe(banner);
+  });
 });

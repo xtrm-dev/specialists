@@ -36,14 +36,23 @@
 
 import { isReadToolResult } from '@earendil-works/pi-coding-agent';
 
+// Every quantifier below is bounded: these patterns run on tool output, so an
+// open `.*` next to a digit run is a ReDoS surface (CodeQL js/polynomial-redos).
+// The bounds sit far above any real notice, and NOTICE_MAX_LENGTH keeps a
+// megabyte of file content away from the patterns entirely. Same fix as the
+// Core source this file forks (CORE-2694).
+const NOTICE_MAX_LENGTH = 4096;
+
 /** Pi appends this notice after a blank separator when the line limit was hit. */
-const SHOWING_NOTICE = /^\[Showing lines \d+-\d+ of \d+.*Use offset=\d+ to continue\.\]$/;
+const SHOWING_NOTICE = /^\[Showing lines \d{1,10}-\d{1,10} of \d{1,10}[^\n]{0,2000}Use offset=\d{1,10} to continue\.\]$/;
 /** Pi appends this notice when a user-specified `limit` stopped before EOF. */
-const USER_LIMIT_NOTICE = /^\[\d+ more lines in file\. Use offset=\d+ to continue\.\]$/;
+const USER_LIMIT_NOTICE = /^\[\d{1,10} more lines in file\. Use offset=\d{1,10} to continue\.\]$/;
 /** Pi emits this banner alone when the first line exceeds the byte limit. */
-const FIRST_LINE_BANNER = /^\[Line \d+ is .* exceeds .* limit\. Use bash: sed -n '\d+p' .*\]$/;
+const FIRST_LINE_BANNER =
+  /^\[Line \d{1,10} is [^\n]{0,2000} exceeds [^\n]{0,2000} limit\. Use bash: sed -n '\d{1,10}p' [^\n]{0,2000}\]$/;
 
 function isSyntheticNotice(line) {
+  if (line.length > NOTICE_MAX_LENGTH) return false;
   return SHOWING_NOTICE.test(line) || USER_LIMIT_NOTICE.test(line) || FIRST_LINE_BANNER.test(line);
 }
 

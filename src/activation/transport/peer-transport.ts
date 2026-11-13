@@ -251,7 +251,11 @@ export async function createSocketReceiptSource(socketPath: string): Promise<Rec
         const f = frame as Partial<ReceiptFrame>;
         if (f.type !== 'control' || f.action !== 'peer_message_status' || !f.orig_msg_id) continue;
         retain(f.orig_msg_id, frame as ReceiptFrame);
-        waiters.get(f.orig_msg_id)?.(frame as ReceiptFrame);
+        // Type check before the call: orig_msg_id comes off the peer socket, so
+        // the Map hit is data, not a callable contract (CodeQL
+        // js/unvalidated-dynamic-method-call).
+        const waiter = waiters.get(f.orig_msg_id);
+        if (typeof waiter === 'function') waiter(frame as ReceiptFrame);
         waiters.delete(f.orig_msg_id);
       }
     });
