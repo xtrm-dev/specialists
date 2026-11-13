@@ -17,6 +17,9 @@ export const REQUIRED_SECTIONS = [
 
 export const SCRUTINY_LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
 
+/** How far past the SCRUTINY heading its level may appear on the same line. */
+export const SCRUTINY_LEVEL_WINDOW = 200;
+
 /** Every heading this parser recognises as terminating the previous section. */
 const ALL_HEADINGS = new Set<string>([...REQUIRED_SECTIONS, 'SCRUTINY']);
 
@@ -62,8 +65,13 @@ function headingOf(line: string): Heading | undefined {
   return inlineBody ? { name, inlineBody } : { name };
 }
 
+// `\s` semantics, not ASCII-only: the pattern this scan replaced used `\s*`, so a
+// heading written with NBSP, U+2028 or U+FEFF around the colon was a heading
+// before and must stay one (a narrowing here refuses a valid contract).
+const SPACE_CHAR = /\s/;
+
 function isSpaceChar(c: string): boolean {
-  return c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\v' || c === '\f';
+  return SPACE_CHAR.test(c);
 }
 
 /** `A-Za-z`, space, `_`, `-`; must start with a letter. */
@@ -105,10 +113,13 @@ function splitHeadingLabel(bare: string): { label: string; body: string } | unde
 /** Extract the declared SCRUTINY level, if any. */
 export function scrutinyLevel(description: string): string | undefined {
   // Bounded runs instead of `[^\n]*`/`\s*`: the contract text is caller input
-  // (CodeQL js/polynomial-redos). A real contract declares its level within 200
-  // characters of the heading.
-  const match = description.match(/SCRUTINY\b[^\n]{0,200}\n?\s{0,20}\*{0,20}\s{0,20}(LOW|MEDIUM|HIGH|CRITICAL)\b/i)
-    ?? description.match(/SCRUTINY\b\s{0,20}[:\-—]?\s{0,20}(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
+  // (CodeQL js/polynomial-redos). The two bounds are a deliberate narrowing: the
+  // level must be declared within SCRUTINY_LEVEL_WINDOW characters of the
+  // heading. Before, an unbounded `[^\n]*` accepted a level anywhere on the
+  // line — and 4000 tabs cost 6.8 s, which is the alert.
+  const match = description.match(
+    new RegExp(`SCRUTINY\\b[^\\n]{0,${SCRUTINY_LEVEL_WINDOW}}\\n?\\s{0,20}\\*{0,20}\\s{0,20}(LOW|MEDIUM|HIGH|CRITICAL)\\b`, 'i'),
+  ) ?? description.match(/SCRUTINY\b\s{0,20}[:\-—]?\s{0,20}(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
   return match?.[1]?.toUpperCase();
 }
 
