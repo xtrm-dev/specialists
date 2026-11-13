@@ -2,17 +2,7 @@
 // DO NOT add new tests to this file. It is excluded from the default vitest run because of FIFO hang in worktree contexts.
 // Run via `bun run test:supervisor` (sets SPECIALISTS_TEST_QUARANTINED=1 to reach this file in isolation). New tests covering pure functions should go in sibling file (e.g. supervisor-<topic>.test.ts) which IS in default run.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import {
-  mkdtempSync,
-  mkdirSync,
-  writeFileSync,
-  existsSync,
-  readFileSync,
-  readdirSync,
-  utimesSync,
-  rmSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, utimesSync, rmSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import * as childProcess from 'node:child_process';
 
@@ -42,6 +32,7 @@ import { Supervisor } from '../../../src/specialist/supervisor.js';
 import { isJobFileOutputEnabled } from '../../../src/specialist/job-file-output.js';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
 import { createObservabilitySqliteClient } from '../../../src/specialist/observability-sqlite.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 function makeMockRunner(output = 'test output', model = 'haiku', backend = 'anthropic') {
   return {
@@ -97,7 +88,7 @@ describe('Supervisor', () => {
   beforeEach(() => {
     originalTmuxSessionEnv = process.env.SPECIALISTS_TMUX_SESSION;
     originalJobFileOutputEnv = process.env.SPECIALISTS_JOB_FILE_OUTPUT;
-    tmpDir = mkdtempSync(join(tmpdir(), 'supervisor-test-'));
+    tmpDir = tempDir('supervisor-test-');
     jobsDir = join(tmpDir, 'jobs');
     mkdirSync(jobsDir, { recursive: true });
     supervisors = [];

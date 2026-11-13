@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -57,6 +56,7 @@ import { createSpecialistStatusTool } from '../../../src/tools/specialist/specia
 import { CircuitBreaker } from '../../../src/utils/circuitBreaker.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader, PI_DEFAULT_PREAMBLE, piSessionSystemPrompt } from '../../utils/pi-resource-loader-double.js';
 import type { ResolvedContextView, SpecialistWorkItemBoundary, WorkItemView } from '../../../src/activation/workitem-store.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * Phase 1 acceptance. The load-bearing assertions here are:
@@ -283,7 +283,7 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 3000): Promise<vo
 
 const hostWorkspaces: string[] = [];
 function hostWorkspace(): string {
-  const root = mkdtempSync(join(tmpdir(), 'native-host-ws-'));
+  const root = tempDir('native-host-ws-');
   hostWorkspaces.push(root);
   return root;
 }
@@ -1632,7 +1632,7 @@ function expectNoFallbackHop(sink: { names: string[] }, created: unknown[]): voi
  * the definition flag; only this file can grant the route on the machine.
  */
 function withOperatorSwitch(enabled: boolean): () => void {
-  const dir = mkdtempSync(join(tmpdir(), 'operator-config-'));
+  const dir = tempDir('operator-config-');
   mkdirSync(join(dir, 'specialists'), { recursive: true });
   if (enabled) {
     writeFileSync(join(dir, 'specialists', 'user.json'), JSON.stringify({ claude_bridge: { enabled: true } }));
@@ -1648,7 +1648,7 @@ function withOperatorSwitch(enabled: boolean): () => void {
 
 /** A real extension entry, so "not loaded" can never be explained by the file being absent. */
 function withBridgeEntry(): { entry: string; restore: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), 'bridge-fixture-'));
+  const dir = tempDir('bridge-fixture-');
   const entry = join(dir, 'index.js');
   writeFileSync(entry, 'export default () => {};\n');
   const previous = process.env.SPECIALISTS_CLAUDE_BRIDGE_PATH;

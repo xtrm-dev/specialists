@@ -12,8 +12,8 @@
  * file is read and no real consent record is touched.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+
 import { join } from 'node:path';
 import {
   ClaudeBridgeRouteModelMismatchError,
@@ -32,6 +32,7 @@ import {
   claudeBridgeSessionOption,
   operatorClaudeBridgeEnabled,
 } from '../../../src/pi/claude-bridge.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const spec = (name: string, execution: Record<string, unknown> = {}) => JSON.stringify({
   specialist: {
@@ -71,7 +72,7 @@ describe('claude_bridge allow list (SPECIALISTS-4442)', () => {
   const loader = () => new SpecialistLoader({ projectDir: project });
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'claude-bridge-allow-'));
+    root = tempDir('claude-bridge-allow-');
     xdg = join(root, 'xdg');
     project = join(root, 'project');
     mkdirSync(project, { recursive: true });

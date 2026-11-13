@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { rmSync } from 'node:fs';
+
 
 import { createPeerDelivery } from '../../../src/activation/peer-bridge.js';
 import { InteractionTransport } from '../../../src/activation/interaction.js';
 import { create, recordReply } from '../../../src/activation/transport/pending-store.js';
 import type { PeerAdapter, PushResult } from '../../../src/activation/transport/peer-adapter.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * unitAI-rrdnt.30. The bridge is where the participant protocol meets the peer wire, and
@@ -20,7 +20,7 @@ const CHILD = 'specialist::researcher';
 const PARENT = 'coordinator::dawid';
 
 let repoRoot: string;
-beforeEach(() => { repoRoot = mkdtempSync(join(tmpdir(), 'peer-bridge-')); });
+beforeEach(() => { repoRoot = tempDir('peer-bridge-'); });
 afterEach(() => { rmSync(repoRoot, { recursive: true, force: true }); });
 
 /**

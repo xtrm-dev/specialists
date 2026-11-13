@@ -1,8 +1,9 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { projectOutstandingAsks } from '../../../src/activation/transport/polling.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * unitAI-rrdnt.26. The polling projection is the degraded path the whole Claude transport
@@ -14,7 +15,7 @@ describe('pending interaction projection for specialist_status', () => {
   afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 
   function repo(): string {
-    const d = mkdtempSync(join(tmpdir(), 'status-interactions-'));
+    const d = tempDir('status-interactions-');
     dirs.push(d);
     return d;
   }

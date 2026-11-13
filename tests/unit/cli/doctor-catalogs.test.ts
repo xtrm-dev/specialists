@@ -4,9 +4,9 @@
 // PI_NPM_GLOBAL_DIR points at, so the result never depends on what this machine has installed (the
 // SPECIALISTS-24 class). The catalog itself is the repository's real config/catalog/index.json.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempDir } from '../../utils/temp-dir.js';
 
 // Roots beyond PI_NPM_GLOBAL_DIR (the interpreter's prefix, bun, every nvm version) are scanned in
 // production; pin the scan to the fixture root so the machine's own installs stay out.
@@ -54,7 +54,7 @@ describe('doctor --catalogs (SPECIALISTS-47)', () => {
   }
 
   beforeEach(() => {
-    globalDir = mkdtempSync(join(tmpdir(), 'doctor-catalogs-global-'));
+    globalDir = tempDir('doctor-catalogs-global-');
     previousGlobal = process.env.PI_NPM_GLOBAL_DIR;
     process.env.PI_NPM_GLOBAL_DIR = globalDir;
     output = [];

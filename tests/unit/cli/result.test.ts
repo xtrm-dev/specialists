@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveObservabilityDbLocation } from '../../../src/specialist/observability-db.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 let tempRoot: string;
 let specialistsDir: string;
@@ -71,7 +71,7 @@ describe('result CLI', () => {
   const originalArgv = process.argv;
 
   beforeEach(() => {
-    tempRoot = mkdtempSync(join(tmpdir(), 'sp-result-test-'));
+    tempRoot = tempDir('sp-result-test-');
     specialistsDir = join(tempRoot, '.specialists');
     jobsDir = join(specialistsDir, 'jobs');
     mkdirSync(jobsDir, { recursive: true });
@@ -461,7 +461,7 @@ describe('result CLI native attempt validation', () => {
   let tempRoot: string;
 
   beforeEach(() => {
-    tempRoot = mkdtempSync(join(tmpdir(), 'sp-result-att-test-'));
+    tempRoot = tempDir('sp-result-att-test-');
     mkdirSync(join(tempRoot, '.specialists', 'jobs'), { recursive: true });
     vi.spyOn(process, 'cwd').mockReturnValue(tempRoot);
   });
@@ -586,7 +586,7 @@ describe('result CLI N2A namespace fix (legacy positional preserved)', () => {
   let tempRoot: string;
 
   beforeEach(() => {
-    tempRoot = mkdtempSync(join(tmpdir(), 'sp-result-n2afix-'));
+    tempRoot = tempDir('sp-result-n2afix-');
     mkdirSync(join(tempRoot, '.specialists', 'jobs'), { recursive: true });
     vi.spyOn(process, 'cwd').mockReturnValue(tempRoot);
   });

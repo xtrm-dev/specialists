@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative as relativePath } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -29,6 +29,7 @@ import {
   resolveCuratedExtensionPaths,
 } from '../../../src/pi/session.js';
 import { ExecutionSchema } from '../../../src/specialist/schema.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * The opt-in Claude Code route (SPECIALISTS-4405). Two properties matter more than the plumbing:
@@ -51,14 +52,7 @@ vi.mock('../../../src/utils/runtime-diagnostics.js', async importOriginal => {
   };
 });
 
-const scratch: string[] = [];
-function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'claude-bridge-'));
-  scratch.push(dir);
-  return dir;
-}
 afterEach(() => {
-  for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 describe('claudeBridgeEnabled / claudeBridgeExtensionProviders', () => {
@@ -77,7 +71,7 @@ describe('claudeBridgeEnabled / claudeBridgeExtensionProviders', () => {
 
 describe('resolveClaudeBridgeExtensionPath', () => {
   it('honours an explicit entry and reports a stale one as absent', () => {
-    const dir = tempDir();
+    const dir = tempDir('claude-bridge-');
     const entry = join(dir, 'index.js');
     writeFileSync(entry, 'export default () => {};\n');
 
@@ -86,7 +80,7 @@ describe('resolveClaudeBridgeExtensionPath', () => {
   });
 
   it('resolves a package entry through the layouts pi loads, including a mainless bridge', () => {
-    const pkg = tempDir();
+    const pkg = tempDir('claude-bridge-');
     // The bridge ships neither `main` nor `exports`; src/index.ts is its real entry.
     writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'pi-claude-bridge', type: 'module' }));
     mkdirSync(join(pkg, 'src'));
@@ -96,7 +90,7 @@ describe('resolveClaudeBridgeExtensionPath', () => {
   });
 
   it('prefers a declared exports/main entry over the layout fallbacks', () => {
-    const pkg = tempDir();
+    const pkg = tempDir('claude-bridge-');
     writeFileSync(
       join(pkg, 'package.json'),
       JSON.stringify({ name: 'pi-claude-bridge', exports: { '.': { import: './dist/main.js' } } }),
@@ -116,7 +110,7 @@ describe('resolveCuratedExtensionPaths', () => {
   });
 
   it('adds the resolved entry to `all` when the flag is on and the extension is installed', () => {
-    const dir = tempDir();
+    const dir = tempDir('claude-bridge-');
     const entry = join(dir, 'index.js');
     writeFileSync(entry, 'export default () => {};\n');
     const previous = process.env[CLAUDE_BRIDGE_PATH_ENV];
@@ -156,7 +150,7 @@ describe('execution.claude_bridge definition field', () => {
     // Measured, not asserted from a list: a repo can write the definition flag into its own
     // `.specialists/user` layer, and the loader honours it. Finding 1 of the #526 review is that
     // this must NOT be enough to load the route — see claudeBridgeRouteEnabled below.
-    const project = tempDir();
+    const project = tempDir('claude-bridge-');
     mkdirSync(join(project, '.specialists', 'user'), { recursive: true });
     writeFileSync(
       join(project, '.specialists', 'user', 'explorer.specialist.json'),
@@ -168,7 +162,7 @@ describe('execution.claude_bridge definition field', () => {
       }),
     );
     // homeDir deliberately points elsewhere: the repo layer alone must carry the flag.
-    const loader = new SpecialistLoader({ projectDir: project, homeDir: tempDir() });
+    const loader = new SpecialistLoader({ projectDir: project, homeDir: tempDir('claude-bridge-') });
     const spec = await loader.get('explorer');
     expect(spec.specialist.execution.claude_bridge).toBe(true);
     // The definition says yes; the machine has not. The route stays OFF.
@@ -183,7 +177,7 @@ describe('execution.claude_bridge definition field', () => {
  */
 describe('operatorClaudeBridgeEnabled', () => {
   function withUserConfig(contents: string | null) {
-    const dir = tempDir();
+    const dir = tempDir('claude-bridge-');
     const file = join(dir, 'user.json');
     if (contents !== null) writeFileSync(file, contents);
     return { path: file, exists: contents !== null, source: 'config-home' as const };
@@ -252,7 +246,7 @@ describe('the switch key in the global user config', () => {
 
 describe('path hygiene (review finding 6)', () => {
   it('rejects a relative override instead of resolving it against the dispatch cwd', () => {
-    const dir = tempDir();
+    const dir = tempDir('claude-bridge-');
     writeFileSync(join(dir, 'index.js'), 'export default () => {};\n');
     const relative = relativePath(process.cwd(), join(dir, 'index.js'));
     expect(resolveClaudeBridgeExtensionPath({ env: { [CLAUDE_BRIDGE_PATH_ENV]: relative } })).toBeUndefined();
@@ -261,7 +255,7 @@ describe('path hygiene (review finding 6)', () => {
   it('rejects a manifest entry that escapes the package directory', () => {
     // CORE-2612: keep the escaping file inside the registered temp root instead
     // of writing evil.js directly into the OS temp dir.
-    const root = tempDir();
+    const root = tempDir('claude-bridge-');
     const pkg = join(root, 'pkg');
     mkdirSync(pkg, { recursive: true });
     const outside = join(pkg, '..', 'evil.js');
@@ -294,12 +288,12 @@ describe('pi store resolution (A2: `pi install` must satisfy the resolver)', () 
   function isolate<T>(fn: (scratchRoots: Record<string, string>) => T): T {
     const scratchRoots: Record<string, string> = {};
     for (const key of ROOT_ENV_KEYS) {
-      scratchRoots[key] = key === 'NVM_BIN' ? join(tempDir(), 'bin') : tempDir();
+      scratchRoots[key] = key === 'NVM_BIN' ? join(tempDir('claude-bridge-'), 'bin') : tempDir('claude-bridge-');
     }
-    const home = tempDir();
+    const home = tempDir('claude-bridge-');
     // No process.env mutation: the scratch roots travel through deps, so a test cannot leak them
     // into the next one and an ambient variable cannot leak in.
-    return fn({ ...scratchRoots, HOME: home, EXEC: join(tempDir(), 'bin', 'node') });
+    return fn({ ...scratchRoots, HOME: home, EXEC: join(tempDir('claude-bridge-'), 'bin', 'node') });
   }
 
   /** Default deps for a test: the scratch roots, home, interpreter, and real existence checks. */
@@ -316,7 +310,7 @@ describe('pi store resolution (A2: `pi install` must satisfy the resolver)', () 
 
   function inRepo<T>(fn: (repo: string) => T): T {
     const previous = process.cwd();
-    const repo = tempDir();
+    const repo = tempDir('claude-bridge-');
     process.chdir(repo);
     try {
       return fn(repo);
@@ -542,8 +536,8 @@ describe('pi store resolution (A2: `pi install` must satisfy the resolver)', () 
 
 describe('claude_bridge_unavailable note (stale-text fix)', () => {
   it('names the install command, the store it lands in, and every path searched', () => {
-    const home = tempDir();
-    const deps = { env: {}, home, execPath: join(tempDir(), 'bin', 'node'), exists: (path: string) => existsSync(path) };
+    const home = tempDir('claude-bridge-');
+    const deps = { env: {}, home, execPath: join(tempDir('claude-bridge-'), 'bin', 'node'), exists: (path: string) => existsSync(path) };
     const note = claudeBridgeUnavailableNote(deps);
     expect(note).toContain('pi install npm:pi-claude-bridge@0.12.0');
     expect(note).toContain(join(home, '.pi', 'agent', 'npm', 'node_modules'));

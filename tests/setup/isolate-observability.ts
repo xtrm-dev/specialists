@@ -22,16 +22,16 @@
  * AND wrote the shared store. Deriving the forbid through the resolver follows
  * production by construction instead of duplicating its git logic in a way that drifts.
  */
-
 import { afterAll } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
+
 import { join, resolve } from 'node:path';
 import { resolveObservabilityDbLocation } from '../../src/specialist/observability-db.js';
 import { createObservabilitySqliteClientAtPath } from '../../src/specialist/observability-sqlite.js';
 import { registerTempDir } from './tmp-registry.js';
+import { tempDir } from '../utils/temp-dir.js';
 
-const isolated = mkdtempSync(join(tmpdir(), 'specialists-test-db-'));
+const isolated = tempDir('specialists-test-db-');
 registerTempDir(isolated);
 
 // Keep `sp init --global` off the operator's live Pi settings. Bun's os.homedir() ignores a

@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { basename, delimiter, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * Wave E1 path discipline (specialists plugin design §6): plugin-owned paths must
@@ -221,7 +222,7 @@ describe('specialists plugin launcher in a marketplace install', () => {
   }
 
   it('starts the runtime installed under the prefix of the npm on PATH', () => {
-    const root = mkdtempSync(join(tmpdir(), 'sp-launcher-'));
+    const root = tempDir('sp-launcher-');
     try {
       const launcher = cacheShapedLauncher(root);
       const prefix = join(root, 'nvm', 'v25');
@@ -242,7 +243,7 @@ describe('specialists plugin launcher in a marketplace install', () => {
   });
 
   it('warns once when the plugin and the runtime versions differ, and still starts', () => {
-    const root = mkdtempSync(join(tmpdir(), 'sp-launcher-'));
+    const root = tempDir('sp-launcher-');
     try {
       const launcher = cacheShapedLauncher(root);
       const pluginDir = join(dirname(launcher), '..', '.claude-plugin');
@@ -271,7 +272,7 @@ describe('specialists plugin launcher in a marketplace install', () => {
   });
 
   it('names every location it searched when no runtime exists', () => {
-    const root = mkdtempSync(join(tmpdir(), 'sp-launcher-'));
+    const root = tempDir('sp-launcher-');
     try {
       const launcher = cacheShapedLauncher(root);
       const run = launch(root, launcher, []);

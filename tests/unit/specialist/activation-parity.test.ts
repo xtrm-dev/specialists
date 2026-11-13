@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { execSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 /** The native path must never spawn; the same guard the other activation suites use. */
@@ -37,6 +36,7 @@ import {
 import type { PiAgentSessionEvent, PiAgentSessionLike, PiSdk } from '../../../src/activation/pi-sdk.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader, loaderRolePrompt } from '../../utils/pi-resource-loader-double.js';
 import { testWorkItems } from '../../utils/test-work-items.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * Native-vs-legacy resource assembly parity (SPECIALISTS-8).
@@ -90,7 +90,7 @@ interface ProbeOptions {
 
 const workspaces: string[] = [];
 function workspace(): string {
-  const root = mkdtempSync(join(tmpdir(), 'parity-ws-'));
+  const root = tempDir('parity-ws-');
   workspaces.push(root);
   return root;
 }

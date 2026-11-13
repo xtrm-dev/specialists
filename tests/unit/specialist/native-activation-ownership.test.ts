@@ -10,20 +10,21 @@
 // the defect being fixed.
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { Database } from 'bun:sqlite';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
+
 import { join } from 'node:path';
 import {
   resolveNativeActivationOwnership,
   resolveSessionHolder,
 } from '../../../src/specialist/native-activation-ownership.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 describe('native activation ownership (SPECIALISTS-104)', () => {
   let tempRoot = '';
   let dbPath = '';
 
   beforeEach(() => {
-    tempRoot = mkdtempSync(join(tmpdir(), 'specialists-ownership-'));
+    tempRoot = tempDir('specialists-ownership-');
     dbPath = join(tempRoot, 'state.db');
   });
 

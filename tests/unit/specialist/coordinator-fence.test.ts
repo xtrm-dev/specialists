@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { resolveWorkspace } from '../../../src/activation/native-host.js';
@@ -16,6 +16,7 @@ import {
   WORKSPACE_WRITE_TOOLS,
   type LeaseProcessProbe,
 } from '../../../src/activation/workspace-lease.js';
+import { scratchDir } from '../../utils/temp-dir.js';
 
 /**
  * XTRM-109: the coordinator is FULLY WAIVED from the workspace writer lease. It is never
@@ -29,7 +30,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 function workspace(): string {
-  const root = mkdtempSync(join(process.cwd(), '.tmp-specialists-4272-'));
+  const root = scratchDir(process.cwd(), '.tmp-specialists-4272-');
   roots.push(root);
   return root;
 }

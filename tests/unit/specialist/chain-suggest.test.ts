@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * SPECIALISTS-4364. After a specialist_dispatch the coordinator receives no pointer
@@ -25,7 +25,7 @@ const EXPECTED_SUGGESTION =
 
 const dirs: string[] = [];
 function scratch(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'chain-suggest-'));
+  const dir = tempDir('chain-suggest-');
   dirs.push(dir);
   return dir;
 }

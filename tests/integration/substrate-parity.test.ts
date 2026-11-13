@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { openSubstrateDb, openWorkItemBoundary } from '../../src/activation/workitem-store.js';
+import { tempDir } from '../utils/temp-dir.js';
 
 /**
  * Private-integration parity (xtrm-6qu.7.1.1): exercises the REAL producer
@@ -64,7 +64,7 @@ async function ensureScratchProject(dbPath: string): Promise<void> {
 
 describe.skipIf(!LIVE)('substrate parity (private integration)', () => {
   it('migration → inline issue → view/check/bind stable + holder refusal', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'substrate-parity-'));
+    const dir = tempDir('substrate-parity-');
     const dbPath = join(dir, 'state.db');
     await ensureScratchProject(dbPath);
     const boundary = await openWorkItemBoundary({ dbPath, substrateDir: SUBSTRATE_DIR });
@@ -98,7 +98,7 @@ describe.skipIf(!LIVE)('substrate parity (private integration)', () => {
   });
 
   it('contextRefs: own + inherited reach resolvedContext with provenance, and the bound hash matches', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'substrate-parity-ctx-'));
+    const dir = tempDir('substrate-parity-ctx-');
     const dbPath = join(dir, 'state.db');
     await ensureScratchProject(dbPath);
     const boundary = await openWorkItemBoundary({ dbPath, substrateDir: SUBSTRATE_DIR });

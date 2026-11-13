@@ -1,6 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -18,13 +17,13 @@ vi.mock('node:child_process', async (importOriginal) => {
     },
   };
 });
-
 import { createActivationForensicSink } from '../../../src/activation/forensic-sink.js';
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import type { PiAgentSessionEvent, PiAgentSessionLike, PiSdk } from '../../../src/activation/pi-sdk.js';
 import { createObservabilitySqliteClientAtPath } from '../../../src/specialist/observability-sqlite.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import type { SpecialistWorkItemBoundary, WorkItemView } from '../../../src/activation/workitem-store.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * SPECIALISTS-123 end-to-end model telemetry.
@@ -69,7 +68,7 @@ afterEach(() => {
 });
 
 function isolatedStore() {
-  const root = mkdtempSync(join(tmpdir(), 'model-telemetry-'));
+  const root = tempDir('model-telemetry-');
   scratchDirs.push(root);
   const dbPath = join(root, 'observability.db');
   const client = createObservabilitySqliteClientAtPath(dbPath);
@@ -78,7 +77,7 @@ function isolatedStore() {
 }
 
 function hostWorkspace(): string {
-  const root = mkdtempSync(join(tmpdir(), 'model-telemetry-ws-'));
+  const root = tempDir('model-telemetry-ws-');
   scratchDirs.push(root);
   return root;
 }

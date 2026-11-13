@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import os, { tmpdir } from 'node:os';
 import path, { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import {
   IDENTITY_ENV_ALLOWLIST,
   resolveAgentIdentityEnv,
@@ -11,6 +11,7 @@ import {
   specialistHolderName,
   specialistPath,
 } from '../../../src/pi/identity-env.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const D = path.delimiter;
 
@@ -309,7 +310,7 @@ describe('resolveAgentIdentityEnv', () => {
       }),
     });
 
-    const dir = mkdtempSync(join(tmpdir(), 'identity-env-git-'));
+    const dir = tempDir('identity-env-git-');
     try {
       // git exits non-zero with `fatal: unable to parse command-line config` when
       // GIT_CONFIG_COUNT names a pair it does not have.

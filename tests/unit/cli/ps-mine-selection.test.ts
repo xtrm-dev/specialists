@@ -24,10 +24,10 @@
 // the ownership pre-image reaches `listNativeActivationIds` and that the
 // reference to the Beads result cannot influence the native block.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { Database } from 'bun:sqlite';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const bdSpawnSync = vi.fn(() => ({ status: 0, stdout: '[]', stderr: '', error: undefined, pid: 1, signal: null, output: [] }));
 
@@ -219,7 +219,7 @@ describe('ps --mine native activation selection (SPECIALISTS-104)', () => {
   let authorityDbPath = '';
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'specialists-ps-mine-'));
+    tempDir = createTempDir('specialists-ps-mine-');
     process.chdir(tempDir);
     mkdirSync(join(tempDir, '.specialists', 'jobs'), { recursive: true });
     buildScenario();

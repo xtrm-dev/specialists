@@ -1,9 +1,9 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { parseSpecialist } from '../../../src/specialist/schema.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 async function loadPrReviewer() {
   return parseSpecialist(readFileSync('config/specialists/pr-reviewer.specialist.json', 'utf8'));
@@ -131,7 +131,7 @@ describe('pr-reviewer package specialist', () => {
     expect(end).toBeGreaterThan(start);
     const lint = system.slice(start + 'f=<body file>;'.length, end).replace(/^\s+/, '');
 
-    const dir = mkdtempSync(join(tmpdir(), 'pr-reviewer-lint-'));
+    const dir = tempDir('pr-reviewer-lint-');
     try {
       const run = (name: string, body: string) => {
         const file = join(dir, name);

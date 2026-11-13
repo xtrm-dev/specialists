@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync, rmSync } from 'node:fs';
+
+
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import {
   resetRuntimeDiagnosticsSink,
   runtimeDiagnosticsSinkPath,
   runtimeWarn,
 } from '../../../src/utils/runtime-diagnostics.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 // Regression guard for the measured defect: a native activation runs the runtime INSIDE
 // the coordinator's Pi process, so one console.debug in the model chain drew
@@ -21,7 +22,7 @@ describe('in-process runtime diagnostics', () => {
   });
 
   it('a native host redirects runtime warnings away from stdio', () => {
-    const cwd = mkdtempSync(join(tmpdir(), 'host-diagnostics-'));
+    const cwd = tempDir('host-diagnostics-');
     const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     try {
       new NativeActivationHost({ cwd });

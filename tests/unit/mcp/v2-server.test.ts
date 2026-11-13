@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { rmSync } from 'node:fs';
+
 import { PassThrough } from 'node:stream';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import type { StdioServerHandle } from '@modelcontextprotocol/server/stdio';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { buildV2Server, serveLegacyStdio, stdioEraFromEnv } from '../../../src/mcp/v2-server.js';
 import type { SubstrateHandle } from '../../../src/substrate/services.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * SDK v2 wire tests (unitAI-aiwva.7 E3).
@@ -135,7 +135,7 @@ let client: WireClient;
 beforeEach(async () => {
   // Hermetic observability: point XDG resolution at a throwaway dir so tool
   // calls never touch a developer or CI database.
-  const xdg = mkdtempSync(join(tmpdir(), 'mcp-v2-xdg-'));
+  const xdg = tempDir('mcp-v2-xdg-');
   vi.stubEnv('XDG_DATA_HOME', xdg);
   (globalThis as { __mcpV2Xdg?: string }).__mcpV2Xdg = xdg;
 

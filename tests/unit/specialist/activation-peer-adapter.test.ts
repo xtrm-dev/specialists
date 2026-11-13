@@ -3,11 +3,10 @@
 // The failure mode under test is a channel that silently never delivers. Every assertion
 // here is written against that: a route that must not be selected, a send that must not be
 // read as delivery, and a push that fails without losing the message.
-
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
-import { tmpdir } from 'node:os';
+
 import { join } from 'node:path';
 
 import * as store from '../../../src/activation/transport/pending-store.js';
@@ -30,11 +29,12 @@ import {
   type SessionRegistration,
 } from '../../../src/activation/transport/roster.js';
 import { PeerAdapter } from '../../../src/activation/transport/peer-adapter.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 let root: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'sp-interactions-'));
+  root = tempDir('sp-interactions-');
 });
 
 afterEach(() => {

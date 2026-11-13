@@ -1,5 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -23,11 +22,12 @@ import {
   RuntimeToolCatalogResolutionError,
   resolveRuntimeToolContract,
 } from '../../../src/pi/session.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const roots: string[] = [];
 
 function makeRoot(prefix: string): string {
-  const root = mkdtempSync(join(tmpdir(), prefix));
+  const root = tempDir(prefix);
   roots.push(root);
   return root;
 }

@@ -1,13 +1,12 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 import { afterAll, expect, test } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const transcriptDir = mkdtempSync(join(tmpdir(), 'sp-chat-smoke-'));
+const transcriptDir = tempDir('sp-chat-smoke-');
 const createdBeads = new Set<string>();
 const createdJobs = new Set<string>();
 
@@ -244,6 +243,7 @@ test('sp chat cleanup still fires on induced TUI crash', async () => {
   const preloadPath = join(transcriptDir, 'chat-crash.preload.ts');
   writeFileSync(preloadPath, `
 import { ChatStatus } from ${JSON.stringify(join(repoRoot, 'src/cli/chat/status.js'))};
+import { tempDir } from '../utils/temp-dir.js';
 const original = ChatStatus.prototype.render;
 ChatStatus.prototype.render = function renderCrash(width: number): string {
   if (width > 0) throw new Error('intentional smoke crash');

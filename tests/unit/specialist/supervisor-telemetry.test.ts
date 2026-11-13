@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Supervisor } from '../../../src/specialist/supervisor.js';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 function makeSupervisor(jobsDir: string): Supervisor {
   return new Supervisor({
@@ -21,7 +21,7 @@ describe('supervisor telemetry fallback', () => {
   beforeEach(() => {
     originalJobFileOutput = process.env.SPECIALISTS_JOB_FILE_OUTPUT;
     process.env.SPECIALISTS_JOB_FILE_OUTPUT = 'on';
-    tmpDir = mkdtempSync(join(tmpdir(), 'supervisor-telemetry-'));
+    tmpDir = tempDir('supervisor-telemetry-');
     jobsDir = join(tmpDir, 'jobs');
     mkdirSync(jobsDir, { recursive: true });
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);

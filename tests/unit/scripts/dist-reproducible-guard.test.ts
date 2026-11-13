@@ -1,6 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -14,6 +13,7 @@ import {
   parseBunVersion,
   wrongBunMessage,
 } from '../../../scripts/check-dist-reproducible.mjs';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const GUARD = resolve(import.meta.dirname, '../../../scripts/check-dist-reproducible.mjs');
 
@@ -242,7 +242,7 @@ describe('CLI end to end (main)', () => {
 
   /** A temp repo with a committed dist/ and a fake bun that writes `built` on `run build`. */
   function fixture(committed: string, built: string) {
-    const root = mkdtempSync(join(tmpdir(), 'dist-guard-'));
+    const root = tempDir('dist-guard-');
     dirs.push(root);
     const repo = join(root, 'repo');
     mkdirSync(join(repo, 'dist'), { recursive: true });
@@ -318,7 +318,7 @@ describe('CLI end to end (main)', () => {
     // The restore compares paths from `git status` with paths from `git ls-files`; a name containing
     // a double quote is quoted in every non -z form, so the old comparison missed it and left the
     // file in a tree it had just called restored.
-    const root = mkdtempSync(join(tmpdir(), 'dist-guard-quote-'));
+    const root = tempDir('dist-guard-quote-');
     dirs.push(root);
     const repo = join(root, 'repo');
     mkdirSync(join(repo, 'dist'), { recursive: true });

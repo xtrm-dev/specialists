@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveRuntimeToolContract } from '../../../src/pi/session.js';
 import { catalogVersion } from '../../utils/catalog-pin.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * The runtime gate is a compatibility check, not an identity check (SPECIALISTS-42).
@@ -17,7 +17,7 @@ import { catalogVersion } from '../../utils/catalog-pin.js';
  * cannot become a machine-dependent test: it passes on a machine with no extensions installed.
  */
 function withFakeGlobalDir<T>(version: string, run: () => T): T {
-  const dir = mkdtempSync(join(tmpdir(), 'catalog-compat-'));
+  const dir = tempDir('catalog-compat-');
   const previous = process.env.PI_NPM_GLOBAL_DIR;
   try {
     mkdirSync(join(dir, 'pi-gitnexus'), { recursive: true });

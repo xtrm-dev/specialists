@@ -60,8 +60,7 @@
 // ---------------------------------------------------------------------------------------
 import { describe, it, expect, vi, afterEach, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /** The native path must never spawn; the same guard the other activation suites use. */
@@ -93,7 +92,7 @@ vi.mock('../../../src/pi/session.js', async (importOriginal) => {
 });
 const PARITY_NPM_SOURCE = 'npm:pi-parity-probe';
 const PARITY_NPM_PACKAGE = 'pi-parity-probe';
-const PARITY_NPM_ROOT = mkdtempSync(join(tmpdir(), 'parity-node-modules-'));
+const PARITY_NPM_ROOT = tempDir('parity-node-modules-');
 npmRoot.dir = PARITY_NPM_ROOT;
 mkdirSync(join(PARITY_NPM_ROOT, PARITY_NPM_PACKAGE), { recursive: true });
 writeFileSync(
@@ -155,6 +154,7 @@ import type { PiAgentSessionEvent, PiAgentSessionLike, PiSdk } from '../../../sr
 import type { JsonSchema } from '../../../src/specialist/system-prompt.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader, loaderRolePrompt } from '../../utils/pi-resource-loader-double.js';
 import { testWorkItems } from '../../utils/test-work-items.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 // ------------------------------------------------------------------ the contract block
 
@@ -420,7 +420,7 @@ function diffProfiles(native: ExecutionProfile, legacy: ExecutionProfile): strin
 
 const workspaces: string[] = [];
 function workspace(): string {
-  const root = mkdtempSync(join(tmpdir(), 'profile-parity-'));
+  const root = tempDir('profile-parity-');
   workspaces.push(root);
   return root;
 }

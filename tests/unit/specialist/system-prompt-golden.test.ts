@@ -5,13 +5,13 @@
 // Inline snapshots were captured against the pre-extraction inline code —
 // if buildSystemPrompt ever changes composition order/spacing, these fail.
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SpecialistRunner } from '../../../src/specialist/runner.js';
 import { HookEmitter } from '../../../src/specialist/hooks.js';
 import { CircuitBreaker } from '../../../src/utils/circuitBreaker.js';
 import type { BeadsClient } from '../../../src/specialist/beads.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 function makeMockSession() {
   return {
@@ -92,7 +92,7 @@ describe('system prompt assembly (golden, byte-identical)', () => {
   // GitNexus index present, inputBeadId set (bead instructions block).
   // Mirrors config/specialists/executor.specialist.json shape.
   it('non-bare markdown + gitnexus index + bead instructions', async () => {
-    const cwd = mkdtempSync(join(tmpdir(), 'system-prompt-golden-b-'));
+    const cwd = tempDir('system-prompt-golden-b-');
     try {
       mkdirSync(join(cwd, '.gitnexus'), { recursive: true });
       writeFileSync(join(cwd, '.gitnexus', 'meta.json'), JSON.stringify({ indexed: true }));
@@ -186,7 +186,7 @@ describe('system prompt assembly (golden, byte-identical)', () => {
   // Scenario C: non-bare, JSON output contract, reviewer + reusedFromJobId
   // (reviewer patch-retrieval note), no GitNexus index.
   it('non-bare json + reviewer reused-job note, no gitnexus index', async () => {
-    const cwd = mkdtempSync(join(tmpdir(), 'system-prompt-golden-c-'));
+    const cwd = tempDir('system-prompt-golden-c-');
     try {
       const actual = await captureSystemPrompt(
         {

@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 
 import { resolveWorkspace } from '../../../src/activation/native-host.js';
 import { acquire, leasePath, type LeaseProcessProbe } from '../../../src/activation/workspace-lease.js';
 import { runLeaseCommand } from '../../../src/cli/lease.js';
 import { createSpecialistLeaseReconcileTool } from '../../../src/tools/specialist/specialist_lease_reconcile.tool.js';
+import { scratchDir } from '../../utils/temp-dir.js';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -18,7 +18,7 @@ const blindProbe: LeaseProcessProbe = { canVerify: () => false, startTicks: () =
 
 /** A real runtime-written lease whose holder PID is replaced by an impossible one. */
 function deadHolderWorkspace(): string {
-  const root = mkdtempSync(join(process.cwd(), '.tmp-specialists-4251-'));
+  const root = scratchDir(process.cwd(), '.tmp-specialists-4251-');
   roots.push(root);
   const identity = resolveWorkspace(root);
   acquire({ workspace: identity, activationId: 'act:holder', attemptId: 'att:holder:1', specialist: 'executor' }, liveProbe);
@@ -55,7 +55,7 @@ describe('specialists lease list', () => {
   });
 
   it('reports no uncertain workspaces for a clean checkout', () => {
-    const root = mkdtempSync(join(process.cwd(), '.tmp-specialists-4251-'));
+    const root = scratchDir(process.cwd(), '.tmp-specialists-4251-');
     roots.push(root);
     expect(cli(['list'], root).out).toContain('No uncertain workspaces');
   });

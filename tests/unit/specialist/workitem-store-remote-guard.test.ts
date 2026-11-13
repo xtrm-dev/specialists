@@ -8,12 +8,12 @@
 // Needs a real Substrate module tree, like substrate-parity: set
 //   XTRM_SUBSTRATE_DIR=<abs path to @jaggerxtrm/substrate>
 // so the test exercises the export rather than a fake that cannot drift.
-
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync, writeFileSync } from 'node:fs';
+
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const SUBSTRATE_DIR = (process.env['XTRM_SUBSTRATE_DIR'] ?? '').trim();
 const suite = SUBSTRATE_DIR ? describe : describe.skip;
@@ -41,7 +41,7 @@ async function guard(): Promise<(dbPath: string, env: NodeJS.ProcessEnv) => void
 }
 
 function configWith(remote: string | null): NodeJS.ProcessEnv {
-  const dir = mkdtempSync(join(tmpdir(), 'wi-guard-'));
+  const dir = tempDir('wi-guard-');
   dirs.push(dir);
   const path = join(dir, 'substrate.json');
   if (remote !== null) writeFileSync(path, JSON.stringify({ remote, remoteSb: '/usr/local/bin/sb', checkouts: {} }));

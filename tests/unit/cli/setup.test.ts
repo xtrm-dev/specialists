@@ -1,10 +1,10 @@
 // NOTE: Live --probe-only validation deferred to Phase C (unitAI-oeysi probe suite live smoke).
 // Contract validation requires upstream pi model API access not available in unit/CI scope.
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 type SpawnCall = { command: string; args: string[] };
 
@@ -73,7 +73,7 @@ describe('setup CLI', () => {
 
   beforeEach(() => {
     vi.resetModules();
-    tempDir = mkdtempSync(join(tmpdir(), 'setup-cli-'));
+    tempDir = createTempDir('setup-cli-');
     stdout = [];
     stderr = [];
     state.spawnCalls = [];

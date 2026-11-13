@@ -4,7 +4,6 @@ import * as fs from 'node:fs';
 import * as crypto from 'node:crypto';
 import * as childProcess from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import * as tmuxUtils from '../../../src/cli/tmux-utils.js';
 import * as worktree from '../../../src/specialist/worktree.js';
@@ -16,6 +15,7 @@ import { Supervisor } from '../../../src/specialist/supervisor.js';
 import { initSchema } from '../../../src/specialist/observability-sqlite.js';
 import { resolveObservabilityDbLocation } from '../../../src/specialist/observability-db.js';
 import { buildInjectedObligationsDiffVariables, buildInjectedReviewerDiffVariables, buildInjectedWriterDiffVariables, buildTmuxLiveFeedCommand, readSafeSnapshotFile, resolveBasePin, run, startEventTailer, type RunArgs } from '../../../src/cli/run.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 function makeRunArgs(overrides: Partial<RunArgs> = {}): RunArgs {
   return {
@@ -164,7 +164,7 @@ describe('tmux live feed command', () => {
 
 describe('run JSON tailer', () => {
   it('reads SQLite timeline events and emits pi-compatible NDJSON', () => {
-    const root = fs.mkdtempSync(join(tmpdir(), 'sp-run-json-'));
+    const root = fs.tempDir('sp-run-json-');
     const jobsDir = join(root, '.specialists', 'jobs');
     fs.mkdirSync(jobsDir, { recursive: true });
     const location = resolveObservabilityDbLocation(root);
@@ -228,7 +228,7 @@ describe('run JSON tailer', () => {
 
   it('does not replay SQLite events when file fallback activates', () => {
     vi.useFakeTimers();
-    const root = fs.mkdtempSync(join(tmpdir(), 'sp-run-json-fallback-'));
+    const root = fs.tempDir('sp-run-json-fallback-');
     const jobsDir = join(root, '.specialists', 'jobs');
     const jobDir = join(jobsDir, 'job-json');
     fs.mkdirSync(jobDir, { recursive: true });

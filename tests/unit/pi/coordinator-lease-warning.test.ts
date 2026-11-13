@@ -1,11 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acquire, inspect, leasePath } from '../../../src/activation/workspace-lease.js';
 import { leaseScopeFor } from '../../../src/activation/workspace-reconcile.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * SPECIALISTS-23. The workspace lease fences native activations against each other, but the
@@ -23,7 +23,7 @@ const SCRIPT = fileURLToPath(new URL('../../../plugins/specialists/scripts/lease
 
 const workspaces: string[] = [];
 function workspace(): string {
-  const root = mkdtempSync(join(tmpdir(), 'lease-warn-'));
+  const root = tempDir('lease-warn-');
   workspaces.push(root);
   return root;
 }

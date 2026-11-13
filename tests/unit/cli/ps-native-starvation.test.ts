@@ -12,9 +12,9 @@
 // no attempt_id — the frozen 2026-09-08 vocabulary) is also present and must
 // never render as a current activation.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 interface FakeRow {
   id: number;
@@ -205,7 +205,7 @@ describe('ps native starvation (unitAI-kmbb9)', () => {
   let tempDir = '';
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'specialists-ps-starve-'));
+    tempDir = createTempDir('specialists-ps-starve-');
     process.chdir(tempDir);
     mkdirSync(join(tempDir, '.specialists', 'jobs'), { recursive: true });
     buildScenario();

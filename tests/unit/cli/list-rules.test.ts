@@ -1,10 +1,10 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildSpecialistOverrideTemplate } from '../../../src/specialist/global-config.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const CLI = join(__dirname, '../../../dist/index.js');
 const BUN = process.env.BUN_BIN ?? 'bun';
@@ -38,7 +38,7 @@ function overlayConfig(name: string, template_sets: unknown): string {
 }
 
 function setupFixture(): string {
-  const root = mkdtempSync(join(tmpdir(), 'list-rules-'));
+  const root = tempDir('list-rules-');
 
   // config/mandatory-rules/
   mkdirSync(join(root, 'config/mandatory-rules'), { recursive: true });
@@ -141,7 +141,7 @@ describe('sp list-rules', () => {
   });
 
   it('global user.json template_sets selection overlays the manifest (unitAI-klo6k)', () => {
-    const home = mkdtempSync(join(tmpdir(), 'list-rules-home-'));
+    const home = tempDir('list-rules-home-');
     try {
       // Global layer replaces alpha's shipped selection with a different set.
       mkdirSync(join(home, '.config', 'specialists'), { recursive: true });
@@ -166,7 +166,7 @@ describe('sp list-rules', () => {
   });
 
   it('global empty selection clears role-specific sets while index policy stays (unitAI-klo6k)', () => {
-    const home = mkdtempSync(join(tmpdir(), 'list-rules-home-'));
+    const home = tempDir('list-rules-home-');
     try {
       mkdirSync(join(home, '.config', 'specialists'), { recursive: true });
       writeFileSync(join(home, '.config', 'specialists', 'user.json'), overlayConfig('alpha', []));
@@ -186,7 +186,7 @@ describe('sp list-rules', () => {
   });
 
   it('malformed global template_sets shape fails validation with a warning; effective state falls back to merged/package (unitAI-klo6k)', () => {
-    const home = mkdtempSync(join(tmpdir(), 'list-rules-home-'));
+    const home = tempDir('list-rules-home-');
     try {
       mkdirSync(join(home, '.config', 'specialists'), { recursive: true });
       writeFileSync(join(home, '.config', 'specialists', 'user.json'), overlayConfig('alpha', 'not-an-array'));
@@ -208,7 +208,7 @@ describe('sp list-rules', () => {
   });
 
   it('non-kebab template_sets ids trigger a validation warning; the merge keeps only kebab siblings (unitAI-klo6k)', () => {
-    const home = mkdtempSync(join(tmpdir(), 'list-rules-home-'));
+    const home = tempDir('list-rules-home-');
     try {
       mkdirSync(join(home, '.config', 'specialists'), { recursive: true });
       writeFileSync(join(home, '.config', 'specialists', 'user.json'), overlayConfig('alpha', ['Bad_Id', 'extra-rule']));
@@ -229,7 +229,7 @@ describe('sp list-rules', () => {
   });
 
   it('invalid JSON in the global config is ignored with a warning, not a crash (unitAI-klo6k)', () => {
-    const home = mkdtempSync(join(tmpdir(), 'list-rules-home-'));
+    const home = tempDir('list-rules-home-');
     try {
       mkdirSync(join(home, '.config', 'specialists'), { recursive: true });
       writeFileSync(join(home, '.config', 'specialists', 'user.json'), '{ broken json');
@@ -247,7 +247,7 @@ describe('sp list-rules', () => {
   });
 
   it('repo overlay beats global beats package for template_sets (true merge, unitAI-klo6k F4)', () => {
-    const home = mkdtempSync(join(tmpdir(), 'list-rules-home-'));
+    const home = tempDir('list-rules-home-');
     try {
       // Global layer selects extra-rule...
       mkdirSync(join(home, '.config', 'specialists'), { recursive: true });

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const state = vi.hoisted(() => ({
   status: null as any,
@@ -36,7 +36,7 @@ describe('resume CLI', () => {
 
   beforeEach(() => {
     vi.resetModules();
-    tmpDir = mkdtempSync(join(tmpdir(), 'resume-cli-'));
+    tmpDir = tempDir('resume-cli-');
     state.jobsDir = join(tmpDir, 'jobs');
     state.emitControlEvent.mockReset();
     state.dispose.mockClear();

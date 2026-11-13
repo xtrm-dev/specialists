@@ -1,10 +1,10 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Database } from 'bun:sqlite';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * Wake dedupe between the Channel push and the fallback watcher (SPECIALISTS-4214).
@@ -24,7 +24,7 @@ const children: Array<{ kill: (s?: NodeJS.Signals) => boolean }> = [];
 
 /** Creates a store plus, when `acks` is given, an ack dir holding those marker names. */
 function setup(rows: Array<[string, string]>, acks: string[] = []): { dbPath: string; ackDir: string } {
-  const root = mkdtempSync(join(tmpdir(), 'wake-watch-ack-'));
+  const root = tempDir('wake-watch-ack-');
   roots.push(root);
   const dbPath = join(root, 'state.db');
   const db = new Database(dbPath);

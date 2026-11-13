@@ -1,6 +1,6 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import {
   GLOBAL_USER_CONFIG_DOC,
@@ -12,6 +12,7 @@ import {
   writeGlobalUserConfig,
   type GlobalUserConfigPath,
 } from '../../../src/specialist/global-config.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 describe('global specialist override config', () => {
   it('buildGlobalUserConfigTemplate includes upgrade-note doc sentinel', () => {
@@ -348,7 +349,7 @@ describe('readValidatedGlobalUserConfig — shared fail-safe read (unitAI-klo6k)
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'sp-global-validated-'));
+    dir = tempDir('sp-global-validated-');
   });
 
   afterEach(() => {
@@ -403,7 +404,7 @@ describe('writeGlobalUserConfig — atomic-write semantics (unitAI-ctb4u.17)', (
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'sp-global-config-'));
+    dir = tempDir('sp-global-config-');
   });
 
   afterEach(() => {

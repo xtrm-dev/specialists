@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createObservabilitySqliteClientAtPath } from '../../../src/specialist/observability-sqlite.js';
 import type { RuntimeOriginV1 } from '../../../src/specialist/runtime-origin.js';
 import { Supervisor, type SupervisorStatus } from '../../../src/specialist/supervisor.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const { bdSpawnMock, xtmuxSpawnMock } = vi.hoisted(() => ({
   bdSpawnMock: vi.fn(),
@@ -83,7 +83,7 @@ describe('Supervisor parent terminal notification', () => {
   beforeEach(() => {
     originalFileOutput = process.env.SPECIALISTS_JOB_FILE_OUTPUT;
     process.env.SPECIALISTS_JOB_FILE_OUTPUT = 'on';
-    tmpDir = mkdtempSync(join(tmpdir(), 'supervisor-parent-notification-'));
+    tmpDir = tempDir('supervisor-parent-notification-');
     jobsDir = join(tmpDir, 'jobs');
     mkdirSync(jobsDir, { recursive: true });
     // Supervisor throws on upsertStatus when no observability db exists. Resolution

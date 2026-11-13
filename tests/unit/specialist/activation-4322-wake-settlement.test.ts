@@ -1,6 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync, mkdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { realpathSync, rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -13,6 +12,7 @@ import type { PiAgentSessionEvent, PiAgentSessionLike, PiSdk } from '../../../sr
 import type { TimelineEvent } from '../../../src/specialist/timeline-events.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import { testWorkItems } from '../../utils/test-work-items.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * SPECIALISTS-4322. A lease-holding activation woken by its own background timer
@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 function scratch(prefix: string): string {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  const dir = realpathSync(tempDir(prefix));
   dirs.push(dir);
   return dir;
 }

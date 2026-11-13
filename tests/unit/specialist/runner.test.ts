@@ -1,8 +1,8 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 // tests/unit/specialist/runner.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir, homedir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -11,6 +11,7 @@ import { HookEmitter } from '../../../src/specialist/hooks.js';
 import { CircuitBreaker } from '../../../src/utils/circuitBreaker.js';
 import { SessionKilledError } from '../../../src/pi/session.js';
 import type { BeadsClient } from '../../../src/specialist/beads.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 function makeMockSession() {
   return {
@@ -56,7 +57,7 @@ function makeLoader(
 }
 
 function createReviewerDiffRepo() {
-  const dir = mkdtempSync(join(tmpdir(), 'reviewer-diff-'));
+  const dir = tempDir('reviewer-diff-');
   execSync('git init -b main', { cwd: dir, stdio: 'pipe' });
   execSync('git config user.email test@example.com', { cwd: dir, stdio: 'pipe' });
   execSync('git config user.name Test User', { cwd: dir, stdio: 'pipe' });
@@ -72,7 +73,7 @@ function createReviewerDiffRepo() {
 }
 
 function createEmptyReviewerRepo() {
-  const dir = mkdtempSync(join(tmpdir(), 'reviewer-empty-'));
+  const dir = tempDir('reviewer-empty-');
   execSync('git init -b main', { cwd: dir, stdio: 'pipe' });
   execSync('git config user.email test@example.com', { cwd: dir, stdio: 'pipe' });
   execSync('git config user.name Test User', { cwd: dir, stdio: 'pipe' });
@@ -111,7 +112,7 @@ describe('SpecialistRunner', () => {
   it('writes specialist.output_file without legacy job file output gate', async () => {
     const previousMode = process.env.SPECIALISTS_JOB_FILE_OUTPUT;
     process.env.SPECIALISTS_JOB_FILE_OUTPUT = 'off';
-    const outputPath = join(mkdtempSync(join(tmpdir(), 'runner-output-file-')), 'test-result.md');
+    const outputPath = join(tempDir('runner-output-file-'), 'test-result.md');
     try {
       const runner = new SpecialistRunner({
         loader: makeLoader({}, 'auto', {}, { output_file: outputPath }),
@@ -133,7 +134,7 @@ describe('SpecialistRunner', () => {
   it('skips specialist.output_file when supervisor suppresses runner file output', async () => {
     const previousMode = process.env.SPECIALISTS_JOB_FILE_OUTPUT;
     process.env.SPECIALISTS_JOB_FILE_OUTPUT = 'on';
-    const outputDir = mkdtempSync(join(tmpdir(), 'runner-output-file-'));
+    const outputDir = tempDir('runner-output-file-');
     const outputPath = join(outputDir, 'test-result.md');
     try {
       const runner = new SpecialistRunner({
@@ -281,7 +282,7 @@ describe('SpecialistRunner', () => {
   });
 
   it('reports mandatory_rule payload bytes per rendered section', async () => {
-    const cwd = mkdtempSync(join(tmpdir(), 'mandatory-rule-payload-'));
+    const cwd = tempDir('mandatory-rule-payload-');
     try {
       mkdirSync(join(cwd, '.specialists', 'default', 'mandatory-rules'), { recursive: true });
       mkdirSync(join(cwd, 'config', 'mandatory-rules'), { recursive: true });
@@ -317,7 +318,7 @@ describe('SpecialistRunner', () => {
   });
 
   it('reports only final injected mandatory sections with exact budget telemetry and digest', async () => {
-    const cwd = mkdtempSync(join(tmpdir(), 'mandatory-rule-budget-'));
+    const cwd = tempDir('mandatory-rule-budget-');
     try {
       mkdirSync(join(cwd, 'config', 'mandatory-rules'), { recursive: true });
       writeFileSync(join(cwd, 'config', 'mandatory-rules', 'floor.md'), '---\nrules:\n  - id: floor-1\n    level: error\n    text: stay safe\n---\n');
@@ -366,7 +367,7 @@ describe('SpecialistRunner', () => {
   });
 
   it('does not start a session when the MUST_KEEP floor exceeds the budget', async () => {
-    const cwd = mkdtempSync(join(tmpdir(), 'mandatory-rule-impossible-'));
+    const cwd = tempDir('mandatory-rule-impossible-');
     const sessionFactory = vi.fn().mockResolvedValue(mockSession);
     const events: Array<{ type: string; details: Record<string, unknown> }> = [];
     try {
@@ -577,7 +578,7 @@ describe('SpecialistRunner', () => {
   });
 
   it('fails closed before session creation or fallback when the project tool catalog is malformed', async () => {
-    const cwd = mkdtempSync(join(tmpdir(), 'runner-invalid-tool-catalog-'));
+    const cwd = tempDir('runner-invalid-tool-catalog-');
     const sessionFactory = vi.fn().mockResolvedValue(mockSession);
     try {
       mkdirSync(join(cwd, '.specialists', 'catalog'), { recursive: true });
@@ -724,7 +725,7 @@ describe('SpecialistRunner', () => {
   });
 
   it('toggles runtime injections off when execution.bare=true', async () => {
-    const cwd = mkdtempSync(join(tmpdir(), 'runner-bare-mode-'));
+    const cwd = tempDir('runner-bare-mode-');
     try {
       mkdirSync(join(cwd, '.gitnexus'), { recursive: true });
       writeFileSync(join(cwd, '.gitnexus', 'meta.json'), JSON.stringify({ indexed: true }));

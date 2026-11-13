@@ -8,11 +8,10 @@
 // The first test kills a real process. Three claims in this epic passed inspection and were
 // then falsified by a live probe, so the crash case is exercised against the real `/proc`
 // probe and a real SIGKILL rather than a stub that can only agree with the code it stubs.
-
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+
 import { join } from 'node:path';
 
 import {
@@ -33,11 +32,12 @@ import {
   type ReconciliationRecord,
 } from '../../../src/activation/workspace-reconcile.js';
 import type { WorkspaceIdentity } from '../../../src/activation/types.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 let root: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'sp-reconcile-'));
+  root = tempDir('sp-reconcile-');
 });
 
 afterEach(() => {

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const ORIGINAL_ENV = { ...process.env };
 const ORIGINAL_CWD = process.cwd();
@@ -64,7 +64,7 @@ describe('version-check CLI', () => {
   });
 
   it('skips when not tty', async () => {
-    tempDir = mkdtempSync(join(tmpdir(), 'version-check-'));
+    tempDir = createTempDir('version-check-');
     process.chdir(tempDir);
     setupNonTty();
 
@@ -73,7 +73,7 @@ describe('version-check CLI', () => {
   });
 
   it('skips when offline or in specialist sandbox', async () => {
-    tempDir = mkdtempSync(join(tmpdir(), 'version-check-'));
+    tempDir = createTempDir('version-check-');
     process.chdir(tempDir);
     setupTty();
 
@@ -93,7 +93,7 @@ describe('version-check CLI', () => {
   });
 
   it('reads cache when fresh', async () => {
-    tempDir = mkdtempSync(join(tmpdir(), 'version-check-'));
+    tempDir = createTempDir('version-check-');
     process.chdir(tempDir);
     setupTty();
 
@@ -123,7 +123,7 @@ describe('version-check CLI', () => {
   });
 
   it('returns null on spawn timeout error without throwing', async () => {
-    tempDir = mkdtempSync(join(tmpdir(), 'version-check-'));
+    tempDir = createTempDir('version-check-');
     process.chdir(tempDir);
     setupTty();
 
@@ -171,7 +171,7 @@ describe('version-check CLI', () => {
   // version here rots the moment package.json passes it, which is how this file was
   // quarantined (local 3.21.1 > pinned 3.14.0 → no nudge).
   it('parses remote tags, caches result, and nudges on newer release', async () => {
-    tempDir = mkdtempSync(join(tmpdir(), 'version-check-'));
+    tempDir = createTempDir('version-check-');
     process.chdir(tempDir);
     setupTty();
 
