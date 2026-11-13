@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -60,6 +60,39 @@ describe('provisionWriterWorkspace', () => {
     const { clone } = cloneBehindRemote();
     provisionWriterWorkspace(clone, 'CORE-2513', 'executor');
     expect(run(clone, 'status', '--porcelain')).toBe('');
+  });
+
+  it('hides runtime state but leaves authored .specialists config visible to git', () => {
+    const { clone } = cloneBehindRemote();
+    // The runtime writes these; the provisioning path must keep them out of the status.
+    for (const dir of ['logs', 'settlements', 'user']) mkdirSync(join(clone, '.specialists', dir), { recursive: true });
+    writeFileSync(join(clone, '.specialists', 'logs', 'runtime-diagnostics.log'), 'x');
+    writeFileSync(join(clone, '.specialists', 'settlements', 'act-settled.jsonl'), 'x');
+    writeFileSync(join(clone, '.specialists', 'version-check.json'), '{}');
+    // Authored source: a project-scope Specialist definition must stay addable.
+    writeFileSync(join(clone, '.specialists', 'user', 'mine.specialist.json'), '{}');
+
+    expect(run(clone, 'status', '--porcelain', '--untracked-files=all'))
+      .toContain('.specialists/logs/runtime-diagnostics.log');
+
+    provisionWriterWorkspace(clone, 'CORE-2514', 'executor');
+
+    const after = run(clone, 'status', '--porcelain', '--untracked-files=all');
+    expect(after).not.toContain('.specialists/logs/');
+    expect(after).not.toContain('.specialists/settlements/');
+    expect(after).not.toContain('version-check.json');
+    expect(after).toContain('.specialists/user/mine.specialist.json');
+  });
+
+  it('writes each info/exclude pattern once, however many worktrees it provisions', () => {
+    const { clone } = cloneBehindRemote();
+    provisionWriterWorkspace(clone, 'CORE-2515', 'executor');
+    const excludePath = join(clone, '.git', 'info', 'exclude');
+    const first = readFileSync(excludePath, 'utf-8');
+
+    provisionWriterWorkspace(clone, 'CORE-2516', 'executor');
+
+    expect(readFileSync(excludePath, 'utf-8')).toBe(first);
   });
 
   it('reuses a worktree already on sp/<slug> at the legacy .worktrees root', () => {

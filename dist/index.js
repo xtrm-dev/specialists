@@ -25790,6 +25790,34 @@ var init_models = __esm(() => {
   init_loader();
 });
 
+// src/utils/runtime-ignore.ts
+function runtimeIgnorePatterns() {
+  return [...RUNTIME_IGNORE_PATTERNS];
+}
+function runtimeIgnoreExcludePatterns() {
+  return RUNTIME_IGNORE_PATTERNS.map((pattern) => `/${pattern}`);
+}
+var RUNTIME_IGNORE_PATTERNS;
+var init_runtime_ignore = __esm(() => {
+  RUNTIME_IGNORE_PATTERNS = [
+    ".xtrm/worktrees/",
+    ".specialists/jobs/",
+    ".specialists/ready/",
+    ".specialists/settlements/",
+    ".specialists/db/*.db",
+    ".specialists/db/*.db-wal",
+    ".specialists/db/*.db-shm",
+    ".specialists/leases/",
+    ".specialists/interactions/",
+    ".specialists/logs/",
+    ".specialists/trace.jsonl",
+    ".specialists/version-check.json",
+    ".specialists/executor-result.md",
+    ".specialists/*-result.md",
+    ".specialists/sync-docs-report.md"
+  ];
+});
+
 // src/pi/native-specialists-registration.ts
 import { existsSync as existsSync19, mkdirSync as mkdirSync10, readFileSync as readFileSync14, writeFileSync as writeFileSync7 } from "fs";
 import { homedir as homedir7 } from "os";
@@ -26590,6 +26618,7 @@ var init_init = __esm(() => {
   init_observability_db();
   init_observability_sqlite();
   init_canonical_asset_resolver();
+  init_runtime_ignore();
   init_loader();
   init_native_specialists_registration();
   init_global_config();
@@ -26619,14 +26648,7 @@ Rules:
 - Add custom Specialist definitions under \`.specialists/user/\`; current role prompts must preserve pinned-Issue/Journal/settlement/Closure semantics.
 <!-- specialists:end -->
 `.trimStart();
-  GITIGNORE_ENTRIES = [
-    ".specialists/jobs/",
-    ".specialists/ready/",
-    ".specialists/settlements/",
-    ".specialists/db/*.db",
-    ".specialists/db/*.db-wal",
-    ".specialists/db/*.db-shm"
-  ];
+  GITIGNORE_ENTRIES = runtimeIgnorePatterns();
   MCP_SERVER_CONFIG = { command: "specialists", args: [] };
   LEGACY_HOOK_NAME = /^specialists-[\w.-]+\.mjs$/;
   LEGACY_HOOK_COMMAND = /\.claude\/hooks\/(specialists-[\w.-]+\.mjs)/;
@@ -59613,18 +59635,9 @@ function provisionWriterWorkspace(cwd, issueRef, role) {
       const mainRoot = dirname25(git("rev-parse", "--path-format=absolute", "--git-common-dir"));
       worktreePath = join53(mainRoot, ".xtrm", "worktrees", `${basename12(mainRoot)}-sp-${roleSlug}-${slug}`);
       const excludePath = git("rev-parse", "--path-format=absolute", "--git-path", "info/exclude");
-      const runtimePatterns = [
-        "/.xtrm/worktrees/",
-        "/.specialists/settlements/",
-        "/.specialists/leases/",
-        "/.specialists/logs/",
-        "/.specialists/db/",
-        "/.specialists/jobs/",
-        "/.specialists/ready/",
-        "/.specialists/interactions/",
-        "/.specialists/trace.jsonl"
-      ];
-      const additions = runtimePatterns.filter((pattern) => spawnSync27("git", ["check-ignore", "-q", join53(mainRoot, pattern.replace(/^\//, ""), "x")], { cwd: mainRoot }).status !== 0).join(`
+      const existing = existsSync48(excludePath) ? readFileSync39(excludePath, "utf-8").split(`
+`) : [];
+      const additions = runtimeIgnoreExcludePatterns().filter((pattern) => !existing.includes(pattern)).filter((pattern) => pattern.includes("*") || spawnSync27("git", ["check-ignore", "-q", join53(mainRoot, pattern.slice(1), "x")], { cwd: mainRoot }).status !== 0).join(`
 `);
       if (additions)
         appendFileSync7(excludePath, `
@@ -59831,6 +59844,7 @@ function admitToolCall(input, probe = procLeaseProbe()) {
 var NON_MUTATING_TOOLS, WORKSPACE_WRITE_TOOLS;
 var init_workspace_lease = __esm(() => {
   init_runtime_diagnostics();
+  init_runtime_ignore();
   init_types3();
   NON_MUTATING_TOOLS = new Set([
     "read",

@@ -92,6 +92,7 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { runtimeWarn } from '../utils/runtime-diagnostics.js';
+import { runtimeIgnoreExcludePatterns } from '../utils/runtime-ignore.js';
 import { DispatchRejectedError, type ActivationId, type AttemptId, type WorkspaceIdentity } from './types.js';
 
 /**
@@ -171,23 +172,19 @@ export function provisionWriterWorkspace(cwd: string, issueRef: string, role: st
       const mainRoot = dirname(git('rev-parse', '--path-format=absolute', '--git-common-dir'));
       worktreePath = join(mainRoot, '.xtrm', 'worktrees', `${basename(mainRoot)}-sp-${roleSlug}-${slug}`);
       // An unignored nested worktree or runtime state directory would show up as `?? ...` in
-      // the dispatcher's status. Keep them out of git's view via info/exclude (per-repo, not
-      // tracked). The patterns are the RUNTIME paths only: `.specialists/` also holds authored
-      // project config (`user/`, `default/`, `catalog/`), which must stay visible to git.
+      // the dispatcher's status. Keep them out of git's view via info/exclude (per-clone, not
+      // tracked), using the shared runtime inventory so this list cannot drift from the one
+      // `sp init` writes. Authored config under `.specialists/` (user/, default/, catalog/) is
+      // deliberately absent: it is source, and a repository's own .gitignore still governs it.
       const excludePath = git('rev-parse', '--path-format=absolute', '--git-path', 'info/exclude');
-      const runtimePatterns = [
-        '/.xtrm/worktrees/',
-        '/.specialists/settlements/',
-        '/.specialists/leases/',
-        '/.specialists/logs/',
-        '/.specialists/db/',
-        '/.specialists/jobs/',
-        '/.specialists/ready/',
-        '/.specialists/interactions/',
-        '/.specialists/trace.jsonl',
-      ];
-      const additions = runtimePatterns
-        .filter((pattern) => spawnSync('git', ['check-ignore', '-q', join(mainRoot, pattern.replace(/^\//, ''), 'x')], { cwd: mainRoot }).status !== 0)
+      // Idempotent by construction: a pattern already in info/exclude is never appended twice,
+      // which glob patterns would defeat if membership were decided by `git check-ignore` alone.
+      // A plain path that some other ignore source already covers is left out of the file.
+      const existing = existsSync(excludePath) ? readFileSync(excludePath, 'utf-8').split('\n') : [];
+      const additions = runtimeIgnoreExcludePatterns()
+        .filter((pattern) => !existing.includes(pattern))
+        .filter((pattern) => pattern.includes('*')
+          || spawnSync('git', ['check-ignore', '-q', join(mainRoot, pattern.slice(1), 'x')], { cwd: mainRoot }).status !== 0)
         .join('\n');
       if (additions) appendFileSync(excludePath, '\n' + additions + '\n');
       const branchExists = spawnSync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], { cwd }).status === 0;
