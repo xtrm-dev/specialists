@@ -82,7 +82,7 @@ import {
   isBridgedModel,
   operatorClaudeBridgeEnabled,
 } from '../pi/claude-bridge.js';
-import { getPermissionGuardExtensionPath, resolvePermissionGuardForSpawn } from '../pi/permission-guard-extension.js';
+import { getPermissionGuardExtensionPath } from '../pi/permission-guard-extension.js';
 import {
   clearIdentityEnv,
   isIdentityManagedKey,
@@ -1199,21 +1199,6 @@ export class NativeActivationHost {
   private readonly admission: (specialist: unknown, tier: string, toolContract: ResolvedToolContract) => void;
   /** Guards the once-per-process settlement republish pass (SPECIALISTS-54). */
   private republished = false;
-  /**
-   * The identity env live activations have put on `process.env`, in apply order
-   * (SPECIALISTS-4423 F2, stack per the delta review). One host, one process env:
-   * the managed keys are cleared before each apply, so a smaller answer cannot
-   * inherit a bigger one's GIT_CONFIG index, and the stack keeps two facts straight
-   * that a single owner could not — that the LAST live activation owns the env, and
-   * that the state to return to is the one captured before the FIRST of them.
-   *
-   * Still one process env for every activation: this bounds what a settled
-   * activation leaves behind, it does not give two running ones separate identities
-   * (that is SPECIALISTS-4427, via the bash tool's spawnHook).
-   */
-  private readonly liveIdentityEnv: Array<{ activationId: string; env: Record<string, string> }> = [];
-  /** State before the oldest live activation applied; null whenever the stack is empty. */
-  private identityEnvBaseline: Record<string, string | undefined> | null = null;
   private readonly env: Record<string, string | undefined>;
 
   private readonly registry = new FleetRegistry();
@@ -1317,138 +1302,6 @@ export class NativeActivationHost {
    * evidence: a refused dispatch is still runtime evidence, and a dispatch that failed
    * silently is indistinguishable from one that never happened.
    */
-  /**
-   * Give `process.env` this activation's agent identity (SPECIALISTS-4423 F2).
-   *
-   * The managed keys are cleared FIRST: `xt identity env` answers with a block sized
-   * by the role's App, so a later, smaller answer must not leave an earlier one's
-   * GIT_CONFIG index or author behind. The baseline is captured only when the stack
-   * goes empty → non-empty, so it is always the state before the OLDEST live
-   * activation — never another activation's identity.
-   */
-  private applyActivationIdentityEnv(
-    activationId: string,
-    specialistName: string,
-    workspacePath: string,
-  ): void {
-    const launchEnv = resolveAgentLaunchEnv({
-      holder: specialistHolderName(specialistName, activationId),
-      roleName: specialistName,
-      cwd: workspacePath,
-      env: process.env,
-      run: this.identityEnvRun,
-    });
-    const existing = this.liveIdentityEnv.findIndex((entry) => entry.activationId === activationId);
-    if (existing >= 0) this.liveIdentityEnv.splice(existing, 1); // resume re-applies
-    if (this.liveIdentityEnv.length === 0) this.identityEnvBaseline = snapshotIdentityEnv(process.env);
-    this.liveIdentityEnv.push({ activationId, env: launchEnv });
-    this.writeIdentityEnv(launchEnv);
-  }
-
-  /** Clear the managed keys, then apply one activation's env. */
-  private writeIdentityEnv(env: Record<string, string>): void {
-    clearIdentityEnv(process.env);
-    Object.assign(process.env, env);
-  }
-
-  /** True when `process.env` still carries exactly the managed keys of `env`. */
-  private identityEnvMatches(env: Record<string, string>): boolean {
-    const current = snapshotIdentityEnv(process.env);
-    for (const key of new Set([...Object.keys(env), ...Object.keys(current)])) {
-      if (!isIdentityManagedKey(key)) continue; // PATH is one process-wide value by design
-      if ((current[key] ?? '') !== (env[key] ?? '')) return false;
-    }
-    return true;
-  }
-
-  /**
-   * Put this activation's identity back at the start of a leg (N1).
-   *
-   * Called from `agent_start`, which every leg reaches — the first turn, a fallback
-   * model, a retry, a background wake and a resume. Two cases: the activation is not on
-   * the stack at all (a wake or resume after its terminal settle), so it applies fresh;
-   * or it is on the stack but no longer owns the env, or its keys were disturbed, so it
-   * takes the env back. Taking the env makes it the top, which keeps the stack honest
-   * about who wrote it last.
-   */
-  private assertActivationIdentityEnv(snapshot: ActivationSnapshot): void {
-    const previousTop = this.liveIdentityEnv[this.liveIdentityEnv.length - 1]?.activationId;
-    const index = this.liveIdentityEnv.findIndex((entry) => entry.activationId === snapshot.activationId);
-    if (index < 0) {
-      this.applyActivationIdentityEnv(
-        snapshot.activationId,
-        snapshot.specialist,
-        snapshot.workspace?.worktreePath ?? this.cwd,
-      );
-      this.warnIdentityTakeover(snapshot.activationId, previousTop);
-      return;
-    }
-    const entry = this.liveIdentityEnv[index];
-    const isTop = index === this.liveIdentityEnv.length - 1;
-    if (isTop && this.identityEnvMatches(entry.env)) return;
-    this.liveIdentityEnv.splice(index, 1);
-    this.liveIdentityEnv.push(entry);
-    this.writeIdentityEnv(entry.env);
-    this.warnIdentityTakeover(snapshot.activationId, previousTop);
-  }
-
-  /**
-   * N5: taking the env from another live activation is the known concurrency limit, and
-   * it happens at a LEG ENTRY, not at a settle — so it must be visible on the same
-   * channel, not only once the winner finally settles. Ids only: never a value.
-   */
-  private warnIdentityTakeover(activationId: string, previousTop: string | undefined): void {
-    if (!previousTop || previousTop === activationId || this.liveIdentityEnv.length < 2) return;
-    warnIdentityEnv(
-      `activation ${activationId} started a leg and took process env from ${previousTop}; ${this.liveIdentityEnv.length} activations are live`,
-    );
-  }
-
-  /**
-   * Host shutdown (N3): nothing may outlive the host with an activation's identity on
-   * `process.env`. The stack is dropped and the baseline restored, whatever state the
-   * activations were in — a stopped, timed-out or crashed activation cannot restore
-   * itself, so the last owner of the process env has to.
-   */
-  shutdown(): void {
-    this.liveIdentityEnv.length = 0;
-    const baseline = this.identityEnvBaseline;
-    this.identityEnvBaseline = null;
-    if (baseline) restoreIdentityEnv(baseline, process.env);
-  }
-
-  /**
-   * Take a settled activation off the stack (SPECIALISTS-4423 F2).
-   *
-   * Only the activation on TOP owns `process.env`, so only its settle touches it:
-   * the previous top takes the env back (that activation is still running and must
-   * keep ITS identity — leaving the baseline there would run its remaining commands
-   * as the operator, silently), and the bottom-most settle restores the baseline.
-   * A settle from anywhere else in the stack changes nothing in `process.env`.
-   */
-  private settleActivationIdentityEnv(activationId: string): void {
-    const index = this.liveIdentityEnv.findIndex((entry) => entry.activationId === activationId);
-    if (index < 0) return;
-    const wasTop = index === this.liveIdentityEnv.length - 1;
-    this.liveIdentityEnv.splice(index, 1);
-    if (!wasTop) return;
-
-    const top = this.liveIdentityEnv[this.liveIdentityEnv.length - 1];
-    if (!top) {
-      const baseline = this.identityEnvBaseline;
-      this.identityEnvBaseline = null;
-      if (baseline) restoreIdentityEnv(baseline, process.env);
-      return;
-    }
-    this.writeIdentityEnv(top.env);
-    // The env is shared, so the swap is money-moving information: an activation that
-    // settles while others run quietly hands the process to another identity. Ids
-    // only — never a holder's value, never a config value.
-    warnIdentityEnv(
-      `activation ${activationId} settled while ${this.liveIdentityEnv.length} others are live; process env now carries ${top.activationId}`,
-    );
-  }
-
   async start(request: ActivationRequest): Promise<ActivationHandle> {
     const activationId = `act:${randomUUID().slice(0, 12)}`;
     const attemptId = `att:${activationId.slice(4)}:1`;
@@ -1545,7 +1398,6 @@ export class NativeActivationHost {
 
     const reject = (reason: string, detail: Record<string, unknown> = {}): never => {
       // All first, so no refusal path can forget any of them.
-      this.settleActivationIdentityEnv(activationId);
       releaseLeaseOnRefusal();
       releaseClaimForRefusal();
       removeWorkspaceOnRefusal();
@@ -2331,6 +2183,35 @@ export class NativeActivationHost {
       },
     });
 
+    // CORE-2525/2528 identity, SPECIALISTS-4456 channel: the activation's identity is
+    // built here and handed to the activation's OWN shells through the bash tool's
+    // `spawnHook` (see `createGuardedTools`). It is deliberately NOT written to
+    // `process.env` any more.
+    //
+    // A native activation runs in the HOST process, and the host may be another agent: a
+    // Pi worker dispatching a read-tier activation used to inherit that activation's
+    // `XTRM_ROLE` and tier, so its own `git push` refused with "the reviewer role does not
+    // push; no credential is offered" (SPECIALISTS-4456). One process env cannot carry two
+    // identities, and the dispatcher's identity is the one that must not move.
+    //
+    // CORE-2524.4 still holds, and is now scoped to the child: the launch env carries PATH
+    // with the gh shim directory first, so the activation's `gh` is the shim and not the
+    // real binary. The host's own PATH is untouched, which is the point — the dispatcher's
+    // `gh` must resolve to the dispatcher's identity.
+    const activationEnv = resolveAgentLaunchEnv({
+      holder: specialistHolderName(specialist.specialist.metadata.name, activationId),
+      roleName: specialist.specialist.metadata.name,
+      cwd: workspace.worktreePath,
+      // The lookup runs in the host env, so `xt` resolves the role; only the ANSWER is
+      // scoped to the child.
+      env: process.env,
+      run: this.identityEnvRun,
+    });
+    // The tier channel stays on the CLI-spawn path only. In process the guard is loaded
+    // for READ_ONLY sessions and sandboxes every bash call unconditionally, which is what
+    // authorizes them; its `tierRefusal` would refuse a NON-read-only tier, and a
+    // non-read-only tier never loads the guard. Writing the tier to `process.env` therefore
+    // protected nothing and downgraded the dispatcher (SPECIALISTS-4456).
     // PRD §52: the mutating builtins are RECONSTRUCTED and wrapped here, so the only
     // mutating tool the child can reach is one that consults the lease on every call. A
     // guard each frontend has to remember to call is optional enforcement; this one cannot
@@ -2338,6 +2219,7 @@ export class NativeActivationHost {
     const guardedTools = createGuardedTools(sdk, {
       toolNames: effectiveToolContract.toolsList,
       cwd: workspace.worktreePath,
+      env: activationEnv,
       // Lease admission with the phase-1 guard carve-out: sandboxed bash in a
       // guard-loaded session is not a mutation, so the lease does not refuse it.
       admit: createNativeToolAdmission({
@@ -2388,32 +2270,6 @@ export class NativeActivationHost {
           'loaded extension set; refusing rather than running unsandboxed',
       });
     }
-    // Tier channel, native surface (SPECIALISTS-4294): the CLI spawns merge
-    // guard.tierEnv into the child env (src/pi/session.ts); in-process there is no
-    // child env — the guard reads process.env — so merge it here, exactly when the
-    // guard is in the loaded set above. Sticky by design: only READ_ONLY sessions
-    // load the guard and all want the same value, writers never read it, and CLI
-    // spawns overwrite per spawn. Without this tierRefusal is dead natively.
-    // Opt-out preserved: resolvePermissionGuardForSpawn returns null when
-    // SPECIALISTS_PERMISSION_GUARD=0 (or non-READ_ONLY), setting nothing.
-    const nativeGuard = resolvePermissionGuardForSpawn(tier);
-    if (nativeGuard && curatedExtensions.all.includes(nativeGuard.path)) {
-      Object.assign(process.env, nativeGuard.tierEnv);
-    }
-    // CORE-2525/2528: in-process there is no child env, so this activation's own
-    // agent identity rides process.env like the guard tier above. Every activation
-    // overwrites it before its first turn; two native activations running at the
-    // same moment share it, which the spawned path does not (that one is exact).
-    // CORE-2524.4: the launch env also carries PATH with the gh shim directory
-    // first. An identity without a reachable shim is useless — the activation's
-    // `gh` would be the real binary and a review would post as the operator. The
-    // shim directory precedes the host PATH, so it is also visible to this host
-    // process while the activation runs; one process, one PATH.
-    this.applyActivationIdentityEnv(activationId, specialist.specialist.metadata.name, workspace.worktreePath);
-    // N1: from here on, anything that ends this dispatch early — a refusal, an SDK that
-    // throws while creating the session, a failed producer — must take the activation off
-    // the identity stack. `reject()` covers the explicit refusals; this covers the rest,
-    // so no failure path can leave the operator's env carrying an agent identity.
     try {
     const resourceLoader = createActivationResourceLoader(sdk, {
       cwd: workspace.worktreePath,
@@ -2825,7 +2681,6 @@ export class NativeActivationHost {
       result,
     };
     } catch (error) {
-      this.settleActivationIdentityEnv(activationId);
       throw error;
     }
   }
@@ -2955,12 +2810,10 @@ export class NativeActivationHost {
         break;
       case 'agent_start':
         this.noteWakeTurnStart(snapshot);
-        // N1: every leg starts here — first turn, fallback model, retry, wake, resume.
-        // If this activation is not on the stack (a wake or resume after its terminal
-        // settle) or its keys were disturbed, put its identity back before the leg's
-        // first tool call. Without this the shim's isAgent() is false and gh resolves to
-        // the real binary, posting as the operator.
-        this.assertActivationIdentityEnv(snapshot);
+        // N1's re-assert is gone with the process env channel (SPECIALISTS-4456): the
+        // activation's identity travels on the bash tool's spawn hook, which every leg of
+        // the activation shares because the tool is built once per dispatch. There is
+        // nothing to disturb between legs, so there is nothing to re-assert.
         snapshot.state = 'running';
         this.save(snapshot);
         emit('turn_started');
@@ -3012,8 +2865,7 @@ export class NativeActivationHost {
             // would ever take the activation off the identity stack — a lost registry
             // record or a settle redelivered while finalisation is in flight. The
             // finaliser owns its own removal on the paths it does run.
-            this.settleActivationIdentityEnv(snapshot.activationId);
-          }
+                }
         }
         break;
       case 'auto_retry_start':
@@ -3306,7 +3158,6 @@ export class NativeActivationHost {
       snapshot.state = 'failed';
       this.save(snapshot);
       // A throw is a terminal state too: the identity must not outlive it.
-      this.settleActivationIdentityEnv(snapshot.activationId);
       const message = error instanceof Error ? error.message : String(error);
       // The run failed by THROWING, not by settling: without this the terminal event would be
       // the only record, and a reader could not tell "Pi never reported totals" from "the
@@ -3380,7 +3231,6 @@ export class NativeActivationHost {
       const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
       snapshot.state = 'failed';
       this.save(snapshot);
-      this.settleActivationIdentityEnv(snapshot.activationId);
       emit('activation_failed', { error: detail, stop_reason: last.stopReason });
       const failedResult: ActivationResult = {
         activationId: snapshot.activationId,
@@ -3514,7 +3364,6 @@ export class NativeActivationHost {
     } finally {
       // A wake turn is unframed, so nothing else will take this activation off the
       // stack: its settle is the activation's terminal point.
-      this.settleActivationIdentityEnv(snapshot.activationId);
     }
   }
 
@@ -3652,7 +3501,6 @@ export class NativeActivationHost {
       flushFailure(false);
       // The framed walk is over: no further leg is pending, so this is terminal for the
       // activation's identity even though the activation itself stays resumable.
-      this.settleActivationIdentityEnv(record.snapshot.activationId);
     }
   }
 
@@ -3947,7 +3795,7 @@ export class NativeActivationHost {
     });
 
     const result = this.runToSettled(record.snapshot, record.session, opts?.prompt ?? record.initialPrompt, emit, record)
-      .finally(() => this.settleActivationIdentityEnv(activationId));
+
     record.result = result;
 
     return {
@@ -4215,7 +4063,6 @@ export class NativeActivationHost {
       this.toolDurationWarnMsByActivation.delete(activationId);
       // N3: abort() is not guaranteed to emit agent_settled, so the disposal path owns
       // the removal itself; otherwise a stopped activation keeps the process env.
-      this.settleActivationIdentityEnv(activationId);
       this.forgetBackgroundTasks(activationId);
       this.wakeDirty.delete(activationId);
       this.wakeFinalising.delete(activationId);
@@ -4363,7 +4210,7 @@ export class NativeActivationHost {
     // terminal side, because resume runs a leg without the fallback walk that would
     // otherwise take the activation off the stack.
     const result = this.runToSettled(record.snapshot, record.session, prompt, emit, record)
-      .finally(() => this.settleActivationIdentityEnv(activationId));
+
     record.result = result;
 
     return {

@@ -24,6 +24,7 @@
  * extension mutating through those bypasses this entirely (unitAI-rrdnt.6).
  */
 
+import { bashSpawnHookWith, hasActivationEnv } from './activation-bash-env.js';
 import type { PiSdk } from './pi-sdk.js';
 import type { AdmissionVerdict } from './workspace-lease.js';
 
@@ -57,6 +58,9 @@ const FACTORY_NAMES: Record<string, string> = {
   bash: 'createBashTool',
   powershell: 'createPowerShellTool',
 };
+
+/** The one factory that takes `{ spawnHook }` here: shells are what an identity reaches. */
+const BASH_FACTORY = 'createBashTool';
 
 /**
  * The tool names the native runtime reconstructs as lease-guarded custom tools.
@@ -96,6 +100,16 @@ export function createGuardedTools(
     toolNames: readonly string[];
     cwd: string;
     admit: (toolName: string) => AdmissionVerdict;
+    /**
+     * Env this activation's shells get on top of the inherited one (SPECIALISTS-4456).
+     *
+     * Applied through the bash tool's `spawnHook`, never through `process.env`: the host
+     * process is shared with the dispatcher, and writing there gave a coordinator the
+     * dispatched Specialist's identity (a reviewer role, so `git push` refused with "the
+     * reviewer role does not push"). Omitted means the shell inherits exactly what pi
+     * gives it, which is the previous behaviour.
+     */
+    env?: Record<string, string>;
   },
 ): GuardedToolsResult {
   const sdkAny = sdk as unknown as Record<string, ((cwd: string, options?: unknown) => ToolLike) | undefined>;
@@ -111,7 +125,12 @@ export function createGuardedTools(
     const factory = sdkAny[factoryName];
     if (!factory) { unguardable.push(name); continue; }
 
-    const original = factory(input.cwd);
+    // Only bash spawns shells, and the identity overlay exists to reach `git` and the `gh`
+    // shim. The other factories take no options on the SDKs this host supports, so passing
+    // them a second argument would open a surface nothing needs.
+    const original = factoryName === BASH_FACTORY && input.env && hasActivationEnv(input.env)
+      ? factory(input.cwd, { spawnHook: bashSpawnHookWith(input.env) })
+      : factory(input.cwd);
     const originalExecute = original.execute.bind(original);
 
     tools.push({

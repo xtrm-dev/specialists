@@ -3175,10 +3175,11 @@ describe('permission-guard native surface', () => {
     expect((record.createArgs!.tools as string[])).not.toContain('bash');
   });
 
-  it('propagates PI_SPECIALIST_PERMISSION_TIER=READ_ONLY into the native activation process', async () => {
-    // SPECIALISTS-4294: the CLI merges the tier env channel per spawn
-    // (src/pi/session.ts); the native in-process guard reads process.env, so the host
-    // must set it — otherwise tierRefusal is dead on the native surface.
+  it('does not write the guard tier into the host process env (SPECIALISTS-4456)', async () => {
+    // SPECIALISTS-4294 put the tier on process.env so the in-process guard could read it.
+    // That was the wrong channel: the guard is loaded only for READ_ONLY sessions and its
+    // sandbox is unconditional, so the value protected nothing, while the write landed on
+    // whoever dispatched the activation. The tier env stays a CLI-spawn channel.
     const TIER_KEY = 'PI_SPECIALIST_PERMISSION_TIER';
     const previousTier = process.env[TIER_KEY];
     delete process.env[TIER_KEY];
@@ -3187,39 +3188,95 @@ describe('permission-guard native surface', () => {
       const record: { createArgs?: Record<string, unknown> } = {};
       const session = fakeSession({ record });
       await dispatchReadOnly(record, session);
-      expect(process.env[TIER_KEY]).toBe('READ_ONLY');
+      expect(process.env[TIER_KEY]).toBeUndefined();
+      // The guard itself is still loaded for the READ_ONLY session; only the env write is gone.
+      const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
+      expect(loader.options.additionalExtensionPaths.some((path: string) => path.includes('permission-guard'))).toBe(true);
     } finally {
       if (previousTier === undefined) delete process.env[TIER_KEY];
       else process.env[TIER_KEY] = previousTier;
     }
   });
 
-  it('leaves the tier channel unset for writer tiers (phase 1 is READ_ONLY only)', async () => {
-    const TIER_KEY = 'PI_SPECIALIST_PERMISSION_TIER';
-    const previousTier = process.env[TIER_KEY];
-    delete process.env[TIER_KEY];
-    try {
-      process.env[GUARD_KEY] = '1';
-      const spec = readOnlySpec();
-      (spec.specialist.execution as Record<string, unknown>).permission_required = 'HIGH';
-      const record: { createArgs?: Record<string, unknown> } = {};
-      const session = fakeSession({ record });
-      const host = new NativeActivationHost({
-        provisionWriterWorkspace: workspaceIdentityFor,
-        loader: loaderFor(spec),
-        workItems: fakeWorkItems(),
-        forensics: collectingSink(),
-        loadSdk: async () => makeSdk(record, session),
-        cwd: hostWorkspace(),
-      });
-      await (await host.start({
-        specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
-      })).result;
-      expect(process.env[TIER_KEY]).toBeUndefined();
-    } finally {
-      if (previousTier === undefined) delete process.env[TIER_KEY];
-      else process.env[TIER_KEY] = previousTier;
-    }
+  it('leaves the host process environment byte-identical across a dispatch (SPECIALISTS-4456)', async () => {
+    // The regression this Issue exists for: a Pi worker dispatched a read-tier activation and
+    // then found XTRM_ROLE=reviewer in its own environment, so `git push` refused with "the
+    // reviewer role does not push; no credential is offered". A full snapshot, because the
+    // leak was several keys (role, holder, GIT_*, tier) and a per-key assertion would pass
+    // while the next key leaked.
+    const spec = readOnlySpec({ permission_required: 'LOW' });
+    const bashOptions: unknown[] = [];
+    const session = fakeSession({});
+    const sdk = {
+      createAgentSession: async (options?: Record<string, unknown>) => {
+        const systemPrompt = String((options as { systemPrompt?: unknown } | undefined)?.systemPrompt ?? '');
+        if (systemPrompt.includes('never prompted')) {
+          return { session: { ...fakeSession({}), getActiveToolNames: () => ['read'], setActiveToolsByName() {} } };
+        }
+        if (Array.isArray(options?.tools)) session.setActiveToolsByName(options.tools as string[]);
+        return { session };
+      },
+      DefaultResourceLoader: FakeResourceLoader,
+      getAgentDir: () => FAKE_AGENT_DIR,
+      ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
+      resolveModelScopeWithDiagnostics: () => ({
+        scopedModels: [{ model: { id: 'test-model', provider: 'testprov' } }],
+        diagnostics: [],
+      }),
+      defineTool: (d: Record<string, unknown>) => d,
+      createEditTool: () => ({ name: 'edit', execute: async () => 'edited' }),
+      createWriteTool: () => ({ name: 'write', execute: async () => 'written' }),
+      // Records the options, which is how the identity reaches the child: the tool is
+      // reconstructed here, so this is the ONLY place the overlay can be attached.
+      createBashTool: (...factoryArgs: unknown[]) => {
+        bashOptions.push(factoryArgs[1]);
+        return { name: 'bash', execute: async () => 'ran' };
+      },
+      createPowerShellTool: () => ({ name: 'powershell', execute: async () => 'ran' }),
+    } as unknown as PiSdk;
+    const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+      // A real identity answer, so the leak would have had something to leak.
+      identityEnvRun: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          env: {
+            XTRM_ROLE: 'reviewer',
+            GIT_AUTHOR_NAME: 'xtrm-reviewer',
+            GIT_AUTHOR_EMAIL: 'reviewer@example.test',
+            GIT_CONFIG_COUNT: '1',
+            GIT_CONFIG_KEY_0: 'credential.helper',
+            GIT_CONFIG_VALUE_0: '',
+          },
+        }),
+      }),
+    });
+
+    const before = { ...process.env };
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+    // Byte-identical: same keys, same values, nothing added, nothing removed.
+    expect({ ...process.env }).toEqual(before);
+
+    // ...and the identity still reaches the activation's own shells.
+    const withHook = bashOptions.filter((options) => options && typeof options === 'object') as Array<{
+      spawnHook: (context: { command: string; cwd: string; env: NodeJS.ProcessEnv }) => {
+        command: string; cwd: string; env: NodeJS.ProcessEnv;
+      };
+    }>;
+    expect(withHook.length).toBeGreaterThan(0);
+    const applied = withHook[0]!.spawnHook({ command: 'git status', cwd: '/tmp', env: { PATH: '/usr/bin' } });
+    expect(applied.env.XTRM_ROLE).toBe('reviewer');
+    expect(applied.env.GIT_AUTHOR_NAME).toBe('xtrm-reviewer');
+    expect(applied.env.GIT_CONFIG_KEY_0).toBe('credential.helper');
+    expect(applied.env.PATH).toContain('/usr/bin');
+    expect(applied.command).toBe('git status');
   });
 });
 
