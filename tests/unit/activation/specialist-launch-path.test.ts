@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, afterAll, afterEach, beforeAll, beforeEach } from 'vitest';
 import { setRuntimeDiagnosticsSink, resetRuntimeDiagnosticsSink } from '../../../src/utils/runtime-diagnostics.js';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -14,18 +14,30 @@ vi.mock('node:child_process', async (importOriginal) => {
   };
 });
 
-import { NativeActivationHost } from '../../../src/activation/native-host.js';
+import { NativeActivationHost, uncoveredHostEnvSpawns } from '../../../src/activation/native-host.js';
 import { testWorkItems } from '../../utils/test-work-items.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
-import { clearIdentityEnv, snapshotIdentityEnv, type IdentityEnvRun } from '../../../src/pi/identity-env.js';
+import type { IdentityEnvRun } from '../../../src/pi/identity-env.js';
 
 /**
- * CORE-2524.4 on the NATIVE launch path. #525 gave a native activation its agent
- * identity on process.env; this proves the same activation also gets PATH with the
- * gh shim directory first. Without it the activation's `gh` resolves through the
- * host PATH, may be the real binary, and a pr-reviewer review posts under the
- * operator identity. The legacy path is pinned in
+ * CORE-2524.4 and SPECIALISTS-4456 on the NATIVE launch path.
+ *
+ * #525 gave a native activation its agent identity by writing it to `process.env`, and this
+ * file used to pin that channel in detail (F2 stack, N1 re-assert, N3 shutdown, N5 takeover
+ * warning, N6 orphan settle). SPECIALISTS-4456 removed the channel: the host process is
+ * shared with whoever dispatched the activation, so a Pi worker that dispatched a read-tier
+ * Specialist inherited its role and tier and could no longer `git push` ("the reviewer role
+ * does not push; no credential is offered"). Two workers lost hours to it.
+ *
+ * The identity now reaches the activation's OWN shells through the bash tool's `spawnHook`
+ * (src/activation/activation-bash-env.ts, wired in createGuardedTools), so the properties
+ * this file exists to protect are unchanged: every leg of an activation runs with its own
+ * holder and role, `gh` resolves through the shim, and nothing about the activation leaks
+ * into the environment of the process that dispatched it — which is now asserted directly,
+ * for every leg, instead of being inferred from stack bookkeeping.
+ *
+ * The legacy CLI-spawn path still hands the child a process-level env; it is pinned in
  * tests/unit/specialist/runner.test.ts ("gives the child a PATH ...").
  */
 
@@ -57,11 +69,8 @@ function fakeSession(
     isIdle: true,
     disposed: false,
     activeTools: ['read', 'grep'],
-    /** Emit one leg start, as a new leg (fallback/retry/wake) would. */
-    emitLegStart() { listeners.forEach(l => l({ type: 'agent_start' })); },
     async prompt() {
-      // The runtime tells the host the leg started BEFORE any tool runs, and that is
-      // where the host re-asserts identity; captures therefore come after it.
+      // The runtime tells the host the leg started BEFORE any tool runs.
       listeners.forEach(l => l({ type: 'agent_start' }));
       onPrompt?.();
       if (options.wait) {
@@ -87,7 +96,7 @@ function fakeSession(
   return session as unknown as PiAgentSessionLike;
 }
 
-function makeSdk(session: PiAgentSessionLike): PiSdk {
+function makeSdk(session: PiAgentSessionLike, bashOptions: unknown[] = []): PiSdk {
   return {
     createAgentSession: async (options?: Record<string, unknown>) => {
       // Model pi's HARD FILTER: the session exposes exactly the tools it was named.
@@ -104,7 +113,16 @@ function makeSdk(session: PiAgentSessionLike): PiSdk {
     defineTool: (d) => d,
     createEditTool: () => ({ name: 'edit', execute: async () => 'edited' }),
     createWriteTool: () => ({ name: 'write', execute: async () => 'written' }),
-    createBashTool: () => ({ name: 'bash', execute: async () => 'ran' }),
+    // The host reconstructs bash as a lease-guarded custom tool, and that is the only
+    // place the activation's identity can be attached without touching process.env. The
+    // recorded options are therefore the assertion surface for this whole file.
+    createBashTool: (...factoryArgs: unknown[]) => {
+      // Models pi: the factory applies the spawn hook, so the tool object carries it here and
+      // a test can ask a SESSION which hook its shell would use.
+      const options = factoryArgs[1] as { spawnHook?: unknown } | undefined;
+      bashOptions.push(options);
+      return { name: 'bash', execute: async () => 'ran', spawnHook: options?.spawnHook };
+    },
     createPowerShellTool: () => ({ name: 'powershell', execute: async () => 'ran' }),
   };
 }
@@ -115,9 +133,15 @@ const originalPath = process.env.PATH;
 beforeEach(() => { process.env.PATH = originalPath; });
 afterEach(() => { process.env.PATH = originalPath; });
 
-async function dispatchOnce(
-  options: { identityEnvRun?: IdentityEnvRun; onPrompt?: () => void } = {},
-): Promise<void> {
+interface DispatchOptions {
+  identityEnvRun?: IdentityEnvRun;
+  onPrompt?: () => void;
+  /** Grants bash to the contract; without it there is no shell to carry an identity. */
+  grantBash?: boolean;
+}
+
+async function dispatchOnce(options: DispatchOptions = {}): Promise<{ bashOptions: unknown[] }> {
+  const bashOptions: unknown[] = [];
   const host = new NativeActivationHost({
     workItems: testWorkItems({ description: BEAD.description }),
     loader: { get: async () => ({
@@ -131,9 +155,10 @@ async function dispatchOnce(
           bare: false,
         },
         prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
+        ...(options.grantBash ? { capabilities: { required_tools: ['bash'] } } : {}),
       },
     }) } as never,
-    loadSdk: async () => makeSdk(fakeSession(options.onPrompt)),
+    loadSdk: async () => makeSdk(fakeSession(options.onPrompt), bashOptions),
     identityEnvRun: options.identityEnvRun ?? ((_cmd, _args, opts) => ({
       status: 0,
       stdout: JSON.stringify({
@@ -142,7 +167,6 @@ async function dispatchOnce(
           GIT_AUTHOR_NAME: 'sp-researcher',
           GIT_AUTHOR_EMAIL: 'researcher@example.invalid',
           SUBSTRATE_HOLDER: 'from-lookup',
-          ...(opts.env?.PROBE_LOOKUP_ENV ? {} : {}),
         },
       }),
     })),
@@ -152,508 +176,312 @@ async function dispatchOnce(
     specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
   });
   await handle.result;
+  return { bashOptions };
 }
 
-describe('native launch path — the Specialist PATH starts at the gh shim (CORE-2524.4)', () => {
-  it('prepends the shim directory when the host PATH does not contain it', async () => {
-    process.env.PATH = `/usr/bin${delimiter}/bin`;
-    await dispatchOnce();
+/**
+ * The guard is what makes READ_ONLY+bash admissible at all (src/activation/native-host.ts
+ * refuses the combination without it), and these tests need a real bash tool in the
+ * contract to reach the spawn hook.
+ */
+const GUARD_KEY = 'SPECIALISTS_PERMISSION_GUARD';
+let previousGuard: string | undefined;
+beforeAll(() => {
+  previousGuard = process.env[GUARD_KEY];
+  process.env[GUARD_KEY] = '1';
+});
+afterAll(() => {
+  if (previousGuard === undefined) delete process.env[GUARD_KEY];
+  else process.env[GUARD_KEY] = previousGuard;
+});
 
-    const launched = String(process.env.PATH).split(delimiter);
+interface SpawnHook {
+  spawnHook: (context: {
+    command: string;
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+  }) => { command: string; cwd: string; env: NodeJS.ProcessEnv };
+}
+
+/** The hooks the host attached to the activation's bash tool, in creation order. */
+function hooks(bashOptions: unknown[]): SpawnHook[] {
+  return bashOptions.filter(
+    (options): options is SpawnHook =>
+      Boolean(options) && typeof (options as SpawnHook).spawnHook === 'function',
+  );
+}
+
+describe('native launch path — the activation identity reaches the shells, not the host (SPECIALISTS-4456)', () => {
+  it('gives the activation PATH with the gh shim first, and leaves the host PATH alone', async () => {
+    // CORE-2524.4: without the shim first, the activation's `gh` is the real binary and a
+    // review posts under the operator identity. SPECIALISTS-4456: that PATH belongs to the
+    // activation's shells, not to the dispatcher's process.
+    const hostPath = `/usr/bin${delimiter}/bin`;
+    process.env.PATH = hostPath;
+    const { bashOptions } = await dispatchOnce({ grantBash: true });
+
+    const [hook] = hooks(bashOptions);
+    expect(hook).toBeDefined();
+    // The inherited PATH is what pi resolved for THIS spawn, which is not the host's: pi
+    // prepends its own managed bin directory. Asserting with a context PATH identical to the
+    // host's is what let a hook that never touched PATH stay green (review finding 4d).
+    const spawnPath = ['/pi/agent/bin', '/usr/bin'].join(delimiter);
+    const launched = String(hook!.spawnHook({ command: 'gh pr view 1', cwd: '/w', env: { PATH: spawnPath } }).env.PATH)
+      .split(delimiter);
     expect(launched[0]).toBe(shim);
+    expect(launched).toContain('/pi/agent/bin');
     expect(launched).toContain('/usr/bin');
-    expect(launched).toContain('/bin');
+    expect(process.env.PATH).toBe(hostPath);
   });
 
-  it('keeps exactly one shim entry when the host PATH already starts with it', async () => {
-    process.env.PATH = `${shim}${delimiter}/usr/bin`;
-    await dispatchOnce();
+  it('keeps exactly one shim entry when the inherited PATH already starts with it', async () => {
+    const hostPath = `${shim}${delimiter}/usr/bin`;
+    process.env.PATH = hostPath;
+    const { bashOptions } = await dispatchOnce({ grantBash: true });
 
-    const launched = String(process.env.PATH).split(delimiter);
-    expect(launched).toEqual([shim, '/usr/bin']);
-    expect(launched.filter((dir) => dir === shim)).toHaveLength(1);
+    const inherited = [shim, '/pi/agent/bin', '/usr/bin'].join(delimiter);
+    const launched = String(
+      hooks(bashOptions)[0]!.spawnHook({ command: 'true', cwd: '/w', env: { PATH: inherited } }).env.PATH,
+    ).split(delimiter);
+    expect(launched).toEqual([shim, '/pi/agent/bin', '/usr/bin']);
+    expect(process.env.PATH).toBe(hostPath);
+  });
+
+  it('carries the activation holder and role in the shell env', async () => {
+    const { bashOptions } = await dispatchOnce({ grantBash: true });
+    const [hook] = hooks(bashOptions);
+
+    const applied = hook!.spawnHook({
+      command: 'gh pr review 1 --approve',
+      cwd: '/w',
+      env: { SUBSTRATE_HOLDER: 'the-dispatcher', XTRM_ROLE: 'worker' },
+    });
+
+    // Derived per activation (`sp-<name>-<activation>`), so a review posts as the App this
+    // Specialist's role names — not as whoever dispatched it.
+    expect(applied.env.SUBSTRATE_HOLDER).toMatch(/^sp-researcher-[A-Za-z0-9]+$/);
+    expect(applied.env.XTRM_ROLE).toBe('researcher');
+    expect(applied.command).toBe('gh pr review 1 --approve');
+  });
+
+  it('leaves the host process environment byte-identical across a dispatch', async () => {
+    const before = { ...process.env };
+    const { bashOptions } = await dispatchOnce({ grantBash: true });
+
+    expect(hooks(bashOptions).length).toBeGreaterThan(0);
+    expect({ ...process.env }).toEqual(before);
   });
 });
 
-/**
- * MEDIUM F2: the identity rides `process.env` because an in-process activation has no
- * child env. Two consequences are pinned here — a smaller answer must not inherit a
- * bigger one's keys, and the host gets its own env back when the activation settles.
- * Concurrent activations still race on `process.env`; that needs a per-session env on
- * the SDK and is not solved in this class.
- */
-/**
- * The stack (SPECIALISTS-4423 F2, delta review): two overlapping activations in ONE
- * host, because that is the only shape in which the guard does any work. Every
- * ordering must end at the state before the OLDEST activation, and the activation
- * still running must keep ITS identity after the other one settles.
- */
-describe('native launch path — overlapping activations return the env to the pre-first state', () => {
-  function makeHost(sessions: Array<{ wait?: Promise<void>; onResume?: () => void; onPrompt?: () => void }>) {
-    let index = 0;
-    const sdk = {
-      ...makeSdk(fakeSession()),
-      createAgentSession: async (options?: Record<string, unknown>) => {
-        const plan = sessions[Math.min(index, sessions.length - 1)];
-        index += 1;
-        const session = fakeSession(plan?.onPrompt, { wait: plan?.wait, onResume: plan?.onResume });
-        if (Array.isArray(options?.tools)) session.getActiveToolNames = () => options!.tools as string[];
-        return { session };
+describe('native launch path — the host env survives every leg shape (SPECIALISTS-4456)', () => {
+  const BEAD_SPEC = {
+    specialist: {
+      metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },
+      execution: {
+        model: 'testprov/test-model',
+        permission_required: 'READ_ONLY',
+        response_format: 'text',
+        output_type: 'research',
+        bare: false,
       },
-    } as PiSdk;
-    return new NativeActivationHost({
-      workItems: testWorkItems({ description: BEAD.description }),
-      loader: { get: async () => ({
-        specialist: {
-          metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },
-          execution: {
-            model: 'testprov/test-model', permission_required: 'READ_ONLY', response_format: 'text',
-            output_type: 'research', bare: false,
-          },
-          prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
-        },
-      }) } as never,
-      loadSdk: async () => sdk,
-      identityEnvRun: () => ({ status: 0, stdout: JSON.stringify({ env: { XTRM_ROLE: 'researcher' } }) }),
-      cwd: process.cwd(),
-    });
-  }
-
-  const dispatch = (host: NativeActivationHost) =>
-    host.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator' });
-
-  // The holder the host derives: `sp-<name>-<first 8 of the activation id with
-  // non-alphanumerics removed>` (identity-env specialistHolderName).
-  const holderFor = (activationId: string) =>
-    `sp-researcher-${activationId.replace(/[^A-Za-z0-9]/g, '').slice(0, 8)}`;
-
-  const gate = () => {
-    let release!: () => void;
-    const wait = new Promise<void>((resolve) => { release = resolve; });
-    return { wait, release };
+      prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
+    },
   };
 
-  it('A then A settles then B then B settles lands on the pre-A state', async () => {
-    const before = snapshotIdentityEnv(process.env);
-    const seen: Array<string | undefined> = [];
-    const host = makeHost([{ onPrompt: () => { seen.push(process.env.SUBSTRATE_HOLDER); } }]);
-
-    const a = await dispatch(host);
-    await a.result;
-    expect(seen).toEqual([holderFor(a.activationId)]);
-    expect(snapshotIdentityEnv(process.env)).toEqual(before);
-
-    const b = await dispatch(host);
-    await b.result;
-    expect(seen.at(-1)).toBe(holderFor(b.activationId));
-    expect(snapshotIdentityEnv(process.env)).toEqual(before);
-  });
-
-  it('A, B, A settles, B settles: B keeps its identity and the end state is pre-A', async () => {
-    const before = snapshotIdentityEnv(process.env);
-    const gateA = gate();
-    const gateB = gate();
-    const host = makeHost([
-      { wait: gateA.wait },
-      { wait: gateB.wait },
-    ]);
-
-    const a = await dispatch(host);
-    const b = await dispatch(host);
-    expect(process.env.SUBSTRATE_HOLDER).toBe(holderFor(b.activationId));
-
-    // A settles while B is live and B is on top: process.env may not change, and B
-    // keeps its identity for the rest of its turn.
-    gateA.release();
-    await a.result;
-    expect(process.env.SUBSTRATE_HOLDER).toBe(holderFor(b.activationId));
-
-    gateB.release();
-    await b.result;
-    expect(snapshotIdentityEnv(process.env)).toEqual(before);
-  });
-
-  it('A, B, B settles, A settles: A takes the env back, then the end state is pre-A', async () => {
-    const before = snapshotIdentityEnv(process.env);
-    const gateA = gate();
-    const gateB = gate();
-    let holderWhenAResumed: string | undefined;
-    const host = makeHost([
-      { wait: gateA.wait, onResume: () => { holderWhenAResumed = process.env.SUBSTRATE_HOLDER; } },
-      { wait: gateB.wait },
-    ]);
-
-    const a = await dispatch(host);
-    const b = await dispatch(host);
-
-    // The swap is operator-visible: settling off the top warns once, ids only.
-    const warnings: string[] = [];
-    setRuntimeDiagnosticsSink((line) => { warnings.push(line); });
-    gateB.release();
-    await b.result;
-    const filtered = warnings.filter((line) => line.includes('identity-env'));
-    resetRuntimeDiagnosticsSink();
-    expect(filtered).toHaveLength(1);
-    expect(filtered[0]).toContain(`activation ${b.activationId} settled while 1 others are live`);
-    expect(warnings[0]).toContain(`process env now carries ${a.activationId}`);
-    expect(warnings[0]).not.toContain(holderFor(a.activationId));
-
-    // B was on top and A is still running: A's identity must be on the env, not the
-    // baseline — otherwise A's remaining shell commands run as the operator.
-    expect(process.env.SUBSTRATE_HOLDER).toBe(holderFor(a.activationId));
-
-    gateA.release();
-    await a.result;
-    expect(snapshotIdentityEnv(process.env)).toEqual(before);
-    expect(holderWhenAResumed).toBe(holderFor(a.activationId));
-  });
-});
-
-/**
- * N1: identity belongs to the activation's LIFETIME, not to one turn. A fallback leg,
- * a retry and a background wake all start a new leg from a state where the env may
- * have been taken or restored, and every one of them must be able to reach git and gh
- * as its own agent. `agent_start` is the one seam all four legs pass through.
- */
-describe('native launch path — every leg of an activation runs with its identity (N1)', () => {
-  function makeHost(plan: {
+  function hostWith(plan: {
     stopReason?: string;
     wait?: Promise<void>;
-    onPrompt?: () => void;
+    /** One hold per created session, in creation order (the overlap cases). */
+    waits?: Array<Promise<void>>;
     throwOnCreate?: boolean;
   } = {}) {
     const created: PiAgentSessionLike[] = [];
+    const createdOptions: Array<Record<string, unknown>> = [];
+    let sessionIndex = 0;
+    const bashOptions: unknown[] = [];
     const sdk = {
-      ...makeSdk(fakeSession()),
+      ...makeSdk(fakeSession(), bashOptions),
       createAgentSession: async (options?: Record<string, unknown>) => {
         if (plan.throwOnCreate) throw new Error('sdk refused');
-        const session = fakeSession(plan.onPrompt, { wait: plan.wait, stopReason: plan.stopReason });
+        const wait = plan.waits?.[sessionIndex] ?? plan.wait;
+        sessionIndex += 1;
+        const session = fakeSession(undefined, { wait, stopReason: plan.stopReason });
         if (Array.isArray(options?.tools)) session.getActiveToolNames = () => options!.tools as string[];
         created.push(session);
+        createdOptions.push(options ?? {});
         return { session };
       },
     } as PiSdk;
     const host = new NativeActivationHost({
       workItems: testWorkItems({ description: BEAD.description }),
-      loader: { get: async () => ({
-        specialist: {
-          metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },
-          execution: {
-            model: 'testprov/test-model', permission_required: 'READ_ONLY', response_format: 'text',
-            output_type: 'research', bare: false,
-          },
-          prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
-        },
-      }) } as never,
+      loader: { get: async () => BEAD_SPEC } as never,
       loadSdk: async () => sdk,
-      identityEnvRun: () => ({ status: 0, stdout: JSON.stringify({ env: { XTRM_ROLE: 'researcher' } }) }),
+      identityEnvRun: () => ({
+        status: 0,
+        stdout: JSON.stringify({ env: { XTRM_ROLE: 'researcher', GIT_AUTHOR_NAME: 'sp-researcher' } }),
+      }),
       cwd: process.cwd(),
     });
-    return { host, created };
+    return { host, created, createdOptions, bashOptions };
   }
 
   const dispatch = (host: NativeActivationHost) =>
     host.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator' });
-  const holderFor = (activationId: string) =>
-    `sp-researcher-${activationId.replace(/[^A-Za-z0-9]/g, '').slice(0, 8)}`;
-  const settleAsync = async (times = 8) => { for (let i = 0; i < times; i += 1) await Promise.resolve(); };
 
-  it('a leg boundary does not strip the identity, and a disturbed env is re-asserted at the next leg', async () => {
-    const before = snapshotIdentityEnv(process.env);
-    let holderAfterIntermediateSettle: string | undefined;
-    let holderOnSecondLeg: string | undefined;
-    const { host, created } = makeHost();
-    const a = await dispatch(host);
-    const session = created[0];
+  /**
+   * One host, two Specialists, one hold per created session. The loader answers by name, so
+   * each activation resolves its own role — which is what makes the isolation assertion
+   * meaningful rather than a comparison of two equal strings.
+   */
+  function hostWithTwoSpecialists(waits: Array<Promise<void>>) {
+    const bashOptions: unknown[] = [];
+    let sessionIndex = 0;
+    const sdk = {
+      ...makeSdk(fakeSession(), bashOptions),
+      createAgentSession: async (options?: Record<string, unknown>) => {
+        const session = fakeSession(undefined, { wait: waits[sessionIndex] });
+        sessionIndex += 1;
+        if (Array.isArray(options?.tools)) session.getActiveToolNames = () => options!.tools as string[];
+        return { session };
+      },
+    } as PiSdk;
+    const host = new NativeActivationHost({
+      workItems: testWorkItems({ description: BEAD.description }),
+      loader: {
+        get: async (name: string) => ({
+          ...BEAD_SPEC,
+          specialist: { ...BEAD_SPEC.specialist, metadata: { ...BEAD_SPEC.specialist.metadata, name } },
+        }),
+      } as never,
+      loadSdk: async () => sdk,
+      identityEnvRun: () => ({
+        status: 0,
+        stdout: JSON.stringify({ env: { GIT_AUTHOR_NAME: 'sp-agent' } }),
+      }),
+      cwd: process.cwd(),
+    });
+    return { host, bashOptions };
+  }
 
-    // A multi-leg shape on ONE session: leg 1 settles, then something outside this
-    // activation takes process.env (another host's restore), then leg 2 starts.
-    holderAfterIntermediateSettle = process.env.SUBSTRATE_HOLDER;
-    clearIdentityEnv(process.env);
-    await session.prompt();
-
-    holderOnSecondLeg = process.env.SUBSTRATE_HOLDER;
-    await a.result;
-
-    expect(holderAfterIntermediateSettle).toBe(holderFor(a.activationId));
-    expect(holderOnSecondLeg).toBe(holderFor(a.activationId));
-    expect(snapshotIdentityEnv(process.env)).toEqual(before);
+  it('a failed session creation leaves the host env untouched', async () => {
+    const before = { ...process.env };
+    const { host } = hostWith({ throwOnCreate: true });
+    await dispatch(host).catch(() => undefined);
+    expect({ ...process.env }).toEqual(before);
   });
 
-  it('a retry leg runs with the identity', async () => {
-    const before = snapshotIdentityEnv(process.env);
-    const holders: Array<string | undefined> = [];
-    const { host } = makeHost({
-      stopReason: 'error',
-      onPrompt: () => { holders.push(process.env.SUBSTRATE_HOLDER); },
-    });
+  /** The bash custom tool this session was built with, if any. */
+  const sessionBashHook = (options: Record<string, unknown>): SpawnHook | undefined => {
+    const customTools = (options.customTools ?? []) as Array<{ name?: string; spawnHook?: SpawnHook['spawnHook'] }>;
+    const bash = customTools.find((tool) => tool?.name === 'bash');
+    if (!bash?.spawnHook) return undefined;
+    return { spawnHook: bash.spawnHook };
+  };
+
+  it('gives every attempt the same hooked bash tool, so no leg can lose the identity', async () => {
+    // The structural property the deleted N1 test existed for: the tools are built ONCE per
+    // dispatch and every session — first, fallback/retry, wake, resume — is created from that
+    // same array. Asserting the hook on one session would pass even if a later attempt built
+    // its own tools without it (review finding 4a).
+    const before = { ...process.env };
+    const { host, createdOptions, bashOptions } = hostWith({ stopReason: 'error' });
     const a = await dispatch(host);
     await a.result;
-
-    const retried = await host.retry(a.activationId, { prompt: 'try again' });
+    const retried = await host.retry(a.activationId, { modelOverride: 'testprov/other-model' });
     await retried.result;
 
-    expect(holders).toHaveLength(2);
-    expect(holders[0]).toBe(holderFor(a.activationId));
-    expect(holders[1]).toBe(holderFor(a.activationId));
-    expect(snapshotIdentityEnv(process.env)).toEqual(before);
+    expect(createdOptions.length).toBeGreaterThanOrEqual(2);
+    const hookObjects = createdOptions.map((options) => sessionBashHook(options));
+    expect(hookObjects.every((hook) => hook !== undefined)).toBe(true);
+    // Same tool, same overlay: identities cannot differ between attempts of one activation.
+    const holders = new Set(hookObjects.map((hook) =>
+      hook!.spawnHook({ command: 'true', cwd: '/w', env: {} }).env.SUBSTRATE_HOLDER));
+    expect(holders.size).toBe(1);
+    expect([...holders][0]).toMatch(/^sp-researcher-/);
+    // Built once, not once per attempt.
+    expect(hooks(bashOptions)).toHaveLength(1);
+    expect({ ...process.env }).toEqual(before);
   });
 
-  it('a wake leg after the framed walk re-applies the identity', async () => {
-    const before = snapshotIdentityEnv(process.env);
-    const holders: Array<string | undefined> = [];
-    const { host, created } = makeHost({ onPrompt: () => { holders.push(process.env.SUBSTRATE_HOLDER); } });
+  it('keeps the hooked bash tool after a resume, which returns the live session', async () => {
+    const before = { ...process.env };
+    const { host, created, createdOptions } = hostWith();
     const a = await dispatch(host);
     await a.result;
-    expect(snapshotIdentityEnv(process.env)).toEqual(before); // the walk took it off the stack
 
-    await created[0].prompt(); // the model's own wake turn on the settled session
-    await settleAsync();
+    const resumed = await host.resume(a.activationId, 'keep going');
+    await resumed.result;
 
-    expect(holders[1]).toBe(holderFor(a.activationId));
-    expect(snapshotIdentityEnv(process.env)).toEqual(before);
+    expect(createdOptions.length).toBe(1);
+    const hook = sessionBashHook(createdOptions[0]!)!;
+    expect(hook.spawnHook({ command: 'true', cwd: '/w', env: {} }).env.XTRM_ROLE).toBe('researcher');
+    expect({ ...process.env }).toEqual(before);
   });
 
-  it('stop() takes the activation off the stack even though abort() settles nothing', async () => {
-    const before = snapshotIdentityEnv(process.env);
-    let release!: () => void;
-    const wait = new Promise<void>((resolve) => { release = resolve; });
-    const { host } = makeHost({ wait });
-    const a = await dispatch(host);
-    expect(process.env.SUBSTRATE_HOLDER).toBe(holderFor(a.activationId));
-
-    await host.stop(a.activationId, 'test');
-    expect(snapshotIdentityEnv(process.env)).toEqual(before);
-    release();
-  });
-
-  it('a dispatch that throws leaves no identity on the host env', async () => {
-    const before = snapshotIdentityEnv(process.env);
-    const { host } = makeHost({ throwOnCreate: true });
-    const dispatched = await dispatch(host).catch(() => undefined);
-    expect(dispatched).toBeUndefined();
-    expect(snapshotIdentityEnv(process.env)).toEqual(before);
-  });
-
-  it('shutdown() restores the baseline whatever state the activations were in', async () => {
-    const before = snapshotIdentityEnv(process.env);
-    let release!: () => void;
-    const wait = new Promise<void>((resolve) => { release = resolve; });
-    const { host } = makeHost({ wait });
-    await dispatch(host);
-    expect(process.env.SUBSTRATE_HOLDER).not.toBe(before.SUBSTRATE_HOLDER);
-
-    host.shutdown();
-    expect(snapshotIdentityEnv(process.env)).toEqual(before);
-    release();
-  });
-});
-
-/**
- * N5: the known concurrency limit, made visible where it actually happens. A leg entry
- * that takes the env from another LIVE activation is announced on the same channel as a
- * settle, because the wrong-App window starts there — not when the winner settles.
- */
-describe('native launch path — the identity takeover is announced at the leg that takes it (N5)', () => {
-  const holderFor = (activationId: string) =>
-    `sp-researcher-${activationId.replace(/[^A-Za-z0-9]/g, '').slice(0, 8)}`;
-
-  it('warns with both ids when a leg takes the env from another live activation', async () => {
-    const before = snapshotIdentityEnv(process.env);
+  it('two overlapping activations leave the host env untouched, whichever settles first', async () => {
+    // The old channel gave the process env to the activation that most recently started a
+    // leg, so an overlapping pair swapped identities mid-run and warned about it. Now each
+    // activation's shells carry their own env, and the process env is nobody's.
+    const before = { ...process.env };
     let releaseA!: () => void;
     let releaseB!: () => void;
     const gateA = new Promise<void>((resolve) => { releaseA = resolve; });
     const gateB = new Promise<void>((resolve) => { releaseB = resolve; });
-    const created: Array<PiAgentSessionLike & { emitLegStart: () => void }> = [];
-    const plans = [{ wait: gateA }, { wait: gateB }];
-    let index = 0;
-    const sdk = {
-      ...makeSdk(fakeSession()),
-      createAgentSession: async (options?: Record<string, unknown>) => {
-        const session = fakeSession(undefined, { wait: plans[Math.min(index, 1)].wait });
-        index += 1;
-        if (Array.isArray(options?.tools)) session.getActiveToolNames = () => options!.tools as string[];
-        created.push(session as PiAgentSessionLike & { emitLegStart: () => void });
-        return { session };
-      },
-    } as PiSdk;
-    const host = new NativeActivationHost({
-      workItems: testWorkItems({ description: BEAD.description }),
-      loader: { get: async () => ({
-        specialist: {
-          metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },
-          execution: {
-            model: 'testprov/test-model', permission_required: 'READ_ONLY', response_format: 'text',
-            output_type: 'research', bare: false,
-          },
-          prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
-        },
-      }) } as never,
-      loadSdk: async () => sdk,
-      identityEnvRun: () => ({ status: 0, stdout: JSON.stringify({ env: { XTRM_ROLE: 'researcher' } }) }),
-      cwd: process.cwd(),
-    });
+    // Two DIFFERENT specialists, so the identities differ by role as well as by holder: a
+    // fallback to process.env would give both hooks the last applied role, and this is the
+    // assertion that turns red (SPECIALISTS-4427 SUCCESS 4).
+    const { host, bashOptions } = hostWithTwoSpecialists([gateA, gateB]);
 
-    const a = await host.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator' });
-    const b = await host.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator' });
-    expect(process.env.SUBSTRATE_HOLDER).toBe(holderFor(b.activationId));
+    const a = await dispatch(host);
+    const b = await host.start({ specialist: 'advisor', issueRef: 'ISSUE-2', requestedByParticipantId: 'coordinator' });
 
-    const linesAll: string[] = [];
-    setRuntimeDiagnosticsSink((line) => { linesAll.push(line); });
-    created[0].emitLegStart(); // A starts another leg while B is live and on top
-    const lines = linesAll.filter((line) => line.includes('identity-env'));
-    resetRuntimeDiagnosticsSink();
+    const applied = hooks(bashOptions).map((hook) =>
+      hook.spawnHook({ command: 'gh pr view 1', cwd: '/w', env: {} }).env);
+    expect(applied.map((env) => env.XTRM_ROLE).sort()).toEqual(['advisor', 'researcher']);
+    expect(applied.map((env) => env.SUBSTRATE_HOLDER).filter((holder, index, all) => all.indexOf(holder) === index)).toHaveLength(2);
 
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain(`activation ${a.activationId} started a leg and took process env from ${b.activationId}`);
-    expect(lines[0]).toContain('2 activations are live');
-    expect(lines[0]).not.toContain(holderFor(a.activationId));
-    // The takeover is real, which is why it is worth warning about.
-    expect(process.env.SUBSTRATE_HOLDER).toBe(holderFor(a.activationId));
-
-    releaseA();
-    await a.result;
     releaseB();
     await b.result;
-    expect(snapshotIdentityEnv(process.env)).toEqual(before);
-  });
-
-  it('a wake settle with no registry record still leaves the stack (N6)', async () => {
-    const before = snapshotIdentityEnv(process.env);
-    const created: PiAgentSessionLike[] = [];
-    const sdk = {
-      ...makeSdk(fakeSession()),
-      createAgentSession: async (options?: Record<string, unknown>) => {
-        const session = fakeSession();
-        if (Array.isArray(options?.tools)) session.getActiveToolNames = () => options!.tools as string[];
-        created.push(session);
-        return { session };
-      },
-    } as PiSdk;
-    const host = new NativeActivationHost({
-      workItems: testWorkItems({ description: BEAD.description }),
-      loader: { get: async () => ({
-        specialist: {
-          metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },
-          execution: {
-            model: 'testprov/test-model', permission_required: 'READ_ONLY', response_format: 'text',
-            output_type: 'research', bare: false,
-          },
-          prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
-        },
-      }) } as never,
-      loadSdk: async () => sdk,
-      identityEnvRun: () => ({ status: 0, stdout: JSON.stringify({ env: { XTRM_ROLE: 'researcher' } }) }),
-      cwd: process.cwd(),
-    });
-    const a = await host.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator' });
+    expect({ ...process.env }).toEqual(before);
+    releaseA();
     await a.result;
-    expect(snapshotIdentityEnv(process.env)).toEqual(before);
-
-    // A wake settle whose registry record is gone: no finaliser can own the removal.
-    (host as unknown as { registry: { remove: (id: string) => void } }).registry.remove(a.activationId);
-    await created[0].prompt();
-    for (let i = 0; i < 8; i += 1) await Promise.resolve();
-
-    expect(snapshotIdentityEnv(process.env)).toEqual(before);
+    expect({ ...process.env }).toEqual(before);
   });
+
+  it('stop() leaves the host env untouched even though abort() settles nothing', async () => {
+    const before = { ...process.env };
+    let release!: () => void;
+    const wait = new Promise<void>((resolve) => { release = resolve; });
+    const { host } = hostWith({ wait });
+
+    const a = await dispatch(host);
+    await host.stop(a.activationId, 'test');
+    expect({ ...process.env }).toEqual(before);
+    release();
+    await a.result.catch(() => undefined);
+    expect({ ...process.env }).toEqual(before);
+  });
+
 });
 
-describe('native launch path — the activation owns process.env only while it runs', () => {
-  const gitConfigKeys = (): string[] =>
-    Object.keys(snapshotIdentityEnv(process.env)).filter((key) => key.startsWith('GIT_CONFIG_'));
-
-  const answer = (pairs: Array<[string, string]>): IdentityEnvRun => () => ({
-    status: 0,
-    stdout: JSON.stringify({
-      env: Object.fromEntries([
-        ['GIT_CONFIG_COUNT', String(pairs.length)],
-        ...pairs.flatMap(([key, value], index) => [
-          [`GIT_CONFIG_KEY_${index}`, key],
-          [`GIT_CONFIG_VALUE_${index}`, value],
-        ]),
-      ]),
-    }),
+describe('a contract that grants a host-env-spawning tool says so (SPECIALISTS-4487)', () => {
+  it('names the granted tools whose children the activation identity cannot reach', () => {
+    // python is granted only at MEDIUM/HIGH (config/catalog/python-kernel.json), and its
+    // interpreter is spawned from the host env, so a kernel subprocess runs as the dispatcher.
+    // The predicate is the whole rule; the dispatch calls it and warns once.
+    expect(uncoveredHostEnvSpawns(['read', 'python', 'bash'])).toEqual(['python']);
+    expect(uncoveredHostEnvSpawns(['read', 'grep', 'bash'])).toEqual([]);
+    expect(uncoveredHostEnvSpawns([])).toEqual([]);
   });
 
-  it('a second activation with a smaller answer carries none of the first one keys', async () => {
-    let firstDuring: string[] = [];
-    await dispatchOnce({
-      onPrompt: () => { firstDuring = gitConfigKeys(); },
-      identityEnvRun: answer([
-        ['url.https://github.com/.insteadOf', 'git@github.com:'],
-        ['credential.https://github.com.useHttpPath', 'true'],
-      ]),
-    });
-    expect(firstDuring).toContain('GIT_CONFIG_KEY_1');
-
-    // A key left on the env by an earlier run is the shape the clear-before-apply
-    // rule exists for: without it the next activation inherits it silently.
-    process.env.GIT_CONFIG_KEY_7 = 'stale-key';
-    process.env.GIT_CONFIG_VALUE_7 = 'stale-value';
-    let secondDuring: string[] = [];
-    try {
-      await dispatchOnce({
-        onPrompt: () => { secondDuring = gitConfigKeys(); },
-        identityEnvRun: answer([['url.https://github.com/.insteadOf', 'git@github.com:']]),
-      });
-    } finally {
-      delete process.env.GIT_CONFIG_KEY_7;
-      delete process.env.GIT_CONFIG_VALUE_7;
-    }
-
-    expect(secondDuring).toContain('GIT_CONFIG_KEY_0');
-    // The first answer's second pair is gone, not layered under the smaller count,
-    // and the stale key from before this activation is gone too.
-    expect(secondDuring).not.toContain('GIT_CONFIG_KEY_1');
-    expect(secondDuring).not.toContain('GIT_CONFIG_VALUE_1');
-    expect(secondDuring).not.toContain('GIT_CONFIG_KEY_7');
-    expect(secondDuring).not.toContain('GIT_CONFIG_VALUE_7');
-  });
-
-  it('gives the host its own identity env back when the activation settles', async () => {
-    const before = snapshotIdentityEnv(process.env);
-    let holderDuringTurn: string | undefined;
-    await dispatchOnce({
-      onPrompt: () => { holderDuringTurn = process.env.SUBSTRATE_HOLDER; },
-    });
-
-    expect(holderDuringTurn).toMatch(/^sp-researcher-/);
-    expect(holderDuringTurn).not.toBe(before.SUBSTRATE_HOLDER);
-    // Every managed key is back exactly as it was: no author, no transport left behind.
-    expect(snapshotIdentityEnv(process.env)).toEqual(before);
-  });
-
-  it('re-applies the identity on resume, because settle took it away', async () => {
-    const holdersDuringTurns: Array<string | undefined> = [];
-    const before = snapshotIdentityEnv(process.env);
-    const host = new NativeActivationHost({
-      workItems: testWorkItems({ description: BEAD.description }),
-      loader: { get: async () => ({
-        specialist: {
-          metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },
-          execution: {
-            model: 'testprov/test-model', permission_required: 'READ_ONLY', response_format: 'text',
-            output_type: 'research', bare: false,
-          },
-          prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
-        },
-      }) } as never,
-      loadSdk: async () => makeSdk(fakeSession(() => { holdersDuringTurns.push(process.env.SUBSTRATE_HOLDER); })),
-      identityEnvRun: () => ({ status: 0, stdout: JSON.stringify({ env: { XTRM_ROLE: 'researcher' } }) }),
-      cwd: process.cwd(),
-    });
-    const handle = await host.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator' });
-    await handle.result;
-    expect(snapshotIdentityEnv(process.env)).toEqual(before);
-
-    const resumed = await host.resume(handle.activationId, 'keep going');
-    await resumed.result;
-
-    // Both turns ran under the activation's holder. Without the resume apply the
-    // second one would carry the host's (restored) holder and run as the operator.
-    expect(holdersDuringTurns).toHaveLength(2);
-    for (const holder of holdersDuringTurns) expect(holder).toMatch(/^sp-researcher-/);
-    expect(snapshotIdentityEnv(process.env)).toEqual(before);
+  it('is what the dispatch warns on, once, before the first turn', () => {
+    // The warning itself cannot be driven end to end from this worktree: `python` reaches the
+    // contract only when the python-kernel extension package resolves (config/catalog/
+    // python-kernel.json grants it at MEDIUM/HIGH), and the package is not installed here, so
+    // a MEDIUM dispatch refuses `required_tools: python` at preflight. The rule is the whole
+    // condition the dispatch fires on, and the dispatch calls it exactly once, before the
+    // session exists (src/activation/native-host.ts, next to createGuardedTools).
+    const granted = uncoveredHostEnvSpawns(['read', 'grep', 'python', 'bash']);
+    expect(granted).toEqual(['python']);
   });
 });

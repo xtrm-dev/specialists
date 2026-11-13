@@ -87,49 +87,6 @@ export function warnIdentityEnv(message: string): void {
 const launcherWarning = warnIdentityEnv;
 
 /**
- * Every key one identity env OWNS. PATH is deliberately not here: the launched
- * PATH is one process-wide value by design (CORE-2524.4), while these keys name a
- * holder and a transport and must never outlive the activation that set them.
- */
-const IDENTITY_MANAGED_KEY = /^(?:SUBSTRATE_HOLDER|XTRM_ROLE|GIT_AUTHOR_NAME|GIT_AUTHOR_EMAIL|GIT_COMMITTER_NAME|GIT_COMMITTER_EMAIL|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+)$/;
-
-export function isIdentityManagedKey(key: string): boolean {
-  return IDENTITY_MANAGED_KEY.test(key);
-}
-
-/** Every identity-managed key present in `env`, with its value (or undefined when absent). */
-export function snapshotIdentityEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string | undefined> {
-  const snapshot: Record<string, string | undefined> = {};
-  for (const key of Object.keys(env)) {
-    if (isIdentityManagedKey(key)) snapshot[key] = env[key];
-  }
-  return snapshot;
-}
-
-/**
- * Remove every identity-managed key from `env`. Called BEFORE an activation's
- * own identity is applied: a smaller answer must not leave a bigger answer's
- * GIT_CONFIG index or author behind, and the host's own git/gh calls must not
- * inherit a settled activation's identity.
- */
-export function clearIdentityEnv(env: NodeJS.ProcessEnv = process.env): void {
-  for (const key of Object.keys(env)) {
-    if (isIdentityManagedKey(key)) delete env[key];
-  }
-}
-
-/** Put `env` back to a snapshot: managed keys cleared first, then the snapshot's values. */
-export function restoreIdentityEnv(
-  snapshot: Record<string, string | undefined>,
-  env: NodeJS.ProcessEnv = process.env,
-): void {
-  clearIdentityEnv(env);
-  for (const [key, value] of Object.entries(snapshot)) {
-    if (typeof value === 'string') env[key] = value;
-  }
-}
-
-/**
  * `GIT_CONFIG_COUNT` is authoritative for git: it reads exactly that many
  * KEY_i/VALUE_i pairs and dies with `fatal: unable to parse command-line config`
  * when one is absent, which breaks EVERY git command in the session. So the
@@ -280,11 +237,15 @@ export function specialistPath(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /**
- * The full env one launched Specialist process receives: the agent identity env
- * plus the PATH that makes the shim reachable. Both launch paths call this — the
- * legacy runner's session env and the native host's process.env — so a Specialist
- * never gets the holder without the shim. Without a holder nothing is fabricated,
- * PATH included.
+ * The full env one launched Specialist receives: the agent identity env plus the PATH that
+ * makes the shim reachable. Two callers:
+ *
+ * - the legacy runner, whose child process takes this env whole;
+ * - the native host, whose SHELLS take it through the spawn hook (SPECIALISTS-4456). The host
+ *   itself does not use the PATH half — it composes PATH per spawn from what pi resolved, so
+ *   pi's managed bin directory survives — and it drops the key before handing the rest over.
+ *
+ * Without a holder nothing is fabricated, PATH included.
  */
 export function resolveAgentLaunchEnv(input: IdentityEnvInput = {}): Record<string, string> {
   const identity = resolveAgentIdentityEnv(input);

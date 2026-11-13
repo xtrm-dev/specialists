@@ -27799,30 +27799,6 @@ function isAllowed(key) {
 function warnIdentityEnv(message) {
   runtimeWarn("identity-env", `[specialists] identity-env: ${message}`);
 }
-function isIdentityManagedKey(key) {
-  return IDENTITY_MANAGED_KEY.test(key);
-}
-function snapshotIdentityEnv(env = process.env) {
-  const snapshot = {};
-  for (const key of Object.keys(env)) {
-    if (isIdentityManagedKey(key))
-      snapshot[key] = env[key];
-  }
-  return snapshot;
-}
-function clearIdentityEnv(env = process.env) {
-  for (const key of Object.keys(env)) {
-    if (isIdentityManagedKey(key))
-      delete env[key];
-  }
-}
-function restoreIdentityEnv(snapshot, env = process.env) {
-  clearIdentityEnv(env);
-  for (const [key, value] of Object.entries(snapshot)) {
-    if (typeof value === "string")
-      env[key] = value;
-  }
-}
 function keepConsistentGitConfig(env, warn) {
   const gitConfigKeys = Object.keys(env).filter((key) => GIT_CONFIG_PREFIXES.some((prefix) => key.startsWith(prefix)));
   if (gitConfigKeys.length === 0)
@@ -27942,7 +27918,7 @@ function specialistHolderName(specialistName, jobId, pid = process.pid) {
   const job = (jobId ?? "").trim().replace(/[^A-Za-z0-9]/g, "");
   return job ? `sp-${name}-${job.slice(0, 8)}` : `sp-${name}-${pid}`;
 }
-var IDENTITY_ENV_ALLOWLIST, GIT_CONFIG_PREFIXES, GIT_CONFIG_COUNT_KEY = "GIT_CONFIG_COUNT", GIT_CONFIG_KEY_PREFIX = "GIT_CONFIG_KEY_", GIT_CONFIG_VALUE_PREFIX = "GIT_CONFIG_VALUE_", launcherWarning, IDENTITY_MANAGED_KEY;
+var IDENTITY_ENV_ALLOWLIST, GIT_CONFIG_PREFIXES, GIT_CONFIG_COUNT_KEY = "GIT_CONFIG_COUNT", GIT_CONFIG_KEY_PREFIX = "GIT_CONFIG_KEY_", GIT_CONFIG_VALUE_PREFIX = "GIT_CONFIG_VALUE_", launcherWarning;
 var init_identity_env = __esm(() => {
   init_runtime_diagnostics();
   IDENTITY_ENV_ALLOWLIST = [
@@ -27955,7 +27931,6 @@ var init_identity_env = __esm(() => {
   ];
   GIT_CONFIG_PREFIXES = ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"];
   launcherWarning = warnIdentityEnv;
-  IDENTITY_MANAGED_KEY = /^(?:SUBSTRATE_HOLDER|XTRM_ROLE|GIT_AUTHOR_NAME|GIT_AUTHOR_EMAIL|GIT_COMMITTER_NAME|GIT_COMMITTER_EMAIL|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+)$/;
 });
 
 // src/utils/circuitBreaker.ts
@@ -94627,6 +94602,29 @@ var init_specialist_status_tool = __esm(() => {
   });
 });
 
+// src/activation/activation-bash-env.ts
+import { delimiter as platformPathDelimiter } from "path";
+function composeActivationPath(shimDir, inherited, pathDelimiter) {
+  const entries = (inherited ?? "").split(pathDelimiter).filter((entry) => entry.length > 0 && entry !== shimDir);
+  return [shimDir, ...entries].join(pathDelimiter);
+}
+function bashSpawnHookWith(overlay, options = {}) {
+  const { shimDir, pathDelimiter = platformPathDelimiter } = options;
+  const identity = { ...overlay };
+  delete identity.PATH;
+  return (context) => {
+    const env = { ...context.env, ...identity };
+    if (shimDir) {
+      env.PATH = composeActivationPath(shimDir, context.env.PATH, pathDelimiter);
+    }
+    return { ...context, env };
+  };
+}
+function hasActivationEnv(overlay, shimDir) {
+  return Object.keys(overlay).length > 0 || Boolean(shimDir);
+}
+var init_activation_bash_env = () => {};
+
 // src/activation/step-contract.ts
 function asStructured(contract) {
   const empty = { problem: "", success: "", scope: [], nonGoals: [], constraints: [], validation: [], output: [] };
@@ -95184,7 +95182,7 @@ function createGuardedTools(sdk, input) {
       unguardable.push(name);
       continue;
     }
-    const original = factory(input.cwd);
+    const original = SHELL_FACTORIES.has(factoryName) && hasActivationEnv(input.env ?? {}, input.shimDir) ? factory(input.cwd, { spawnHook: bashSpawnHookWith(input.env ?? {}, { shimDir: input.shimDir }) }) : factory(input.cwd);
     const originalExecute = original.execute.bind(original);
     tools.push({
       ...original,
@@ -95206,14 +95204,16 @@ function createGuardedTools(sdk, input) {
   }
   return { tools, guarded, unguardable };
 }
-var FACTORY_NAMES, GUARDED_TOOL_NAMES;
+var FACTORY_NAMES, SHELL_FACTORIES, GUARDED_TOOL_NAMES;
 var init_guarded_tools = __esm(() => {
+  init_activation_bash_env();
   FACTORY_NAMES = {
     edit: "createEditTool",
     write: "createWriteTool",
     bash: "createBashTool",
     powershell: "createPowerShellTool"
   };
+  SHELL_FACTORIES = new Set(["createBashTool", "createPowerShellTool"]);
   GUARDED_TOOL_NAMES = Object.keys(FACTORY_NAMES);
 });
 
@@ -96506,6 +96506,9 @@ var init_settlement_store = () => {};
 import { randomUUID as randomUUID9 } from "crypto";
 import { existsSync as existsSync60 } from "fs";
 import { join as join64 } from "path";
+function uncoveredHostEnvSpawns(toolsList) {
+  return HOST_ENV_SPAWNING_TOOLS.filter((tool) => toolsList.includes(tool));
+}
 function extractTokenUsage(event) {
   const nested = nativeEventTokenUsage(event);
   if (nested) {
@@ -96788,8 +96791,6 @@ class NativeActivationHost {
   settlements;
   admission;
   republished = false;
-  liveIdentityEnv = [];
-  identityEnvBaseline = null;
   env;
   registry = new FleetRegistry;
   fleetEpoch = 0;
@@ -96822,84 +96823,6 @@ class NativeActivationHost {
     this.toolDurationWarnMs = normalizeToolDurationWarnMs(deps.stallDetection?.tool_duration_warn_ms) ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms;
     this.toolDurationWarnMsByDep = normalizeToolDurationWarnMs(deps.stallDetection?.tool_duration_warn_ms);
     this.env = deps.env ?? process.env;
-  }
-  applyActivationIdentityEnv(activationId, specialistName, workspacePath) {
-    const launchEnv = resolveAgentLaunchEnv({
-      holder: specialistHolderName(specialistName, activationId),
-      roleName: specialistName,
-      cwd: workspacePath,
-      env: process.env,
-      run: this.identityEnvRun
-    });
-    const existing = this.liveIdentityEnv.findIndex((entry) => entry.activationId === activationId);
-    if (existing >= 0)
-      this.liveIdentityEnv.splice(existing, 1);
-    if (this.liveIdentityEnv.length === 0)
-      this.identityEnvBaseline = snapshotIdentityEnv(process.env);
-    this.liveIdentityEnv.push({ activationId, env: launchEnv });
-    this.writeIdentityEnv(launchEnv);
-  }
-  writeIdentityEnv(env) {
-    clearIdentityEnv(process.env);
-    Object.assign(process.env, env);
-  }
-  identityEnvMatches(env) {
-    const current = snapshotIdentityEnv(process.env);
-    for (const key of new Set([...Object.keys(env), ...Object.keys(current)])) {
-      if (!isIdentityManagedKey(key))
-        continue;
-      if ((current[key] ?? "") !== (env[key] ?? ""))
-        return false;
-    }
-    return true;
-  }
-  assertActivationIdentityEnv(snapshot) {
-    const previousTop = this.liveIdentityEnv[this.liveIdentityEnv.length - 1]?.activationId;
-    const index = this.liveIdentityEnv.findIndex((entry) => entry.activationId === snapshot.activationId);
-    if (index < 0) {
-      this.applyActivationIdentityEnv(snapshot.activationId, snapshot.specialist, snapshot.workspace?.worktreePath ?? this.cwd);
-      this.warnIdentityTakeover(snapshot.activationId, previousTop);
-      return;
-    }
-    const entry = this.liveIdentityEnv[index];
-    const isTop = index === this.liveIdentityEnv.length - 1;
-    if (isTop && this.identityEnvMatches(entry.env))
-      return;
-    this.liveIdentityEnv.splice(index, 1);
-    this.liveIdentityEnv.push(entry);
-    this.writeIdentityEnv(entry.env);
-    this.warnIdentityTakeover(snapshot.activationId, previousTop);
-  }
-  warnIdentityTakeover(activationId, previousTop) {
-    if (!previousTop || previousTop === activationId || this.liveIdentityEnv.length < 2)
-      return;
-    warnIdentityEnv(`activation ${activationId} started a leg and took process env from ${previousTop}; ${this.liveIdentityEnv.length} activations are live`);
-  }
-  shutdown() {
-    this.liveIdentityEnv.length = 0;
-    const baseline = this.identityEnvBaseline;
-    this.identityEnvBaseline = null;
-    if (baseline)
-      restoreIdentityEnv(baseline, process.env);
-  }
-  settleActivationIdentityEnv(activationId) {
-    const index = this.liveIdentityEnv.findIndex((entry) => entry.activationId === activationId);
-    if (index < 0)
-      return;
-    const wasTop = index === this.liveIdentityEnv.length - 1;
-    this.liveIdentityEnv.splice(index, 1);
-    if (!wasTop)
-      return;
-    const top = this.liveIdentityEnv[this.liveIdentityEnv.length - 1];
-    if (!top) {
-      const baseline = this.identityEnvBaseline;
-      this.identityEnvBaseline = null;
-      if (baseline)
-        restoreIdentityEnv(baseline, process.env);
-      return;
-    }
-    this.writeIdentityEnv(top.env);
-    warnIdentityEnv(`activation ${activationId} settled while ${this.liveIdentityEnv.length} others are live; process env now carries ${top.activationId}`);
   }
   async start(request) {
     const activationId = `act:${randomUUID9().slice(0, 12)}`;
@@ -96944,7 +96867,6 @@ class NativeActivationHost {
       release();
     };
     const reject = (reason, detail = {}) => {
-      this.settleActivationIdentityEnv(activationId);
       releaseLeaseOnRefusal();
       releaseClaimForRefusal();
       removeWorkspaceOnRefusal();
@@ -97437,9 +97359,24 @@ class NativeActivationHost {
         emit(kind === "escalation" ? "escalation_resolved" : "clarification_answered");
       }
     });
+    const activationLaunchEnv = resolveAgentLaunchEnv({
+      holder: specialistHolderName(specialist.specialist.metadata.name, activationId),
+      roleName: specialist.specialist.metadata.name,
+      cwd: workspace.worktreePath,
+      env: process.env,
+      run: this.identityEnvRun
+    });
+    const { PATH: _launchPath, ...activationEnv } = activationLaunchEnv;
+    const activationShimDir = shimBinDir(process.env);
+    const uncoveredSpawns = uncoveredHostEnvSpawns(effectiveToolContract.toolsList);
+    if (uncoveredSpawns.length > 0 && hasActivationEnv(activationEnv, activationShimDir)) {
+      warnIdentityEnv(`activation ${activationId} grants ${uncoveredSpawns.join(", ")}, whose child processes ` + `inherit the dispatching session's identity rather than the activation's ` + `(SPECIALISTS-4487); its bash and powershell calls carry the activation's`);
+    }
     const guardedTools = createGuardedTools(sdk, {
       toolNames: effectiveToolContract.toolsList,
       cwd: workspace.worktreePath,
+      env: activationEnv,
+      shimDir: activationShimDir,
       admit: createNativeToolAdmission({
         guardLoaded: curatedExtensions.all.includes(getPermissionGuardExtensionPath() ?? ""),
         workspace,
@@ -97460,11 +97397,6 @@ class NativeActivationHost {
         note: "the resolved contract grants READ_ONLY bash but the permission guard is not in the " + "loaded extension set; refusing rather than running unsandboxed"
       });
     }
-    const nativeGuard = resolvePermissionGuardForSpawn(tier);
-    if (nativeGuard && curatedExtensions.all.includes(nativeGuard.path)) {
-      Object.assign(process.env, nativeGuard.tierEnv);
-    }
-    this.applyActivationIdentityEnv(activationId, specialist.specialist.metadata.name, workspace.worktreePath);
     try {
       const resourceLoader = createActivationResourceLoader(sdk, {
         cwd: workspace.worktreePath,
@@ -97732,7 +97664,6 @@ class NativeActivationHost {
         result
       };
     } catch (error) {
-      this.settleActivationIdentityEnv(activationId);
       throw error;
     }
   }
@@ -97804,7 +97735,6 @@ class NativeActivationHost {
         break;
       case "agent_start":
         this.noteWakeTurnStart(snapshot);
-        this.assertActivationIdentityEnv(snapshot);
         snapshot.state = "running";
         this.save(snapshot);
         emit("turn_started");
@@ -97828,8 +97758,6 @@ class NativeActivationHost {
             this.finalizeWakeTurn(snapshot, record, emit).finally(() => {
               this.wakeFinalising.delete(snapshot.activationId);
             });
-          } else {
-            this.settleActivationIdentityEnv(snapshot.activationId);
           }
         }
         break;
@@ -98040,7 +97968,6 @@ class NativeActivationHost {
     } catch (error) {
       snapshot.state = "failed";
       this.save(snapshot);
-      this.settleActivationIdentityEnv(snapshot.activationId);
       const message = error instanceof Error ? error.message : String(error);
       await recordSettlementOnce();
       emit("activation_failed", { error: message });
@@ -98077,7 +98004,6 @@ class NativeActivationHost {
       const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
       snapshot.state = "failed";
       this.save(snapshot);
-      this.settleActivationIdentityEnv(snapshot.activationId);
       emit("activation_failed", { error: detail, stop_reason: last.stopReason });
       const failedResult = {
         activationId: snapshot.activationId,
@@ -98156,9 +98082,7 @@ class NativeActivationHost {
       const session = record.session;
       await this.captureSessionStats(session, emit);
       this.settleTurnTail(snapshot, session, emit, record, { notifyWake: true });
-    } catch {} finally {
-      this.settleActivationIdentityEnv(snapshot.activationId);
-    }
+    } catch {}
   }
   notifyWakeSettlement(result) {
     const notify = this.wakeSettlement;
@@ -98229,7 +98153,6 @@ class NativeActivationHost {
       return await this.walkFallbackChain(record, ctx, legEmit, flushFailure, index, fallbackUsed);
     } finally {
       flushFailure(false);
-      this.settleActivationIdentityEnv(record.snapshot.activationId);
     }
   }
   async walkFallbackChain(record, ctx, legEmit, flushFailure, index, fallbackUsed) {
@@ -98450,7 +98373,7 @@ class NativeActivationHost {
       model_override: record.snapshot.modelOverride,
       reused_session: reusedSession
     });
-    const result = this.runToSettled(record.snapshot, record.session, opts?.prompt ?? record.initialPrompt, emit, record).finally(() => this.settleActivationIdentityEnv(activationId));
+    const result = this.runToSettled(record.snapshot, record.session, opts?.prompt ?? record.initialPrompt, emit, record);
     record.result = result;
     return {
       activationId,
@@ -98616,7 +98539,6 @@ class NativeActivationHost {
     } finally {
       this.stopToolDurationWatch(activationId);
       this.toolDurationWarnMsByActivation.delete(activationId);
-      this.settleActivationIdentityEnv(activationId);
       this.forgetBackgroundTasks(activationId);
       this.wakeDirty.delete(activationId);
       this.wakeFinalising.delete(activationId);
@@ -98727,7 +98649,7 @@ class NativeActivationHost {
     });
     record.unsubscribe();
     record.unsubscribe = record.session.subscribe((event) => this.onSessionEvent(record.snapshot, event, emit));
-    const result = this.runToSettled(record.snapshot, record.session, prompt, emit, record).finally(() => this.settleActivationIdentityEnv(activationId));
+    const result = this.runToSettled(record.snapshot, record.session, prompt, emit, record);
     record.result = result;
     return {
       activationId,
@@ -98801,7 +98723,7 @@ function legacyOnlyConfigNotes(spec) {
   }
   return notes;
 }
-var TOKEN_USAGE_KEYS, WRITE_TIERS, TOOL_DURATION_CHECK_INTERVAL_MS = 1e4, LIVE_BACKGROUND_STATUSES, TERMINAL_BACKGROUND_STATUSES, BACKGROUND_TASK_MAX_HOLD_MS, NON_LOCAL_EXTENSION_PREFIXES, defaultExtensionSourceResolutionEnv, EXTENSION_CLASS_SOURCES, BUILTIN_TOOL_SOURCES, EMPTY_DISCOVERY, FALLBACK_RETRYABLE_CLASSES, NULL_FORENSIC_SINK, gateExtensionProviders, provisionalModelPatterns;
+var HOST_ENV_SPAWNING_TOOLS, TOKEN_USAGE_KEYS, WRITE_TIERS, TOOL_DURATION_CHECK_INTERVAL_MS = 1e4, LIVE_BACKGROUND_STATUSES, TERMINAL_BACKGROUND_STATUSES, BACKGROUND_TASK_MAX_HOLD_MS, NON_LOCAL_EXTENSION_PREFIXES, defaultExtensionSourceResolutionEnv, EXTENSION_CLASS_SOURCES, BUILTIN_TOOL_SOURCES, EMPTY_DISCOVERY, FALLBACK_RETRYABLE_CLASSES, NULL_FORENSIC_SINK, gateExtensionProviders, provisionalModelPatterns;
 var init_native_host = __esm(() => {
   init_loader();
   init_system_prompt();
@@ -98811,6 +98733,7 @@ var init_native_host = __esm(() => {
   init_claude_bridge();
   init_permission_guard_extension();
   init_identity_env();
+  init_activation_bash_env();
   init_resolved_tool_contract();
   init_model_chain();
   init_contract_sections();
@@ -98831,6 +98754,7 @@ var init_native_host = __esm(() => {
   init_runtime_diagnostics();
   init_authority_store();
   init_types3();
+  HOST_ENV_SPAWNING_TOOLS = ["python"];
   TOKEN_USAGE_KEYS = [
     "input_tokens",
     "output_tokens",

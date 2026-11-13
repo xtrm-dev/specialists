@@ -59,18 +59,6 @@ export interface IdentityEnvInput {
  */
 /** One `[specialists] identity-env:` line: the launcher's warning channel, and the only one. */
 export declare function warnIdentityEnv(message: string): void;
-export declare function isIdentityManagedKey(key: string): boolean;
-/** Every identity-managed key present in `env`, with its value (or undefined when absent). */
-export declare function snapshotIdentityEnv(env?: NodeJS.ProcessEnv): Record<string, string | undefined>;
-/**
- * Remove every identity-managed key from `env`. Called BEFORE an activation's
- * own identity is applied: a smaller answer must not leave a bigger answer's
- * GIT_CONFIG index or author behind, and the host's own git/gh calls must not
- * inherit a settled activation's identity.
- */
-export declare function clearIdentityEnv(env?: NodeJS.ProcessEnv): void;
-/** Put `env` back to a snapshot: managed keys cleared first, then the snapshot's values. */
-export declare function restoreIdentityEnv(snapshot: Record<string, string | undefined>, env?: NodeJS.ProcessEnv): void;
 /**
  * The identity env for one launched session. Never throws: on any doubt it
  * returns the holder (and the role name) and nothing else.
@@ -95,11 +83,15 @@ export declare function shimBinDir(env?: NodeJS.ProcessEnv): string;
  */
 export declare function specialistPath(env?: NodeJS.ProcessEnv): string;
 /**
- * The full env one launched Specialist process receives: the agent identity env
- * plus the PATH that makes the shim reachable. Both launch paths call this — the
- * legacy runner's session env and the native host's process.env — so a Specialist
- * never gets the holder without the shim. Without a holder nothing is fabricated,
- * PATH included.
+ * The full env one launched Specialist receives: the agent identity env plus the PATH that
+ * makes the shim reachable. Two callers:
+ *
+ * - the legacy runner, whose child process takes this env whole;
+ * - the native host, whose SHELLS take it through the spawn hook (SPECIALISTS-4456). The host
+ *   itself does not use the PATH half — it composes PATH per spawn from what pi resolved, so
+ *   pi's managed bin directory survives — and it drops the key before handing the rest over.
+ *
+ * Without a holder nothing is fabricated, PATH included.
  */
 export declare function resolveAgentLaunchEnv(input?: IdentityEnvInput): Record<string, string>;
 /** The holder a supervised run claims: stable per job, unique per concurrent run. */
