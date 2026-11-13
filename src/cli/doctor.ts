@@ -731,6 +731,9 @@ async function checkSpecialistOverrides(): Promise<boolean> {
     if (config === null) {
       if (invalidReason !== null) {
         warn(`global user config ${invalidReason}; mandatory-rules selection report skipped`);
+        // A short entry is the usual cause and has a one-line repair that keeps every value set
+        // (SPECIALISTS-4448). Say it here: "Required" on six fields reads like corruption.
+        fix('sp init --global   (backfills the full override template into every entry; keeps every value you set)');
       }
       return null;
     }
