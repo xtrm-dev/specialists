@@ -8,13 +8,13 @@
  * to another provider.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SpecialistLoader, ClaudeBridgeRouteModelMismatchError } from '../../../src/specialist/loader.js';
 import { NativeActivationHost, NULL_FORENSIC_SINK } from '../../../src/activation/native-host.js';
 import type { DispatchRejectedError } from '../../../src/activation/types.js';
 import { claudeBridgeRouteEnabled, claudeBridgeSessionOption } from '../../../src/pi/claude-bridge.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const SPEC = (name: string) => JSON.stringify({
   specialist: {
@@ -32,7 +32,9 @@ describe('dispatch consumes the allow-list resolver (SPECIALISTS-4442)', () => {
   let previousXdg: string | undefined;
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'bridge-route-dispatch-'));
+    // Registered with the CORE-2612 registry: a killed or timed-out worker leaves this
+    // directory behind, and only a registered directory can be swept at teardown.
+    root = tempDir('bridge-route-dispatch-');
     home = join(root, 'home');
     project = join(root, 'project');
     mkdirSync(join(project, 'config', 'specialists'), { recursive: true });
@@ -48,7 +50,6 @@ describe('dispatch consumes the allow-list resolver (SPECIALISTS-4442)', () => {
     else process.env.HOME = previousHome;
     if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME;
     else process.env.XDG_CONFIG_HOME = previousXdg;
-    rmSync(root, { recursive: true, force: true });
   });
 
   const writeBlock = (block: Record<string, unknown>) => {
