@@ -5,7 +5,7 @@ import {
   flattenFleet,
   reduceFleetOverlayState,
   renderFleetOverlay,
-} from '../../../config/pi-extensions/specialist-subagents/fleet-overlay.mjs';
+} from '../../../config/pi-extensions/native-specialists/fleet-overlay.mjs';
 
 function snapshot() {
   const parent = {
