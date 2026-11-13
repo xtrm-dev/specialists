@@ -25,7 +25,8 @@
  *    python-kernel extension spawns its interpreter with `{ ...process.env }`, so a
  *    subprocess it starts carries the DISPATCHER's identity, not the activation's. Before
  *    this change it carried the activation's only because the host had overwritten
- *    `process.env`. Fixing that needs an env channel in the extension, upstream.
+ *    `process.env`. Tracked as SPECIALISTS-4487 (fix belongs in the extension or in the
+ *    tool-contract path); the host warns at dispatch when a contract grants such a tool.
  * 2. **The READ_ONLY sandbox.** The permission guard rewrites a bash call to
  *    `bwrap --clearenv … -- bash -c`, and builds its `--setenv` passthrough from
  *    `process.env` with an allowlist that never included the identity keys. Inside the

@@ -42,6 +42,8 @@ import { contractToMarkdown } from './contract-markdown.js';
 import { SpecialistLoader, type StallDetectionConfig } from '../specialist/loader.js';
 import { type IdentityEnvRun } from '../pi/identity-env.js';
 import { type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
+/** The granted tools whose child processes the activation's identity cannot reach. */
+export declare function uncoveredHostEnvSpawns(toolsList: readonly string[]): string[];
 import { type SpecialistWorkItemBoundary } from './workitem-store.js';
 import { type InteractionMessage, type PendingAsk } from './interaction.js';
 import { PeerAdapter, type TransportForensicEvent } from './transport/peer-adapter.js';
@@ -568,21 +570,6 @@ export declare class NativeActivationHost {
     private readonly admission;
     /** Guards the once-per-process settlement republish pass (SPECIALISTS-54). */
     private republished;
-    /**
-     * The identity env live activations have put on `process.env`, in apply order
-     * (SPECIALISTS-4423 F2, stack per the delta review). One host, one process env:
-     * the managed keys are cleared before each apply, so a smaller answer cannot
-     * inherit a bigger one's GIT_CONFIG index, and the stack keeps two facts straight
-     * that a single owner could not — that the LAST live activation owns the env, and
-     * that the state to return to is the one captured before the FIRST of them.
-     *
-     * Still one process env for every activation: this bounds what a settled
-     * activation leaves behind, it does not give two running ones separate identities
-     * (that is SPECIALISTS-4427, via the bash tool's spawnHook).
-     */
-    private readonly liveIdentityEnv;
-    /** State before the oldest live activation applied; null whenever the stack is empty. */
-    private identityEnvBaseline;
     private readonly env;
     private readonly registry;
     /**
@@ -649,54 +636,6 @@ export declare class NativeActivationHost {
      * evidence: a refused dispatch is still runtime evidence, and a dispatch that failed
      * silently is indistinguishable from one that never happened.
      */
-    /**
-     * Give `process.env` this activation's agent identity (SPECIALISTS-4423 F2).
-     *
-     * The managed keys are cleared FIRST: `xt identity env` answers with a block sized
-     * by the role's App, so a later, smaller answer must not leave an earlier one's
-     * GIT_CONFIG index or author behind. The baseline is captured only when the stack
-     * goes empty → non-empty, so it is always the state before the OLDEST live
-     * activation — never another activation's identity.
-     */
-    private applyActivationIdentityEnv;
-    /** Clear the managed keys, then apply one activation's env. */
-    private writeIdentityEnv;
-    /** True when `process.env` still carries exactly the managed keys of `env`. */
-    private identityEnvMatches;
-    /**
-     * Put this activation's identity back at the start of a leg (N1).
-     *
-     * Called from `agent_start`, which every leg reaches — the first turn, a fallback
-     * model, a retry, a background wake and a resume. Two cases: the activation is not on
-     * the stack at all (a wake or resume after its terminal settle), so it applies fresh;
-     * or it is on the stack but no longer owns the env, or its keys were disturbed, so it
-     * takes the env back. Taking the env makes it the top, which keeps the stack honest
-     * about who wrote it last.
-     */
-    private assertActivationIdentityEnv;
-    /**
-     * N5: taking the env from another live activation is the known concurrency limit, and
-     * it happens at a LEG ENTRY, not at a settle — so it must be visible on the same
-     * channel, not only once the winner finally settles. Ids only: never a value.
-     */
-    private warnIdentityTakeover;
-    /**
-     * Host shutdown (N3): nothing may outlive the host with an activation's identity on
-     * `process.env`. The stack is dropped and the baseline restored, whatever state the
-     * activations were in — a stopped, timed-out or crashed activation cannot restore
-     * itself, so the last owner of the process env has to.
-     */
-    shutdown(): void;
-    /**
-     * Take a settled activation off the stack (SPECIALISTS-4423 F2).
-     *
-     * Only the activation on TOP owns `process.env`, so only its settle touches it:
-     * the previous top takes the env back (that activation is still running and must
-     * keep ITS identity — leaving the baseline there would run its remaining commands
-     * as the operator, silently), and the bottom-most settle restores the baseline.
-     * A settle from anywhere else in the stack changes nothing in `process.env`.
-     */
-    private settleActivationIdentityEnv;
     start(request: ActivationRequest): Promise<ActivationHandle>;
     /**
      * The shared work boundary for this host.

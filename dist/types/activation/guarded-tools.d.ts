@@ -59,5 +59,20 @@ export declare function createGuardedTools(sdk: PiSdk, input: {
     toolNames: readonly string[];
     cwd: string;
     admit: (toolName: string) => AdmissionVerdict;
+    /**
+     * Env this activation's shells get on top of the inherited one (SPECIALISTS-4456).
+     *
+     * Applied through the shell tools' `spawnHook`, never through `process.env`: the host
+     * process is shared with the dispatcher, and writing there gave a coordinator the
+     * dispatched Specialist's identity (a reviewer role, so `git push` refused with "the
+     * reviewer role does not push"). Its `PATH` is ignored here — the hook composes PATH
+     * from what pi resolved for the spawn so pi's managed bin directory survives.
+     */
+    env?: Record<string, string>;
+    /**
+     * Directory holding the gh/xt identity shim, put first on each shell's PATH. Separate
+     * from `env` because PATH must be composed per spawn, not precomputed from the host.
+     */
+    shimDir?: string;
 }): GuardedToolsResult;
 //# sourceMappingURL=guarded-tools.d.ts.map
