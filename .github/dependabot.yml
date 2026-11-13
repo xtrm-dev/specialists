@@ -1,13 +1,20 @@
 # Dependabot — generated for @jaggerxtrm/specialists security baseline.
 version: 2
 updates:
-  - package-ecosystem: npm
+  # This repository's JavaScript dependencies are managed by Bun (bun.lock, no
+  # package-lock.json). Declared as `npm`, Dependabot reported misconfigured_tooling on
+  # every run and could neither update bun.lock nor rebase its own pull requests.
+  - package-ecosystem: bun
     directory: /
     schedule:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
     labels: [dependencies, javascript]
+    # Newly published versions are the usual vector for a compromised or broken release;
+    # seven days of soak time keeps a fresh package out of the weekly proposal.
+    cooldown:
+      default-days: 7
     groups:
       npm-minor-and-patch:
         update-types: [minor, patch]
