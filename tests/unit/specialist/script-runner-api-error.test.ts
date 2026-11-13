@@ -81,6 +81,23 @@ afterEach(() => {
   spawnMock.mockReset();
 });
 
+
+/** A session that ends with empty text and empty stderr, emitting one provider api_error. */
+function failingSession(errorMessage: string) {
+  return {
+    start: vi.fn(async () => undefined),
+    prompt: vi.fn(async () => undefined),
+    waitForDone: vi.fn(async () => {
+      const options = piSessionCreateMock.mock.calls.at(-1)![0];
+      options.onMetric({ type: 'api_error', source: 'rpc', errorMessage });
+    }),
+    getLastOutput: vi.fn(async () => ''),
+    getStderr: vi.fn(() => ''),
+    close: vi.fn(async () => undefined),
+    kill: vi.fn(),
+  };
+}
+
 describe('runScriptSpecialist empty assistant text surfaces provider api_error (DARTHFEEDOR-1207)', () => {
   it('reports the captured provider error instead of "pi produced no assistant text"', async () => {
     const session = {
@@ -117,5 +134,29 @@ describe('runScriptSpecialist empty assistant text surfaces provider api_error (
     expect(result.error_type).toBe('auth');
     // The auth failure must stop the model-chain walk, not burn the fallback.
     expect(piSessionCreateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a retryable provider failure retryable, so the fallback model still runs', async () => {
+    // SPECIALISTS-4479 review F1: the captured provider text is a DISPLAY aid. Folding it
+    // into stderr made a retryable 5xx look final and stopped the model-chain walk.
+    piSessionCreateMock
+      .mockResolvedValueOnce(failingSession('529 {"type":"overloaded_error","message":"Overloaded"}'))
+      .mockResolvedValueOnce(failingSession('HTTP 401 {"message":"Invalid session","type":"invalid_api_key"}'));
+
+    const result = await runScriptSpecialist(
+      { specialist: 'service-knowledge-sync', variables: { name: 'release notes' } },
+      {
+        loader: makeLoader() as never,
+        projectDir: '.',
+        surface: 'script',
+        trust: { allowWriteCapable: true },
+      },
+    );
+
+    expect(result.success).toBe(false);
+    // The retryable 529 walked to the fallback model; the auth failure then stopped the chain.
+    expect(piSessionCreateMock).toHaveBeenCalledTimes(2);
+    expect(result.error).toContain('401');
+    expect(result.error_type).toBe('auth');
   });
 });
