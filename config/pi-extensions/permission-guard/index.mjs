@@ -284,11 +284,17 @@ export function bashRefusalReason() {
   return tierRefusal();
 }
 
+
+function notify(ctx, message) {
+  try { if (ctx?.ui?.notify) { ctx.ui.notify(message, 'warning'); return; } } catch {}
+  console.error(message);
+}
+
 export default function permissionGuard(pi) {
-  pi.on('session_start', async () => {
+  pi.on('session_start', async (_event, ctx) => {
     await bwrapSelfCheck();
     if (!selfCheckState.ok) {
-      console.error(`[permission-guard] ${SELF_CHECK_FAILURE_PREFIX}: ${selfCheckState.detail}; all bash calls will be refused`);
+      notify(ctx, `[permission-guard] ${SELF_CHECK_FAILURE_PREFIX}: ${selfCheckState.detail}; all bash calls will be refused`);
     }
   });
 

@@ -6965,68 +6965,10 @@ import { createHash } from "node:crypto";
 
 // src/pi/read-line-numbers-extension.ts
 import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-var HERE = dirname(fileURLToPath(import.meta.url));
-var REL = join("config", "pi-extensions", "read-line-numbers");
-var CANDIDATES = [
-  join(HERE, "..", REL),
-  join(HERE, "..", "..", REL),
-  join(HERE, "..", "..", "..", REL)
-];
-var cached;
-function getReadLineNumbersExtensionPath() {
-  if (cached !== undefined)
-    return cached;
-  for (const candidate of CANDIDATES) {
-    if (existsSync(join(candidate, "index.mjs"))) {
-      cached = resolve(candidate);
-      return cached;
-    }
-  }
-  cached = null;
-  process.stderr.write("[read-line-numbers] WARN: bundled extension not found alongside package. " + `Model-facing read output will not be line-numbered for this session.
-`);
-  return cached;
-}
-
-// src/pi/extension-tool-policy-extension.ts
-import { existsSync as existsSync2 } from "node:fs";
-import { dirname as dirname2, join as join2, resolve as resolve2 } from "node:path";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
-var HERE2 = dirname2(fileURLToPath2(import.meta.url));
-var REL2 = join2("config", "pi-extensions", "extension-tool-policy");
-var CANDIDATES2 = [
-  join2(HERE2, "..", REL2),
-  join2(HERE2, "..", "..", REL2),
-  join2(HERE2, "..", "..", "..", REL2)
-];
-var cached2;
-function getExtensionToolPolicyExtensionPath() {
-  if (cached2 !== undefined)
-    return cached2;
-  for (const candidate of CANDIDATES2) {
-    if (existsSync2(join2(candidate, "index.mjs"))) {
-      cached2 = resolve2(candidate);
-      return cached2;
-    }
-  }
-  cached2 = null;
-  process.stderr.write("[xtrm-tool-policy] WARN: bundled policy extension not found alongside package. " + `Enabled extension sources will load without the tool-policy gate.
-`);
-  return cached2;
-}
-var NATIVE_TOOLS_ENV_KEY = "PI_SPECIALIST_ALLOWED_NATIVE_TOOLS";
-var REQUIRED_EXTENSION_TOOLS_ENV_KEY = "PI_SPECIALIST_REQUIRED_EXTENSION_TOOLS";
-
-// src/pi/permission-guard-extension.ts
-import { existsSync as existsSync3 } from "node:fs";
-import { dirname as dirname4, join as join4, resolve as resolve3 } from "node:path";
-import { fileURLToPath as fileURLToPath3 } from "node:url";
 
 // src/utils/runtime-diagnostics.ts
 import { appendFileSync, mkdirSync } from "node:fs";
-import { dirname as dirname3, join as join3 } from "node:path";
+import { dirname, join } from "node:path";
 var STDERR_SINK = (line) => {
   process.stderr.write(`${line}
 `);
@@ -7036,14 +6978,14 @@ function setRuntimeDiagnosticsSink(next) {
   sink = next ?? (() => {});
 }
 function runtimeDiagnosticsSinkPath(root) {
-  return join3(root, ".specialists", "logs", "runtime-diagnostics.log");
+  return join(root, ".specialists", "logs", "runtime-diagnostics.log");
 }
 function createFileDiagnosticsSink(path) {
   let directoryReady = false;
   return (line) => {
     try {
       if (!directoryReady) {
-        mkdirSync(dirname3(path), { recursive: true });
+        mkdirSync(dirname(path), { recursive: true });
         directoryReady = true;
       }
       appendFileSync(path, `${new Date().toISOString()} ${line}
@@ -7074,7 +7016,63 @@ function runtimeDebug(tag, message, detail) {
   emit("DEBUG", tag, message, detail);
 }
 
+// src/pi/read-line-numbers-extension.ts
+import { dirname as dirname2, join as join2, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+var HERE = dirname2(fileURLToPath(import.meta.url));
+var REL = join2("config", "pi-extensions", "read-line-numbers");
+var CANDIDATES = [
+  join2(HERE, "..", REL),
+  join2(HERE, "..", "..", REL),
+  join2(HERE, "..", "..", "..", REL)
+];
+var cached;
+function getReadLineNumbersExtensionPath() {
+  if (cached !== undefined)
+    return cached;
+  for (const candidate of CANDIDATES) {
+    if (existsSync(join2(candidate, "index.mjs"))) {
+      cached = resolve(candidate);
+      return cached;
+    }
+  }
+  cached = null;
+  runtimeWarn("read-line-numbers", "bundled extension not found alongside package. Model-facing read output will not be line-numbered for this session.");
+  return cached;
+}
+
+// src/pi/extension-tool-policy-extension.ts
+import { existsSync as existsSync2 } from "node:fs";
+import { dirname as dirname3, join as join3, resolve as resolve2 } from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+var HERE2 = dirname3(fileURLToPath2(import.meta.url));
+var REL2 = join3("config", "pi-extensions", "extension-tool-policy");
+var CANDIDATES2 = [
+  join3(HERE2, "..", REL2),
+  join3(HERE2, "..", "..", REL2),
+  join3(HERE2, "..", "..", "..", REL2)
+];
+var cached2;
+function getExtensionToolPolicyExtensionPath() {
+  if (cached2 !== undefined)
+    return cached2;
+  for (const candidate of CANDIDATES2) {
+    if (existsSync2(join3(candidate, "index.mjs"))) {
+      cached2 = resolve2(candidate);
+      return cached2;
+    }
+  }
+  cached2 = null;
+  runtimeWarn("xtrm-tool-policy", "bundled policy extension not found alongside package. Enabled extension sources will load without the tool-policy gate.");
+  return cached2;
+}
+var NATIVE_TOOLS_ENV_KEY = "PI_SPECIALIST_ALLOWED_NATIVE_TOOLS";
+var REQUIRED_EXTENSION_TOOLS_ENV_KEY = "PI_SPECIALIST_REQUIRED_EXTENSION_TOOLS";
+
 // src/pi/permission-guard-extension.ts
+import { existsSync as existsSync3 } from "node:fs";
+import { dirname as dirname4, join as join4, resolve as resolve3 } from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
 var HERE3 = dirname4(fileURLToPath3(import.meta.url));
 var REL3 = join4("config", "pi-extensions", "permission-guard");
 var CANDIDATES3 = [
@@ -12757,8 +12755,7 @@ function getWorktreeBoundaryExtensionPath(worktreeBoundary) {
   try {
     mkdirSync3(extensionsDir, { recursive: true });
   } catch (err) {
-    process.stderr.write(`[worktree-boundary] WARN: could not create extensions directory at ${extensionsDir}: ${err.message}. ` + `Boundary enforcement will NOT apply for this session.
-`);
+    runtimeWarn("worktree-boundary", `could not create extensions directory at ${extensionsDir}: ${err.message}. Boundary enforcement will NOT apply for this session.`);
     return null;
   }
   const extensionPath = join7(extensionsDir, `worktree-boundary-${boundaryHash}.mjs`);
@@ -12803,8 +12800,7 @@ export default function(pi) {
   try {
     writeFileSync2(extensionPath, extensionSource, "utf-8");
   } catch (err) {
-    process.stderr.write(`[worktree-boundary] WARN: could not write extension file at ${extensionPath}: ${err.message}. ` + `Boundary enforcement will NOT apply for this session.
-`);
+    runtimeWarn("worktree-boundary", `could not write extension file at ${extensionPath}: ${err.message}. Boundary enforcement will NOT apply for this session.`);
     return null;
   }
   return extensionPath;
@@ -12905,8 +12901,7 @@ class PiAgentSession {
     }
     const { kept: dedupedSources, dropped: droppedSources } = deduplicateExtensionSources(curatedExtensions.dedupeAgainstDynamic, this.options.extensionSources ?? []);
     for (const { dropped, keptAs } of droppedSources) {
-      process.stderr.write(`[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').
-`);
+      runtimeWarn("python-kernel", `DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').`);
     }
     for (const source of dedupedSources) {
       args.push("-e", source);
@@ -17919,8 +17914,7 @@ function isAllowed(key) {
   return GIT_CONFIG_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 function warnIdentityEnv(message) {
-  process.stderr.write(`[specialists] identity-env: ${message}
-`);
+  runtimeWarn("identity-env", `[specialists] identity-env: ${message}`);
 }
 var launcherWarning = warnIdentityEnv;
 var IDENTITY_MANAGED_KEY = /^(?:SUBSTRATE_HOLDER|XTRM_ROLE|GIT_AUTHOR_NAME|GIT_AUTHOR_EMAIL|GIT_COMMITTER_NAME|GIT_COMMITTER_EMAIL|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+)$/;
@@ -21197,8 +21191,7 @@ class SpecialistLoader {
         if (typeof rawId === "string" && /^[a-z][a-z0-9-]*$/.test(rawId)) {
           safeIds.push(rawId);
         } else {
-          process.stderr.write(`[specialists] mandatory_rules.template_sets: dropping invalid set id '${String(rawId)}' for '${name}' (must be kebab-case)
-`);
+          runtimeWarn("loader", `[specialists] mandatory_rules.template_sets: dropping invalid set id '${String(rawId)}' for '${name}' (must be kebab-case)`);
         }
       }
       baseMandatoryRules[field] = safeIds;
@@ -21222,15 +21215,13 @@ class SpecialistLoader {
     const homeHit = hits.find((h) => h.dir.scope === "home");
     const repoHit = hits.find((h) => h.dir.scope === "user");
     if (homeHit && repoHit && realpathOr(repoHit.resolved.filePath) !== realpathOr(homeHit.resolved.filePath)) {
-      process.stderr.write(`[specialists] warning: '${name}' resolved from repo '${repoHit.resolved.filePath}' shadows home '${homeHit.resolved.filePath}'
-`);
+      runtimeWarn("loader", `[specialists] warning: '${name}' resolved from repo '${repoHit.resolved.filePath}' shadows home '${homeHit.resolved.filePath}'`);
     }
     const baseHit = hits[0];
     const baseContent = await readFile(baseHit.resolved.filePath, "utf-8");
     const base = await parseSpecialist(this.toJson(baseContent, baseHit.resolved.deprecatedYaml));
     if (baseHit.resolved.deprecatedYaml) {
-      process.stderr.write(`[specialists] DEPRECATED: YAML specialist config detected at ${baseHit.resolved.filePath}. Please migrate to .specialist.json
-`);
+      runtimeWarn("loader", `[specialists] DEPRECATED: YAML specialist config detected at ${baseHit.resolved.filePath}. Please migrate to .specialist.json`);
     }
     this.resolveCanonicalPresetReferences(name, base);
     const warnings = [];
@@ -21247,13 +21238,11 @@ class SpecialistLoader {
         overrideRaw = JSON.parse(this.toJson(content, hit.resolved.deprecatedYaml));
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        process.stderr.write(`[specialists] skipping override ${hit.resolved.filePath}: ${msg}
-`);
+        runtimeWarn("loader", `[specialists] skipping override ${hit.resolved.filePath}: ${msg}`);
         continue;
       }
       if (hit.resolved.deprecatedYaml) {
-        process.stderr.write(`[specialists] DEPRECATED: YAML specialist config detected at ${hit.resolved.filePath}. Please migrate to .specialist.json
-`);
+        runtimeWarn("loader", `[specialists] DEPRECATED: YAML specialist config detected at ${hit.resolved.filePath}. Please migrate to .specialist.json`);
       }
       warnings.push(...this.applyOverrideFields(name, base, overrideRaw, "user"));
     }
@@ -21271,8 +21260,7 @@ class SpecialistLoader {
       }
     }
     for (const shadow of claudeBridgeDecision.shadowed) {
-      process.stderr.write(`[specialists] claude_bridge allow list in ${claudeBridgeDecision.blockPath} overrides '${name}' ` + `${shadow.field}: layer value ${JSON.stringify(shadow.layerValue)} ignored, using ` + `${JSON.stringify(shadow.blockValue)}
-`);
+      runtimeWarn("loader", `[specialists] claude_bridge allow list in ${claudeBridgeDecision.blockPath} overrides '${name}' ${shadow.field}: layer value ${JSON.stringify(shadow.layerValue)} ignored, using ${JSON.stringify(shadow.blockValue)}`);
     }
     const top = hits[hits.length - 1];
     resolveSkillsPaths(base, baseHit.dir.path, this.projectDir);
@@ -21349,8 +21337,7 @@ class SpecialistLoader {
           });
         } catch (e) {
           const reason = e instanceof Error ? e.message : String(e);
-          process.stderr.write(`[specialists] skipping ${file} (${specialistName}): ${reason}
-`);
+          runtimeWarn("loader", `[specialists] skipping ${file} (${specialistName}): ${reason}`);
         }
       }
     }
@@ -21510,15 +21497,14 @@ function writeDottedPath(obj, dotted, value) {
   cur[leaf] = value;
 }
 function emitPresetResolved(specialist, field, presetName, resolvedValue, depth) {
-  process.stderr.write(`${JSON.stringify({
+  runtimeWarn("loader", JSON.stringify({
     event: "preset_resolved",
     specialist,
     field,
     preset_name: presetName,
     resolved_value: resolvedValue,
     depth
-  })}
-`);
+  }));
 }
 function resolveSkillsPaths(spec, fileDir, consumerRoot) {
   const rawPaths = spec.specialist.skills?.paths;
@@ -25537,12 +25523,11 @@ class NativeActivationHost {
       piAgentDir: () => sdk.getAgentDir()
     });
     for (const source of skippedDeclaredSources) {
-      process.stderr.write(formatSkippedExtensionSourceMessage(source));
+      runtimeWarn("extension-discovery", formatSkippedExtensionSourceMessage(source).trim());
     }
     const { kept: dynamicExtensions, dropped: droppedExtensions } = deduplicateExtensionSources(curatedExtensions.dedupeAgainstDynamic, declaredLocalExtensions);
     for (const { dropped, keptAs } of droppedExtensions) {
-      process.stderr.write(`[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').
-`);
+      runtimeWarn("python-kernel", `DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').`);
     }
     const emitDiscoverySessionsSignal = () => {
       emit("extension_discovery_sessions", {
@@ -25675,8 +25660,7 @@ class NativeActivationHost {
         resolved_tool_contract: formatResolvedToolContract(effectiveToolContract, "discover-then-pin")
       },
       ...isReviewer ? {
-        appendExecutionContext: createReviewerDiffAppendHook((message) => process.stderr.write(`${message}
-`))
+        appendExecutionContext: createReviewerDiffAppendHook((message) => runtimeWarn("reviewer-diff", message))
       } : {}
     });
     if (rendered.mandatoryRulesError) {
@@ -26077,12 +26061,10 @@ class NativeActivationHost {
       });
       const unresolved = outcomes.filter((outcome) => outcome.outcome !== "published");
       if (unresolved.length > 0) {
-        process.stderr.write(`[specialists] ${unresolved.length} settlement(s) still unpublished after republish: ` + `${unresolved.map((o) => `${o.activationId}/${o.attemptId}=${o.outcome}`).join(", ")}
-`);
+        runtimeWarn("settlement-republish", `[specialists] ${unresolved.length} settlement(s) still unpublished after republish: ` + `${unresolved.map((o) => `${o.activationId}/${o.attemptId}=${o.outcome}`).join(", ")}`);
       }
     } catch (error) {
-      process.stderr.write(`[specialists] settlement republish pass failed: ${error instanceof Error ? error.message : String(error)}
-`);
+      runtimeWarn("settlement-republish", `[specialists] settlement republish pass failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   onSessionEvent(snapshot, event, emit) {

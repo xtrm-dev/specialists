@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { setRuntimeDiagnosticsSink, resetRuntimeDiagnosticsSink } from '../../../src/utils/runtime-diagnostics.js';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 
@@ -286,15 +287,14 @@ describe('native launch path — overlapping activations return the env to the p
     const b = await dispatch(host);
 
     // The swap is operator-visible: settling off the top warns once, ids only.
-    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const warnings: string[] = [];
+    setRuntimeDiagnosticsSink((line) => { warnings.push(line); });
     gateB.release();
     await b.result;
-    const warnings = stderr.mock.calls
-      .map((call) => String(call[0]))
-      .filter((line) => line.includes('identity-env'));
-    stderr.mockRestore();
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain(`activation ${b.activationId} settled while 1 others are live`);
+    const filtered = warnings.filter((line) => line.includes('identity-env'));
+    resetRuntimeDiagnosticsSink();
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]).toContain(`activation ${b.activationId} settled while 1 others are live`);
     expect(warnings[0]).toContain(`process env now carries ${a.activationId}`);
     expect(warnings[0]).not.toContain(holderFor(a.activationId));
 
@@ -498,10 +498,11 @@ describe('native launch path — the identity takeover is announced at the leg t
     const b = await host.start({ specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator' });
     expect(process.env.SUBSTRATE_HOLDER).toBe(holderFor(b.activationId));
 
-    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const linesAll: string[] = [];
+    setRuntimeDiagnosticsSink((line) => { linesAll.push(line); });
     created[0].emitLegStart(); // A starts another leg while B is live and on top
-    const lines = stderr.mock.calls.map((call) => String(call[0])).filter((line) => line.includes('identity-env'));
-    stderr.mockRestore();
+    const lines = linesAll.filter((line) => line.includes('identity-env'));
+    resetRuntimeDiagnosticsSink();
 
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain(`activation ${a.activationId} started a leg and took process env from ${b.activationId}`);

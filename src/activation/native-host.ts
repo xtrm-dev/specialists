@@ -138,7 +138,7 @@ import { FleetRegistry, RESUMABLE_STATES, RETRYABLE_STATES, nextAttemptId, type 
 import { publishSettlement, republishPendingSettlements, type SettlementSubject } from './settlement-publication.js';
 import { createFileSettlementStore, type SettlementStore } from './settlement-store.js';
 import { join } from 'node:path';
-import { createFileDiagnosticsSink, runtimeDiagnosticsSinkPath, setRuntimeDiagnosticsSink } from '../utils/runtime-diagnostics.js';
+import { createFileDiagnosticsSink, runtimeDiagnosticsSinkPath, setRuntimeDiagnosticsSink, runtimeWarn } from '../utils/runtime-diagnostics.js';
 import { NULL_AUTHORITY_WRITER, type AuthorityWriter } from './authority-store.js';
 import {
   DispatchRejectedError,
@@ -1966,16 +1966,14 @@ export class NativeActivationHost {
     // yields an empty set (a non-existent path loads with NO error) is a refusal, not a
     // skip, detected positively inside `discoverDynamicExtensionTools`.
     for (const source of skippedDeclaredSources) {
-      process.stderr.write(formatSkippedExtensionSourceMessage(source));
+      runtimeWarn('extension-discovery', formatSkippedExtensionSourceMessage(source).trim());
     }
     const { kept: dynamicExtensions, dropped: droppedExtensions } = deduplicateExtensionSources(
       curatedExtensions.dedupeAgainstDynamic,
       declaredLocalExtensions,
     );
     for (const { dropped, keptAs } of droppedExtensions) {
-      process.stderr.write(
-        `[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').\n`,
-      );
+      runtimeWarn('python-kernel', `DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').`);
     }
 
     // Discovery runs exactly once per activation, before the effective contract, the prompt,
@@ -2185,7 +2183,7 @@ export class NativeActivationHost {
       // the legacy path. Without it the reviewer role loses its diff entirely.
       ...(isReviewer
         ? {
-            appendExecutionContext: createReviewerDiffAppendHook((message) => process.stderr.write(`${message}\n`)),
+            appendExecutionContext: createReviewerDiffAppendHook((message) => runtimeWarn('reviewer-diff', message)),
           }
         : {}),
     });
@@ -2842,15 +2840,10 @@ export class NativeActivationHost {
       const unresolved = outcomes.filter((outcome: { outcome: string }) => outcome.outcome !== 'published');
       if (unresolved.length > 0) {
         // Named, not counted: an operator has to be able to find the records.
-        process.stderr.write(
-          `[specialists] ${unresolved.length} settlement(s) still unpublished after republish: `
-            + `${unresolved.map((o: { activationId: string; attemptId: string; outcome: string }) => `${o.activationId}/${o.attemptId}=${o.outcome}`).join(', ')}\n`,
-        );
+        runtimeWarn('settlement-republish', `[specialists] ${unresolved.length} settlement(s) still unpublished after republish: ` + `${unresolved.map((o: { activationId: string; attemptId: string; outcome: string }) => `${o.activationId}/${o.attemptId}=${o.outcome}`).join(', ')}`);
       }
     } catch (error) {
-      process.stderr.write(
-        `[specialists] settlement republish pass failed: ${error instanceof Error ? error.message : String(error)}\n`,
-      );
+      runtimeWarn('settlement-republish', `[specialists] settlement republish pass failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

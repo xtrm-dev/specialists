@@ -4,6 +4,7 @@
 // the bundled build (dist/) and dev source (src/pi/) resolve.
 
 import { existsSync } from 'node:fs';
+import { runtimeWarn } from '../utils/runtime-diagnostics.js';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -27,10 +28,7 @@ export function getExtensionToolPolicyExtensionPath(): string | null {
     }
   }
   cached = null;
-  process.stderr.write(
-    '[xtrm-tool-policy] WARN: bundled policy extension not found alongside package. ' +
-      'Enabled extension sources will load without the tool-policy gate.\n',
-  );
+  runtimeWarn('xtrm-tool-policy', 'bundled policy extension not found alongside package. Enabled extension sources will load without the tool-policy gate.');
   return cached;
 }
 
