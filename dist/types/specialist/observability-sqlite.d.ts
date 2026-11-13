@@ -159,12 +159,31 @@ export interface ForensicEventRecord {
 }
 export interface ListForensicEventsFilters {
     jobId?: string;
+    /** Explicit job candidate set. Empty means select nothing. */
+    jobIds?: readonly string[];
     jobIdPrefix?: string;
     sinceMs?: number;
+    /**
+     * Exact-job continuation cursor. Forensic seq is UNIQUE within job_id
+     * (idx_forensic_events_job_seq), so this is the stable follow/replay cursor
+     * for operator surfaces. Use with jobId; callers must not infer cross-job
+     * ordering from seq.
+     */
+    afterSeq?: number;
+    /** Exact durable attempt identity (e.g. att:<activation>:2). */
+    attemptId?: string;
     eventFamily?: string;
     eventName?: string;
     limit?: number;
     order?: 'asc' | 'desc';
+}
+export interface ListStatusesWindowFilters {
+    /** Hard row bound. Clamped to 1..500. */
+    limit?: number;
+    /** Only jobs touched at/after this epoch ms. */
+    sinceMs?: number;
+    /** Optional persisted status allowlist. */
+    statuses?: readonly SupervisorStatus['status'][];
 }
 /** Filters for {@link ObservabilitySqliteClient.listNativeActivationIds}.
  * XTRM-93 N3 (unitAI-kmbb9). `limit` bounds ACTIVATION count, never event
@@ -394,6 +413,12 @@ export interface ObservabilitySqliteClient {
     queryMemberContextHealth(jobId: string): number | null;
     readStatus(jobId: string): SupervisorStatus | null;
     listStatuses(): SupervisorStatus[];
+    /**
+     * Deterministic bounded status window for refreshable operator surfaces.
+     * Unlike listStatuses(), the bound is applied in SQL before status_json
+     * deserialization.
+     */
+    listStatusesWindow(filters?: ListStatusesWindowFilters): SupervisorStatus[];
     /** Read durable PR/base drift state for a job. Returns null when the job row is missing.
      *  Specialists-05q.1: schema/model only — refresh logic lives in .2. */
     readPrDriftState(jobId: string): PrDriftState | null;
@@ -446,6 +471,8 @@ export interface ObservabilitySqliteClient {
     readEvents(jobId: string): TimelineEvent[];
     readEventsAfterSeq(jobId: string, afterSeq: number): TimelineEvent[];
     readForensicEvents(filters?: ListForensicEventsFilters): ForensicEventRecord[];
+    /** Complete durable attempt-id history for one job, ordered by first forensic seq. */
+    listForensicAttemptIds(jobId: string): string[];
     /** XTRM-93 N3 (unitAI-kmbb9): activation-first id selection for `sp ps`.
      * Returns the latest-N native activation ids (job_id 'act:' space) ordered
      * by specialist_jobs.updated_at_ms DESC. The bound is an ACTIVATION count,

@@ -14189,6 +14189,22 @@ function assertKnownTopLevelFields(event) {
     }
   }
 }
+function assertNoForbiddenLabels(labels) {
+  const forbidden = Object.keys(labels).filter((key) => FORBIDDEN_PROMETHEUS_LABELS.has(key));
+  if (forbidden.length > 0) {
+    throw new Error(`Forbidden telemetry label(s): ${forbidden.join(", ")}`);
+  }
+}
+function pickAllowedLabels(source, allowlist = DEFAULT_LABEL_ALLOWLIST) {
+  const labels = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (!allowlist.has(key) || value === undefined || value === null)
+      continue;
+    labels[key] = String(value);
+  }
+  assertNoForbiddenLabels(labels);
+  return labels;
+}
 function projectSpawnedByLink(spawnOrigin) {
   if (!spawnOrigin || typeof spawnOrigin !== "object")
     return;
@@ -16302,6 +16318,39 @@ class SqliteClient {
       return statuses;
     }, "listStatuses");
   }
+  listStatusesWindow(filters = {}) {
+    return withRetry(() => {
+      const clauses = [];
+      const params = [];
+      if (filters.sinceMs !== undefined) {
+        clauses.push("updated_at_ms >= ?");
+        params.push(filters.sinceMs);
+      }
+      const statuses = filters.statuses?.filter((status) => typeof status === "string" && status.length > 0) ?? [];
+      if (statuses.length > 0) {
+        clauses.push(`status IN (${statuses.map(() => "?").join(",")})`);
+        params.push(...statuses);
+      }
+      const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+      const limit = Math.max(1, Math.min(filters.limit ?? 100, 500));
+      const rows = this.db.query(`
+        SELECT status_json
+        FROM specialist_jobs
+        ${where}
+        ORDER BY updated_at_ms DESC, job_id DESC
+        LIMIT ?
+      `).all(...params, limit);
+      const result = [];
+      for (const row of rows) {
+        if (!row.status_json)
+          continue;
+        try {
+          result.push(JSON.parse(row.status_json));
+        } catch {}
+      }
+      return result;
+    }, "listStatusesWindow");
+  }
   readPrDriftState(jobId) {
     return withRetry(() => {
       const row = this.db.query(`
@@ -16634,9 +16683,15 @@ class SqliteClient {
     return withRetry(() => {
       const clauses = [];
       const params = [];
+      if (filters.jobIds !== undefined && filters.jobIds.length === 0)
+        return [];
       if (filters.jobId) {
         clauses.push("job_id = ?");
         params.push(filters.jobId);
+      }
+      if (filters.jobIds && filters.jobIds.length > 0) {
+        clauses.push(`job_id IN (${filters.jobIds.map(() => "?").join(",")})`);
+        params.push(...filters.jobIds);
       }
       if (filters.jobIdPrefix) {
         clauses.push("job_id >= ? AND job_id < ?");
@@ -16645,6 +16700,16 @@ class SqliteClient {
       if (filters.sinceMs !== undefined) {
         clauses.push("t >= ?");
         params.push(filters.sinceMs);
+      }
+      if (filters.afterSeq !== undefined) {
+        if (!filters.jobId)
+          throw new Error("readForensicEvents afterSeq requires exact jobId");
+        clauses.push("seq > ?");
+        params.push(filters.afterSeq);
+      }
+      if (filters.attemptId !== undefined) {
+        clauses.push("attempt_id = ?");
+        params.push(filters.attemptId);
       }
       if (filters.eventFamily) {
         clauses.push("event_family = ?");
@@ -16657,15 +16722,28 @@ class SqliteClient {
       const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
       const limit = Math.max(1, Math.min(filters.limit ?? 1000, 1e4));
       const dir = filters.order === "desc" ? "DESC" : "ASC";
+      const orderBy = filters.afterSeq !== undefined ? `seq ${dir}, id ${dir}` : `t ${dir}, seq ${dir}, id ${dir}`;
       return this.db.query(`
         SELECT id, job_id, seq, t, schema_version, event_family, event_name,
                participant_kind, participant_role, participant_id, attempt_id, redaction_status, event_json
         FROM specialist_forensic_events
         ${where}
-        ORDER BY t ${dir}, seq ${dir}, id ${dir}
+        ORDER BY ${orderBy}
         LIMIT ?
       `).all(...params, limit);
     }, "readForensicEvents");
+  }
+  listForensicAttemptIds(jobId) {
+    return withRetry(() => {
+      const rows = this.db.query(`
+        SELECT attempt_id, MIN(seq) AS first_seq
+        FROM specialist_forensic_events
+        WHERE job_id = ? AND attempt_id IS NOT NULL
+        GROUP BY attempt_id
+        ORDER BY first_seq ASC, attempt_id ASC
+      `).all(jobId);
+      return rows.map((row) => row.attempt_id).filter((attemptId) => typeof attemptId === "string" && attemptId.length > 0);
+    }, "listForensicAttemptIds");
   }
   listNativeActivationIds(filters = {}) {
     return withRetry(() => {
@@ -28171,6 +28249,401 @@ function createSpecialistFeedTool(getHost, openObservability = () => createObser
     }
   };
 }
+// src/specialist/forensic-renderer.ts
+var DEFAULT_MAX_PAYLOAD_FIELDS = 5;
+var DEFAULT_MAX_FIELD_VALUE_CHARS = 32;
+function forensicEventToRow(ev, opts = {}) {
+  const schemaWarning = ev.schema_version === FORENSIC_SCHEMA_VERSION ? undefined : `unknown forensic schema: ${ev.schema_version}`;
+  return {
+    ts: ev.t_unix_ms,
+    seq: ev.seq,
+    type: `${ev.event_family}.${ev.event_name}`,
+    actor: buildActor(ev),
+    severity: ev.severity,
+    payload: buildPayload(ev, opts),
+    jobId: typeof ev.correlation.job_id === "string" ? ev.correlation.job_id : "",
+    beadId: typeof ev.correlation.bead_id === "string" ? ev.correlation.bead_id : undefined,
+    schemaWarning,
+    correlation: {
+      chain_id: ev.correlation.chain_id,
+      chain_root_job_id: ev.correlation.chain_root_job_id,
+      participant_id: ev.correlation.participant_id
+    }
+  };
+}
+function buildActor(ev) {
+  const role = ev.resource.participant_role ?? "unknown";
+  const jobId = typeof ev.correlation.job_id === "string" ? ev.correlation.job_id : "";
+  const jobShort = jobId.slice(0, 8) || "-";
+  return `${role}:${jobShort}`;
+}
+function buildPayload(ev, opts) {
+  const maxFields = opts.maxPayloadFields ?? DEFAULT_MAX_PAYLOAD_FIELDS;
+  const maxChars = opts.maxFieldValueChars ?? DEFAULT_MAX_FIELD_VALUE_CHARS;
+  const safe = pickAllowedLabels(ev.body);
+  const entries = Object.entries(safe).filter(([, v]) => v && v !== "null" && v !== "undefined").slice(0, maxFields).map(([k, v]) => `${k}=${shortenValue(String(v), maxChars)}`);
+  if (entries.length > 0)
+    return entries.join(" ");
+  return `severity=${ev.severity} redaction=${ev.redaction.status}`;
+}
+function shortenValue(value, max) {
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (max <= 1)
+    return cleaned.slice(0, max);
+  return cleaned.length > max ? cleaned.slice(0, max - 1) + "…" : cleaned;
+}
+
+// src/specialist/forensic-presentation.ts
+function isForensicAgentInternal(event) {
+  if (event.event_family === "turn")
+    return true;
+  if (event.event_family === "tool")
+    return true;
+  const name = event.event_name;
+  return name === "model.token_usage.recorded" || name === "model.finish_reason.recorded" || name.startsWith("model.meta") || name === "mcp.call.started" || name === "mcp.call.completed" || name === "mcp.call.failed" || name === "mcp.latency.observed";
+}
+
+// src/specialist/runtime-origin-reconstruct.ts
+var RUN_START_EVENT_NAME = "job.started";
+function reconstructLineage(events) {
+  const out = new Map;
+  for (const ev of events) {
+    if (ev.event_name !== RUN_START_EVENT_NAME)
+      continue;
+    const jobId = ev.correlation.job_id;
+    if (!jobId)
+      continue;
+    const links = ev.links ?? {};
+    const spawnedBy = links.spawned_by;
+    const rootOrigin = links.root_runtime_origin;
+    out.set(jobId, {
+      job_id: jobId,
+      ...ev.correlation.parent_job_id ? { parent_job_id: ev.correlation.parent_job_id } : {},
+      ...spawnedBy ? { spawned_by: spawnedBy } : {},
+      ...rootOrigin ? { root_runtime_origin: rootOrigin, root_agent_instance_id: rootOrigin.agent_instance_id } : {},
+      spawned_at_ms: ev.t_unix_ms
+    });
+  }
+  return out;
+}
+
+// src/specialist/observability-read-model.ts
+var DEFAULT_CHRONOLOGY_LIMIT = 200;
+var MAX_CHRONOLOGY_LIMIT = 2000;
+var MAX_READ_AHEAD_FACTOR = 4;
+var MAX_FLEET_JOBS = 500;
+var DEFAULT_FLEET_JOBS = 100;
+var INSPECT_EVENT_LIMIT = 1000;
+function parseForensicRecord(record) {
+  try {
+    const event = JSON.parse(record.event_json);
+    if (!event || typeof event !== "object")
+      return null;
+    if (typeof event.t_unix_ms !== "number")
+      return null;
+    if (typeof event.event_family !== "string" || typeof event.event_name !== "string")
+      return null;
+    if (!event.correlation || typeof event.correlation !== "object")
+      return null;
+    if (!event.resource || typeof event.resource !== "object")
+      return null;
+    if (!event.body || typeof event.body !== "object")
+      return null;
+    if (!event.redaction || typeof event.redaction !== "object")
+      return null;
+    return { record, event };
+  } catch {
+    return null;
+  }
+}
+function parseForensicRecords(records) {
+  const parsed = [];
+  let invalidRecords = 0;
+  for (const record of records) {
+    const value = parseForensicRecord(record);
+    if (value)
+      parsed.push(value);
+    else
+      invalidRecords += 1;
+  }
+  parsed.sort((a, b) => a.record.seq - b.record.seq || a.record.id - b.record.id);
+  return { parsed, invalidRecords };
+}
+function readForensicWindow(source, options) {
+  const limit = clamp(options.limit ?? DEFAULT_CHRONOLOGY_LIMIT, 1, MAX_CHRONOLOGY_LIMIT);
+  let readAhead = options.allEvents ? Math.min(MAX_CHRONOLOGY_LIMIT, limit + 1) : Math.min(MAX_CHRONOLOGY_LIMIT, Math.max(limit + 1, limit * MAX_READ_AHEAD_FACTOR));
+  let raw = [];
+  let visible = [];
+  let invalidRecords = 0;
+  while (true) {
+    raw = source.readForensicEvents({
+      jobId: options.jobId,
+      ...options.after ? { afterSeq: options.after.seq } : {},
+      ...options.attemptId ? { attemptId: options.attemptId } : {},
+      limit: readAhead,
+      order: options.after ? "asc" : "desc"
+    });
+    const parsedResult = parseForensicRecords(raw);
+    invalidRecords = parsedResult.invalidRecords;
+    visible = options.allEvents ? parsedResult.parsed : parsedResult.parsed.filter(({ event }) => !isForensicAgentInternal(event));
+    const storageExhausted = raw.length < readAhead;
+    if (visible.length >= limit || storageExhausted || readAhead >= MAX_CHRONOLOGY_LIMIT)
+      break;
+    readAhead = Math.min(MAX_CHRONOLOGY_LIMIT, readAhead * 2);
+  }
+  const page = options.after ? visible.slice(0, limit) : visible.slice(-limit);
+  const last = page[page.length - 1];
+  return {
+    events: page.map(({ event }) => event),
+    rows: page.map(({ event }) => forensicEventToRow(event)),
+    ...last ? { cursor: { seq: last.record.seq } } : {},
+    invalidRecords,
+    hasMore: visible.length > page.length || raw.length >= readAhead
+  };
+}
+function readFleetSnapshot(source, options = {}) {
+  const limit = clamp(options.limit ?? DEFAULT_FLEET_JOBS, 1, MAX_FLEET_JOBS);
+  const statuses = source.listStatusesWindow({
+    limit,
+    ...options.sinceMs !== undefined ? { sinceMs: options.sinceMs } : {},
+    ...options.statuses ? { statuses: options.statuses } : {}
+  });
+  const lineageRecords = source.readForensicEvents({
+    jobIds: statuses.map((status) => status.id),
+    eventName: "job.started",
+    ...options.sinceMs !== undefined ? { sinceMs: options.sinceMs } : {},
+    limit: Math.min(2000, Math.max(limit * 4, limit + 1)),
+    order: "desc"
+  });
+  const parsedLineage = parseForensicRecords(lineageRecords);
+  const lineage = reconstructLineage(parsedLineage.parsed.map(({ event }) => event));
+  const byId = new Map;
+  for (const status of statuses) {
+    if (!status?.id || !status.specialist)
+      continue;
+    const lineageNode = lineage.get(status.id);
+    const native = status.id.startsWith("act:");
+    const state = native && (status.status === "running" || status.status === "starting") ? "active" : status.status;
+    const warning = status.current_event === "stale_warning";
+    const node = {
+      jobId: status.id,
+      specialist: status.specialist,
+      ...status.bead_id ? { beadId: status.bead_id } : {},
+      state,
+      attention: warning ? "warning" : attentionFor(state),
+      native,
+      ...status.current_event ? { currentEvent: status.current_event } : {},
+      ...status.current_tool ? { currentTool: status.current_tool } : {},
+      startedAtMs: status.started_at_ms,
+      lastEventAtMs: status.last_event_at_ms ?? status.started_at_ms,
+      ...lineageNode?.parent_job_id ? { parentJobId: lineageNode.parent_job_id } : {},
+      children: [],
+      ...lineageNode ? { lineage: lineageNode } : {},
+      ...attachmentProjection(lineageNode)
+    };
+    byId.set(node.jobId, node);
+  }
+  for (const node of byId.values()) {
+    if (!node.parentJobId)
+      continue;
+    const parent = byId.get(node.parentJobId);
+    if (parent)
+      parent.children.push(node.jobId);
+  }
+  for (const node of byId.values()) {
+    node.children.sort((a, b) => nodeSort(byId.get(a), byId.get(b)));
+  }
+  const nodes = [...byId.values()].sort(nodeSort);
+  const roots = nodes.filter((node) => !node.parentJobId || !byId.has(node.parentJobId)).map((node) => node.jobId);
+  return {
+    generatedAtMs: Date.now(),
+    nodes,
+    byId,
+    roots,
+    lineage,
+    invalidRecords: parsedLineage.invalidRecords,
+    counts: {
+      total: nodes.length,
+      active: nodes.filter((node) => node.attention === "active").length,
+      waiting: nodes.filter((node) => node.attention === "blocked").length,
+      warning: nodes.filter((node) => node.attention === "warning").length,
+      failed: nodes.filter((node) => node.attention === "failed").length,
+      settled: nodes.filter((node) => node.attention === "settled").length
+    }
+  };
+}
+function readResultProjection(source, ref) {
+  const status = source.readStatus(ref.jobId);
+  if (!status) {
+    return {
+      jobId: ref.jobId,
+      ...ref.attemptId ? { attemptId: ref.attemptId } : {},
+      attemptVerified: false,
+      output: null,
+      available: false,
+      error: `No job found: ${ref.jobId}`
+    };
+  }
+  if (ref.attemptId) {
+    let attemptIds;
+    try {
+      attemptIds = source.listForensicAttemptIds(ref.jobId);
+    } catch {
+      return {
+        jobId: ref.jobId,
+        attemptId: ref.attemptId,
+        attemptVerified: false,
+        output: null,
+        available: false,
+        error: `Cannot verify attempt '${ref.attemptId}' for activation '${ref.jobId}': forensic read failed.`
+      };
+    }
+    if (!attemptIds.includes(ref.attemptId)) {
+      return {
+        jobId: ref.jobId,
+        attemptId: ref.attemptId,
+        attemptVerified: false,
+        output: null,
+        available: false,
+        error: `No such attempt '${ref.attemptId}' for activation '${ref.jobId}'.`
+      };
+    }
+  }
+  const output = source.readResult(ref.jobId);
+  return {
+    jobId: ref.jobId,
+    ...ref.attemptId ? { attemptId: ref.attemptId } : {},
+    attemptVerified: true,
+    output,
+    available: output !== null
+  };
+}
+function readActivationInspect(source, jobId) {
+  const status = source.readStatus(jobId);
+  if (!status)
+    return null;
+  const records = source.readForensicEvents({ jobId, limit: INSPECT_EVENT_LIMIT, order: "desc" });
+  const { parsed } = parseForensicRecords(records);
+  const attempts = source.listForensicAttemptIds(jobId);
+  const latest = parsed[parsed.length - 1]?.event;
+  const admitted = [...parsed].reverse().find(({ event }) => event.event_name === "control.activation_admitted.recorded")?.event;
+  const admittedEnvelope = admitted?.body ?? {};
+  const admittedBody = recordBodyField(admittedEnvelope, "legacy_timeline_event") ?? admittedEnvelope;
+  const startRows = source.readForensicEvents({ jobId, eventName: "job.started", limit: 1, order: "asc" });
+  const startEvents = parseForensicRecords(startRows).parsed.map(({ event }) => event);
+  const lineage = reconstructLineage(startEvents);
+  const lineageNode = lineage.get(jobId);
+  return {
+    jobId,
+    specialist: status.specialist,
+    ...status.bead_id ? { beadId: status.bead_id } : {},
+    state: status.status,
+    ...status.current_event ? { currentEvent: status.current_event } : {},
+    ...status.current_tool ? { currentTool: status.current_tool } : {},
+    ...status.model ? { model: status.model } : {},
+    ...status.backend ? { backend: status.backend } : {},
+    attempts,
+    ...attempts.length > 0 ? { latestAttemptId: attempts[attempts.length - 1] } : {},
+    ...stringBodyField(admittedBody, "configured_model", "configuredModel"),
+    ...stringBodyField(admittedBody, "requested_model", "requestedModel"),
+    ...stringBodyField(admittedBody, "resolved_model", "resolvedModel"),
+    ...typeof admittedBody.model_override === "boolean" ? { modelOverride: admittedBody.model_override } : {},
+    ...stringBodyField(admittedBody, "thinking_level", "thinkingLevel"),
+    ...typeof latest?.correlation.pi_session_id === "string" ? { piSessionId: latest.correlation.pi_session_id } : {},
+    ...typeof latest?.correlation.workspace_id === "string" ? { workspaceId: latest.correlation.workspace_id } : {},
+    ...typeof latest?.correlation.trace_id === "string" ? { traceId: latest.correlation.trace_id } : {},
+    ...typeof latest?.correlation.span_id === "string" ? { spanId: latest.correlation.span_id } : {},
+    ...typeof latest?.correlation.parent_span_id === "string" ? { parentSpanId: latest.correlation.parent_span_id } : {},
+    ...status.metrics ? { metrics: status.metrics } : {},
+    ...typeof status.context_pct === "number" ? { contextPct: status.context_pct } : {},
+    ...status.context_pct_source ? { contextPctSource: status.context_pct_source } : {},
+    ...status.worktree_path ? { worktreePath: status.worktree_path } : {},
+    ...status.branch ? { branch: status.branch } : {},
+    ...lineageNode?.parent_job_id ? { parentJobId: lineageNode.parent_job_id } : {},
+    ...attachmentProjection(lineageNode)
+  };
+}
+function asObservabilityReadSource(client) {
+  return client;
+}
+function recordBodyField(body, key) {
+  const value = body[key];
+  return value && typeof value === "object" && !Array.isArray(value) ? value : undefined;
+}
+function stringBodyField(body, sourceKey, targetKey) {
+  const value = body[sourceKey];
+  return typeof value === "string" && value.length > 0 ? { [targetKey]: value } : {};
+}
+function attentionFor(state) {
+  const normalized = state.toLowerCase();
+  if (normalized === "waiting" || normalized === "blocked" || normalized === "needs_reply" || normalized === "escalated")
+    return "blocked";
+  if (["error", "failed", "rejected", "cancelled", "canceled", "stopped"].includes(normalized))
+    return "failed";
+  if (["done", "completed", "settled", "disposed"].includes(normalized))
+    return "settled";
+  if (["starting", "running", "active", "admitted", "requested", "stopping", "uncertain"].includes(normalized))
+    return "active";
+  return "idle";
+}
+function attachmentProjection(node) {
+  if (!node)
+    return {};
+  const direct = attachmentFromSpawnedBy(node.spawned_by);
+  if (direct)
+    return { attachment: direct };
+  const root = attachmentFromRoot(node.root_runtime_origin);
+  return root ? { attachment: root } : {};
+}
+function attachmentFromSpawnedBy(link) {
+  if (!link || link.kind !== "xtmux.agent_instance")
+    return;
+  return {
+    kind: "xtmux.agent_instance",
+    hostId: link.host_id,
+    paneId: link.tmux_pane_id,
+    sessionId: link.tmux_session_id,
+    windowId: link.tmux_window_id,
+    ...link.agent_instance_id ? { agentInstanceId: link.agent_instance_id } : {},
+    direct: true
+  };
+}
+function attachmentFromRoot(origin) {
+  if (!origin)
+    return;
+  return {
+    kind: "xtmux.agent_instance",
+    hostId: origin.host_id,
+    paneId: origin.tmux_pane_id,
+    ...origin.agent_instance_id ? { agentInstanceId: origin.agent_instance_id } : {},
+    direct: false
+  };
+}
+function nodeSort(a, b) {
+  if (!a && !b)
+    return 0;
+  if (!a)
+    return 1;
+  if (!b)
+    return -1;
+  const priority = (node) => {
+    if (node.attention === "blocked")
+      return 6;
+    if (node.attention === "failed")
+      return 5;
+    if (node.attention === "warning")
+      return 4;
+    if (node.attention === "active")
+      return 3;
+    if (node.attention === "settled")
+      return 2;
+    return 1;
+  };
+  return priority(b) - priority(a) || (b.lastEventAtMs ?? 0) - (a.lastEventAtMs ?? 0) || a.jobId.localeCompare(b.jobId);
+}
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, Math.floor(value)));
+}
 // src/specialist/bead-gate.ts
 import { spawnSync as spawnSync6 } from "node:child_process";
 var NON_DISPATCHABLE_STATUSES = new Set(["closed", "deferred"]);
@@ -28831,6 +29304,7 @@ export {
   activationDisplayMarker,
   activationDisplayMetrics,
   admitCoordinatorToolCall,
+  asObservabilityReadSource,
   buildFleetDisplay,
   completionBody,
   createActivationForensicSink,
@@ -28855,14 +29329,21 @@ export {
   inspect as inspectWorkspaceLease,
   isBuildStale,
   isDroppedLink,
+  isForensicAgentInternal,
   isWorkspaceWriteTool,
   leaseScopeFor,
   openSubstrateDb,
   openWorkItemBoundary,
   parseCompletionBody,
+  parseForensicRecord,
+  parseForensicRecords,
   parseLaunchOutcome,
   projectLaunchOutcome,
+  readActivationInspect,
   readBuildId,
+  readFleetSnapshot,
+  readForensicWindow,
+  readResultProjection,
   readVerifiedCitationWindow,
   recoverDeadHolder,
   releaseHolderLease,
