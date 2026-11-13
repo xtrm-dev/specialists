@@ -15808,6 +15808,39 @@ class SqliteClient {
       return statuses;
     }, "listStatuses");
   }
+  listStatusesWindow(filters = {}) {
+    return withRetry(() => {
+      const clauses = [];
+      const params = [];
+      if (filters.sinceMs !== undefined) {
+        clauses.push("updated_at_ms >= ?");
+        params.push(filters.sinceMs);
+      }
+      const statuses = filters.statuses?.filter((status) => typeof status === "string" && status.length > 0) ?? [];
+      if (statuses.length > 0) {
+        clauses.push(`status IN (${statuses.map(() => "?").join(",")})`);
+        params.push(...statuses);
+      }
+      const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+      const limit = Math.max(1, Math.min(filters.limit ?? 100, 500));
+      const rows = this.db.query(`
+        SELECT status_json
+        FROM specialist_jobs
+        ${where}
+        ORDER BY updated_at_ms DESC, job_id DESC
+        LIMIT ?
+      `).all(...params, limit);
+      const result = [];
+      for (const row of rows) {
+        if (!row.status_json)
+          continue;
+        try {
+          result.push(JSON.parse(row.status_json));
+        } catch {}
+      }
+      return result;
+    }, "listStatusesWindow");
+  }
   readPrDriftState(jobId) {
     return withRetry(() => {
       const row = this.db.query(`
@@ -16140,9 +16173,15 @@ class SqliteClient {
     return withRetry(() => {
       const clauses = [];
       const params = [];
+      if (filters.jobIds !== undefined && filters.jobIds.length === 0)
+        return [];
       if (filters.jobId) {
         clauses.push("job_id = ?");
         params.push(filters.jobId);
+      }
+      if (filters.jobIds && filters.jobIds.length > 0) {
+        clauses.push(`job_id IN (${filters.jobIds.map(() => "?").join(",")})`);
+        params.push(...filters.jobIds);
       }
       if (filters.jobIdPrefix) {
         clauses.push("job_id >= ? AND job_id < ?");
@@ -16151,6 +16190,16 @@ class SqliteClient {
       if (filters.sinceMs !== undefined) {
         clauses.push("t >= ?");
         params.push(filters.sinceMs);
+      }
+      if (filters.afterSeq !== undefined) {
+        if (!filters.jobId)
+          throw new Error("readForensicEvents afterSeq requires exact jobId");
+        clauses.push("seq > ?");
+        params.push(filters.afterSeq);
+      }
+      if (filters.attemptId !== undefined) {
+        clauses.push("attempt_id = ?");
+        params.push(filters.attemptId);
       }
       if (filters.eventFamily) {
         clauses.push("event_family = ?");
@@ -16163,15 +16212,28 @@ class SqliteClient {
       const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
       const limit = Math.max(1, Math.min(filters.limit ?? 1000, 1e4));
       const dir = filters.order === "desc" ? "DESC" : "ASC";
+      const orderBy = filters.afterSeq !== undefined ? `seq ${dir}, id ${dir}` : `t ${dir}, seq ${dir}, id ${dir}`;
       return this.db.query(`
         SELECT id, job_id, seq, t, schema_version, event_family, event_name,
                participant_kind, participant_role, participant_id, attempt_id, redaction_status, event_json
         FROM specialist_forensic_events
         ${where}
-        ORDER BY t ${dir}, seq ${dir}, id ${dir}
+        ORDER BY ${orderBy}
         LIMIT ?
       `).all(...params, limit);
     }, "readForensicEvents");
+  }
+  listForensicAttemptIds(jobId) {
+    return withRetry(() => {
+      const rows = this.db.query(`
+        SELECT attempt_id, MIN(seq) AS first_seq
+        FROM specialist_forensic_events
+        WHERE job_id = ? AND attempt_id IS NOT NULL
+        GROUP BY attempt_id
+        ORDER BY first_seq ASC, attempt_id ASC
+      `).all(jobId);
+      return rows.map((row) => row.attempt_id).filter((attemptId) => typeof attemptId === "string" && attemptId.length > 0);
+    }, "listForensicAttemptIds");
   }
   listNativeActivationIds(filters = {}) {
     return withRetry(() => {
@@ -45892,6 +45954,167 @@ var init_components = __esm(() => {
   VIEWS = ["all", "ps", "feed", "job", "result", "bead", "diff", "config", "repoConfig"];
 });
 
+// src/specialist/forensic-presentation.ts
+function isForensicAgentInternal(event) {
+  if (event.event_family === "turn")
+    return true;
+  if (event.event_family === "tool")
+    return true;
+  const name = event.event_name;
+  return name === "model.token_usage.recorded" || name === "model.finish_reason.recorded" || name.startsWith("model.meta") || name === "mcp.call.started" || name === "mcp.call.completed" || name === "mcp.call.failed" || name === "mcp.latency.observed";
+}
+
+// src/specialist/runtime-origin-reconstruct.ts
+var init_runtime_origin_reconstruct = () => {};
+
+// src/specialist/observability-read-model.ts
+function parseForensicRecord(record) {
+  try {
+    const event = JSON.parse(record.event_json);
+    if (!event || typeof event !== "object")
+      return null;
+    if (typeof event.t_unix_ms !== "number")
+      return null;
+    if (typeof event.event_family !== "string" || typeof event.event_name !== "string")
+      return null;
+    if (!event.correlation || typeof event.correlation !== "object")
+      return null;
+    if (!event.resource || typeof event.resource !== "object")
+      return null;
+    if (!event.body || typeof event.body !== "object")
+      return null;
+    if (!event.redaction || typeof event.redaction !== "object")
+      return null;
+    return { record, event };
+  } catch {
+    return null;
+  }
+}
+function parseForensicRecords(records) {
+  const parsed = [];
+  let invalidRecords = 0;
+  for (const record of records) {
+    const value = parseForensicRecord(record);
+    if (value)
+      parsed.push(value);
+    else
+      invalidRecords += 1;
+  }
+  parsed.sort((a, b) => a.record.seq - b.record.seq || a.record.id - b.record.id);
+  return { parsed, invalidRecords };
+}
+function readForensicWindow(source, options) {
+  const limit = clamp(options.limit ?? DEFAULT_CHRONOLOGY_LIMIT, 1, MAX_CHRONOLOGY_LIMIT);
+  let readAhead = options.allEvents ? Math.min(MAX_CHRONOLOGY_LIMIT, limit + 1) : Math.min(MAX_CHRONOLOGY_LIMIT, Math.max(limit + 1, limit * MAX_READ_AHEAD_FACTOR));
+  let raw = [];
+  let visible = [];
+  let invalidRecords = 0;
+  while (true) {
+    raw = source.readForensicEvents({
+      jobId: options.jobId,
+      ...options.after ? { afterSeq: options.after.seq } : {},
+      ...options.attemptId ? { attemptId: options.attemptId } : {},
+      limit: readAhead,
+      order: options.after ? "asc" : "desc"
+    });
+    const parsedResult = parseForensicRecords(raw);
+    invalidRecords = parsedResult.invalidRecords;
+    visible = options.allEvents ? parsedResult.parsed : parsedResult.parsed.filter(({ event }) => !isForensicAgentInternal(event));
+    const storageExhausted = raw.length < readAhead;
+    if (visible.length >= limit || storageExhausted || readAhead >= MAX_CHRONOLOGY_LIMIT)
+      break;
+    readAhead = Math.min(MAX_CHRONOLOGY_LIMIT, readAhead * 2);
+  }
+  const page = options.after ? visible.slice(0, limit) : visible.slice(-limit);
+  const last = page[page.length - 1];
+  const lastScanned = raw[raw.length - 1];
+  const cursorSeq = options.after && visible.length <= page.length && lastScanned ? Math.max(last?.record.seq ?? 0, lastScanned.seq) : last?.record.seq;
+  return {
+    events: page.map(({ event }) => event),
+    rows: page.map(({ event }) => forensicEventToRow(event)),
+    ...cursorSeq !== undefined ? { cursor: { seq: cursorSeq } } : {},
+    invalidRecords,
+    hasMore: visible.length > page.length || raw.length >= readAhead
+  };
+}
+function asObservabilityReadSource(client) {
+  return client;
+}
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, Math.floor(value)));
+}
+var DEFAULT_CHRONOLOGY_LIMIT = 200, MAX_CHRONOLOGY_LIMIT = 2000, MAX_READ_AHEAD_FACTOR = 4;
+var init_observability_read_model = __esm(() => {
+  init_forensic_renderer();
+  init_runtime_origin_reconstruct();
+});
+
+// src/cli/console/observability-runtime.ts
+import { existsSync as existsSync34 } from "fs";
+function withForensicObservability(runtime) {
+  const baseReadFeed = runtime.readFeed.bind(runtime);
+  return new Proxy(runtime, {
+    get(target, property) {
+      if (property !== "readFeed") {
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+      return async (args) => {
+        if ((args.source ?? "forensic") !== "forensic")
+          return baseReadFeed(args);
+        const client = openReadClient(args.repo);
+        if (!client)
+          return baseReadFeed(args);
+        try {
+          const window = readForensicWindow(asObservabilityReadSource(client), {
+            jobId: args.jobId,
+            ...typeof args.fromSeq === "number" && args.fromSeq > 0 ? { after: { seq: args.fromSeq - 1 } } : {},
+            limit: args.limit,
+            allEvents: true
+          });
+          return window.events.map((event, index) => forensicEventToFeedRow(event, {
+            jobId: typeof event.correlation.job_id === "string" ? event.correlation.job_id : args.jobId,
+            specialist: event.resource.participant_role ?? "unknown",
+            ...typeof event.correlation.bead_id === "string" ? { beadId: event.correlation.bead_id } : {},
+            ...typeof event.correlation.node_id === "string" ? { nodeId: event.correlation.node_id } : {},
+            ...typeof event.resource.repo === "string" ? { repo: event.resource.repo } : {},
+            ...typeof event.resource.model === "string" ? { model: event.resource.model } : {},
+            ...typeof event.correlation.chain_id === "string" ? { chainId: event.correlation.chain_id } : {},
+            ...typeof event.correlation.chain_root_job_id === "string" ? { chainRootJobId: event.correlation.chain_root_job_id } : {},
+            ...typeof event.correlation.chain_root_bead_id === "string" ? { chainRootBeadId: event.correlation.chain_root_bead_id } : {},
+            ...typeof event.correlation.epic_id === "string" ? { epicId: event.correlation.epic_id } : {},
+            ...typeof event.correlation.pi_session_id === "string" ? { piSessionId: event.correlation.pi_session_id } : {},
+            ...typeof event.correlation.workspace_id === "string" ? { workspaceId: event.correlation.workspace_id } : {},
+            ...typeof event.correlation.conversation_id === "string" ? { conversationId: event.correlation.conversation_id } : {},
+            ...typeof event.correlation.trace_id === "string" ? { traceId: event.correlation.trace_id } : {},
+            ...typeof event.correlation.span_id === "string" ? { spanId: event.correlation.span_id } : {},
+            ...typeof event.correlation.parent_span_id === "string" ? { parentSpanId: event.correlation.parent_span_id } : {}
+          }, index));
+        } finally {
+          client.close();
+        }
+      };
+    }
+  });
+}
+function openReadClient(repo) {
+  if (repo.dbPath) {
+    if (!existsSync34(repo.dbPath))
+      return null;
+    return createObservabilitySqliteClientAtPath(repo.dbPath);
+  }
+  const location = resolveObservabilityDbLocation(repo.path);
+  if (!existsSync34(location.dbPath))
+    return null;
+  return createObservabilitySqliteClient(repo.path);
+}
+var init_observability_runtime = __esm(() => {
+  init_observability_db();
+  init_observability_sqlite();
+  init_observability_read_model();
+  init_forensic();
+});
+
 // src/cli/console.ts
 async function run17() {
   const terminal = new ProcessTerminal;
@@ -45902,7 +46125,7 @@ async function run17() {
     resolveExit = resolve;
   });
   const app = new ConsoleApp({
-    runtime: createRuntimeClient(process.cwd()),
+    runtime: withForensicObservability(createRuntimeClient(process.cwd())),
     requestRender: () => tui.requestRender(),
     rows: () => terminal.rows,
     stop: () => resolveExit?.()
@@ -45932,6 +46155,7 @@ var init_console = __esm(() => {
   init_dist3();
   init_components();
   init_runtime();
+  init_observability_runtime();
 });
 
 // src/specialist/hooks.ts
@@ -45971,7 +46195,7 @@ class HookEmitter {
 var init_hooks = () => {};
 
 // src/specialist/worktree.ts
-import { existsSync as existsSync34, symlinkSync as symlinkSync2, mkdirSync as mkdirSync17, rmSync as rmSync5 } from "fs";
+import { existsSync as existsSync35, symlinkSync as symlinkSync2, mkdirSync as mkdirSync17, rmSync as rmSync5 } from "fs";
 import { join as join39, resolve as resolve17 } from "path";
 import { spawnSync as spawnSync18, execFileSync as execFileSync3 } from "child_process";
 function deriveBranchName(beadId, specialistName) {
@@ -46097,7 +46321,7 @@ function markBeadsSkipWorktree(worktreePath) {
 function symlinkPiNpmCache(commonRoot, worktreePath) {
   const source = join39(commonRoot, ".pi", "npm");
   const target = join39(worktreePath, ".pi", "npm");
-  if (!existsSync34(source) || existsSync34(target))
+  if (!existsSync35(source) || existsSync35(target))
     return;
   try {
     mkdirSync17(join39(worktreePath, ".pi"), { recursive: true });
@@ -46352,7 +46576,7 @@ var init_epic_reconciler = __esm(() => {
 
 // src/cli/merge.ts
 import { spawnSync as spawnSync19 } from "child_process";
-import { existsSync as existsSync35, readFileSync as readFileSync28, readdirSync as readdirSync12 } from "fs";
+import { existsSync as existsSync36, readFileSync as readFileSync28, readdirSync as readdirSync12 } from "fs";
 import { join as join41 } from "path";
 function parseOptions(argv) {
   let target = "";
@@ -46593,12 +46817,12 @@ function readAllJobStatuses() {
     }
   }
   const jobsDir = join41(process.cwd(), ".specialists", "jobs");
-  if (!existsSync35(jobsDir))
+  if (!existsSync36(jobsDir))
     return [];
   const statuses = [];
   for (const jobId of readdirSync12(jobsDir)) {
     const statusFile = join41(jobsDir, jobId, "status.json");
-    if (!existsSync35(statusFile))
+    if (!existsSync36(statusFile))
       continue;
     try {
       const raw = JSON.parse(readFileSync28(statusFile, "utf-8"));
@@ -46955,7 +47179,7 @@ ${conflicts.map((file) => `- ${file}`).join(`
   throw new Error(`Merge conflict while merging '${branch}'.${context}`);
 }
 function runTypecheckGate(cwd = process.cwd()) {
-  const hasTypeScriptConfig = existsSync35(join41(cwd, "tsconfig.json")) || readdirSync12(cwd).some((entry) => entry.startsWith("tsconfig") && entry.endsWith(".json"));
+  const hasTypeScriptConfig = existsSync36(join41(cwd, "tsconfig.json")) || readdirSync12(cwd).some((entry) => entry.startsWith("tsconfig") && entry.endsWith(".json"));
   if (!hasTypeScriptConfig) {
     console.log("TypeScript gate: skipped (no tsconfig \u2014 non-TS repo)");
     return;
@@ -46970,7 +47194,7 @@ ${stderr || stdout || "Unknown tsc error"}`);
 }
 function hasNodeBuildScript(cwd) {
   const packageJsonPath = join41(cwd, "package.json");
-  if (!existsSync35(packageJsonPath))
+  if (!existsSync36(packageJsonPath))
     return false;
   try {
     const pkg = JSON.parse(readFileSync28(packageJsonPath, "utf8"));
@@ -47379,7 +47603,7 @@ function createPiJsonProjector(context) {
 
 // src/cli/run.ts
 import { dirname as dirname24, join as join42, resolve as resolve18, sep as sep4 } from "path";
-import { constants as fsConstants, existsSync as existsSync36, fstatSync as fstatSync2, openSync as openSync4, readFileSync as readFileSync29, readSync, readdirSync as readdirSync13, realpathSync as realpathSync5, statSync as statSync10, closeSync as closeSync3 } from "fs";
+import { constants as fsConstants, existsSync as existsSync37, fstatSync as fstatSync2, openSync as openSync4, readFileSync as readFileSync29, readSync, readdirSync as readdirSync13, realpathSync as realpathSync5, statSync as statSync10, closeSync as closeSync3 } from "fs";
 import { randomBytes } from "crypto";
 import { spawn as cpSpawn, execFileSync as execFileSync4, execSync as execSync6 } from "child_process";
 function formatBackgroundLaunchLine(opts) {
@@ -47659,7 +47883,7 @@ function resolveNewestJobIdFromDb(cwd, jobsDir, specialist, previousLatest, minS
     const newest = sqliteClient.listStatuses().filter((status) => {
       if (status.specialist !== specialist || status.id === previousLatest || status.started_at_ms < minStartedAtMs)
         return false;
-      return existsSync36(join42(jobsDir, status.id, "status.json"));
+      return existsSync37(join42(jobsDir, status.id, "status.json"));
     }).sort((left, right) => right.started_at_ms - left.started_at_ms || left.id.localeCompare(right.id))[0];
     return newest?.id ?? "";
   } catch {
@@ -49095,7 +49319,7 @@ var init_node_resolve = __esm(() => {
 });
 
 // src/specialist/job-control.ts
-import { existsSync as existsSync37, readFileSync as readFileSync30, writeFileSync as writeFileSync18 } from "fs";
+import { existsSync as existsSync38, readFileSync as readFileSync30, writeFileSync as writeFileSync18 } from "fs";
 import { join as join43 } from "path";
 
 class JobControl {
@@ -49175,7 +49399,7 @@ class JobControl {
         return sqliteResult;
     } catch {}
     const resultPath = this.resultPath(jobId);
-    if (!existsSync37(resultPath))
+    if (!existsSync38(resultPath))
       return null;
     try {
       return readFileSync30(resultPath, "utf-8");
@@ -51288,7 +51512,7 @@ var init_node_supervisor = __esm(() => {
 });
 
 // src/cli/node.ts
-import { existsSync as existsSync38, readFileSync as readFileSync31, readdirSync as readdirSync14 } from "fs";
+import { existsSync as existsSync39, readFileSync as readFileSync31, readdirSync as readdirSync14 } from "fs";
 import { randomUUID as randomUUID3 } from "crypto";
 import { basename as basename8, join as join44, resolve as resolve19 } from "path";
 function parseNodeArgs(argv) {
@@ -51491,7 +51715,7 @@ function discoverNodeConfigs(cwd) {
   const discoveredByName = new Map;
   for (const directory of NODE_DISCOVERY_DIRS) {
     const absoluteDir = resolve19(cwd, directory.path);
-    if (!existsSync38(absoluteDir))
+    if (!existsSync39(absoluteDir))
       continue;
     const files = readdirSync14(absoluteDir).filter((fileName) => fileName.endsWith(NODE_CONFIG_SUFFIX));
     for (const fileName of files) {
@@ -51513,7 +51737,7 @@ function getNodeDiscoverySummary() {
 }
 function resolveNodeConfigPath(cwd, input) {
   const explicitPath = resolve19(cwd, input);
-  if (existsSync38(explicitPath)) {
+  if (existsSync39(explicitPath)) {
     return { name: toNodeName(explicitPath), path: explicitPath, source: "repo" };
   }
   const normalizedName = input.endsWith(NODE_CONFIG_SUFFIX) ? input.slice(0, -NODE_CONFIG_SUFFIX.length) : input;
@@ -52878,7 +53102,7 @@ var init_epic = __esm(() => {
 
 // src/cli/status.ts
 import { spawnSync as spawnSync22 } from "child_process";
-import { existsSync as existsSync39, readFileSync as readFileSync32 } from "fs";
+import { existsSync as existsSync40, readFileSync as readFileSync32 } from "fs";
 import { join as join45 } from "path";
 function ok2(msg) {
   console.log(`  ${green9("\u2713")} ${msg}`);
@@ -52977,7 +53201,7 @@ function countJobEvents(sqliteClient, jobsDir, jobId) {
     return 0;
   }
   const eventsFile = join45(jobsDir, jobId, "events.jsonl");
-  if (!existsSync39(eventsFile))
+  if (!existsSync40(eventsFile))
     return 0;
   const raw = readFileSync32(eventsFile, "utf-8").trim();
   if (!raw)
@@ -53014,7 +53238,7 @@ function getLatestContextSnapshot(sqliteClient, jobsDir, jobId) {
     return null;
   }
   const eventsFile = join45(jobsDir, jobId, "events.jsonl");
-  if (!existsSync39(eventsFile))
+  if (!existsSync40(eventsFile))
     return null;
   const lines = readFileSync32(eventsFile, "utf-8").split(`
 `);
@@ -53114,12 +53338,12 @@ async function run20() {
 `).slice(1).map((line) => line.split(/\s+/)[0]).filter(Boolean)) : new Set;
     const bdInstalled = isInstalled2("bd");
     const bdVersion = bdInstalled ? cmd("bd", ["--version"]) : null;
-    const beadsPresent = existsSync39(join45(process.cwd(), ".beads"));
+    const beadsPresent = existsSync40(join45(process.cwd(), ".beads"));
     const specialistsBin = cmd("which", ["specialists"]);
     const jobsDir = resolveJobsDir();
     const jobFileOutputMode = detectJobFileOutputMode();
     let jobs = [];
-    if (existsSync39(jobsDir)) {
+    if (existsSync40(jobsDir)) {
       supervisor = new Supervisor({
         runner: null,
         runOptions: null,
@@ -53458,7 +53682,7 @@ function formatActivationAge(nowMs, atMs) {
 }
 
 // src/specialist/native-activation-ownership.ts
-import { existsSync as existsSync40 } from "fs";
+import { existsSync as existsSync41 } from "fs";
 function resolveSessionHolder(env = process.env) {
   for (const key of ["XTRM_SESSION_NAME", "XTRM_SESSION_ID"]) {
     const value = (env[key] ?? "").trim();
@@ -53501,7 +53725,7 @@ function resolveNativeActivationOwnership(opts = {}) {
     };
   }
   const dbPath = opts.dbPath ?? resolveAuthorityDbPath(opts.env);
-  if (!existsSync40(dbPath)) {
+  if (!existsSync41(dbPath)) {
     return {
       kind: "unavailable",
       reason: "authority_store_absent",
@@ -54700,7 +54924,7 @@ var init_ps = __esm(() => {
 });
 
 // src/cli/result.ts
-import { existsSync as existsSync41, readFileSync as readFileSync33 } from "fs";
+import { existsSync as existsSync42, readFileSync as readFileSync33 } from "fs";
 import { join as join46 } from "path";
 function isNativeActivationId(ref) {
   return /^act:[^:]+$/.test(ref);
@@ -54828,13 +55052,13 @@ function findMissingNativeAttemptError(sqliteClient, supervisor, activationId, r
   if (!sqliteClient) {
     return `Cannot verify attempt '${requestedAttemptId}' for activation '${activationId}': observability database is unavailable. Run: specialists db setup`;
   }
-  let attemptRows;
+  let attemptIds;
   try {
-    attemptRows = sqliteClient.readForensicEvents({ jobId: activationId, limit: 1e4 });
+    attemptIds = sqliteClient.listForensicAttemptIds(activationId);
   } catch {
     return `Cannot verify attempt '${requestedAttemptId}' for activation '${activationId}': forensic read failed.`;
   }
-  if (!attemptRows.some((row) => row.attempt_id === requestedAttemptId)) {
+  if (!attemptIds.includes(requestedAttemptId)) {
     return `No such attempt '${requestedAttemptId}' for activation '${activationId}'.`;
   }
   return null;
@@ -54846,7 +55070,7 @@ function readTimelineEventsForResult(sqliteClient, jobsDir, jobId) {
     } catch {}
   }
   const eventsPath = join46(jobsDir, jobId, "events.jsonl");
-  if (!existsSync41(eventsPath))
+  if (!existsSync42(eventsPath))
     return [];
   return readFileSync33(eventsPath, "utf-8").split(`
 `).map((line) => line.trim()).filter(Boolean).map((line) => parseTimelineEvent(line)).filter((event) => event !== null);
@@ -55102,7 +55326,7 @@ async function run22() {
       } catch (error) {
         console.warn(`SQLite result read failed for job ${jobId}; falling back to result.txt`, error);
       }
-      if (existsSync41(resultPath)) {
+      if (existsSync42(resultPath)) {
         return readFileSync33(resultPath, "utf-8");
       }
       try {
@@ -55321,7 +55545,7 @@ var init_result = __esm(() => {
 });
 
 // src/specialist/timeline-query.ts
-import { existsSync as existsSync42, readdirSync as readdirSync15, readFileSync as readFileSync34 } from "fs";
+import { existsSync as existsSync43, readdirSync as readdirSync15, readFileSync as readFileSync34 } from "fs";
 import { basename as basename9, join as join47 } from "path";
 function readJobEvents(jobDir) {
   const jobId = basename9(jobDir);
@@ -55335,7 +55559,7 @@ function readJobEvents(jobDir) {
   if (process.env.SPECIALISTS_JOB_FILE_OUTPUT !== "on")
     return [];
   const eventsPath = join47(jobDir, "events.jsonl");
-  if (!existsSync42(eventsPath))
+  if (!existsSync43(eventsPath))
     return [];
   const content = readFileSync34(eventsPath, "utf-8");
   const lines = content.split(`
@@ -55381,7 +55605,7 @@ function readAllJobEvents(jobsDir, jobId) {
   } catch {}
   if (process.env.SPECIALISTS_JOB_FILE_OUTPUT !== "on")
     return [];
-  if (!existsSync42(jobsDir))
+  if (!existsSync43(jobsDir))
     return [];
   const batches = [];
   const entries = readdirSync15(jobsDir);
@@ -55398,7 +55622,7 @@ function readAllJobEvents(jobsDir, jobId) {
     const statusPath = join47(jobDir, "status.json");
     let specialist = "unknown";
     let beadId;
-    if (existsSync42(statusPath)) {
+    if (existsSync43(statusPath)) {
       try {
         const status = JSON.parse(readFileSync34(statusPath, "utf-8"));
         specialist = status.specialist ?? "unknown";
@@ -55465,7 +55689,7 @@ var init_timeline_query = __esm(() => {
 // src/cli/feed.ts
 import {
   closeSync as closeSync4,
-  existsSync as existsSync43,
+  existsSync as existsSync44,
   openSync as openSync5,
   readFileSync as readFileSync35,
   readdirSync as readdirSync16,
@@ -55949,7 +56173,7 @@ function listMatchingJobIds(sqliteClient, jobsDir, options) {
       jobIds.add(status.id);
     }
   } catch {}
-  if (existsSync43(jobsDir)) {
+  if (existsSync44(jobsDir)) {
     for (const entry of readdirSync16(jobsDir)) {
       const jobDir = join48(jobsDir, entry);
       try {
@@ -56191,7 +56415,7 @@ async function run23() {
         return false;
       }
     })();
-    if (!existsSync43(jobsDir) && !hasSqliteStatuses) {
+    if (!existsSync44(jobsDir) && !hasSqliteStatuses) {
       if (options.jobId && sqliteClient) {
         console.log(dim9(`job ${options.jobId} not found in .specialists/db/observability.db`));
       } else {
@@ -57108,7 +57332,7 @@ var init_metrics = __esm(() => {
 });
 
 // src/cli/log.ts
-import { existsSync as existsSync44, readdirSync as readdirSync17, statSync as statSync12 } from "fs";
+import { existsSync as existsSync45, readdirSync as readdirSync17, statSync as statSync12 } from "fs";
 import { basename as basename11, join as join49 } from "path";
 function parseSince4(value) {
   if (value.includes("T") || value.includes("-"))
@@ -57200,7 +57424,7 @@ function parseArgs15(argv) {
 }
 function discoverDbTargets(cwd, repoFilter) {
   const cwdLocation = resolveObservabilityDbLocation(cwd);
-  if (existsSync44(cwdLocation.dbPath)) {
+  if (existsSync45(cwdLocation.dbPath)) {
     const repo = basename11(cwdLocation.gitRoot);
     if (!repoFilter || repo === repoFilter) {
       return [{ repo, root: cwdLocation.gitRoot, dbPath: cwdLocation.dbPath, source: "cwd" }];
@@ -57223,7 +57447,7 @@ function discoverDbTargets(cwd, repoFilter) {
       continue;
     }
     const dbPath = join49(root, ".specialists", "db", "observability.db");
-    if (!existsSync44(dbPath))
+    if (!existsSync45(dbPath))
       continue;
     if (repoFilter && entry !== repoFilter)
       continue;
@@ -57241,14 +57465,6 @@ function matches(status, options) {
   if (options.nodeId && status.node_id !== options.nodeId)
     return false;
   return true;
-}
-function isForensicAgentInternal(event) {
-  if (event.event_family === "turn")
-    return true;
-  if (event.event_family === "tool")
-    return true;
-  const name = event.event_name;
-  return name === "model.token_usage.recorded" || name === "model.finish_reason.recorded" || name.startsWith("model.meta") || name === "mcp.call.started" || name === "mcp.call.completed" || name === "mcp.call.failed" || name === "mcp.latency.observed";
 }
 function isRuntimeEvent(event) {
   if (RUNTIME_EVENT_TYPES.has(event.type))
@@ -57941,12 +58157,12 @@ async function run30() {
 }
 
 // src/specialist/worktree-gc.ts
-import { existsSync as existsSync45, readdirSync as readdirSync18, readFileSync as readFileSync36 } from "fs";
+import { existsSync as existsSync46, readdirSync as readdirSync18, readFileSync as readFileSync36 } from "fs";
 import { join as join50 } from "path";
 import { spawnSync as spawnSync25 } from "child_process";
 function readJobStatus2(jobDir) {
   const statusPath = join50(jobDir, "status.json");
-  if (!existsSync45(statusPath))
+  if (!existsSync46(statusPath))
     return null;
   try {
     return JSON.parse(readFileSync36(statusPath, "utf-8"));
@@ -57971,7 +58187,7 @@ function collectWorktreeGcCandidates(jobsDir) {
       const worktreePath = status.worktree_path;
       if (!worktreePath)
         return null;
-      if (!existsSync45(worktreePath))
+      if (!existsSync46(worktreePath))
         return null;
       return {
         jobId: status.id,
@@ -57983,7 +58199,7 @@ function collectWorktreeGcCandidates(jobsDir) {
   }
   if (!getFileFallbackEnabled())
     return [];
-  if (!existsSync45(jobsDir))
+  if (!existsSync46(jobsDir))
     return [];
   const candidates = [];
   for (const entry of readdirSync18(jobsDir, { withFileTypes: true })) {
@@ -57999,7 +58215,7 @@ function collectWorktreeGcCandidates(jobsDir) {
     const { worktree_path: worktreePath, branch } = status;
     if (!worktreePath)
       continue;
-    if (!existsSync45(worktreePath))
+    if (!existsSync46(worktreePath))
       continue;
     candidates.push({
       jobId: status.id,
@@ -58041,7 +58257,7 @@ var init_worktree_gc = __esm(() => {
 });
 
 // src/cli/clean.ts
-import { existsSync as existsSync46, readFileSync as readFileSync37, readdirSync as readdirSync19, rmSync as rmSync7, statSync as statSync13 } from "fs";
+import { existsSync as existsSync47, readFileSync as readFileSync37, readdirSync as readdirSync19, rmSync as rmSync7, statSync as statSync13 } from "fs";
 import { join as join51 } from "path";
 function parseDuration2(raw) {
   const match = /^(\d+)(ms|s|m|h|d)$/i.exec(raw.trim());
@@ -58230,7 +58446,7 @@ function readCompletedJobDirectory(baseDirectory, entry) {
   if (containsProtectedSqliteArtifact(directoryPath))
     return null;
   const statusFilePath = join51(directoryPath, "status.json");
-  if (!existsSync46(statusFilePath))
+  if (!existsSync47(statusFilePath))
     return null;
   let statusData;
   try {
@@ -58249,7 +58465,7 @@ function collectCompletedJobs(jobsDirectoryPath) {
   if (statuses.length > 0) {
     return statuses.filter((status) => COMPLETED_STATUSES.has(status.status)).map((status) => {
       const directoryPath = join51(jobsDirectoryPath, status.id);
-      if (!existsSync46(directoryPath) || containsProtectedSqliteArtifact(directoryPath))
+      if (!existsSync47(directoryPath) || containsProtectedSqliteArtifact(directoryPath))
         return null;
       const { createdAtMs, completedAtMs } = getJobTimestamps(status);
       return { id: status.id, directoryPath, completedAtMs, createdAtMs, sizeBytes: readDirectorySizeBytes(directoryPath) };
@@ -58603,7 +58819,7 @@ async function run31() {
     console.log(`Hid ${hiddenCount} terminal row(s) from default ps.`);
     return;
   }
-  if (!existsSync46(jobsDirectoryPath)) {
+  if (!existsSync47(jobsDirectoryPath)) {
     console.log("No jobs directory found.");
     return;
   }
@@ -59118,10 +59334,10 @@ var init_attach = __esm(() => {
 });
 
 // src/specialist/drift-detector.ts
-import { existsSync as existsSync47, readFileSync as readFileSync38, readdirSync as readdirSync20, rmSync as rmSync8 } from "fs";
+import { existsSync as existsSync48, readFileSync as readFileSync38, readdirSync as readdirSync20, rmSync as rmSync8 } from "fs";
 import { join as join52, resolve as resolve20, relative as relative4 } from "path";
 function listFiles(root) {
-  if (!existsSync47(root))
+  if (!existsSync48(root))
     return [];
   const out = [];
   const visit = (dir) => {
@@ -59161,12 +59377,12 @@ function detectDriftForRepo(repoRoot) {
       { scope: "user", dir: resolve20(repoRoot, ".specialists/user") }
     ];
     for (const { scope, dir } of scopes) {
-      if (!existsSync47(dir))
+      if (!existsSync48(dir))
         continue;
       for (const file of listFiles(dir)) {
         const rel = relPath(file, dir);
         const canonicalPath = join52(asset.canonicalDir, rel);
-        if (!existsSync47(canonicalPath))
+        if (!existsSync48(canonicalPath))
           continue;
         const bytesEqual = readFileSync38(file).equals(readFileSync38(canonicalPath));
         findings.push(makeFinding(repoRoot, asset.kind, scope, file, canonicalPath, bytesEqual));
@@ -59587,7 +59803,7 @@ ${detail.missing.map((m) => `  - ${m}`).join(`
 // src/activation/workspace-lease.ts
 import { execFileSync as execFileSync5, spawnSync as spawnSync27 } from "child_process";
 import { createHash as createHash8 } from "crypto";
-import { appendFileSync as appendFileSync7, existsSync as existsSync48, linkSync, mkdirSync as mkdirSync19, readFileSync as readFileSync39, realpathSync as realpathSync6, renameSync as renameSync6, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync21 } from "fs";
+import { appendFileSync as appendFileSync7, existsSync as existsSync49, linkSync, mkdirSync as mkdirSync19, readFileSync as readFileSync39, realpathSync as realpathSync6, renameSync as renameSync6, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync21 } from "fs";
 import { basename as basename12, dirname as dirname25, join as join53 } from "path";
 function workspaceIdentityFor(cwd) {
   return { repositoryRoot: cwd, worktreePath: cwd };
@@ -59633,7 +59849,7 @@ function provisionWriterWorkspace(cwd, issueRef, role) {
       const mainRoot = dirname25(git("rev-parse", "--path-format=absolute", "--git-common-dir"));
       worktreePath = join53(mainRoot, ".xtrm", "worktrees", `${basename12(mainRoot)}-sp-${roleSlug}-${slug}`);
       const excludePath = git("rev-parse", "--path-format=absolute", "--git-path", "info/exclude");
-      const existing = existsSync48(excludePath) ? readFileSync39(excludePath, "utf-8").split(`
+      const existing = existsSync49(excludePath) ? readFileSync39(excludePath, "utf-8").split(`
 `) : [];
       const additions = runtimeIgnoreExcludePatterns().filter((pattern) => !existing.includes(pattern)).filter((pattern) => pattern.includes("*") || spawnSync27("git", ["check-ignore", "-q", join53(mainRoot, pattern.slice(1), "x")], { cwd: mainRoot }).status !== 0).join(`
 `);
@@ -59663,7 +59879,7 @@ function removeWriterWorkspace(cwd, workspace) {
 }
 function procLeaseProbe() {
   return {
-    canVerify: () => existsSync48("/proc/self/stat"),
+    canVerify: () => existsSync49("/proc/self/stat"),
     startTicks(pid) {
       try {
         const stat = readFileSync39(`/proc/${pid}/stat`, "utf-8");
@@ -59698,7 +59914,7 @@ function leasePath(workspace) {
 }
 function inspect(workspace, probe = procLeaseProbe()) {
   const path = leasePath(workspace);
-  if (!existsSync48(path))
+  if (!existsSync49(path))
     return { state: "free" };
   let lease;
   try {
@@ -59860,7 +60076,7 @@ var init_workspace_lease = __esm(() => {
 });
 
 // src/activation/workspace-reconcile.ts
-import { appendFileSync as appendFileSync8, existsSync as existsSync49, mkdirSync as mkdirSync20, readdirSync as readdirSync21, readFileSync as readFileSync40, unlinkSync as unlinkSync3 } from "fs";
+import { appendFileSync as appendFileSync8, existsSync as existsSync50, mkdirSync as mkdirSync20, readdirSync as readdirSync21, readFileSync as readFileSync40, unlinkSync as unlinkSync3 } from "fs";
 import { userInfo } from "os";
 import { join as join54 } from "path";
 function reconcile(workspace, request, options = {}) {
@@ -59938,7 +60154,7 @@ function appendRecord(workspace, record) {
 `, { mode: 384 });
 }
 function readLogAt(path) {
-  if (!existsSync49(path))
+  if (!existsSync50(path))
     return [];
   const out = [];
   for (const line of readFileSync40(path, "utf-8").split(`
@@ -59986,7 +60202,7 @@ function leaseScopeFor(cwd) {
 }
 function projectUncertainWorkspaces(scope, probe = procLeaseProbe()) {
   const dir = leaseDir(scope);
-  if (!existsSync49(dir))
+  if (!existsSync50(dir))
     return [];
   const out = [];
   for (const entry of readdirSync21(dir)) {
@@ -60334,9 +60550,9 @@ var init_dead_job_audit = __esm(() => {
 });
 
 // src/specialist/channel-doctor.ts
-import { existsSync as existsSync50, readFileSync as readFileSync41 } from "fs";
+import { existsSync as existsSync51, readFileSync as readFileSync41 } from "fs";
 function readJson2(path) {
-  if (!existsSync50(path))
+  if (!existsSync51(path))
     return { exists: false, value: null, parseError: null };
   try {
     return { exists: true, value: JSON.parse(readFileSync41(path, "utf8")), parseError: null };
@@ -60350,7 +60566,7 @@ function isRecord3(value) {
 function checkCapabilityDeclared(serverSourcePath) {
   const id = 1;
   const name = "MCP server declares the claude/channel capability";
-  if (!existsSync50(serverSourcePath)) {
+  if (!existsSync51(serverSourcePath)) {
     return { id, name, status: "unknown", detail: `server source not found at ${serverSourcePath}` };
   }
   const source = readFileSync41(serverSourcePath, "utf8");
@@ -60486,7 +60702,7 @@ var init_channel_doctor = () => {};
 // src/cli/doctor.ts
 import { createHash as createHash10 } from "crypto";
 import { spawnSync as spawnSync28 } from "child_process";
-import { existsSync as existsSync51, mkdirSync as mkdirSync21, readdirSync as readdirSync22, readFileSync as readFileSync42, writeFileSync as writeFileSync22 } from "fs";
+import { existsSync as existsSync52, mkdirSync as mkdirSync21, readdirSync as readdirSync22, readFileSync as readFileSync42, writeFileSync as writeFileSync22 } from "fs";
 import { homedir as homedir13 } from "os";
 import { join as join55, relative as relative5, resolve as resolve23 } from "path";
 import { fileURLToPath as fileURLToPath10 } from "url";
@@ -60518,7 +60734,7 @@ function isInstalled3(bin) {
   return spawnSync28("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
 function loadJson2(path) {
-  if (!existsSync51(path))
+  if (!existsSync52(path))
     return null;
   try {
     return JSON.parse(readFileSync42(path, "utf8"));
@@ -60563,7 +60779,7 @@ function checkBd() {
     return true;
   }
   hint(`bd installed  ${dim14(sp("bd", ["--version"]).stdout || "")}  ${dim14("(legacy compatibility only)")}`);
-  if (existsSync51(join55(CWD, ".beads")))
+  if (existsSync52(join55(CWD, ".beads")))
     hint(".beads/ present \u2014 historical/legacy workspace available");
   else
     ok3("no .beads/ workspace \u2014 expected for a Substrate-first project");
@@ -60590,7 +60806,7 @@ async function checkSubstrateRuntime() {
       return;
     }
     const manifestPath = join55(dir, "package.json");
-    if (!existsSync51(manifestPath)) {
+    if (!existsSync52(manifestPath)) {
       warn3(`no package.json at ${dir} \u2014 native dispatch will be refused`);
       fix("point XTRM_SUBSTRATE_DIR at a @jaggerxtrm/substrate checkout");
       return;
@@ -60625,7 +60841,7 @@ async function checkSubstrateRuntime() {
     }
     ok3("IssueService context reader present");
     const dbPath = resolveWorkItemDbPath();
-    if (!existsSync51(dbPath)) {
+    if (!existsSync52(dbPath)) {
       warn3(`work store not present at ${dbPath}`);
       fix("run `xt init`, or `sb init`, or set SUBSTRATE_DB to an existing store");
       return;
@@ -60650,7 +60866,7 @@ function resolveManagedSettingsPath() {
 }
 function resolveServerSourcePath() {
   const distPath = fileURLToPath10(new URL("../../dist/index.js", import.meta.url));
-  if (existsSync51(distPath))
+  if (existsSync52(distPath))
     return distPath;
   return fileURLToPath10(new URL("../mcp/v2-server.ts", import.meta.url));
 }
@@ -60789,12 +61005,12 @@ function collectFileHashes(rootDir) {
       hashes.set(relPath, hashFile(fullPath));
     }
   };
-  if (existsSync51(rootDir))
+  if (existsSync52(rootDir))
     visit(rootDir);
   return hashes;
 }
 function resolvePackageAssetDir(relativePath) {
-  return resolveCanonicalAssetDir(relativePath) ?? (existsSync51(join55(CWD, "config", relativePath)) ? join55(CWD, "config", relativePath) : null);
+  return resolveCanonicalAssetDir(relativePath) ?? (existsSync52(join55(CWD, "config", relativePath)) ? join55(CWD, "config", relativePath) : null);
 }
 function checkSkillDrift() {
   section3(`Skills \u2014 global default pool  (~/${relative5(homedir13(), GLOBAL_DEFAULT_SKILLS_DIR)})`);
@@ -60804,7 +61020,7 @@ function checkSkillDrift() {
     fix("restore config/skills/ or install package assets");
     return false;
   }
-  if (!existsSync51(GLOBAL_DEFAULT_SKILLS_DIR)) {
+  if (!existsSync52(GLOBAL_DEFAULT_SKILLS_DIR)) {
     fail9(`${GLOBAL_DEFAULT_SKILLS_DIR} missing`);
     fix("reinstall xtrm-tools (skills are vendored globally)");
     return false;
@@ -60839,7 +61055,7 @@ function checkSkillDrift() {
 }
 function checkUserOverlayDrift() {
   section3("User specialist overlays");
-  if (!existsSync51(USER_SPECIALISTS_DIR)) {
+  if (!existsSync52(USER_SPECIALISTS_DIR)) {
     ok3("no user overlays present");
     return true;
   }
@@ -60858,7 +61074,7 @@ function checkUserOverlayDrift() {
       warn3(`${name}: failed to parse \u2014 skipping drift check`);
       continue;
     }
-    if (!defaultPath || !existsSync51(defaultPath)) {
+    if (!defaultPath || !existsSync52(defaultPath)) {
       ok3(`${name}: user-only overlay (no package default to drift from)`);
       continue;
     }
@@ -60890,14 +61106,14 @@ function checkRuntimeDirs() {
   const jobsDir = join55(rootDir, "jobs");
   const readyDir = join55(rootDir, "ready");
   let allOk = true;
-  if (!existsSync51(rootDir)) {
+  if (!existsSync52(rootDir)) {
     warn3(".specialists/ not found in current project");
     fix("specialists init");
     allOk = false;
   } else {
     ok3(".specialists/ present");
     for (const [subDir, label] of [[jobsDir, "jobs"], [readyDir, "ready"]]) {
-      if (!existsSync51(subDir)) {
+      if (!existsSync52(subDir)) {
         warn3(`.specialists/${label}/ missing \u2014 auto-creating`);
         mkdirSync21(subDir, { recursive: true });
         ok3(`.specialists/${label}/ created`);
@@ -60912,7 +61128,7 @@ function checkClaudeMdFragments() {
   section3("CLAUDE.md fragments");
   const projectRoot = process.cwd();
   const claudeMd = join55(projectRoot, "CLAUDE.md");
-  if (!existsSync51(claudeMd)) {
+  if (!existsSync52(claudeMd)) {
     warn3("No CLAUDE.md in project root \u2014 skipping fragment check");
     return true;
   }
@@ -61329,7 +61545,7 @@ function cleanupProcesses(jobsDir, dryRun) {
   };
   for (const jobId of entries) {
     const statusPath = join55(jobsDir, jobId, "status.json");
-    if (!existsSync51(statusPath))
+    if (!existsSync52(statusPath))
       continue;
     try {
       const status = JSON.parse(readFileSync42(statusPath, "utf8"));
@@ -61418,7 +61634,7 @@ function checkZombieJobs() {
   section3("Background jobs");
   hint(`watchdog mode: ${resolveWatchdogMode()}`);
   const jobsDir = join55(CWD, ".specialists", "jobs");
-  if (!existsSync51(jobsDir)) {
+  if (!existsSync52(jobsDir)) {
     hint("No .specialists/jobs/ \u2014 skipping");
     return true;
   }
@@ -61660,7 +61876,7 @@ var init_doctor = __esm(() => {
 
 // src/specialist/benchmarks.ts
 import { randomUUID as randomUUID4 } from "crypto";
-import { closeSync as closeSync5, existsSync as existsSync52, fsyncSync as fsyncSync2, mkdirSync as mkdirSync22, openSync as openSync6, readFileSync as readFileSync43, renameSync as renameSync7, writeFileSync as writeFileSync23 } from "fs";
+import { closeSync as closeSync5, existsSync as existsSync53, fsyncSync as fsyncSync2, mkdirSync as mkdirSync22, openSync as openSync6, readFileSync as readFileSync43, renameSync as renameSync7, writeFileSync as writeFileSync23 } from "fs";
 import { homedir as homedir14 } from "os";
 import { dirname as dirname26, join as join56 } from "path";
 async function loadBenchmarkSnapshot(options = {}) {
@@ -61695,7 +61911,7 @@ async function loadSourceSnapshot(source, options, warn) {
   return cached ? toSnapshot(cached) : null;
 }
 function readCache2(path, options, warn) {
-  if (!existsSync52(path))
+  if (!existsSync53(path))
     return null;
   try {
     const parsed = JSON.parse(readFileSync43(path, "utf8"));
@@ -62448,7 +62664,7 @@ var init_setup = __esm(() => {
 });
 
 // src/cli/serve-hot-reload.ts
-import { existsSync as existsSync53, readdirSync as readdirSync24, statSync as statSync14, watch as fsWatch } from "fs";
+import { existsSync as existsSync54, readdirSync as readdirSync24, statSync as statSync14, watch as fsWatch } from "fs";
 import { join as join58 } from "path";
 function specialistNameFromFile(file) {
   const match = file.match(/^(.+)\.specialist\.(json|yaml)$/);
@@ -62456,7 +62672,7 @@ function specialistNameFromFile(file) {
 }
 function snapshotMtimes(dir) {
   const out = new Map;
-  if (!existsSync53(dir))
+  if (!existsSync54(dir))
     return out;
   const entries = readdirSync24(dir).filter((name) => specialistNameFromFile(name) !== null);
   for (const name of entries) {
@@ -62518,7 +62734,7 @@ function createUserDirWatcher(opts) {
       for (const file of changed)
         queue(file);
     }, opts.pollMs);
-  } else if (existsSync53(opts.userDir)) {
+  } else if (existsSync54(opts.userDir)) {
     try {
       watcher = fsWatch(opts.userDir, { persistent: false }, (_eventType, filename) => {
         queue(filename ? String(filename) : null);
@@ -62552,7 +62768,7 @@ import { randomUUID as randomUUID6 } from "crypto";
 import { once } from "events";
 import { spawnSync as spawnSync30 } from "child_process";
 import { access, readdir as readdir2, readFile as readFile4, constants as constants3 } from "fs/promises";
-import { existsSync as existsSync54 } from "fs";
+import { existsSync as existsSync55 } from "fs";
 import { homedir as homedir16 } from "os";
 import { join as join59 } from "path";
 function createReadinessState() {
@@ -62570,7 +62786,7 @@ function pruneAuditFailures(state, now = Date.now()) {
   }
 }
 async function checkUserDirSpecs(userDir) {
-  if (!existsSync54(userDir))
+  if (!existsSync55(userDir))
     return "empty";
   const entries = await readdir2(userDir).catch(() => []);
   const specFiles = entries.filter((name) => name.endsWith(".specialist.json") || name.endsWith(".specialist.yaml"));
@@ -93272,7 +93488,7 @@ var init_descriptions = __esm(() => {
 });
 
 // src/tools/specialist/activation.tool.ts
-import { existsSync as existsSync55 } from "fs";
+import { existsSync as existsSync56 } from "fs";
 import { fileURLToPath as fileURLToPath11 } from "url";
 function toActivationView(snapshot, nowMs = Date.now()) {
   return {
@@ -93612,7 +93828,7 @@ var init_activation_tool = __esm(() => {
   DIST_LIB_PATH = (() => {
     for (const candidate of ["./lib.js", "../../../dist/lib.js"]) {
       const path = fileURLToPath11(new URL(candidate, import.meta.url));
-      if (existsSync55(path))
+      if (existsSync56(path))
         return path;
     }
     return fileURLToPath11(new URL("../../../dist/lib.js", import.meta.url));
@@ -93952,7 +94168,7 @@ var init_specialist_lease_reconcile_tool = __esm(() => {
 });
 
 // src/activation/transport/pending-store.ts
-import { existsSync as existsSync56, mkdirSync as mkdirSync24, readdirSync as readdirSync25, readFileSync as readFileSync47, renameSync as renameSync8, unlinkSync as unlinkSync4, writeFileSync as writeFileSync25 } from "fs";
+import { existsSync as existsSync57, mkdirSync as mkdirSync24, readdirSync as readdirSync25, readFileSync as readFileSync47, renameSync as renameSync8, unlinkSync as unlinkSync4, writeFileSync as writeFileSync25 } from "fs";
 import { join as join60 } from "path";
 function projectDeliveryState(state) {
   if (state === "delivered")
@@ -93974,7 +94190,7 @@ function replyPath(repoRoot, activationId, messageId) {
   return join60(interactionsRoot(repoRoot), activationId, `${messageId}.reply.json`);
 }
 function writeAtomic(path, value, exclusive = false) {
-  if (exclusive && existsSync56(path)) {
+  if (exclusive && existsSync57(path)) {
     throw new Error(`interaction record already exists: ${path}`);
   }
   const tmp = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
@@ -93990,7 +94206,7 @@ function writeAtomic(path, value, exclusive = false) {
   }
 }
 function readJson3(path) {
-  if (!existsSync56(path))
+  if (!existsSync57(path))
     return;
   try {
     return JSON.parse(readFileSync47(path, "utf-8"));
@@ -94065,7 +94281,7 @@ function comparePendingViews(a, b) {
 }
 function listForActivation(repoRoot, activationId) {
   const dir = join60(interactionsRoot(repoRoot), activationId);
-  if (!existsSync56(dir))
+  if (!existsSync57(dir))
     return [];
   const views = [];
   for (const entry of readdirSync25(dir)) {
@@ -94080,7 +94296,7 @@ function listForActivation(repoRoot, activationId) {
 }
 function listAll(repoRoot) {
   const root = interactionsRoot(repoRoot);
-  if (!existsSync56(root))
+  if (!existsSync57(root))
     return [];
   return readdirSync25(root).flatMap((activationId) => listForActivation(repoRoot, activationId)).sort(comparePendingViews);
 }
@@ -94657,7 +94873,7 @@ var init_peer_bridge = __esm(() => {
 });
 
 // src/activation/transport/roster.ts
-import { existsSync as existsSync57, readdirSync as readdirSync26, readFileSync as readFileSync48 } from "fs";
+import { existsSync as existsSync58, readdirSync as readdirSync26, readFileSync as readFileSync48 } from "fs";
 import { homedir as homedir17 } from "os";
 import { join as join61 } from "path";
 function defaultRosterDir() {
@@ -94732,7 +94948,7 @@ function scanRoster(options = {}) {
   const probe = options.probe ?? procProbe();
   const live = [];
   const rejected = [];
-  if (!existsSync57(dir))
+  if (!existsSync58(dir))
     return { live, rejected };
   for (const file of readdirSync26(dir)) {
     if (!file.endsWith(".json"))
@@ -95050,11 +95266,11 @@ var ASK_TOOL = "ask_coordinator", ESCALATE_TOOL = "escalate_to_coordinator", too
 });
 
 // src/activation/pi-sdk.ts
-import { existsSync as existsSync58 } from "fs";
+import { existsSync as existsSync59 } from "fs";
 import { join as join62 } from "path";
 import { pathToFileURL as pathToFileURL2 } from "url";
 function piSdkCandidates(deps = {}) {
-  const exists = deps.exists ?? existsSync58;
+  const exists = deps.exists ?? existsSync59;
   const candidates = [PI_SDK_PACKAGE];
   for (const root of resolveGlobalNodeModulesDirs(deps)) {
     const entry = join62(root, PI_SDK_PACKAGE, "dist", "index.js");
@@ -96286,7 +96502,7 @@ var init_settlement_store = () => {};
 
 // src/activation/native-host.ts
 import { randomUUID as randomUUID9 } from "crypto";
-import { existsSync as existsSync59 } from "fs";
+import { existsSync as existsSync60 } from "fs";
 import { join as join64 } from "path";
 function extractTokenUsage(event) {
   const nested = nativeEventTokenUsage(event);
@@ -97498,7 +97714,7 @@ class NativeActivationHost {
     if (this.workItemsDefault)
       return this.workItemsDefault;
     const selection = await selectWorkItemStore();
-    if (selection.kind === "local" && !existsSync59(selection.dbPath)) {
+    if (selection.kind === "local" && !existsSync60(selection.dbPath)) {
       throw new Error(`no Substrate work store at ${selection.dbPath} (set SUBSTRATE_DB (or the legacy XTRM_STATE_DB) or initialize it via xt init / sb)`);
     }
     this.workItemsDefault = await openWorkItemBoundary(selection.kind === "local" ? { dbPath: selection.dbPath } : {});
@@ -98603,7 +98819,7 @@ var init_native_host = __esm(() => {
   NON_LOCAL_EXTENSION_PREFIXES = ["npm:", "git:", "github:", "http:", "https:", "ssh:"];
   defaultExtensionSourceResolutionEnv = {
     globalNodeModulesDirs: resolveGlobalNodeModulesDirs,
-    manifestExists: (packagePath) => existsSync59(join64(packagePath, "package.json")),
+    manifestExists: (packagePath) => existsSync60(join64(packagePath, "package.json")),
     piAgentDir: () => {
       return;
     }
@@ -98944,6 +99160,7 @@ var init_lib = __esm(() => {
   init_observability_sqlite();
   init_specialist_feed_tool();
   init_observability_db();
+  init_observability_read_model();
   init_bead_gate();
   init_build_identity();
   init_beads();
@@ -99085,7 +99302,7 @@ var init_specialist_list_tool = __esm(() => {
 });
 
 // src/mcp/resume-tool.ts
-import { existsSync as existsSync60 } from "fs";
+import { existsSync as existsSync61 } from "fs";
 import { fileURLToPath as fileURLToPath12 } from "url";
 function createSpecialistResumeTool(getHost, getPusher) {
   return {
@@ -99139,7 +99356,7 @@ var init_resume_tool = __esm(() => {
   DIST_LIB_PATH2 = (() => {
     for (const candidate of ["./lib.js", "../../dist/lib.js"]) {
       const path = fileURLToPath12(new URL(candidate, import.meta.url));
-      if (existsSync60(path))
+      if (existsSync61(path))
         return path;
     }
     return fileURLToPath12(new URL("../../dist/lib.js", import.meta.url));

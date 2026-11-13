@@ -18,8 +18,8 @@ export declare const substrateJournalSchema: z.ZodObject<{
     issue_id?: string | undefined;
     session_id?: string | undefined;
     limit?: number | undefined;
-    entry_id?: string | undefined;
     cursor?: number | undefined;
+    entry_id?: string | undefined;
     run_id?: string | undefined;
 }, {
     op: "append" | "list" | "checkpoint" | "get" | "since" | "latest_checkpoint";
@@ -29,8 +29,8 @@ export declare const substrateJournalSchema: z.ZodObject<{
     issue_id?: string | undefined;
     session_id?: string | undefined;
     limit?: number | undefined;
-    entry_id?: string | undefined;
     cursor?: number | undefined;
+    entry_id?: string | undefined;
     run_id?: string | undefined;
 }>;
 type JournalInput = z.infer<typeof substrateJournalSchema>;
@@ -73,8 +73,8 @@ export declare function createSubstrateJournalTool(getJournal: GetJournal): {
         issue_id?: string | undefined;
         session_id?: string | undefined;
         limit?: number | undefined;
-        entry_id?: string | undefined;
         cursor?: number | undefined;
+        entry_id?: string | undefined;
         run_id?: string | undefined;
     }, {
         op: "append" | "list" | "checkpoint" | "get" | "since" | "latest_checkpoint";
@@ -84,8 +84,8 @@ export declare function createSubstrateJournalTool(getJournal: GetJournal): {
         issue_id?: string | undefined;
         session_id?: string | undefined;
         limit?: number | undefined;
-        entry_id?: string | undefined;
         cursor?: number | undefined;
+        entry_id?: string | undefined;
         run_id?: string | undefined;
     }>;
     execute(input: JournalInput): Promise<{
