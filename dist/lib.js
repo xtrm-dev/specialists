@@ -28393,10 +28393,12 @@ function readForensicWindow(source, options) {
   }
   const page = options.after ? visible.slice(0, limit) : visible.slice(-limit);
   const last = page[page.length - 1];
+  const lastScanned = raw[raw.length - 1];
+  const cursorSeq = options.after && visible.length <= page.length && lastScanned ? Math.max(last?.record.seq ?? 0, lastScanned.seq) : last?.record.seq;
   return {
     events: page.map(({ event }) => event),
     rows: page.map(({ event }) => forensicEventToRow(event)),
-    ...last ? { cursor: { seq: last.record.seq } } : {},
+    ...cursorSeq !== undefined ? { cursor: { seq: cursorSeq } } : {},
     invalidRecords,
     hasMore: visible.length > page.length || raw.length >= readAhead
   };
@@ -28526,7 +28528,13 @@ function readActivationInspect(source, jobId) {
   const { parsed } = parseForensicRecords(records);
   const attempts = source.listForensicAttemptIds(jobId);
   const latest = parsed[parsed.length - 1]?.event;
-  const admitted = [...parsed].reverse().find(({ event }) => event.event_name === "control.activation_admitted.recorded")?.event;
+  const admittedRows = source.readForensicEvents({
+    jobId,
+    eventName: "control.activation_admitted.recorded",
+    limit: 1,
+    order: "asc"
+  });
+  const admitted = parseForensicRecords(admittedRows).parsed[0]?.event;
   const admittedEnvelope = admitted?.body ?? {};
   const admittedBody = recordBodyField(admittedEnvelope, "legacy_timeline_event") ?? admittedEnvelope;
   const startRows = source.readForensicEvents({ jobId, eventName: "job.started", limit: 1, order: "asc" });

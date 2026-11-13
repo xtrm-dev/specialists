@@ -46022,10 +46022,12 @@ function readForensicWindow(source, options) {
   }
   const page = options.after ? visible.slice(0, limit) : visible.slice(-limit);
   const last = page[page.length - 1];
+  const lastScanned = raw[raw.length - 1];
+  const cursorSeq = options.after && visible.length <= page.length && lastScanned ? Math.max(last?.record.seq ?? 0, lastScanned.seq) : last?.record.seq;
   return {
     events: page.map(({ event }) => event),
     rows: page.map(({ event }) => forensicEventToRow(event)),
-    ...last ? { cursor: { seq: last.record.seq } } : {},
+    ...cursorSeq !== undefined ? { cursor: { seq: cursorSeq } } : {},
     invalidRecords,
     hasMore: visible.length > page.length || raw.length >= readAhead
   };
@@ -46062,7 +46064,8 @@ function withForensicObservability(runtime) {
           const window = readForensicWindow(asObservabilityReadSource(client), {
             jobId: args.jobId,
             ...typeof args.fromSeq === "number" && args.fromSeq > 0 ? { after: { seq: args.fromSeq - 1 } } : {},
-            limit: args.limit
+            limit: args.limit,
+            allEvents: true
           });
           return window.events.map((event, index) => forensicEventToFeedRow(event, {
             jobId: typeof event.correlation.job_id === "string" ? event.correlation.job_id : args.jobId,
