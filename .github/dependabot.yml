@@ -11,6 +11,10 @@ updates:
       day: monday
     open-pull-requests-limit: 5
     labels: [dependencies, javascript]
+    # Newly published versions are the usual vector for a compromised or broken release;
+    # seven days of soak time keeps a fresh package out of the weekly proposal.
+    cooldown:
+      default-days: 7
     groups:
       npm-minor-and-patch:
         update-types: [minor, patch]
