@@ -170,6 +170,22 @@ describe('specialists plugin path discipline', () => {
     });
   });
 
+  it('offers service-knowledge from its home repo, xtrm-dev/xtrm, by git subdirectory', () => {
+    // The service-knowledge package and its Claude Code plugin live in xtrm-dev/xtrm; the xtrm
+    // marketplace only points at that folder, so `claude plugin install service-knowledge@xtrm`
+    // installs the plugin from GitHub (CORE-2714, the CORE-2580 skill-suggest pattern).
+    const root = join(PLUGIN_ROOT, '..', '..');
+    const marketplace = JSON.parse(readFileSync(join(root, '.claude-plugin', 'marketplace.json'), 'utf-8')) as {
+      plugins: Array<{ name: string; source: unknown }>;
+    };
+    const entry = marketplace.plugins.find((candidate) => candidate.name === 'service-knowledge');
+    expect(entry?.source).toEqual({
+      source: 'git-subdir',
+      url: 'https://github.com/xtrm-dev/xtrm.git',
+      path: 'packages/service-knowledge/plugin/service-knowledge',
+    });
+  });
+
   it('versions every plugin with the package version so plugin update ships changes', () => {
     // Claude Code keys the plugin cache and `claude plugin update` on plugin.json "version".
     // Pinned at 0.1.0, every release was "already at the latest version" (SPECIALISTS-4254).
