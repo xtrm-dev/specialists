@@ -160,7 +160,7 @@ describe('specialists plugin path discipline', () => {
     // so `claude plugin install skill-suggest@xtrm` installs it from GitHub (CORE-2580).
     const root = join(PLUGIN_ROOT, '..', '..');
     const marketplace = JSON.parse(readFileSync(join(root, '.claude-plugin', 'marketplace.json'), 'utf-8')) as {
-      plugins: Array<{ name: string; source: unknown }>;
+      plugins: Array<{ name: string; source: unknown; description?: string }>;
     };
     const entry = marketplace.plugins.find((candidate) => candidate.name === 'skill-suggest');
     expect(entry?.source).toEqual({
@@ -176,7 +176,7 @@ describe('specialists plugin path discipline', () => {
     // installs the plugin from GitHub (CORE-2714, the CORE-2580 skill-suggest pattern).
     const root = join(PLUGIN_ROOT, '..', '..');
     const marketplace = JSON.parse(readFileSync(join(root, '.claude-plugin', 'marketplace.json'), 'utf-8')) as {
-      plugins: Array<{ name: string; source: unknown }>;
+      plugins: Array<{ name: string; source: unknown; description?: string }>;
     };
     const entry = marketplace.plugins.find((candidate) => candidate.name === 'service-knowledge');
     expect(entry?.source).toEqual({
