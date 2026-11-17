@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Harden the release pre-flight (SPECIALISTS-4429) (#541) ([387e9fc](https://github.com/xtrm-dev/specialists/commit/387e9fc55f067c877844ecf950a61c3e96273337))
+- Anchor the PI_VERSION override and always clean in warning mode (SPECIALISTS-4429) (#542) ([09a7624](https://github.com/xtrm-dev/specialists/commit/09a7624d18b492526a8c7ea34706320f440a3a71))
+- Bound the retained receipts by count and age (SPECIALISTS-4434) (#547) ([61e403e](https://github.com/xtrm-dev/specialists/commit/61e403e5d7c3235c05be047643d180b9ec9e8685))
+- Refuse prototype-walking edit paths and scrub stacks from the serve wire (SPECIALISTS-4432) (#546) ([982c132](https://github.com/xtrm-dev/specialists/commit/982c132b0ca72ea7ba1cc4920301747903b13630))
+- Break same-millisecond ties by id (SPECIALISTS-4436) (#548) ([34d4dd0](https://github.com/xtrm-dev/specialists/commit/34d4dd059e934eea32e3811bb8f84d4bcecbb3a2))
+- A lead-launched specialist exports its own role, not the lead's (CORE-2722) ([ea2dc3c](https://github.com/xtrm-dev/specialists/commit/ea2dc3c2fdf200553608e6eb64a1273be9315dee))
+
+### Project maintenance
+- Make the NODE_ENV assertion prove the override (SPECIALISTS-4429) (#543) ([21be15b](https://github.com/xtrm-dev/specialists/commit/21be15b78a1e6eda9640dea37c350832012b1781))
+- Register scratch dirs and sweep them after the suite (CORE-2612) (#544) ([395d3e5](https://github.com/xtrm-dev/specialists/commit/395d3e5744889d1a525477403503513a53a936ab))
+- Declare pi 1.4-2, pin pi-tui 1.5.2, test the current pi (SPECIALISTS-4431) (#545) ([d7399ba](https://github.com/xtrm-dev/specialists/commit/d7399ba029060bbe5e8e6245cc17941a4a44ac9f))
+- Read the hook files instead of spawning cat (SPECIALISTS-4435) (#549) ([ca17cf3](https://github.com/xtrm-dev/specialists/commit/ca17cf307d77679bedc9a0613549bd5851300769))
+- Pin the image's pi instead of tracking latest (SPECIALISTS-4437) (#550) ([31c6303](https://github.com/xtrm-dev/specialists/commit/31c6303df4dbb9775852b3433873d9c7158acfda))
+- Validate the dispatch version, add a pinned row, check the pin (SPECIALISTS-4438) (#551) ([c3bfaac](https://github.com/xtrm-dev/specialists/commit/c3bfaac09d9cd9910967aae6e67be3743b0dc857))
+- Identity env, formal review, Claude Code route (CORE-2623) (#552) ([865c4d5](https://github.com/xtrm-dev/specialists/commit/865c4d52ec74e785c54abd6b3c87014d2a4751ad))
+
 ## [4.2.0] - 2026-11-11
 
 ### Added
