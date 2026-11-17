@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import {
   IDENTITY_ENV_ALLOWLIST,
+  isIdentityManagedKey,
   resolveAgentIdentityEnv,
   resolveAgentLaunchEnv,
   shimBinDir,
@@ -29,7 +30,7 @@ describe('resolveAgentIdentityEnv', () => {
       warn: (message) => warnings.push(message),
       run: () => ({ status: 127, stdout: 'xt: not found' }),
     });
-    expect(env).toEqual({ SUBSTRATE_HOLDER: 'sp-pr-reviewer-1a2b3c4d', XTRM_ROLE: 'pr-reviewer' });
+    expect(env).toEqual({ SUBSTRATE_HOLDER: 'sp-pr-reviewer-1a2b3c4d', XTRM_ROLE: 'pr-reviewer', XTMUX_AGENT_ROLE: 'pr-reviewer' });
   });
 
   // MEDIUM F1: a fallback to "no role identity" is git running as the operator, so
@@ -144,6 +145,7 @@ describe('resolveAgentIdentityEnv', () => {
     expect(env).toEqual({
       SUBSTRATE_HOLDER: 'sp-pr-reviewer-1a2b3c4d',
       XTRM_ROLE: 'reviewer',
+      XTMUX_AGENT_ROLE: 'pr-reviewer',
       GIT_AUTHOR_NAME: 'sp-pr-reviewer-1a2b3c4d',
       GIT_AUTHOR_EMAIL: 'op@example.com',
       GIT_COMMITTER_NAME: 'sp-pr-reviewer-1a2b3c4d',
@@ -377,6 +379,7 @@ describe('resolveAgentLaunchEnv', () => {
     expect(env).toEqual({
       SUBSTRATE_HOLDER: 'sp-pr-reviewer-1a2b3c4d',
       XTRM_ROLE: 'reviewer',
+      XTMUX_AGENT_ROLE: 'pr-reviewer',
       PATH: `/home/worker/.local/bin${D}/usr/bin`,
     });
   });
@@ -408,5 +411,61 @@ describe('specialistHolderName', () => {
     expect(specialistHolderName('pr-reviewer', '1a2b3c4d-5e6f-7890')).toBe('sp-pr-reviewer-1a2b3c4d');
     expect(specialistHolderName('pr-reviewer', null, 4242)).toBe('sp-pr-reviewer-4242');
     expect(specialistHolderName('pr reviewer!', '')).toBe(`sp-pr-reviewer-${process.pid}`);
+  });
+});
+
+// CORE-2722: a Specialist launched by a lead must not inherit the lead's identity.
+describe('a lead-launched Specialist exports its own identity (CORE-2722)', () => {
+  const leadEnv = {
+    XTMUX_AGENT_ROLE: 'lead',
+    SUBSTRATE_HOLDER: 'MMD-4418-serving-lead-2',
+    XTRM_AGENT_NAME: 'market-data-xt-claude-MMD-4418-serving-lead',
+    XTRM_DISPATCHER_NAME: 'market-data-xt-claude-MMD-4418-serving-lead',
+    XTRM_DISPATCHER_ADDRESS: 'uds:/run/user/1000/cc-socks/1.sock',
+  };
+
+  it('exports the specialist as XTMUX_AGENT_ROLE and its own holder', () => {
+    const env = resolveAgentIdentityEnv({
+      holder: 'sp-pr-reviewer-1a2b3c4d',
+      roleName: 'pr-reviewer',
+      env: leadEnv,
+      warn: () => undefined,
+      run: () => ({ status: 0, stdout: JSON.stringify({ env: { SUBSTRATE_HOLDER: 'x', XTRM_ROLE: 'pr-reviewer' } }) }),
+    });
+    expect(env.XTMUX_AGENT_ROLE).toBe('pr-reviewer');
+    expect(env.SUBSTRATE_HOLDER).toBe('sp-pr-reviewer-1a2b3c4d');
+  });
+
+  it('exports the role even when xt is unavailable', () => {
+    const env = resolveAgentIdentityEnv({
+      holder: 'sp-pr-reviewer-1a2b3c4d', roleName: 'pr-reviewer', env: leadEnv,
+      warn: () => undefined, run: () => ({ status: 127, stdout: '' }),
+    });
+    expect(env.XTMUX_AGENT_ROLE).toBe('pr-reviewer');
+  });
+
+  it('does not hand the lead XTRM_AGENT_NAME to the xt lookup (it outranks the holder for attribution)', () => {
+    let lookupEnv: NodeJS.ProcessEnv | undefined;
+    resolveAgentIdentityEnv({
+      holder: 'sp-pr-reviewer-1a2b3c4d', roleName: 'pr-reviewer', env: leadEnv, warn: () => undefined,
+      run: (_c, _a, opts) => { lookupEnv = opts.env; return { status: 0, stdout: JSON.stringify({ env: {} }) }; },
+    });
+    expect(lookupEnv?.XTRM_AGENT_NAME).toBeUndefined();
+    expect(lookupEnv?.SUBSTRATE_HOLDER).toBe('sp-pr-reviewer-1a2b3c4d');
+  });
+
+  it('never takes XTRM_AGENT_NAME from the xt answer', () => {
+    const env = resolveAgentIdentityEnv({
+      holder: 'h', roleName: 'r', env: {}, warn: () => undefined,
+      run: () => ({ status: 0, stdout: JSON.stringify({ env: { XTRM_AGENT_NAME: 'lead-name' } }) }),
+    });
+    expect(env.XTRM_AGENT_NAME).toBeUndefined();
+  });
+
+  it('manages XTMUX_AGENT_ROLE and XTRM_AGENT_NAME, and leaves the dispatcher keys alone', () => {
+    expect(isIdentityManagedKey('XTMUX_AGENT_ROLE')).toBe(true);
+    expect(isIdentityManagedKey('XTRM_AGENT_NAME')).toBe(true);
+    expect(isIdentityManagedKey('XTRM_DISPATCHER_NAME')).toBe(false);
+    expect(isIdentityManagedKey('XTRM_DISPATCHER_ADDRESS')).toBe(false);
   });
 });

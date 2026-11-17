@@ -656,3 +656,37 @@ describe('native launch path — the activation owns process.env only while it r
     expect(snapshotIdentityEnv(process.env)).toEqual(before);
   });
 });
+
+describe('native launch path — a lead-launched Specialist (CORE-2722)', () => {
+  const LEAD: Record<string, string> = {
+    XTMUX_AGENT_ROLE: 'lead',
+    SUBSTRATE_HOLDER: 'MMD-4418-serving-lead-2',
+    XTRM_AGENT_NAME: 'market-data-xt-claude-MMD-4418-serving-lead',
+    XTRM_DISPATCHER_NAME: 'market-data-xt-claude-MMD-4418-serving-lead',
+  };
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => { for (const k of Object.keys(LEAD)) { saved[k] = process.env[k]; process.env[k] = LEAD[k]; } });
+  afterEach(() => { for (const k of Object.keys(LEAD)) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } });
+
+  it('runs with its own role and holder, keeps the launcher as XTRM_DISPATCHER_*, and restores the lead after', async () => {
+    let seen: Record<string, string | undefined> = {};
+    await dispatchOnce({
+      identityEnvRun: () => ({ status: 0, stdout: JSON.stringify({ env: { XTRM_ROLE: 'researcher' } }) }),
+      onPrompt: () => {
+        seen = {
+          role: process.env.XTMUX_AGENT_ROLE,
+          holder: process.env.SUBSTRATE_HOLDER,
+          agentName: process.env.XTRM_AGENT_NAME,
+          dispatcher: process.env.XTRM_DISPATCHER_NAME,
+        };
+      },
+    });
+    expect(seen.role).toBe('researcher');
+    expect(seen.holder).toMatch(/^sp-researcher-/);
+    expect(seen.agentName).toBeUndefined();
+    expect(seen.dispatcher).toBe(LEAD.XTRM_DISPATCHER_NAME);
+    expect(process.env.XTMUX_AGENT_ROLE).toBe('lead');
+    expect(process.env.SUBSTRATE_HOLDER).toBe(LEAD.SUBSTRATE_HOLDER);
+    expect(process.env.XTRM_AGENT_NAME).toBe(LEAD.XTRM_AGENT_NAME);
+  });
+});

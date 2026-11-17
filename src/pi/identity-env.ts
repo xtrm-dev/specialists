@@ -17,6 +17,12 @@
  *   `GIT_CONFIG_*` block: core writes an empty `GIT_CONFIG_VALUE_*` on purpose
  *   to reset a global credential helper, and git refuses every command when
  *   `GIT_CONFIG_COUNT` names an index whose pair is absent.
+ * - CORE-2722: a launched Specialist is its own agent, never the lead that
+ *   dispatched it. `XTMUX_AGENT_ROLE` (the role the agent host reports and the
+ *   project-management hooks resolve) is set to the specialist name, and the
+ *   inherited `XTRM_AGENT_NAME` (which outranks the holder for attribution) is
+ *   cleared. The launcher stays reachable through the inherited
+ *   `XTRM_DISPATCHER_*`, which this module never touches.
  * - PATH is never taken from the CLI. `resolveAgentLaunchEnv` appends it locally
  *   with the gh shim directory first (CORE-2524.4), because an identity the shim
  *   cannot intercept is not an identity.
@@ -90,7 +96,7 @@ const launcherWarning = warnIdentityEnv;
  * PATH is one process-wide value by design (CORE-2524.4), while these keys name a
  * holder and a transport and must never outlive the activation that set them.
  */
-const IDENTITY_MANAGED_KEY = /^(?:SUBSTRATE_HOLDER|XTRM_ROLE|GIT_AUTHOR_NAME|GIT_AUTHOR_EMAIL|GIT_COMMITTER_NAME|GIT_COMMITTER_EMAIL|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+)$/;
+const IDENTITY_MANAGED_KEY = /^(?:SUBSTRATE_HOLDER|XTRM_ROLE|XTMUX_AGENT_ROLE|XTRM_AGENT_NAME|GIT_AUTHOR_NAME|GIT_AUTHOR_EMAIL|GIT_COMMITTER_NAME|GIT_COMMITTER_EMAIL|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+)$/;
 
 export function isIdentityManagedKey(key: string): boolean {
   return IDENTITY_MANAGED_KEY.test(key);
@@ -175,6 +181,18 @@ function describeErrorClass(error: unknown): string {
 }
 
 /**
+ * The env `xt identity env` runs in: the host env with this launch's identity on
+ * top, and without the launcher's `XTRM_AGENT_NAME`. That name outranks the
+ * holder when xt attributes a review, so a lead-launched Specialist would
+ * otherwise be named after the lead (CORE-2722).
+ */
+function lookupEnv(host: NodeJS.ProcessEnv, base: Record<string, string>): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...host, ...base };
+  delete env.XTRM_AGENT_NAME;
+  return env;
+}
+
+/**
  * The identity env for one launched session. Never throws: on any doubt it
  * returns the holder (and the role name) and nothing else.
  */
@@ -183,7 +201,11 @@ export function resolveAgentIdentityEnv(input: IdentityEnvInput = {}): Record<st
   if (!holder) return {};
   const roleName = (input.roleName ?? '').trim();
   const base: Record<string, string> = { SUBSTRATE_HOLDER: holder };
-  if (roleName) base.XTRM_ROLE = roleName;
+  if (roleName) {
+    base.XTRM_ROLE = roleName;
+    // CORE-2722: the role the agent host reports. Never taken from the xt answer.
+    base.XTMUX_AGENT_ROLE = roleName;
+  }
 
   const run = input.run ?? ((cmd, args, opts) => {
     const result = spawnSync(cmd, args, {
@@ -212,7 +234,7 @@ export function resolveAgentIdentityEnv(input: IdentityEnvInput = {}): Record<st
   try {
     result = run('xt', ['identity', 'env', '--json'], {
       cwd: input.cwd,
-      env: { ...(input.env ?? process.env), ...base },
+      env: lookupEnv(input.env ?? process.env, base),
       timeoutMs: input.timeoutMs ?? 5000,
     });
   } catch (error) {
