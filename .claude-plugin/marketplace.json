@@ -24,6 +24,15 @@
         "path": "packages/claude-skill-suggest"
       },
       "description": "Suggests one skill per turn from an async monitor that reads the session transcript tail. Never wakes an idle session, never wraps tool calls, fails open. Source: xtrm-dev/core."
+    },
+    {
+      "name": "service-knowledge",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/xtrm-dev/xtrm.git",
+        "path": "packages/service-knowledge/plugin/service-knowledge"
+      },
+      "description": "Operational service knowledge: five read-only MCP tools over the per-repo FTS5 evidence index (search, get, evidence-for-files, status, drift). Call them before grep and before reading service source. Source: xtrm-dev/xtrm (a private repository, so the installing host needs git access to it)."
     }
   ]
 }

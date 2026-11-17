@@ -160,7 +160,7 @@ describe('specialists plugin path discipline', () => {
     // so `claude plugin install skill-suggest@xtrm` installs it from GitHub (CORE-2580).
     const root = join(PLUGIN_ROOT, '..', '..');
     const marketplace = JSON.parse(readFileSync(join(root, '.claude-plugin', 'marketplace.json'), 'utf-8')) as {
-      plugins: Array<{ name: string; source: unknown }>;
+      plugins: Array<{ name: string; source: unknown; description?: string }>;
     };
     const entry = marketplace.plugins.find((candidate) => candidate.name === 'skill-suggest');
     expect(entry?.source).toEqual({
@@ -168,6 +168,28 @@ describe('specialists plugin path discipline', () => {
       url: 'https://github.com/xtrm-dev/core.git',
       path: 'packages/claude-skill-suggest',
     });
+  });
+
+  it('offers service-knowledge from its home repo, xtrm-dev/xtrm, by git subdirectory', () => {
+    // The service-knowledge package and its Claude Code plugin live in xtrm-dev/xtrm; the xtrm
+    // marketplace only points at that folder, so `claude plugin install service-knowledge@xtrm`
+    // installs the plugin from GitHub (CORE-2714, the CORE-2580 skill-suggest pattern).
+    const root = join(PLUGIN_ROOT, '..', '..');
+    const marketplace = JSON.parse(readFileSync(join(root, '.claude-plugin', 'marketplace.json'), 'utf-8')) as {
+      plugins: Array<{ name: string; source: unknown; description?: string }>;
+    };
+    const entry = marketplace.plugins.find((candidate) => candidate.name === 'service-knowledge');
+    expect(entry?.source).toEqual({
+      source: 'git-subdir',
+      url: 'https://github.com/xtrm-dev/xtrm.git',
+      path: 'packages/service-knowledge/plugin/service-knowledge',
+    });
+    // Unlike skill-suggest (public xtrm-dev/core), this entry points at a PRIVATE repository from a
+    // public marketplace: an installing host without git access fails at clone time. The
+    // description must say so, because the failure happens inside Claude Code's clone step where
+    // the reason is not obvious.
+    expect(entry?.description).toContain('private');
+    expect(entry?.description).toContain('git access');
   });
 
   it('versions every plugin with the package version so plugin update ships changes', () => {
