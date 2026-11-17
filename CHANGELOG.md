@@ -30,8 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Give an activation its identity on the bash spawn hook, not on process.env (SPECIALISTS-4456) (#574) ([a10c2ce](https://github.com/xtrm-dev/specialists/commit/a10c2ce2f842964279f849f6b0aad72fab64b427))
 - Clear the open js/* alerts on master (SPECIALISTS-4495) (#578) ([b4c4a72](https://github.com/xtrm-dev/specialists/commit/b4c4a72c4cbc18afc864d036884c92a095f63f04))
 - A lead-launched specialist exports its own role (CORE-2722) (#582) ([e6fa1c7](https://github.com/xtrm-dev/specialists/commit/e6fa1c7628d9d7b7753acf2349da70ab7b581e63))
-- A bridged activation's Claude Code child gets the activation identity (SPECIALISTS-4498) ([ed89f3a](https://github.com/xtrm-dev/specialists/commit/ed89f3a5d968650f5de861023cc9f27dff7e7963))
-- Say when a bridged child cannot get the git credential reset, match PATH in any case (SPECIALISTS-4498) ([f4c09ab](https://github.com/xtrm-dev/specialists/commit/f4c09abf69a83dac7041bc3e7376cfc0e3106da6))
+- A bridged activation's Claude Code child gets the activation identity (SPECIALISTS-4498) (#583) ([8d8fd3d](https://github.com/xtrm-dev/specialists/commit/8d8fd3d0a3dee0e1cd4f9095e53b18fb6044f3f7))
+- One dispatcher value per dispatch, written to env and Substrate (SPECIALISTS-4503) ([54ee58e](https://github.com/xtrm-dev/specialists/commit/54ee58edecc6c9c160897aebd1a6d10381c7e68d))
 
 ### Project maintenance
 - Make the NODE_ENV assertion prove the override (SPECIALISTS-4429) (#543) ([21be15b](https://github.com/xtrm-dev/specialists/commit/21be15b78a1e6eda9640dea37c350832012b1781))
@@ -52,8 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Create every scratch directory through tempDir so the CORE-2612 sweep can see it (SPECIALISTS-4474) (#576) ([7a95f4b](https://github.com/xtrm-dev/specialists/commit/7a95f4b18a5f1e8f18b6a01772825e496ef15b09))
 - Teach the operator allow list, not the removed two-switch route (SPECIALISTS-4447) (#577) ([346eea1](https://github.com/xtrm-dev/specialists/commit/346eea1d6a758e3386fe53b8384d8d83aeb41b01))
 - Bump the actions-all group across 1 directory with 3 updates (#561) ([4eb1e50](https://github.com/xtrm-dev/specialists/commit/4eb1e50cd3b9a5d67b590004e7c24ba84749b132))
-- Rebuild the committed bundle with the pinned bun 1.4.2 (SPECIALISTS-4498) ([271b536](https://github.com/xtrm-dev/specialists/commit/271b53696df16005e7db0cec62f8235b3025eec0))
-- Rebuild the committed bundle with the pinned bun 1.4.2 (SPECIALISTS-4498) ([be007a5](https://github.com/xtrm-dev/specialists/commit/be007a56e21a50a942eba9ee213ea6f7e33768c6))
+- Rebuild the committed bundle with the pinned bun 1.4.2 (SPECIALISTS-4503) ([12cf6e4](https://github.com/xtrm-dev/specialists/commit/12cf6e4ff018c2adf9b346af9172a16a4fbeb579))
 
 ## [4.2.0] - 2026-11-11
 
