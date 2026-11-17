@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const mockSqlite = {
   listStatuses: vi.fn(() => []),
@@ -83,7 +83,7 @@ describe('ps CLI — run()', () => {
   let tempDir = '';
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'specialists-ps-'));
+    tempDir = createTempDir('specialists-ps-');
     process.chdir(tempDir);
     // Ensure .specialists/jobs exists
     mkdirSync(join(tempDir, '.specialists', 'jobs'), { recursive: true });

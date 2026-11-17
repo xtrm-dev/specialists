@@ -154,10 +154,129 @@ const OverrideMandatoryRulesSchema = z.object({
  */
 export const CLAUDE_BRIDGE_SWITCH_KEY = 'claude_bridge';
 
-/** The operator half of the Claude Code route switch. Both this and the definition flag must be on. */
-export const ClaudeBridgeSwitchSchema = z.object({
-  enabled: z.boolean().default(false),
-}).strict();
+/** The provider prefix every selectable bridge model must carry. */
+export const CLAUDE_BRIDGE_MODEL_PREFIX = 'claude-bridge/';
+
+/**
+ * A Specialist name the allow list may name. Kebab-case is the whole grammar: it admits no
+ * wildcard, no glob, no path and no empty string, so consent always names one Specialist
+ * (SPECIALISTS-4442). Deliberately not a free-form string with a "*" exception.
+ */
+const ClaudeBridgeSpecialistNameSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]*$/, 'must be an explicit kebab-case Specialist name (no wildcard, no glob)');
+
+/** A model the bridge route can serve. A non-bridged string is refused at write time. */
+export const ClaudeBridgeModelSchema = z
+  .string()
+  .refine(value => value.startsWith(CLAUDE_BRIDGE_MODEL_PREFIX) && value.length > CLAUDE_BRIDGE_MODEL_PREFIX.length, {
+    message: `must be a ${CLAUDE_BRIDGE_MODEL_PREFIX}... model`,
+  });
+
+/**
+ * The operator's whole Claude Code route selection (SPECIALISTS-4442, Option A).
+ *
+ * This block is the ONLY operator-side selector: `enabled` is machine consent, `specialists` is
+ * the explicit allow list, and `default_model`/`models` name the bridged models. When
+ * `specialists` is present it is authoritative both ways for `execution.claude_bridge` and
+ * `execution.model` — the loader applies it after every other layer, so no repository layer can
+ * enable the route or redirect a listed Specialist.
+ *
+ * Absent `specialists` keeps the legacy rule (the merged definition flag decides) so the change
+ * is a rollout, not a flag day. `specialists: []` means "no Specialist", never "all".
+ */
+export const ClaudeBridgeBlockSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    default_model: ClaudeBridgeModelSchema.optional(),
+    specialists: z.array(ClaudeBridgeSpecialistNameSchema).optional(),
+    models: z.record(z.string(), ClaudeBridgeModelSchema).optional(),
+  })
+  .strict()
+  .superRefine((block, ctx) => {
+    if (!block.specialists) return;
+    for (const name of block.specialists) {
+      const model = block.models?.[name] ?? block.default_model;
+      if (model === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['specialists'],
+          message:
+            `listed Specialist "${name}" has no bridge model: set models.${name} or default_model ` +
+            `(${CLAUDE_BRIDGE_MODEL_PREFIX}...)`,
+        });
+      }
+    }
+  });
+
+export type ClaudeBridgeBlock = z.infer<typeof ClaudeBridgeBlockSchema>;
+
+/** @deprecated Use {@link ClaudeBridgeBlockSchema}: the switch is now the whole route selection. */
+export const ClaudeBridgeSwitchSchema = ClaudeBridgeBlockSchema;
+
+export interface ClaudeBridgeBlockRead {
+  /** The file holds a `claude_bridge` key. */
+  present: boolean;
+  /** The validated block, or null when absent or invalid. */
+  block: ClaudeBridgeBlock | null;
+  /** Structured reason the block could not be used; null when absent or valid. */
+  error: string | null;
+  /**
+   * Names the raw block appears to list, even when it fails validation. Lets the route refusal
+   * name a Specialist the operator asked for instead of routing it off silently.
+   */
+  listedNames: string[];
+  /** Absolute path of the file that was read. */
+  path: string;
+}
+
+/**
+ * Read + validate the reserved block. Deliberately separate from the sparse-layer read: this one
+ * follows `operatorClaudeBridgeEnabled` and NEVER throws, so the loader, the route reader and
+ * `sp doctor` all observe the same failure instead of two different ones (SPECIALISTS-4442, Q5.3).
+ */
+export function readClaudeBridgeBlock(
+  location: GlobalUserConfigPath = getGlobalUserConfigPath(),
+  readFile: (path: string) => string = path => readFileSync(path, 'utf-8'),
+): ClaudeBridgeBlockRead {
+  const absent: ClaudeBridgeBlockRead = { present: false, block: null, error: null, listedNames: [], path: location.path };
+  if (!location.exists) return absent;
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFile(location.path));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ...absent, error: `cannot read ${location.path}: ${message}` };
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ...absent, error: `${location.path} is not a JSON object` };
+  }
+  const entry = (raw as Record<string, unknown>)[CLAUDE_BRIDGE_SWITCH_KEY];
+  if (entry === undefined) return absent;
+
+  const listedNames = (() => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+    const listed = (entry as Record<string, unknown>).specialists;
+    return Array.isArray(listed) ? listed.filter((name): name is string => typeof name === 'string') : [];
+  })();
+
+  const parsed = ClaudeBridgeBlockSchema.safeParse(entry);
+  if (!parsed.success) {
+    return {
+      present: true,
+      block: null,
+      // Same `claude_bridge.<field>` path shape the validator reports, so doctor and the route
+      // reader cannot describe one malformed block two different ways.
+      error: parsed.error.issues
+        .map(issue => `${[CLAUDE_BRIDGE_SWITCH_KEY, ...issue.path.map(String)].join('.')}: ${issue.message}`)
+        .join('; ') || 'invalid claude_bridge block',
+      listedNames,
+      path: location.path,
+    };
+  }
+  return { present: true, block: parsed.data, error: null, listedNames, path: location.path };
+}
 
 export const GlobalSpecialistOverrideSchema = z.object({
   execution: OverrideExecutionSchema,
@@ -292,6 +411,12 @@ export interface GlobalConfigMergeResult {
   config: GlobalUserConfig;
   added: string[];
   extended: string[];
+  /** Entries whose definition cannot be resolved on this machine. Kept, and backfilled. */
+  notInstalledHere: string[];
+  /**
+   * @deprecated Always empty now: an unresolvable entry is backfilled and kept, never treated as
+   * removed (SPECIALISTS-4448). Retained so callers compiling against the old shape keep working.
+   */
   removed: string[];
 }
 
@@ -310,23 +435,37 @@ export function mergeGlobalUserConfig(
   const merged: GlobalUserConfig = { _doc: GLOBAL_USER_CONFIG_DOC };
   const added: string[] = [];
   const extended: string[] = [];
+  const notInstalledHere: string[] = [];
   const removed: string[] = [];
 
   // 1. Preserve existing specialists, filling missing override fields.
   for (const [name, rawExisting] of Object.entries(existing)) {
     if (name.startsWith('_')) continue;
-    const templateOverride = template[name];
-    if (templateOverride && typeof templateOverride === 'object') {
-      const normalized = fillMissingDefaults(
-        (rawExisting && typeof rawExisting === 'object' ? { ...rawExisting } : {}) as Record<string, unknown>,
-        templateOverride as unknown as Record<string, unknown>,
-      );
-      merged[name] = normalized as unknown as GlobalSpecialistOverride;
-      extended.push(name);
-    } else {
-      // Specialist no longer shipped — keep verbatim, flag as removed.
+    // The reserved route block is machine configuration, not a Specialist: keep it verbatim and
+    // never report it as "no longer shipped" (SPECIALISTS-4442, D3).
+    if (name === CLAUDE_BRIDGE_SWITCH_KEY) {
       merged[name] = rawExisting as unknown as GlobalSpecialistOverride;
-      removed.push(name);
+      continue;
+    }
+    // Resolvable on this machine: the loader-derived template. Not resolvable: the schema
+    // template. Either way the entry gets the full override shape, because an entry that omits
+    // fields is not "an entry with defaults" — the strict writer rejects the whole file for it
+    // (SPECIALISTS-4448). A definition being absent here is not evidence the operator wants the
+    // entry gone: the file is shared across machines, so the entry is kept full, not dropped.
+    const templateOverride = template[name];
+    const isResolvable = Boolean(templateOverride && typeof templateOverride === 'object');
+    const shape = isResolvable
+      ? (templateOverride as unknown as Record<string, unknown>)
+      : (buildSpecialistOverrideTemplate() as unknown as Record<string, unknown>);
+    const normalized = fillMissingDefaults(
+      (rawExisting && typeof rawExisting === 'object' ? { ...rawExisting } : {}) as Record<string, unknown>,
+      shape,
+    );
+    merged[name] = normalized as unknown as GlobalSpecialistOverride;
+    extended.push(name);
+    if (!isResolvable) {
+      // Reported, never removed: the fix a reader needs is "install it here", not "delete it".
+      notInstalledHere.push(name);
     }
   }
 
@@ -339,7 +478,7 @@ export function mergeGlobalUserConfig(
     }
   }
 
-  return { config: merged, added, extended, removed };
+  return { config: merged, added, extended, notInstalledHere, removed };
 }
 
 export interface GlobalConfigDriftReport {
@@ -395,12 +534,19 @@ export function analyzeGlobalUserConfigDrift(
   };
   for (const [specialist, entry] of Object.entries(existing)) {
     if (specialist.startsWith('_')) continue;
+    // The reserved route block is machine configuration, not a Specialist: it carries no override
+    // template, so reporting it as "lagging the template" would be noise.
+    if (specialist === CLAUDE_BRIDGE_SWITCH_KEY) continue;
     const templateEntry = template[specialist];
-    if (templateEntry && typeof templateEntry === 'object') {
-      const missing: string[] = [];
-      missingTemplatePaths(entry, templateEntry, '', missing);
-      if (missing.length > 0) report.missingFields[specialist] = missing;
-    }
+    // A name this machine cannot resolve still has an override template — the schema one. Without
+    // that fallback a short entry for an uninstalled Specialist is invisible to doctor, which is
+    // how the file reached a state where every write failed (SPECIALISTS-4448).
+    const shape = templateEntry && typeof templateEntry === 'object'
+      ? (templateEntry as unknown as Record<string, unknown>)
+      : (buildSpecialistOverrideTemplate() as unknown as Record<string, unknown>);
+    const missing: string[] = [];
+    missingTemplatePaths(entry, shape, '', missing);
+    if (missing.length > 0) report.missingFields[specialist] = missing;
     const extensions = (entry as { execution?: { extensions?: unknown } } | null)?.execution?.extensions;
     if (!extensions || typeof extensions !== 'object') continue;
     for (const [source, value] of Object.entries(extensions as Record<string, unknown>)) {
@@ -437,12 +583,16 @@ export function validateGlobalUserConfig(
 
   const switchErrors: Array<{ path: string; message: string }> = [];
   if (raw && typeof raw === 'object' && !Array.isArray(raw) && CLAUDE_BRIDGE_SWITCH_KEY in raw) {
-    const parsedSwitch = ClaudeBridgeSwitchSchema.safeParse((raw as Record<string, unknown>)[CLAUDE_BRIDGE_SWITCH_KEY]);
+    const parsedSwitch = ClaudeBridgeBlockSchema.safeParse((raw as Record<string, unknown>)[CLAUDE_BRIDGE_SWITCH_KEY]);
     if (!parsedSwitch.success) {
-      switchErrors.push({
-        path: CLAUDE_BRIDGE_SWITCH_KEY,
-        message: parsedSwitch.error.issues.map(issue => issue.message).join('; ') || 'invalid switch',
-      });
+      // Same schema the route decision reads, so the validator and the runtime cannot disagree.
+      for (const issue of parsedSwitch.error.issues) {
+        const subPath = issue.path.map(part => (typeof part === 'number' ? `[${part}]` : part)).join('.');
+        switchErrors.push({
+          path: subPath ? `${CLAUDE_BRIDGE_SWITCH_KEY}.${subPath}` : CLAUDE_BRIDGE_SWITCH_KEY,
+          message: issue.message,
+        });
+      }
     }
   }
 

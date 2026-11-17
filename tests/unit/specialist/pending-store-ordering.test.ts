@@ -1,14 +1,14 @@
 // SPECIALISTS-4436: two asks recorded in the same millisecond must have a stable order.
 // The sort used to compare createdAtMs only, so the result was readdir order — a flaky
 // expectation for every caller that lists outstanding asks.
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { rmSync } from 'node:fs';
+
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { create, listAll } from '../../../src/activation/transport/pending-store.js';
 import { projectOutstandingAsks } from '../../../src/activation/transport/polling.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const roots: string[] = [];
 
@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 function freshRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), 'pending-order-'));
+  const root = tempDir('pending-order-');
   roots.push(root);
   return root;
 }

@@ -1,19 +1,19 @@
 // tests/unit/specialist/job-root.test.ts
 // Contract tests for common-root resolution and branch detection
-
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { resolveCommonGitRoot, resolveJobsDir, resolveCurrentBranch } from '../../../src/specialist/job-root.js';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 describe('resolveCommonGitRoot', () => {
   let tempDir: string;
   let gitDir: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'job-root-test-'));
+    tempDir = createTempDir('job-root-test-');
     gitDir = join(tempDir, '.git');
     spawnSync('git', ['init'], { cwd: tempDir, stdio: 'ignore' });
     spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tempDir });
@@ -37,7 +37,7 @@ describe('resolveCommonGitRoot', () => {
   });
 
   it('returns undefined when git is unavailable', () => {
-    const nonGitDir = mkdtempSync(join(tmpdir(), 'non-git-'));
+    const nonGitDir = createTempDir('non-git-');
     try {
       const root = resolveCommonGitRoot(nonGitDir);
       expect(root).toBeUndefined();
@@ -51,7 +51,7 @@ describe('resolveJobsDir', () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'jobs-dir-test-'));
+    tempDir = createTempDir('jobs-dir-test-');
     spawnSync('git', ['init'], { cwd: tempDir, stdio: 'ignore' });
     spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tempDir });
     spawnSync('git', ['config', 'user.name', 'Test'], { cwd: tempDir });
@@ -74,7 +74,7 @@ describe('resolveJobsDir', () => {
   });
 
   it('falls back to cwd/.specialists/jobs when git is unavailable', () => {
-    const nonGitDir = mkdtempSync(join(tmpdir(), 'non-git-jobs-'));
+    const nonGitDir = createTempDir('non-git-jobs-');
     try {
       const jobsDir = resolveJobsDir(nonGitDir);
       expect(jobsDir).toBe(join(nonGitDir, '.specialists', 'jobs'));
@@ -88,7 +88,7 @@ describe('resolveCurrentBranch', () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'branch-test-'));
+    tempDir = createTempDir('branch-test-');
     spawnSync('git', ['init'], { cwd: tempDir, stdio: 'ignore' });
     spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tempDir });
     spawnSync('git', ['config', 'user.name', 'Test'], { cwd: tempDir });
@@ -124,7 +124,7 @@ describe('resolveCurrentBranch', () => {
   });
 
   it('returns undefined when git is unavailable', () => {
-    const nonGitDir = mkdtempSync(join(tmpdir(), 'non-git-branch-'));
+    const nonGitDir = createTempDir('non-git-branch-');
     try {
       const branch = resolveCurrentBranch(nonGitDir);
       expect(branch).toBeUndefined();

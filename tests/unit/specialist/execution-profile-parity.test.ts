@@ -60,8 +60,7 @@
 // ---------------------------------------------------------------------------------------
 import { describe, it, expect, vi, afterEach, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /** The native path must never spawn; the same guard the other activation suites use. */
@@ -93,7 +92,7 @@ vi.mock('../../../src/pi/session.js', async (importOriginal) => {
 });
 const PARITY_NPM_SOURCE = 'npm:pi-parity-probe';
 const PARITY_NPM_PACKAGE = 'pi-parity-probe';
-const PARITY_NPM_ROOT = mkdtempSync(join(tmpdir(), 'parity-node-modules-'));
+const PARITY_NPM_ROOT = tempDir('parity-node-modules-');
 npmRoot.dir = PARITY_NPM_ROOT;
 mkdirSync(join(PARITY_NPM_ROOT, PARITY_NPM_PACKAGE), { recursive: true });
 writeFileSync(
@@ -130,11 +129,11 @@ import { GUARDED_TOOL_NAMES } from '../../../src/activation/guarded-tools.js';
  * carry it. The parity sweep asserts the host sets nothing that is absent from this map.
  */
 const SESSION_OPTION_TO_PROFILE_KEY: Record<string, readonly string[]> = {
-  resourceLoader: ['skills', 'resources', 'extensions'],
+  // The loader also carries the role prompt: pi ignores a `systemPrompt` session option (HIRYUEN-774).
+  resourceLoader: ['skills', 'resources', 'extensions', 'outputContractSchema'],
   model: ['model'],
   customTools: ['customTools'],
   tools: ['tools'],
-  systemPrompt: ['outputContractSchema'],
   cwd: ['cwd'],
   thinkingLevel: ['thinking'],
   noTools: ['builtinToolsFenced'],
@@ -153,8 +152,9 @@ import {
 } from '../../../src/pi/session.js';
 import type { PiAgentSessionEvent, PiAgentSessionLike, PiSdk } from '../../../src/activation/pi-sdk.js';
 import type { JsonSchema } from '../../../src/specialist/system-prompt.js';
-import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
+import { FAKE_AGENT_DIR, FakeResourceLoader, loaderRolePrompt } from '../../utils/pi-resource-loader-double.js';
 import { testWorkItems } from '../../utils/test-work-items.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 // ------------------------------------------------------------------ the contract block
 
@@ -420,7 +420,7 @@ function diffProfiles(native: ExecutionProfile, legacy: ExecutionProfile): strin
 
 const workspaces: string[] = [];
 function workspace(): string {
-  const root = mkdtempSync(join(tmpdir(), 'profile-parity-'));
+  const root = tempDir('profile-parity-');
   workspaces.push(root);
   return root;
 }
@@ -639,7 +639,7 @@ async function compileNativeProfile(
     .specialist.capabilities ?? {});
   const specSkills = ((spec as { specialist: { skills?: { paths?: string[]; scripts?: Array<{ phase?: string; inject_output?: boolean }> } } })
     .specialist.skills ?? {});
-  const systemPrompt = String(createArgs.systemPrompt ?? '');
+  const systemPrompt = loaderRolePrompt(loader);
   const model = createArgs.model as { id?: string; provider?: string } | undefined;
 
   return {

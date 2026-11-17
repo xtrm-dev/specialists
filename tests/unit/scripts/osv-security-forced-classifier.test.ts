@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
+
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const require = createRequire(import.meta.url);
 const {
@@ -45,7 +45,7 @@ function protectedScanScript(): string {
 }
 
 function runProtectedScan(report: string, options: { scannerStatus?: number; classifierFailure?: boolean } = {}) {
-  const fixtureDir = mkdtempSync(join(tmpdir(), 'osv-workflow-gate-'));
+  const fixtureDir = tempDir('osv-workflow-gate-');
   const binDir = join(fixtureDir, 'bin');
   const fixture = join(fixtureDir, 'report.json');
   const scanner = join(binDir, 'osv-scanner');

@@ -24,6 +24,24 @@ describe('analyzeGlobalUserConfigDrift', () => {
     return e;
   };
 
+  it('reports a short entry whose Specialist this machine cannot resolve', () => {
+    // Without the schema-template fallback such an entry was invisible to doctor, which is how a
+    // user.json reached a state where every write failed (SPECIALISTS-4448).
+    const existing = { 'frontend-auditor': { execution: { timeout_ms: 900_000 } } };
+    const report = analyzeGlobalUserConfigDrift(existing, template);
+    expect(report.missingFields['frontend-auditor']).toEqual(
+      expect.arrayContaining(['execution.model', 'beads_write_notes', 'skills']),
+    );
+    // The value the operator set is not reported as missing.
+    expect(report.missingFields['frontend-auditor']).not.toContain('execution.timeout_ms');
+  });
+
+  it('never reports the reserved route block as lagging the template', () => {
+    const existing = { claude_bridge: { enabled: true } };
+    const report = analyzeGlobalUserConfigDrift(existing, template);
+    expect(report.missingFields).toEqual({});
+  });
+
   it('reports missing template fields, retired, inert and missing-path sources without mutating input', () => {
     const existing = {
       _doc: 'x',

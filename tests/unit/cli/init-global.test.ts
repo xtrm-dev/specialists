@@ -199,12 +199,18 @@ describe('mergeGlobalUserConfig — idempotent merge', () => {
     expect(result.config.executor.skills.paths).toEqual([]);
   });
 
-  it('keeps removed specialists in the file and flags them', () => {
+  it('keeps a specialist the template no longer lists, backfilled and reported as not installed', () => {
+    // Was `removed: ['debugger']`. A name with no loaded definition is not "removed" — the file is
+    // shared across machines, and leaving the entry short made every later write fail validation
+    // (SPECIALISTS-4448). It stays, in the full template shape, reported as not installed here.
     const first = mergeGlobalUserConfig({}, template()).config;
-    const shrunkenTemplate = buildGlobalUserConfigTemplate(['executor']); // debugger removed
+    const shrunkenTemplate = buildGlobalUserConfigTemplate(['executor']); // debugger not resolvable
     const result = mergeGlobalUserConfig(first, shrunkenTemplate);
-    expect(result.removed).toEqual(['debugger']);
+    expect(result.notInstalledHere).toEqual(['debugger']);
+    expect(result.removed).toEqual([]);
     expect(result.config.debugger).toBeDefined();
+    expect(Object.keys(result.config.debugger.execution).sort())
+      .toEqual(Object.keys(buildSpecialistOverrideTemplate().execution).sort());
   });
 
   it('appends newly-shipped specialists to an existing file', () => {

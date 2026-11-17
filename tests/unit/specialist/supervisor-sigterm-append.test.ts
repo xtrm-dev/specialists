@@ -1,9 +1,9 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, existsSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureObservabilityDbFile, resolveObservabilityDbLocation } from '../../../src/specialist/observability-db.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 function makeRunOptions() {
   return { name: 'test-specialist', prompt: 'do something', keepAlive: true, inputBeadId: 'unitAI-readonly-1' };
@@ -86,7 +86,7 @@ describe('Supervisor SIGTERM append behavior', () => {
 
     ({ Supervisor } = await import('../../../src/specialist/supervisor.js'));
 
-    tmpDir = mkdtempSync(join(tmpdir(), 'supervisor-sigterm-append-'));
+    tmpDir = tempDir('supervisor-sigterm-append-');
     jobsDir = join(tmpDir, 'jobs');
     mkdirSync(jobsDir, { recursive: true });
     supervisors = [];

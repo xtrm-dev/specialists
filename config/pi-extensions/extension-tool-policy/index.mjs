@@ -101,14 +101,22 @@ export function buildActiveToolAdvisory(activeTools) {
   return `${header}\n${lines.join("\n")}`;
 }
 
+
+function notify(ctx, message, level = 'error') {
+  try {
+    if (ctx?.ui?.notify) { ctx.ui.notify(message, level); return; }
+  } catch {}
+  console.error(message);
+}
+
 export default function extensionToolPolicy(pi) {
-  pi.on("session_start", () => {
+  pi.on("session_start", (_event, ctx) => {
     try {
       const allTools = pi.getAllTools();
       const active = selectActiveTools(allTools, process.env.PI_SPECIALIST_ALLOWED_NATIVE_TOOLS);
       pi.setActiveTools(active);
     } catch (error) {
-      console.error(`[xtrm-tool-policy] failed to apply tool policy: ${error?.message ?? String(error)}`);
+      notify(ctx, `[xtrm-tool-policy] failed to apply tool policy: ${error?.message ?? String(error)}`);
       // Selection may fail after another extension or runtime layer activated
       // tools. Explicitly reset to empty rather than assuming
       // --no-builtin-tools still owns the active set. Pi catches extension
@@ -117,7 +125,7 @@ export default function extensionToolPolicy(pi) {
       try {
         pi.setActiveTools([]);
       } catch (resetError) {
-        console.error(`[xtrm-tool-policy] failed to clear active tools: ${resetError?.message ?? String(resetError)}`);
+        notify(ctx, `[xtrm-tool-policy] failed to clear active tools: ${resetError?.message ?? String(resetError)}`);
         process.exit(1);
       }
     }
@@ -131,14 +139,14 @@ export default function extensionToolPolicy(pi) {
     // reason and then continue.
     const missing = missingPromisedTools(pi.getActiveTools(), process.env[REQUIRED_EXTENSION_TOOLS_ENV_KEY]);
     if (missing.length > 0) {
-      console.error(
+      notify(ctx,
         `[xtrm-tool-policy] contract promises tools this session did not activate: ${missing.join(", ")}. ` +
           "Refusing to run with a smaller tool surface than the contract declares.",
       );
       try {
         pi.setActiveTools([]);
       } catch (resetError) {
-        console.error(`[xtrm-tool-policy] failed to clear active tools: ${resetError?.message ?? String(resetError)}`);
+        notify(ctx, `[xtrm-tool-policy] failed to clear active tools: ${resetError?.message ?? String(resetError)}`);
       }
       // Pi catches handler exceptions and continues, so an empty tool set alone is not a
       // refusal — the process must end for this to be fail-closed.
@@ -146,7 +154,7 @@ export default function extensionToolPolicy(pi) {
     }
   });
 
-  pi.on("before_agent_start", (event) => {
+  pi.on("before_agent_start", (event, ctx) => {
     try {
       // Runtime-confirmed active set — reflects the session_start policy
       // resolution (granted natives + active extension tools). Never list a
@@ -162,7 +170,7 @@ export default function extensionToolPolicy(pi) {
       return { systemPrompt: `${event.systemPrompt ?? ""}\n\n${advisory}` };
     } catch (error) {
       // Advisory is best-effort; never take the session down.
-      console.error(`[xtrm-tool-policy] failed to append advisory: ${error?.message ?? String(error)}`);
+      notify(ctx, `[xtrm-tool-policy] failed to append advisory: ${error?.message ?? String(error)}`);
       return undefined;
     }
   });

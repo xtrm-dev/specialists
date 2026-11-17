@@ -1,9 +1,10 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 import { afterEach, describe, expect, it } from 'vitest';
-import { copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { spawnSync } from 'node:child_process';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 const entry = join(repoRoot, 'src/index.ts');
@@ -51,7 +52,7 @@ describe('integration: specialists doctor managed mirrors', () => {
   });
 
   it('reports missing managed mirrors with sync-defaults fix hint', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-doctor-'));
+    tempDir = createTempDir('specialists-int-doctor-');
 
     const result = runCli(tempDir, ['doctor']);
 
@@ -64,7 +65,7 @@ describe('integration: specialists doctor managed mirrors', () => {
   });
 
   it('reports managed-mirror mismatch details and sync hint', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-doctor-'));
+    tempDir = createTempDir('specialists-int-doctor-');
     await setupXtrmStructure(tempDir);
     await seedCanonicalMirrorSources(tempDir);
 

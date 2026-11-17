@@ -10,6 +10,7 @@
 // extension's stderr WARN pattern.
 
 import { existsSync } from 'node:fs';
+import { runtimeWarn } from '../utils/runtime-diagnostics.js';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -37,10 +38,7 @@ export function getReadLineNumbersExtensionPath(): string | null {
     }
   }
   cached = null;
-  process.stderr.write(
-    '[read-line-numbers] WARN: bundled extension not found alongside package. ' +
-      'Model-facing read output will not be line-numbered for this session.\n',
-  );
+  runtimeWarn('read-line-numbers', 'bundled extension not found alongside package. Model-facing read output will not be line-numbered for this session.');
   return cached;
 }
 

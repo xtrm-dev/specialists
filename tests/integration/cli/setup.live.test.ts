@@ -4,10 +4,11 @@
 // and authenticated runtime that should not be required for discovery smoke.
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { spawnSync } from 'node:child_process';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const liveDescribe = process.env.SPECIALISTS_LIVE_SMOKE === '1' ? describe : describe.skip;
 const repoRoot = resolve(import.meta.dirname, '../../..');
@@ -23,8 +24,8 @@ liveDescribe('integration: specialists setup live smoke', () => {
   });
 
   it('runs discovery JSON against isolated fixture repo', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-setup-live-'));
-    tempHome = await mkdtemp(join(tmpdir(), 'specialists-setup-home-'));
+    tempDir = createTempDir('specialists-setup-live-');
+    tempHome = createTempDir('specialists-setup-home-');
 
     await mkdir(join(tempDir, '.specialists', 'user'), { recursive: true });
     await mkdir(join(tempHome, '.config', 'specialists'), { recursive: true });

@@ -1,6 +1,6 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

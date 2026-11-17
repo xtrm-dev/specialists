@@ -42,7 +42,13 @@
 import { randomUUID } from 'node:crypto';
 import { contractToMarkdown } from './contract-markdown.js';
 import { existsSync } from 'node:fs';
-import { SpecialistLoader, parseNpmSourceName, STALL_DETECTION_DEFAULTS, type StallDetectionConfig } from '../specialist/loader.js';
+import {
+  ClaudeBridgeRouteModelMismatchError,
+  SpecialistLoader,
+  parseNpmSourceName,
+  STALL_DETECTION_DEFAULTS,
+  type StallDetectionConfig,
+} from '../specialist/loader.js';
 import { buildSystemPrompt } from '../specialist/system-prompt.js';
 import { renderTaskPrompt } from '../specialist/task-prompt.js';
 import {
@@ -74,19 +80,31 @@ import {
   claudeBridgeOffSwitches,
   claudeBridgeRouteEnabled,
   isBridgedModel,
+  operatorClaudeBridgeEnabled,
 } from '../pi/claude-bridge.js';
-import { getPermissionGuardExtensionPath, resolvePermissionGuardForSpawn } from '../pi/permission-guard-extension.js';
+import { getPermissionGuardExtensionPath } from '../pi/permission-guard-extension.js';
 import {
-  clearIdentityEnv,
-  isIdentityManagedKey,
   resolveAgentLaunchEnv,
-  restoreIdentityEnv,
-  snapshotIdentityEnv,
+  shimBinDir,
   specialistHolderName,
   warnIdentityEnv,
   type IdentityEnvRun,
 } from '../pi/identity-env.js';
+import { hasActivationEnv } from './activation-bash-env.js';
 import { formatResolvedToolContract, withDiscoveredExtensionTools, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
+
+/**
+ * Tools that spawn a child process from the HOST environment, which the activation's own
+ * identity does not reach (SPECIALISTS-4456 channel, SPECIALISTS-4487 fix). Named here rather
+ * than in a comment so a dispatch can say so out loud: a contract that grants one of these
+ * lets the activation act as whoever dispatched it, from a tool the identity hook cannot see.
+ */
+const HOST_ENV_SPAWNING_TOOLS = ['python'] as const;
+
+/** The granted tools whose child processes the activation's identity cannot reach. */
+export function uncoveredHostEnvSpawns(toolsList: readonly string[]): string[] {
+  return HOST_ENV_SPAWNING_TOOLS.filter((tool) => toolsList.includes(tool));
+}
 import { resolveModelChain } from '../specialist/model-chain.js';
 import { extractPurposeExcerpt, extractSections } from './contract-sections.js';
 import {
@@ -131,7 +149,7 @@ import { FleetRegistry, RESUMABLE_STATES, RETRYABLE_STATES, nextAttemptId, type 
 import { publishSettlement, republishPendingSettlements, type SettlementSubject } from './settlement-publication.js';
 import { createFileSettlementStore, type SettlementStore } from './settlement-store.js';
 import { join } from 'node:path';
-import { createFileDiagnosticsSink, runtimeDiagnosticsSinkPath, setRuntimeDiagnosticsSink } from '../utils/runtime-diagnostics.js';
+import { createFileDiagnosticsSink, runtimeDiagnosticsSinkPath, setRuntimeDiagnosticsSink, runtimeWarn } from '../utils/runtime-diagnostics.js';
 import { NULL_AUTHORITY_WRITER, type AuthorityWriter } from './authority-store.js';
 import {
   DispatchRejectedError,
@@ -758,6 +776,31 @@ export function resolveWorkspace(cwd: string): WorkspaceIdentity {
   return workspaceIdentityFor(cwd);
 }
 
+/**
+ * Emit `session_start` on a freshly created native session.
+ *
+ * `sdk.createAgentSession` builds the session but does NOT emit the lifecycle: that is
+ * `AgentSession.bindExtensions`, which the CLI calls after it creates a session. A host that
+ * skips it runs every extension without its `session_start` handler. SPECIALISTS-4441: the
+ * Claude Code bridge registers its provider from exactly that handler for every module instance
+ * after the first in a process, so skipping it left the bridged provider unregistered and the
+ * post-load verification reported "the extension is installed but did not load its provider".
+ *
+ * No UI bindings are passed: a native activation has no terminal to bind to, and every binding
+ * field is optional on pi's side.
+ */
+export async function bindActivationSession(
+  session: Pick<PiAgentSessionLike, 'bindExtensions'>,
+): Promise<{ bound: boolean; error?: string }> {
+  if (typeof session.bindExtensions !== 'function') return { bound: false };
+  try {
+    await session.bindExtensions({});
+    return { bound: true };
+  } catch (error) {
+    return { bound: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 /** Signal 0 probes existence; EPERM means alive under another uid. */
 function processAlive(pid: number): boolean {
   try {
@@ -770,8 +813,29 @@ function processAlive(pid: number): boolean {
 
 export function createActivationResourceLoader(
   sdk: PiSdk,
-  options: { cwd: string; skillPaths: string[]; extensionPaths?: string[] },
+  options: {
+    cwd: string;
+    skillPaths: string[];
+    extensionPaths?: string[];
+    rolePrompt?: { text: string; mode?: 'append' | 'replace' };
+  },
 ): PiResourceLoaderLike {
+  // Role prompt wiring (HIRYUEN-774). pi takes a session's system prompt ONLY from the
+  // resource loader: `createAgentSession` seeds the agent with an empty prompt and ignores a
+  // `systemPrompt` option, and `AgentSession` rebuilds the prompt from the loader's
+  // `getSystemPrompt()` / `getAppendSystemPrompt()`. A loader built without them gave every
+  // native activation pi's generic coding preamble and no role prompt at all. The two modes
+  // mirror the legacy CLI (src/pi/session.ts): `append` (the default) is
+  // `--append-system-prompt`, `replace` is `--system-prompt`; the CLI fills these same two
+  // loader options from those flags. An empty prompt is omitted, as the legacy runner does.
+  const rolePromptText = options.rolePrompt?.text ?? '';
+  const rolePromptOptions =
+    rolePromptText.length === 0
+      ? {}
+      : options.rolePrompt?.mode === 'replace'
+        ? { systemPrompt: rolePromptText }
+        : { appendSystemPrompt: [rolePromptText] };
+
   // Codemode builtin wiring (SPECIALISTS-4260 follow-up).
   //
   // The `codemode` tool registers ONLY through pi's codemode extension, and SDK sessions do not
@@ -816,6 +880,7 @@ export function createActivationResourceLoader(
     noContextFiles: true,
     noPromptTemplates: true,
     noThemes: true,
+    ...rolePromptOptions,
   });
 }
 
@@ -1145,21 +1210,6 @@ export class NativeActivationHost {
   private readonly admission: (specialist: unknown, tier: string, toolContract: ResolvedToolContract) => void;
   /** Guards the once-per-process settlement republish pass (SPECIALISTS-54). */
   private republished = false;
-  /**
-   * The identity env live activations have put on `process.env`, in apply order
-   * (SPECIALISTS-4423 F2, stack per the delta review). One host, one process env:
-   * the managed keys are cleared before each apply, so a smaller answer cannot
-   * inherit a bigger one's GIT_CONFIG index, and the stack keeps two facts straight
-   * that a single owner could not — that the LAST live activation owns the env, and
-   * that the state to return to is the one captured before the FIRST of them.
-   *
-   * Still one process env for every activation: this bounds what a settled
-   * activation leaves behind, it does not give two running ones separate identities
-   * (that is SPECIALISTS-4427, via the bash tool's spawnHook).
-   */
-  private readonly liveIdentityEnv: Array<{ activationId: string; env: Record<string, string> }> = [];
-  /** State before the oldest live activation applied; null whenever the stack is empty. */
-  private identityEnvBaseline: Record<string, string | undefined> | null = null;
   private readonly env: Record<string, string | undefined>;
 
   private readonly registry = new FleetRegistry();
@@ -1263,138 +1313,6 @@ export class NativeActivationHost {
    * evidence: a refused dispatch is still runtime evidence, and a dispatch that failed
    * silently is indistinguishable from one that never happened.
    */
-  /**
-   * Give `process.env` this activation's agent identity (SPECIALISTS-4423 F2).
-   *
-   * The managed keys are cleared FIRST: `xt identity env` answers with a block sized
-   * by the role's App, so a later, smaller answer must not leave an earlier one's
-   * GIT_CONFIG index or author behind. The baseline is captured only when the stack
-   * goes empty → non-empty, so it is always the state before the OLDEST live
-   * activation — never another activation's identity.
-   */
-  private applyActivationIdentityEnv(
-    activationId: string,
-    specialistName: string,
-    workspacePath: string,
-  ): void {
-    const launchEnv = resolveAgentLaunchEnv({
-      holder: specialistHolderName(specialistName, activationId),
-      roleName: specialistName,
-      cwd: workspacePath,
-      env: process.env,
-      run: this.identityEnvRun,
-    });
-    const existing = this.liveIdentityEnv.findIndex((entry) => entry.activationId === activationId);
-    if (existing >= 0) this.liveIdentityEnv.splice(existing, 1); // resume re-applies
-    if (this.liveIdentityEnv.length === 0) this.identityEnvBaseline = snapshotIdentityEnv(process.env);
-    this.liveIdentityEnv.push({ activationId, env: launchEnv });
-    this.writeIdentityEnv(launchEnv);
-  }
-
-  /** Clear the managed keys, then apply one activation's env. */
-  private writeIdentityEnv(env: Record<string, string>): void {
-    clearIdentityEnv(process.env);
-    Object.assign(process.env, env);
-  }
-
-  /** True when `process.env` still carries exactly the managed keys of `env`. */
-  private identityEnvMatches(env: Record<string, string>): boolean {
-    const current = snapshotIdentityEnv(process.env);
-    for (const key of new Set([...Object.keys(env), ...Object.keys(current)])) {
-      if (!isIdentityManagedKey(key)) continue; // PATH is one process-wide value by design
-      if ((current[key] ?? '') !== (env[key] ?? '')) return false;
-    }
-    return true;
-  }
-
-  /**
-   * Put this activation's identity back at the start of a leg (N1).
-   *
-   * Called from `agent_start`, which every leg reaches — the first turn, a fallback
-   * model, a retry, a background wake and a resume. Two cases: the activation is not on
-   * the stack at all (a wake or resume after its terminal settle), so it applies fresh;
-   * or it is on the stack but no longer owns the env, or its keys were disturbed, so it
-   * takes the env back. Taking the env makes it the top, which keeps the stack honest
-   * about who wrote it last.
-   */
-  private assertActivationIdentityEnv(snapshot: ActivationSnapshot): void {
-    const previousTop = this.liveIdentityEnv[this.liveIdentityEnv.length - 1]?.activationId;
-    const index = this.liveIdentityEnv.findIndex((entry) => entry.activationId === snapshot.activationId);
-    if (index < 0) {
-      this.applyActivationIdentityEnv(
-        snapshot.activationId,
-        snapshot.specialist,
-        snapshot.workspace?.worktreePath ?? this.cwd,
-      );
-      this.warnIdentityTakeover(snapshot.activationId, previousTop);
-      return;
-    }
-    const entry = this.liveIdentityEnv[index];
-    const isTop = index === this.liveIdentityEnv.length - 1;
-    if (isTop && this.identityEnvMatches(entry.env)) return;
-    this.liveIdentityEnv.splice(index, 1);
-    this.liveIdentityEnv.push(entry);
-    this.writeIdentityEnv(entry.env);
-    this.warnIdentityTakeover(snapshot.activationId, previousTop);
-  }
-
-  /**
-   * N5: taking the env from another live activation is the known concurrency limit, and
-   * it happens at a LEG ENTRY, not at a settle — so it must be visible on the same
-   * channel, not only once the winner finally settles. Ids only: never a value.
-   */
-  private warnIdentityTakeover(activationId: string, previousTop: string | undefined): void {
-    if (!previousTop || previousTop === activationId || this.liveIdentityEnv.length < 2) return;
-    warnIdentityEnv(
-      `activation ${activationId} started a leg and took process env from ${previousTop}; ${this.liveIdentityEnv.length} activations are live`,
-    );
-  }
-
-  /**
-   * Host shutdown (N3): nothing may outlive the host with an activation's identity on
-   * `process.env`. The stack is dropped and the baseline restored, whatever state the
-   * activations were in — a stopped, timed-out or crashed activation cannot restore
-   * itself, so the last owner of the process env has to.
-   */
-  shutdown(): void {
-    this.liveIdentityEnv.length = 0;
-    const baseline = this.identityEnvBaseline;
-    this.identityEnvBaseline = null;
-    if (baseline) restoreIdentityEnv(baseline, process.env);
-  }
-
-  /**
-   * Take a settled activation off the stack (SPECIALISTS-4423 F2).
-   *
-   * Only the activation on TOP owns `process.env`, so only its settle touches it:
-   * the previous top takes the env back (that activation is still running and must
-   * keep ITS identity — leaving the baseline there would run its remaining commands
-   * as the operator, silently), and the bottom-most settle restores the baseline.
-   * A settle from anywhere else in the stack changes nothing in `process.env`.
-   */
-  private settleActivationIdentityEnv(activationId: string): void {
-    const index = this.liveIdentityEnv.findIndex((entry) => entry.activationId === activationId);
-    if (index < 0) return;
-    const wasTop = index === this.liveIdentityEnv.length - 1;
-    this.liveIdentityEnv.splice(index, 1);
-    if (!wasTop) return;
-
-    const top = this.liveIdentityEnv[this.liveIdentityEnv.length - 1];
-    if (!top) {
-      const baseline = this.identityEnvBaseline;
-      this.identityEnvBaseline = null;
-      if (baseline) restoreIdentityEnv(baseline, process.env);
-      return;
-    }
-    this.writeIdentityEnv(top.env);
-    // The env is shared, so the swap is money-moving information: an activation that
-    // settles while others run quietly hands the process to another identity. Ids
-    // only — never a holder's value, never a config value.
-    warnIdentityEnv(
-      `activation ${activationId} settled while ${this.liveIdentityEnv.length} others are live; process env now carries ${top.activationId}`,
-    );
-  }
-
   async start(request: ActivationRequest): Promise<ActivationHandle> {
     const activationId = `act:${randomUUID().slice(0, 12)}`;
     const attemptId = `att:${activationId.slice(4)}:1`;
@@ -1491,7 +1409,6 @@ export class NativeActivationHost {
 
     const reject = (reason: string, detail: Record<string, unknown> = {}): never => {
       // All first, so no refusal path can forget any of them.
-      this.settleActivationIdentityEnv(activationId);
       releaseLeaseOnRefusal();
       releaseClaimForRefusal();
       removeWorkspaceOnRefusal();
@@ -1511,6 +1428,16 @@ export class NativeActivationHost {
     await this.republishOncePerProcess();
 
     const specialist = await this.loader.get(request.specialist).catch((error: unknown) => {
+      // SPECIALISTS-4442: a Specialist the operator allow list names but cannot give a bridged
+      // model is refused with its own code, never reported as an unknown name and never admitted.
+      if (error instanceof ClaudeBridgeRouteModelMismatchError) {
+        // Literal, not error.code: the refusal-reason set is asserted against the literal codes in
+        // this file (dispatch-refusal-fix.test.ts). The dispatch test pins the two together.
+        return reject('claude_bridge_route_model_mismatch', {
+          requestedModel: error.model ?? undefined,
+          note: error.message,
+        });
+      }
       return reject('unknown_specialist', {
         note: error instanceof Error ? error.message : String(error),
       });
@@ -1872,7 +1799,7 @@ export class NativeActivationHost {
     if (!modelCheck.ok && !claudeBridge && modelChain[0]?.startsWith(`${CLAUDE_BRIDGE_PROVIDER}/`)) {
       return reject('model_unavailable', {
         requestedModel: modelChain[0],
-        note: `${modelCheck.reason ?? 'No models match'} (the Claude Code route is off: ${claudeBridgeOffSwitches(execution).join(' and ')} is not enabled; not falling back to another provider)`,
+        note: `${modelCheck.reason ?? 'No models match'} (the Claude Code route is off: ${claudeBridgeOffSwitches(execution, operatorClaudeBridgeEnabled, request.specialist).join(' and ')} is not enabled; not falling back to another provider)`,
       });
     }
     while ((!modelCheck.ok || !modelCheck.model) && modelIndex < modelChain.length - 1) {
@@ -1924,16 +1851,14 @@ export class NativeActivationHost {
     // yields an empty set (a non-existent path loads with NO error) is a refusal, not a
     // skip, detected positively inside `discoverDynamicExtensionTools`.
     for (const source of skippedDeclaredSources) {
-      process.stderr.write(formatSkippedExtensionSourceMessage(source));
+      runtimeWarn('extension-discovery', formatSkippedExtensionSourceMessage(source).trim());
     }
     const { kept: dynamicExtensions, dropped: droppedExtensions } = deduplicateExtensionSources(
       curatedExtensions.dedupeAgainstDynamic,
       declaredLocalExtensions,
     );
     for (const { dropped, keptAs } of droppedExtensions) {
-      process.stderr.write(
-        `[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').\n`,
-      );
+      runtimeWarn('python-kernel', `DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').`);
     }
 
     // Discovery runs exactly once per activation, before the effective contract, the prompt,
@@ -2143,7 +2068,7 @@ export class NativeActivationHost {
       // the legacy path. Without it the reviewer role loses its diff entirely.
       ...(isReviewer
         ? {
-            appendExecutionContext: createReviewerDiffAppendHook((message) => process.stderr.write(`${message}\n`)),
+            appendExecutionContext: createReviewerDiffAppendHook((message) => runtimeWarn('reviewer-diff', message)),
           }
         : {}),
     });
@@ -2269,6 +2194,51 @@ export class NativeActivationHost {
       },
     });
 
+    // CORE-2525/2528 identity, SPECIALISTS-4456 channel: the activation's identity is
+    // built here and handed to the activation's OWN shells through the bash tool's
+    // `spawnHook` (see `createGuardedTools`). It is deliberately NOT written to
+    // `process.env` any more.
+    //
+    // A native activation runs in the HOST process, and the host may be another agent: a
+    // Pi worker dispatching a read-tier activation used to inherit that activation's
+    // `XTRM_ROLE` and tier, so its own `git push` refused with "the reviewer role does not
+    // push; no credential is offered" (SPECIALISTS-4456). One process env cannot carry two
+    // identities, and the dispatcher's identity is the one that must not move.
+    //
+    // CORE-2524.4 still holds, and is now scoped to the child: each shell's PATH is composed
+    // with the gh shim directory first (inside the spawn hook, from the PATH pi resolved for
+    // that spawn, so pi's own managed bin directory survives), so the activation's `gh` is
+    // the shim and not the real binary. The host's own PATH is untouched, which is the point
+    // — the dispatcher's `gh` must resolve to the dispatcher's identity.
+    const activationLaunchEnv = resolveAgentLaunchEnv({
+      holder: specialistHolderName(specialist.specialist.metadata.name, activationId),
+      roleName: specialist.specialist.metadata.name,
+      cwd: workspace.worktreePath,
+      // The lookup runs in the host env, so `xt` resolves the role; only the ANSWER is
+      // scoped to the child.
+      env: process.env,
+      run: this.identityEnvRun,
+    });
+    // PATH cannot be precomputed here: the hook must compose it from the PATH pi gives the
+    // spawn, or it would drop pi's managed bin directory (fd, rg). The launcher's PATH is
+    // therefore stripped and only the shim directory is passed on.
+    const { PATH: _launchPath, ...activationEnv } = activationLaunchEnv;
+    const activationShimDir = shimBinDir(process.env);
+    // Visibility for the one limit the hook cannot cover: a tool whose child inherits the
+    // host env runs as the dispatcher, not as this activation (SPECIALISTS-4487).
+    const uncoveredSpawns = uncoveredHostEnvSpawns(effectiveToolContract.toolsList);
+    if (uncoveredSpawns.length > 0 && hasActivationEnv(activationEnv, activationShimDir)) {
+      warnIdentityEnv(
+        `activation ${activationId} grants ${uncoveredSpawns.join(', ')}, whose child processes ` +
+        `inherit the dispatching session's identity rather than the activation's ` +
+        `(SPECIALISTS-4487); its bash and powershell calls carry the activation's`,
+      );
+    }
+    // The tier channel stays on the CLI-spawn path only. In process the guard is loaded
+    // for READ_ONLY sessions and sandboxes every bash call unconditionally, which is what
+    // authorizes them; its `tierRefusal` would refuse a NON-read-only tier, and a
+    // non-read-only tier never loads the guard. Writing the tier to `process.env` therefore
+    // protected nothing and downgraded the dispatcher (SPECIALISTS-4456).
     // PRD §52: the mutating builtins are RECONSTRUCTED and wrapped here, so the only
     // mutating tool the child can reach is one that consults the lease on every call. A
     // guard each frontend has to remember to call is optional enforcement; this one cannot
@@ -2276,6 +2246,8 @@ export class NativeActivationHost {
     const guardedTools = createGuardedTools(sdk, {
       toolNames: effectiveToolContract.toolsList,
       cwd: workspace.worktreePath,
+      env: activationEnv,
+      shimDir: activationShimDir,
       // Lease admission with the phase-1 guard carve-out: sandboxed bash in a
       // guard-loaded session is not a mutation, so the lease does not refuse it.
       admit: createNativeToolAdmission({
@@ -2326,39 +2298,24 @@ export class NativeActivationHost {
           'loaded extension set; refusing rather than running unsandboxed',
       });
     }
-    // Tier channel, native surface (SPECIALISTS-4294): the CLI spawns merge
-    // guard.tierEnv into the child env (src/pi/session.ts); in-process there is no
-    // child env — the guard reads process.env — so merge it here, exactly when the
-    // guard is in the loaded set above. Sticky by design: only READ_ONLY sessions
-    // load the guard and all want the same value, writers never read it, and CLI
-    // spawns overwrite per spawn. Without this tierRefusal is dead natively.
-    // Opt-out preserved: resolvePermissionGuardForSpawn returns null when
-    // SPECIALISTS_PERMISSION_GUARD=0 (or non-READ_ONLY), setting nothing.
-    const nativeGuard = resolvePermissionGuardForSpawn(tier);
-    if (nativeGuard && curatedExtensions.all.includes(nativeGuard.path)) {
-      Object.assign(process.env, nativeGuard.tierEnv);
-    }
-    // CORE-2525/2528: in-process there is no child env, so this activation's own
-    // agent identity rides process.env like the guard tier above. Every activation
-    // overwrites it before its first turn; two native activations running at the
-    // same moment share it, which the spawned path does not (that one is exact).
-    // CORE-2524.4: the launch env also carries PATH with the gh shim directory
-    // first. An identity without a reachable shim is useless — the activation's
-    // `gh` would be the real binary and a review would post as the operator. The
-    // shim directory precedes the host PATH, so it is also visible to this host
-    // process while the activation runs; one process, one PATH.
-    this.applyActivationIdentityEnv(activationId, specialist.specialist.metadata.name, workspace.worktreePath);
-    // N1: from here on, anything that ends this dispatch early — a refusal, an SDK that
-    // throws while creating the session, a failed producer — must take the activation off
-    // the identity stack. `reject()` covers the explicit refusals; this covers the rest,
-    // so no failure path can leave the operator's env carrying an agent identity.
     try {
     const resourceLoader = createActivationResourceLoader(sdk, {
       cwd: workspace.worktreePath,
       skillPaths: specialist.specialist.skills?.paths ?? [],
       extensionPaths: [...curatedExtensions.all, ...dynamicExtensions],
+      rolePrompt: { text: systemPrompt.text, mode: specialist.specialist.prompt.system_prompt_mode },
     });
     await resourceLoader.reload();
+    // HIRYUEN-774: the loader is pi's only system-prompt channel, so it must carry the role
+    // prompt after reload. Fail closed when it does not, or cannot say: a loader without the
+    // getters cannot feed pi's prompt either. The per-session check below adds pi's view.
+    const loaderPrompts = [resourceLoader.getSystemPrompt?.() ?? '', ...(resourceLoader.getAppendSystemPrompt?.() ?? [])];
+    if (systemPrompt.text.length > 0 && !loaderPrompts.some((text) => text.includes(systemPrompt.text))) {
+      return reject('system_prompt_not_applied', {
+        ...(autoCreatedRef ? { created_ref: autoCreatedRef } : {}),
+        note: 'the resource loader does not carry the built role prompt; a native activation never runs without its role prompt',
+      });
+    }
 
     // Session options are built once so every later attempt on a new model — the fallback
     // walk below, a retry with an override — creates its session identically to the first.
@@ -2395,7 +2352,8 @@ export class NativeActivationHost {
       // contract the child was shown. The hard filter stays: `tools` is never omitted on a
       // prompted session.
       tools: [...effectiveToolContract.toolsList, ASK_TOOL, ESCALATE_TOOL],
-      systemPrompt: systemPrompt.text,
+      // No `systemPrompt` here: pi ignores that option. The role prompt rides the resource
+      // loader above (HIRYUEN-774) and is verified on every created session below.
     };
 
     // SPECIALISTS-42 (c): post-load verification on the NATIVE path.
@@ -2416,6 +2374,21 @@ export class NativeActivationHost {
       options: { viaFallback?: boolean } = {},
     ): Promise<PiAgentSessionLike> => {
       const created = await sdk.createAgentSession({ ...baseSessionOptions, model });
+      // SPECIALISTS-4441: emit the lifecycle the extensions expect BEFORE verifying anything.
+      // `createAgentSession` does not do it; without this no extension sees session_start, and a
+      // provider registered from that handler never reaches the runtime this session uses.
+      const sessionBinding = await bindActivationSession(created.session);
+      if (claudeBridge) {
+        // A provider registered from session_start is not in the model snapshot yet: the SDK
+        // refreshes once after applying LOAD-time registrations, which does not cover this one.
+        // A failed refresh leaves the registration in place, and the verification below reports
+        // the truth rather than turning a refresh problem into a different refusal.
+        try {
+          await modelRuntime.refresh?.({ allowNetwork: false });
+        } catch {
+          // deliberately non-fatal
+        }
+      }
       const missing = missingPromisedTools(created.session);
       if (missing.length > 0) {
         // Fail closed BEFORE the binding and before any model turn: a session missing a
@@ -2468,11 +2441,18 @@ export class NativeActivationHost {
         }
         if (!resolvedModel) {
           created.session.dispose();
+          const registered = typeof modelRuntime.getProvider === 'function'
+            ? modelRuntime.getProvider(CLAUDE_BRIDGE_PROVIDER)?.id ?? null
+            : null;
           const detail = {
             requestedModel: provisionalPattern,
             note:
               `the "${CLAUDE_BRIDGE_PROVIDER}" provider did not register on the session runtime, so ` +
-              `"${provisionalPattern}" does not exist; the extension is installed but did not load its provider`,
+              `"${provisionalPattern}" does not exist; the extension is installed but did not load its provider` +
+              ` (extension ${claudeBridgePath ?? '<unresolved>'}: ` +
+              `${sessionBinding.bound ? 'session_start emitted' : 'session_start not emitted'}` +
+              `${sessionBinding.error ? `, bind failed: ${sessionBinding.error}` : ''}` +
+              `; provider "${CLAUDE_BRIDGE_PROVIDER}" is ${registered ? 'registered' : 'absent'} on the runtime)`,
           };
           if (options.viaFallback) {
             throw new DispatchRejectedError('model_unavailable', {
@@ -2561,6 +2541,29 @@ export class NativeActivationHost {
             }
           }
         }
+      }
+      // HIRYUEN-774: the role prompt must be in the session's system prompt. A session that
+      // dropped it runs with none of the role's rules and still settles with a normal-looking
+      // result, which is how this went unnoticed. Checked once, at creation, against pi's live
+      // `session.systemPrompt` (pi 1.4.0 has it; the loader check above already failed closed
+      // for a loader that cannot carry the prompt); a reused session keeps the same loader. Not
+      // covered: an extension that rewrites the prompt per turn via before_agent_start, which is
+      // that extension's deliberate choice.
+      const livePrompt = created.session.systemPrompt;
+      if (systemPrompt.text.length > 0 && typeof livePrompt === 'string' && !livePrompt.includes(systemPrompt.text)) {
+        created.session.dispose();
+        const detail = {
+          ...(autoCreatedRef ? { created_ref: autoCreatedRef } : {}),
+          note: 'the session system prompt does not contain the built role prompt; a native activation never runs without its role prompt',
+        };
+        if (options.viaFallback) {
+          throw new DispatchRejectedError('system_prompt_not_applied', {
+            specialist: request.specialist,
+            issueRef: request.issueRef,
+            ...detail,
+          });
+        }
+        return reject('system_prompt_not_applied', detail);
       }
       return created.session;
     };
@@ -2706,7 +2709,9 @@ export class NativeActivationHost {
       result,
     };
     } catch (error) {
-      this.settleActivationIdentityEnv(activationId);
+      // No cleanup of its own: every early end is already handled by `reject()` above, and a
+      // throw here has nothing left to unwind. Kept as an explicit re-throw so the boundary
+      // is visible rather than implied by the absence of a catch.
       throw error;
     }
   }
@@ -2778,15 +2783,10 @@ export class NativeActivationHost {
       const unresolved = outcomes.filter((outcome: { outcome: string }) => outcome.outcome !== 'published');
       if (unresolved.length > 0) {
         // Named, not counted: an operator has to be able to find the records.
-        process.stderr.write(
-          `[specialists] ${unresolved.length} settlement(s) still unpublished after republish: `
-            + `${unresolved.map((o: { activationId: string; attemptId: string; outcome: string }) => `${o.activationId}/${o.attemptId}=${o.outcome}`).join(', ')}\n`,
-        );
+        runtimeWarn('settlement-republish', `[specialists] ${unresolved.length} settlement(s) still unpublished after republish: ` + `${unresolved.map((o: { activationId: string; attemptId: string; outcome: string }) => `${o.activationId}/${o.attemptId}=${o.outcome}`).join(', ')}`);
       }
     } catch (error) {
-      process.stderr.write(
-        `[specialists] settlement republish pass failed: ${error instanceof Error ? error.message : String(error)}\n`,
-      );
+      runtimeWarn('settlement-republish', `[specialists] settlement republish pass failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -2841,12 +2841,8 @@ export class NativeActivationHost {
         break;
       case 'agent_start':
         this.noteWakeTurnStart(snapshot);
-        // N1: every leg starts here — first turn, fallback model, retry, wake, resume.
-        // If this activation is not on the stack (a wake or resume after its terminal
-        // settle) or its keys were disturbed, put its identity back before the leg's
-        // first tool call. Without this the shim's isAgent() is false and gh resolves to
-        // the real binary, posting as the operator.
-        this.assertActivationIdentityEnv(snapshot);
+        // Every leg — first turn, fallback, retry, wake, resume — shares the shell tools built
+        // once per dispatch, so the activation's identity needs no per-leg handling here.
         snapshot.state = 'running';
         this.save(snapshot);
         emit('turn_started');
@@ -2881,10 +2877,8 @@ export class NativeActivationHost {
         snapshot.state = 'settled';
         this.save(snapshot);
         this.releaseIfWriter(snapshot, 'settled');
-        // N1: agent_settled is a TURN boundary, not the activation's end — a fallback
-        // leg, a retry or a background wake starts another leg from here. The identity
-        // stays on the stack until a terminal state; the leg entry (agent_start)
-        // re-asserts it in case something else took the env in between.
+        // agent_settled is a TURN boundary, not the activation's end: a fallback leg, a retry
+        // or a background wake starts another leg from here.
         if (unframedWake) {
           this.wakeDirty.delete(snapshot.activationId);
           const record = this.registry.get(snapshot.activationId);
@@ -2893,12 +2887,6 @@ export class NativeActivationHost {
             void this.finalizeWakeTurn(snapshot, record, emit).finally(() => {
               this.wakeFinalising.delete(snapshot.activationId);
             });
-          } else {
-            // N6 (defensive): no finaliser will run for this settle, so nothing else
-            // would ever take the activation off the identity stack — a lost registry
-            // record or a settle redelivered while finalisation is in flight. The
-            // finaliser owns its own removal on the paths it does run.
-            this.settleActivationIdentityEnv(snapshot.activationId);
           }
         }
         break;
@@ -3191,8 +3179,7 @@ export class NativeActivationHost {
     } catch (error) {
       snapshot.state = 'failed';
       this.save(snapshot);
-      // A throw is a terminal state too: the identity must not outlive it.
-      this.settleActivationIdentityEnv(snapshot.activationId);
+      // A throw is a terminal state too: nothing of this activation may outlive it.
       const message = error instanceof Error ? error.message : String(error);
       // The run failed by THROWING, not by settling: without this the terminal event would be
       // the only record, and a reader could not tell "Pi never reported totals" from "the
@@ -3266,7 +3253,6 @@ export class NativeActivationHost {
       const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
       snapshot.state = 'failed';
       this.save(snapshot);
-      this.settleActivationIdentityEnv(snapshot.activationId);
       emit('activation_failed', { error: detail, stop_reason: last.stopReason });
       const failedResult: ActivationResult = {
         activationId: snapshot.activationId,
@@ -3397,10 +3383,6 @@ export class NativeActivationHost {
     } catch {
       // Finalisation is diagnostic plumbing on top of an already-settled turn:
       // it must never throw into the session fan-out.
-    } finally {
-      // A wake turn is unframed, so nothing else will take this activation off the
-      // stack: its settle is the activation's terminal point.
-      this.settleActivationIdentityEnv(snapshot.activationId);
     }
   }
 
@@ -3537,8 +3519,7 @@ export class NativeActivationHost {
     } finally {
       flushFailure(false);
       // The framed walk is over: no further leg is pending, so this is terminal for the
-      // activation's identity even though the activation itself stays resumable.
-      this.settleActivationIdentityEnv(record.snapshot.activationId);
+      // activation even though it stays resumable.
     }
   }
 
@@ -3731,7 +3712,18 @@ export class NativeActivationHost {
       const retryRuntime = await createGateModelRuntime(sdk);
       // SPECIALISTS-4405: the override must be able to name a bridged model too. The flag is a
       // property of the definition, so it is read from the definition rather than guessed.
-      const retrySpecialist = await this.loader.get(record.snapshot.specialist).catch(() => undefined);
+      // SPECIALISTS-4442: retry re-reads the SAME merged spec, so a retry of a listed
+      // Specialist cannot silently change the model, and a refused one stays refused.
+      const retrySpecialist = await this.loader.get(record.snapshot.specialist).catch((error: unknown) => {
+        if (error instanceof ClaudeBridgeRouteModelMismatchError) {
+          throw new DispatchRejectedError('claude_bridge_route_model_mismatch', {
+            activationId,
+            requestedModel: error.model ?? undefined,
+            note: error.message,
+          });
+        }
+        return undefined;
+      });
       // The same two halves as dispatch: the definition selects, the operator grants.
       const retryBridge = retrySpecialist
         ? claudeBridgeRouteEnabled(retrySpecialist.specialist.execution)
@@ -3821,8 +3813,7 @@ export class NativeActivationHost {
       reused_session: reusedSession,
     });
 
-    const result = this.runToSettled(record.snapshot, record.session, opts?.prompt ?? record.initialPrompt, emit, record)
-      .finally(() => this.settleActivationIdentityEnv(activationId));
+    const result = this.runToSettled(record.snapshot, record.session, opts?.prompt ?? record.initialPrompt, emit, record);
     record.result = result;
 
     return {
@@ -4088,9 +4079,8 @@ export class NativeActivationHost {
       // The per-activation threshold dies with the registry entry (same lifetime).
       this.stopToolDurationWatch(activationId);
       this.toolDurationWarnMsByActivation.delete(activationId);
-      // N3: abort() is not guaranteed to emit agent_settled, so the disposal path owns
-      // the removal itself; otherwise a stopped activation keeps the process env.
-      this.settleActivationIdentityEnv(activationId);
+      // abort() is not guaranteed to emit agent_settled, so the disposal path owns the
+      // bookkeeping itself; otherwise a stopped activation keeps its watchers alive.
       this.forgetBackgroundTasks(activationId);
       this.wakeDirty.delete(activationId);
       this.wakeFinalising.delete(activationId);
@@ -4234,11 +4224,10 @@ export class NativeActivationHost {
     record.unsubscribe();
     record.unsubscribe = record.session.subscribe((event) => this.onSessionEvent(record.snapshot, event, emit));
 
-    // One path re-applies the identity: the leg entry (agent_start). This owns only the
-    // terminal side, because resume runs a leg without the fallback walk that would
-    // otherwise take the activation off the stack.
-    const result = this.runToSettled(record.snapshot, record.session, prompt, emit, record)
-      .finally(() => this.settleActivationIdentityEnv(activationId));
+    // Resume runs one leg on the live session. It shares the dispatch's hooked shell tools,
+    // so it needs no identity bookkeeping of its own — only the terminal side belongs here.
+    const result = this.runToSettled(record.snapshot, record.session, prompt, emit, record);
+
     record.result = result;
 
     return {

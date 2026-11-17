@@ -1,10 +1,10 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, readdirSync } from 'node:fs';
+import { rmSync, readFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Database } from 'bun:sqlite';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const hookPath = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -13,7 +13,7 @@ const hookPath = join(
 
 const tmpRoots: string[] = [];
 function tmpRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), 'precompact-hook-'));
+  const root = tempDir('precompact-hook-');
   tmpRoots.push(root);
   return root;
 }

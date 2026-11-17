@@ -59,12 +59,22 @@ export interface PiResourceLoaderOptions {
   noContextFiles?: boolean;
   noPromptTemplates?: boolean;
   noThemes?: boolean;
+  /**
+   * The ONLY channels through which a session's system prompt reaches the model: pi's
+   * `AgentSession` rebuilds its prompt from `resourceLoader.getSystemPrompt()` /
+   * `getAppendSystemPrompt()`, and `createAgentSession` ignores a `systemPrompt` option.
+   * Same pair the pi CLI fills from `--system-prompt` / `--append-system-prompt`.
+   */
+  systemPrompt?: string;
+  appendSystemPrompt?: string[];
 }
 
 /** Structural view of a pi `ResourceLoader` — only what the host constructs and reads. */
 export interface PiResourceLoaderLike {
   reload(): Promise<void>;
   getSkills(): { skills: Array<{ name: string }>; diagnostics: unknown[] };
+  getSystemPrompt?(): string | undefined;
+  getAppendSystemPrompt?(): string[];
 }
 
 export interface PiSdk {
@@ -139,6 +149,18 @@ export interface PiAgentSessionLike {
   setThinkingLevel?(level: string, options?: Record<string, unknown>): void;
   setActiveToolsByName(names: string[]): void;
   waitForIdle(): Promise<void>;
+  /** The system prompt as the provider sees it. Present on real pi sessions; absent on older doubles. */
+  readonly systemPrompt?: string;
+  /**
+   * Emit the session lifecycle (pi `AgentSession.bindExtensions`). Required for every extension
+   * that does work in a `session_start` handler: `createAgentSession` builds the session but does
+   * NOT emit that event, and the CLI calls this method after creating its session
+   * (SPECIALISTS-4441: pi-claude-bridge registers its provider from that handler for every module
+   * instance after the first in a process, so a host that skips it never gets the provider).
+   *
+   * Optional because older SDK doubles have no such method; the host binds when it is present.
+   */
+  bindExtensions?(bindings?: Record<string, unknown>): Promise<void>;
   /**
    * Pi's own session token/cost/context totals (SPECIALISTS-120). Aggregates EVERY session
    * entry — including tool-reported usage, compaction and branch-summary generation, and
@@ -182,6 +204,19 @@ export interface PiAgentSessionEvent {
 export interface PiModelRuntimeLike {
   hasConfiguredAuth(providerId: string): boolean | Promise<boolean>;
   getAvailable?: () => Promise<unknown[]>;
+  /**
+   * Provider registration an extension performs at `session_start` (SPECIALISTS-4441). Present on
+   * every pi build this host supports; optional only so an old test double still satisfies the
+   * structural type.
+   */
+  registerProvider?: (name: string, config: unknown) => void;
+  /** Whether a provider is registered on THIS runtime — the fact the refusal note reports. */
+  getProvider?: (name: string) => { id?: string } | undefined;
+  /**
+   * Rebuild the runtime's model snapshot after a late registration. The SDK calls this once after
+   * applying LOAD-time registrations; a registration made from `session_start` needs it again.
+   */
+  refresh?: (options?: { allowNetwork?: boolean }) => Promise<unknown>;
 }
 
 export interface PiModelScopeResult {

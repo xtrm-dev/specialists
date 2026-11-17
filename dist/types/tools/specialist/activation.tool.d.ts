@@ -185,8 +185,8 @@ export declare const specialistDispatchSchema: z.ZodObject<{
     title?: string | undefined;
     issue_ref?: string | undefined;
     contract?: string | undefined;
-    requested_by?: string | undefined;
     model_override?: string | undefined;
+    requested_by?: string | undefined;
     thinking_override?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined;
     parent_ref?: string | undefined;
     epic_context_depth?: number | undefined;
@@ -199,8 +199,8 @@ export declare const specialistDispatchSchema: z.ZodObject<{
     title?: string | undefined;
     issue_ref?: string | undefined;
     contract?: string | undefined;
-    requested_by?: string | undefined;
     model_override?: string | undefined;
+    requested_by?: string | undefined;
     thinking_override?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined;
     parent_ref?: string | undefined;
     epic_context_depth?: number | undefined;
@@ -233,8 +233,8 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         title?: string | undefined;
         issue_ref?: string | undefined;
         contract?: string | undefined;
-        requested_by?: string | undefined;
         model_override?: string | undefined;
+        requested_by?: string | undefined;
         thinking_override?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined;
         parent_ref?: string | undefined;
         epic_context_depth?: number | undefined;
@@ -247,8 +247,8 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
         title?: string | undefined;
         issue_ref?: string | undefined;
         contract?: string | undefined;
-        requested_by?: string | undefined;
         model_override?: string | undefined;
+        requested_by?: string | undefined;
         thinking_override?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined;
         parent_ref?: string | undefined;
         epic_context_depth?: number | undefined;

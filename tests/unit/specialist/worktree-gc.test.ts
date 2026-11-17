@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 let mockSqliteClient: { listStatuses: () => any[] } | null = null;
 vi.mock('../../../src/specialist/observability-sqlite.js', () => ({
@@ -19,7 +19,7 @@ describe('collectWorktreeGcCandidates', () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'gc-test-'));
+    tempDir = createTempDir('gc-test-');
     jobsDir = join(tempDir, '.specialists', 'jobs');
     mkdirSync(jobsDir, { recursive: true });
     worktreePath = join(tempDir, 'worktrees', 'test-wt');
@@ -82,7 +82,7 @@ describe('pruneWorktrees', () => {
   let worktreePath: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'prune-test-'));
+    tempDir = createTempDir('prune-test-');
     spawnSync('git', ['init'], { cwd: tempDir, stdio: 'ignore' });
     spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tempDir });
     spawnSync('git', ['config', 'user.name', 'Test'], { cwd: tempDir });

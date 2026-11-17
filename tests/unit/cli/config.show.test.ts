@@ -1,6 +1,7 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const SPECIALIST = {
   specialist: {
@@ -53,7 +54,7 @@ describe('config CLI resolved output', () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-config-resolved-'));
+    tempDir = createTempDir('specialists-config-resolved-');
     await mkdir(join(tempDir, 'config', 'specialists'), { recursive: true });
     await mkdir(join(tempDir, '.specialists', 'catalog'), { recursive: true });
     await writeFile(join(tempDir, 'config', 'specialists', 'executor.specialist.json'), JSON.stringify(SPECIALIST), 'utf-8');
@@ -92,7 +93,7 @@ describe('config CLI resolved output — canonical catalog fallback', () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-config-resolved-canonical-'));
+    tempDir = createTempDir('specialists-config-resolved-canonical-');
     // Manifest only. NO .specialists/catalog/ directory; loader must fall back
     // to the canonical config/catalog/index.json resolved from the running module.
     await mkdir(join(tempDir, 'config', 'specialists'), { recursive: true });

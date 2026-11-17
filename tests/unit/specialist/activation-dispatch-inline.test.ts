@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -25,6 +24,7 @@ import { REQUIRED_SECTIONS } from '../../../src/activation/contract-sections.js'
 import { testWorkItems } from '../../utils/test-work-items.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const INLINE_CONTRACT =
   'PROBLEM\nProve the inline-dispatch path.\n\nSUCCESS\nA read-only activation settles.\n\n' +
@@ -84,7 +84,7 @@ afterEach(() => {
 
 function hostWith(fixture: { events?: Array<{ name: string; beadId?: string }>; permission?: string; inlineCreate?: (contract: string, opts?: { title?: string; holder?: string; activationId?: string }) => { ref: string; issueId: string; claimId: number | null } } = {}) {
   const sessionsCreated = { count: 0 };
-  const root = mkdtempSync(join(tmpdir(), 'mcp-inline-ws-'));
+  const root = tempDir('mcp-inline-ws-');
   workspaces.push(root);
   const session = fakeSession();
   const sdk: PiSdk = {

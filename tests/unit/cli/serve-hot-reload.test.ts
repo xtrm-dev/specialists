@@ -1,8 +1,8 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { createUserDirWatcher } from '../../../src/cli/serve-hot-reload.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 class FakeLoader {
   invalidations: Array<string | undefined> = [];
@@ -24,7 +24,7 @@ describe('serve hot-reload', () => {
   let loader: FakeLoader;
 
   beforeEach(() => {
-    tempRoot = mkdtempSync(join(tmpdir(), 'serve-reload-'));
+    tempRoot = tempDir('serve-reload-');
     userDir = join(tempRoot, '.specialists', 'user');
     mkdirSync(userDir, { recursive: true });
     loader = new FakeLoader();

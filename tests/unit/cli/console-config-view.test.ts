@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+
 import { join } from 'node:path';
 import {
   describeLeaf,
@@ -15,6 +15,7 @@ import {
   initialConsoleState,
   reduceConsoleState,
 } from '../../../src/cli/console/view-model.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const SGR_RE = /\x1b\[[0-9;]*m/g;
 const strip = (s: string): string => s.replace(SGR_RE, '');
@@ -151,7 +152,7 @@ describe('readGlobalConfigSnapshot — file-existence + parse handling', () => {
   const originalHome = process.env.HOME;
 
   beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), 'sp-console-config-'));
+    tmp = tempDir('sp-console-config-');
     process.env.XDG_CONFIG_HOME = tmp;
     process.env.HOME = tmp;
   });

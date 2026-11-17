@@ -1,5 +1,5 @@
-import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { rm, symlink, writeFile } from 'node:fs/promises';
+
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -7,12 +7,13 @@ import {
   verifyExactLineCitation,
   type RawPiReadEvidence,
 } from '../../../src/specialist/citation-evidence.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const temporaryDirectories: string[] = [];
 let trustedRoot = '';
 
 async function fixture(content: string): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), 'specialists-citation-'));
+  const directory = tempDir('specialists-citation-');
   temporaryDirectories.push(directory);
   trustedRoot = directory;
   const path = 'fixture.txt';
@@ -143,7 +144,7 @@ describe('verified citation evidence', () => {
     await expect(readVerifiedCitationWindow(join(trustedRoot, 'fixture.txt'), { trustedRoot })).rejects.toThrow(
       'path must be relative to trusted root',
     );
-    const outside = await mkdtemp(join(tmpdir(), 'specialists-outside-'));
+    const outside = tempDir('specialists-outside-');
     temporaryDirectories.push(outside);
     await writeFile(join(outside, 'secret.txt'), 'secret', 'utf8');
     await symlink(join(outside, 'secret.txt'), join(trustedRoot, 'escape.txt'));

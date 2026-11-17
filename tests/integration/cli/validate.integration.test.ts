@@ -1,9 +1,10 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { spawnSync } from 'node:child_process';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 const entry = join(repoRoot, 'src/index.ts');
@@ -45,7 +46,7 @@ describe('integration: specialists validate ownership resolution', () => {
   });
 
   it('reports default-mirror source for mirrored specialist', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-validate-'));
+    tempDir = createTempDir('specialists-int-validate-');
     await mkdir(join(tempDir, '.specialists', 'default'), { recursive: true });
 
     await writeFile(
@@ -64,7 +65,7 @@ describe('integration: specialists validate ownership resolution', () => {
   });
 
   it('prefers user override source over default mirror', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-validate-'));
+    tempDir = createTempDir('specialists-int-validate-');
     await mkdir(join(tempDir, '.specialists', 'default'), { recursive: true });
     await mkdir(join(tempDir, '.specialists', 'user'), { recursive: true });
 
@@ -81,7 +82,7 @@ describe('integration: specialists validate ownership resolution', () => {
   });
 
   it('returns clear not-found message for missing specialist', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-validate-'));
+    tempDir = createTempDir('specialists-int-validate-');
     const result = runCli(tempDir, ['validate', 'missing']);
 
     expect(result.status).toBe(1);

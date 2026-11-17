@@ -2,10 +2,11 @@
 // KAN-90 / unitAI-1gtou.14: sp doctor --specialists override-layer reporting.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+
 import { join } from 'node:path';
-import { mkdtemp } from 'node:fs/promises';
+
 import { buildSpecialistOverrideTemplate } from '../../../src/specialist/global-config.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 // Force the loader to ignore the installed package's canonical-asset dir so each
 // test sees ONLY the fixtures we write into tmpProject/config/specialists/.
@@ -29,8 +30,8 @@ describe('doctor --specialists  (KAN-90 override layer)', () => {
   let originalCwd: string;
 
   beforeEach(async () => {
-    tmpProject = await mkdtemp(join(tmpdir(), 'doctor-overrides-proj-'));
-    tmpHome = await mkdtemp(join(tmpdir(), 'doctor-overrides-home-'));
+    tmpProject = tempDir('doctor-overrides-proj-');
+    tmpHome = tempDir('doctor-overrides-home-');
     mkdirSync(join(tmpProject, 'config', 'specialists'), { recursive: true });
     originalHome = process.env.HOME;
     originalXdg = process.env.XDG_CONFIG_HOME;

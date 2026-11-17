@@ -1,13 +1,14 @@
 // tests/unit/specialist/loader.test.ts
 // ISSUE: xtrm-wiy5n.4.11 — static skip remains tracked.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, writeFile, mkdir, utimes, symlink } from 'node:fs/promises';
+import { writeFile, mkdir, utimes, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { realpathSync } from 'node:fs';
-import { tmpdir, homedir } from 'node:os';
+import { homedir } from 'node:os';
 import { rm } from 'node:fs/promises';
 import { SpecialistExtensionSourceCollisionError, SpecialistLoader, checkStaleness, type SpecialistSummary } from '../../../src/specialist/loader.js';
 import { loadPresets } from '../../../src/specialist/preset-resolver.js';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const MINIMAL_YAML = (name: string) => JSON.stringify({
   specialist: {
@@ -90,7 +91,7 @@ describe('SpecialistLoader', () => {
   let loader: SpecialistLoader;
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-test-'));
+    tempDir = createTempDir('specialists-test-');
     loader = new SpecialistLoader({ projectDir: tempDir });
   });
 
@@ -326,7 +327,7 @@ describe('checkStaleness', () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'staleness-test-'));
+    tempDir = createTempDir('staleness-test-');
   });
 
   afterEach(async () => {
@@ -456,7 +457,7 @@ describe('SpecialistLoader — stall_detection YAML parsing', () => {
   let loader: SpecialistLoader;
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'loader-stall-test-'));
+    tempDir = createTempDir('loader-stall-test-');
     specsDir = join(tempDir, '.specialists', 'user');
     await mkdir(specsDir, { recursive: true });
     loader = new SpecialistLoader({ projectDir: tempDir });
@@ -589,8 +590,8 @@ describe('KAN-90 — global override layer + null-model hard fail', () => {
   });
 
   beforeEach(async () => {
-    tmpProject = await mkdtemp(join(tmpdir(), 'kan90-proj-'));
-    tmpHome = await mkdtemp(join(tmpdir(), 'kan90-home-'));
+    tmpProject = createTempDir('kan90-proj-');
+    tmpHome = createTempDir('kan90-home-');
     originalHome = process.env.HOME;
     originalXdg = process.env.XDG_CONFIG_HOME;
     process.env.HOME = tmpHome;
@@ -1465,8 +1466,8 @@ describe('home layer ~/.specialists/user/ (SPECIALISTS-4323)', () => {
   let originalXdg: string | undefined;
 
   beforeEach(async () => {
-    tmpProject = await mkdtemp(join(tmpdir(), 'home-proj-'));
-    tmpHome = await mkdtemp(join(tmpdir(), 'home-home-'));
+    tmpProject = createTempDir('home-proj-');
+    tmpHome = createTempDir('home-home-');
     originalHome = process.env.HOME;
     originalXdg = process.env.XDG_CONFIG_HOME;
     process.env.HOME = tmpHome;

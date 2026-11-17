@@ -30,17 +30,18 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
 
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import { createActivationForensicSink } from '../../../src/activation/forensic-sink.js';
 import { createObservabilitySqliteClientAtPath } from '../../../src/specialist/observability-sqlite.js';
 import { SpecialistLoader } from '../../../src/specialist/loader.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 const runLive = process.env.SPECIALISTS_LIVE_SMOKE === '1';
@@ -314,7 +315,7 @@ describe('live smoke: native Specialist activation', () => {
     if (!runLive) return;
     expect(baseModel, 'SPECIALISTS_LIVE_SMOKE_MODEL is required for the live smoke').not.toBe('');
 
-    tempRepo = await mkdtemp(join(tmpdir(), 'native-activation-live-'));
+    tempRepo = tempDir('native-activation-live-');
     // A real git root, so resolveObservabilityDbLocation places a real observability.db
     // here instead of writing into the project's own store.
     expect(run('git', ['init', '-q'], tempRepo).status).toBe(0);

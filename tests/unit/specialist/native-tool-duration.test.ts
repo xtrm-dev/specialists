@@ -1,6 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -17,7 +16,6 @@ vi.mock('node:child_process', async (importOriginal) => {
     },
   };
 });
-
 import { createActivationForensicSink } from '../../../src/activation/forensic-sink.js';
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import { createMemorySettlementStore } from '../../../src/activation/settlement-store.js';
@@ -27,6 +25,7 @@ import { createObservabilitySqliteClientAtPath } from '../../../src/specialist/o
 import { createStaleWarningEvent } from '../../../src/specialist/timeline-events.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import type { SpecialistWorkItemBoundary, WorkItemView } from '../../../src/activation/workitem-store.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * SPECIALISTS-102 producer-level proof.
@@ -192,7 +191,7 @@ afterEach(() => {
 });
 
 function isolatedStore() {
-  const root = mkdtempSync(join(tmpdir(), 'tool-duration-'));
+  const root = tempDir('tool-duration-');
   scratchDirs.push(root);
   const dbPath = join(root, 'observability.db');
   const client = createObservabilitySqliteClientAtPath(dbPath);
@@ -201,7 +200,7 @@ function isolatedStore() {
 }
 
 function hostWorkspace(): string {
-  const root = mkdtempSync(join(tmpdir(), 'tool-duration-ws-'));
+  const root = tempDir('tool-duration-ws-');
   scratchDirs.push(root);
   return root;
 }

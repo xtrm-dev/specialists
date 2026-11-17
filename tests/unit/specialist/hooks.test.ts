@@ -1,16 +1,17 @@
 // tests/unit/specialist/hooks.test.ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { HookEmitter } from '../../../src/specialist/hooks.js';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 describe('HookEmitter', () => {
   let tempDir: string;
   let emitter: HookEmitter;
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-hooks-'));
+    tempDir = createTempDir('specialists-hooks-');
     emitter = new HookEmitter({ tracePath: join(tempDir, 'trace.jsonl') });
   });
 

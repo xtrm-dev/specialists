@@ -12,7 +12,6 @@
 // Guarded behind PI_INTEGRATION=1 for the model-backed leg (matches the
 // existing convention); the malformed-source failure leg needs no model but
 // needs the pi binary, so it stays under the same guard.
-
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 // Exact-toolset assertions predate the phase-1 permission guard
@@ -29,13 +28,13 @@ afterEach(() => {
 });
 import { catalogVersion } from '../../utils/catalog-pin.js';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-
 import { resolveRuntimeToolContract } from '../../../src/pi/session.js';
 import { PiAgentSession } from '../../../src/pi/session.js';
 import { getExtensionToolPolicyExtensionPath, NATIVE_TOOLS_ENV_KEY } from '../../../src/pi/extension-tool-policy-extension.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const ENABLED = process.env.PI_INTEGRATION === '1';
 const describeIntegration = ENABLED ? describe : describe.skip;
@@ -126,8 +125,8 @@ function cleanSpawnEnv(piBin: string) {
 
 describe('extension exposure sanity (no Pi needed)', () => {
   it('resolution lists exposed sources and the policy path resolves', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ext-exposure-sanity-'));
-    const npmGlobalDir = mkdtempSync(join(tmpdir(), 'ext-exposure-npm-global-'));
+    const dir = tempDir('ext-exposure-sanity-');
+    const npmGlobalDir = tempDir('ext-exposure-npm-global-');
     const prevGlobalDir = process.env.PI_NPM_GLOBAL_DIR;
     writeFileSync(join(dir, 'index.mjs'), FIXTURE_EXTENSION, 'utf8');
     try {
@@ -170,7 +169,7 @@ describe('extension exposure sanity (no Pi needed)', () => {
 
 describeIntegration('extension exposure model-backed regression', () => {
   it('model can invoke a tool registered by an enabled extension source', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ext-exposure-model-'));
+    const dir = tempDir('ext-exposure-model-');
     writeFileSync(join(dir, 'index.mjs'), FIXTURE_EXTENSION, 'utf8');
 
     try {
@@ -231,9 +230,9 @@ describeIntegration('extension exposure model-backed regression', () => {
   it('advisory is derived from the actual active set and reviewed guidance', () => {
     // Both extension tools MUST be active. Only ast_grep has reviewed guidance
     // and belongs in the advisory. The denied bash builtin MUST stay inactive.
-    const dir = mkdtempSync(join(tmpdir(), 'advisory-model-'));
+    const dir = tempDir('advisory-model-');
     writeFileSync(join(dir, 'index.mjs'), ADVISORY_FIXTURE_EXTENSION, 'utf8');
-    const captureDir = mkdtempSync(join(tmpdir(), 'advisory-capture-'));
+    const captureDir = tempDir('advisory-capture-');
     writeFileSync(join(captureDir, 'index.mjs'), ADVISORY_CAPTURE_EXTENSION, 'utf8');
 
     try {
@@ -346,7 +345,7 @@ describeIntegration('extension exposure model-backed regression', () => {
     // latency), then fails; pi exits 1 before the prompt ack. PiAgentSession
     // must reject the pending RPC immediately on child exit — not after the
     // fixed 30s command timeout — and surface the actionable stderr.
-    const dir = mkdtempSync(join(tmpdir(), 'ext-cold-fail-'));
+    const dir = tempDir('ext-cold-fail-');
     writeFileSync(join(dir, 'index.mjs'), [
       'await new Promise((r) => setTimeout(r, 1500));',
       "throw new Error('fixture source resolution failed');",

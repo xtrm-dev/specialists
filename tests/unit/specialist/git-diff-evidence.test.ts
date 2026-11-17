@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
@@ -10,6 +10,7 @@ import {
   willHunksBeInline,
   writeGitDiffHunksArtifact,
 } from '../../../src/specialist/git-diff-evidence.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 describe('git-diff-evidence', () => {
   it('parses per-file +/- counts from git numstat output', () => {
@@ -78,7 +79,7 @@ describe('git-diff-evidence', () => {
     expect(inline.hunks).not.toContain('sk-123456789012');
     expect(inline.hunks).not.toContain('realpassword');
 
-    const jobDir = mkdtempSync(join(tmpdir(), 'git-diff-artifact-'));
+    const jobDir = tempDir('git-diff-artifact-');
     try {
       const ref = writeGitDiffHunksArtifact(
         jobDir,
@@ -115,7 +116,7 @@ describe('git-diff-evidence', () => {
   });
 
   it('inline diff does not create artifact file on disk', () => {
-    const jobDir = mkdtempSync(join(tmpdir(), 'git-diff-inline-'));
+    const jobDir = tempDir('git-diff-inline-');
     try {
       const smallHunks = 'diff --git a/x b/x\n-old\n+new\n';
       expect(willHunksBeInline(smallHunks)).toBe(true);

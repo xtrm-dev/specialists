@@ -191,7 +191,9 @@ describe('pull_request workflow trust boundary', () => {
 
   it('requires immutable SHA refs in package-payload actions', () => {
     const source = readFileSync(join(WORKFLOW_DIRECTORY, 'package-payload.yml'), 'utf8');
-    const actionRefs = [...source.matchAll(/^\s+-?\s*uses:\s+([^\s#]+)$/gm)].map((match) => match[1]);
+    // A trailing comment (`# v7.0.1`) is how every pin in this repository is labelled; the
+    // pattern must tolerate it, or labelling a pin silently removes it from the check.
+    const actionRefs = [...source.matchAll(/^\s+-?\s*uses:\s+([^\s#]+)(?:\s+#.*)?$/gm)].map((match) => match[1]);
     expect(actionRefs.length).toBeGreaterThan(0);
     expect(actionRefs.every((ref) => /@[0-9a-f]{40}$/.test(ref))).toBe(true);
   });

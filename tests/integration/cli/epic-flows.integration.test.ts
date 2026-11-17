@@ -1,11 +1,12 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { execSync, spawnSync } from 'node:child_process';
 import { join, resolve, dirname } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { createObservabilitySqliteClient } from '../../../src/specialist/observability-sqlite.js';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 const entry = join(repoRoot, 'src/index.ts');
@@ -104,7 +105,7 @@ describe('integration: epic run/ps/recovery flows', () => {
   let tempDir = '';
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'sp-epic-flows-'));
+    tempDir = createTempDir('sp-epic-flows-');
     await initRepo(tempDir);
     await writeSpecialist(tempDir, 'epic-runner');
   });

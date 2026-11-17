@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { rmSync } from 'node:fs';
+
+
 
 /**
  * S1 settlement publication (XTRM-252.8 / ADR §§37–40, §94, §97).
@@ -43,6 +43,7 @@ import {
   republishPendingSettlements,
   SUMMARY_MAX,
 } from '../../../src/activation/settlement-publication.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /** Closed Journal result field set — mirrors RESULT_FIELDS (substrate@a77d094). */
 const CLOSED_RESULT_FIELDS = new Set([
@@ -222,7 +223,7 @@ function readOnlySpec() {
 
 const hostWorkspaces: string[] = [];
 function hostWorkspace(): string {
-  const root = mkdtempSync(join(tmpdir(), 's1-pub-ws-'));
+  const root = tempDir('s1-pub-ws-');
   hostWorkspaces.push(root);
   return root;
 }

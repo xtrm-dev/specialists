@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * The legacy argv path must agree with the native host about the Claude Code route
@@ -22,15 +22,8 @@ vi.mock('node:child_process', () => ({
 
 const { PiAgentSession } = await import('../../../src/pi/session.js');
 
-const scratch: string[] = [];
-function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'claude-bridge-legacy-'));
-  scratch.push(dir);
-  return dir;
-}
-
 function withOperatorSwitch(enabled: boolean): () => void {
-  const dir = tempDir();
+  const dir = tempDir('claude-bridge-legacy-');
   mkdirSync(join(dir, 'specialists'), { recursive: true });
   if (enabled) {
     writeFileSync(join(dir, 'specialists', 'user.json'), JSON.stringify({ claude_bridge: { enabled: true } }));
@@ -47,7 +40,7 @@ function withOperatorSwitch(enabled: boolean): () => void {
 }
 
 function bridgeEntry(): string {
-  const dir = tempDir();
+  const dir = tempDir('claude-bridge-legacy-');
   const entry = join(dir, 'index.js');
   writeFileSync(entry, 'export default () => {};\n');
   process.env.SPECIALISTS_CLAUDE_BRIDGE_PATH = entry;
@@ -56,7 +49,6 @@ function bridgeEntry(): string {
 
 afterEach(() => {
   spawnReached.calls.length = 0;
-  for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 async function legacySession(claudeBridge: boolean) {

@@ -1,7 +1,7 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -23,6 +23,7 @@ import {
 } from '../../../src/specialist/script-runner.js';
 import { resolveExecutionExtensionSelection } from '../../../src/pi/session.js';
 import { createObservabilitySqliteClientAtPath } from '../../../src/specialist/observability-sqlite.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const { spawnMock, spawnSyncMock, piSessionCreateMock, resolveGlobalNodeModulesDirMock, resolveRuntimeToolContractMock, RuntimeToolCatalogResolutionErrorMock, sqliteClients } = vi.hoisted(() => {
   class RuntimeToolCatalogResolutionErrorMock extends Error {
@@ -422,10 +423,10 @@ describe('runScriptSpecialist resolved tool contract', () => {
   });
 
   it('reuses one resolved contract for prompt evidence, direct pi launch tools, and gitnexus package path', async () => {
-    const npmGlobalDir = mkdtempSync(join(tmpdir(), 'pi-global-'));
+    const npmGlobalDir = tempDir('pi-global-');
     const rediscoveredGitnexusPath = join(npmGlobalDir, 'pi-gitnexus');
     writeFileSync(rediscoveredGitnexusPath, '');
-    const contractPackagePath = join(mkdtempSync(join(tmpdir(), 'pi-contract-')), 'pi-gitnexus-contract');
+    const contractPackagePath = join(tempDir('pi-contract-'), 'pi-gitnexus-contract');
     writeFileSync(contractPackagePath, '');
     resolveGlobalNodeModulesDirMock.mockReturnValue(npmGlobalDir);
     const resolvedToolContract = createResolvedToolContract({
@@ -520,10 +521,10 @@ describe('runScriptSpecialist resolved tool contract', () => {
   });
 
   it.each(['disabled', 'loaded_unhealthy', 'catalog_incompatible', 'not_installed'] as const)('does not load gitnexus extension for %s contract state on direct cli path', async (gitnexusStatus) => {
-    const npmGlobalDir = mkdtempSync(join(tmpdir(), 'pi-global-'));
+    const npmGlobalDir = tempDir('pi-global-');
     const rediscoveredGitnexusPath = join(npmGlobalDir, 'pi-gitnexus');
     writeFileSync(rediscoveredGitnexusPath, '');
-    const contractPackagePath = join(mkdtempSync(join(tmpdir(), 'pi-contract-')), 'pi-gitnexus-contract');
+    const contractPackagePath = join(tempDir('pi-contract-'), 'pi-gitnexus-contract');
     writeFileSync(contractPackagePath, '');
     resolveGlobalNodeModulesDirMock.mockReturnValue(npmGlobalDir);
     const resolvedToolContract = createResolvedToolContract({
@@ -1036,7 +1037,7 @@ describe('runScriptSpecialist skill forwarding', () => {
     // skills.paths must point at files that actually exist: a missing declared skill is
     // now a hard pre-run failure (unitAI-6639v.2), because pi silently ignores a bad
     // --skill arg. The forwarding contract under test is unchanged.
-    const skillDir = mkdtempSync(join(tmpdir(), 'sp-skill-forwarding-'));
+    const skillDir = tempDir('sp-skill-forwarding-');
     const skillOne = join(skillDir, 'one-SKILL.md');
     const skillTwo = join(skillDir, 'two-SKILL.md');
     const inherited = join(skillDir, 'inherited-SKILL.md');
@@ -1347,7 +1348,7 @@ describe('runScriptSpecialist PiAgentSession JSON recovery', () => {
 
 describe('runScriptSpecialist PiAgentSession observability bridge', () => {
   it('persists intermediate session callbacks to the script-specialist timeline', async () => {
-    const dbPath = join(mkdtempSync(join(tmpdir(), 'script-runner-observability-')), 'observability.db');
+    const dbPath = join(tempDir('script-runner-observability-'), 'observability.db');
     const session = {
       start: vi.fn(async () => undefined),
       prompt: vi.fn(async () => undefined),

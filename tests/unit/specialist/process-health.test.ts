@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { collectOrphanProcesses, collectProcessHealth, collectStaleSpecialistJobs } from '../../../src/specialist/process-health.js';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 // SupervisorStatus is intentionally narrow, but the runtime source in process-health.ts casts
 // per-status to include pid/updated_at_ms (see `as SupervisorStatus & { pid?: number; updated_at_ms?: number }`
@@ -30,7 +30,7 @@ describe('process-health', () => {
   });
 
   it('collects rss, dolt, serena, and orphan signals from proc snapshot fixtures', () => {
-    root = mkdtempSync(join(tmpdir(), 'process-health-'));
+    root = tempDir('process-health-');
     const meminfo = join(root, 'meminfo');
     writeFileSync(meminfo, 'MemAvailable:       1000 kB\n', 'utf-8');
     writeFileSync(join(root, 'uptime'), '2000.00 1000.00\n', 'utf-8');
@@ -79,7 +79,7 @@ describe('process-health', () => {
   });
 
   it('warns when dolt or orphan process counts exceed safe defaults', () => {
-    root = mkdtempSync(join(tmpdir(), 'process-health-'));
+    root = tempDir('process-health-');
     const meminfo = join(root, 'meminfo');
     writeFileSync(meminfo, 'MemAvailable:       100000 kB\n', 'utf-8');
     writeFileSync(join(root, 'uptime'), '2000.00 1000.00\n', 'utf-8');
@@ -101,7 +101,7 @@ describe('process-health', () => {
   });
 
   it('collects deleted-cwd dolt and tool processes as reapable leaks', () => {
-    root = mkdtempSync(join(tmpdir(), 'process-health-'));
+    root = tempDir('process-health-');
     const meminfo = join(root, 'meminfo');
     writeFileSync(meminfo, 'MemAvailable:       100000 kB\n', 'utf-8');
     writeFileSync(join(root, 'uptime'), '2000.00 1000.00\n', 'utf-8');
@@ -137,7 +137,7 @@ describe('process-health', () => {
   });
 
   it('collects stale specialist jobs for dead pids, orphaned keep-alives, and dead toolchains', () => {
-    root = mkdtempSync(join(tmpdir(), 'process-health-'));
+    root = tempDir('process-health-');
     const meminfo = join(root, 'meminfo');
     writeFileSync(meminfo, 'MemAvailable:	100000 kB\n', 'utf-8');
     writeFileSync(join(root, 'uptime'), '4000.00 1000.00\n', 'utf-8');
@@ -183,7 +183,7 @@ describe('process-health', () => {
   });
 
   it('detects terminal-alive jobs: registry done/error/cancelled but PID still running (unitAI-yme9q)', () => {
-    root = mkdtempSync(join(tmpdir(), 'process-health-'));
+    root = tempDir('process-health-');
     const meminfo = join(root, 'meminfo');
     writeFileSync(meminfo, 'MemAvailable:	100000 kB\n', 'utf-8');
     writeFileSync(join(root, 'uptime'), '4000.00 1000.00\n', 'utf-8');
@@ -230,7 +230,7 @@ describe('process-health', () => {
     ]);
   });
   it('does not count MCP, tsserver, or shell tooling as specialist jobs', () => {
-    root = mkdtempSync(join(tmpdir(), 'process-health-'));
+    root = tempDir('process-health-');
     const meminfo = join(root, 'meminfo');
     writeFileSync(meminfo, 'MemAvailable:       100000 kB\n', 'utf-8');
     writeFileSync(join(root, 'uptime'), '2000.00 1000.00\n', 'utf-8');

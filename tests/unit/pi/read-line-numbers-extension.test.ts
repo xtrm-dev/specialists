@@ -259,4 +259,21 @@ describe('read-line-numbers extension hook', () => {
     }) as { content: Array<{ text: string }> };
     expect(result.content[0]?.text).toBe('1 | one\n2 | two\n3 | ');
   });
+
+  it('notice patterns stay linear on adversarial notice-shaped input (CORE-2694)', () => {
+    // Discriminating: `numberReadText` tests only the LAST line against the
+    // notice patterns, so the run must be ON that last line — a multi-line
+    // payload whose long line is not last never reaches a regex and passes on
+    // the pre-fix code. Both inputs below stall the old patterns (476 ms and
+    // 67 ms measured on master's .mjs); the bounded forms answer at once.
+    const start = performance.now();
+    mjs.numberReadText('[Showing lines 1-1 of ' + '1'.repeat(40000) + 'x', 1, false);
+    mjs.numberReadText('[Line 1 is ' + ' exceeds '.repeat(5000) + 'x', 1, false);
+    expect(performance.now() - start).toBeLessThan(100);
+    // Behaviour: the three Pi notices are still recognised verbatim.
+    const showing = 'foo\nbar\n\n[Showing lines 1-2 of 5000. Use offset=3 to continue.]';
+    expect(mjs.numberReadText(showing, 1, true)).toBe('1 | foo\n2 | bar\n\n[Showing lines 1-2 of 5000. Use offset=3 to continue.]');
+    const banner = "[Line 5 is 60KB, exceeds 50KB limit. Use bash: sed -n '5p' /a/b.txt | head -c 51200]";
+    expect(mjs.numberReadText(banner, 1, false)).toBe(banner);
+  });
 });

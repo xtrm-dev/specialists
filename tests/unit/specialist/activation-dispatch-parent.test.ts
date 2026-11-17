@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { rmSync } from 'node:fs';
+
+
 
 /**
  * Ad hoc dispatch with a parent (XT-108): `specialist_dispatch` accepts an optional
@@ -29,6 +29,7 @@ import {
 import { defaultInlineTitle } from '../../../src/activation/native-host.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const INLINE_CONTRACT =
   'PROBLEM\nProve the parented inline-dispatch path.\n\nSUCCESS\nA read-only activation settles.\n\n' +
@@ -210,7 +211,7 @@ afterEach(() => {
 });
 
 function hostWith(boundary: SpecialistWorkItemBoundary, specialist: string, outputType: string) {
-  const root = mkdtempSync(join(tmpdir(), 'parent-inline-ws-'));
+  const root = tempDir('parent-inline-ws-');
   workspaces.push(root);
   const session = fakeSession();
   const sdk: PiSdk = {

@@ -19,10 +19,10 @@
  *   `GIT_CONFIG_COUNT` names an index whose pair is absent.
  * - CORE-2722: a launched Specialist is its own agent, never the lead that
  *   dispatched it. `XTMUX_AGENT_ROLE` (the role the agent host reports and the
- *   project-management hooks resolve) is set to the specialist name, and the
- *   inherited `XTRM_AGENT_NAME` (which outranks the holder for attribution) is
- *   cleared. The launcher stays reachable through the inherited
- *   `XTRM_DISPATCHER_*`, which this module never touches.
+ *   project-management hooks resolve) is the specialist name, and `XTRM_AGENT_NAME`
+ *   (which outranks the holder for review attribution) is the holder, so neither
+ *   inherits the launcher's value. The launcher stays reachable through the
+ *   inherited `XTRM_DISPATCHER_*`, which this module never touches.
  * - PATH is never taken from the CLI. `resolveAgentLaunchEnv` appends it locally
  *   with the gh shim directory first (CORE-2524.4), because an identity the shim
  *   cannot intercept is not an identity.
@@ -30,6 +30,7 @@
 
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
+import { runtimeWarn } from '../utils/runtime-diagnostics.js';
 import path from 'node:path';
 
 /** Keys the session may take from `xt identity env --json`. */
@@ -86,53 +87,10 @@ function isAllowed(key: string): boolean {
  */
 /** One `[specialists] identity-env:` line: the launcher's warning channel, and the only one. */
 export function warnIdentityEnv(message: string): void {
-  process.stderr.write(`[specialists] identity-env: ${message}\n`);
+  runtimeWarn('identity-env', `[specialists] identity-env: ${message}`);
 }
 
 const launcherWarning = warnIdentityEnv;
-
-/**
- * Every key one identity env OWNS. PATH is deliberately not here: the launched
- * PATH is one process-wide value by design (CORE-2524.4), while these keys name a
- * holder and a transport and must never outlive the activation that set them.
- */
-const IDENTITY_MANAGED_KEY = /^(?:SUBSTRATE_HOLDER|XTRM_ROLE|XTMUX_AGENT_ROLE|XTRM_AGENT_NAME|GIT_AUTHOR_NAME|GIT_AUTHOR_EMAIL|GIT_COMMITTER_NAME|GIT_COMMITTER_EMAIL|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+)$/;
-
-export function isIdentityManagedKey(key: string): boolean {
-  return IDENTITY_MANAGED_KEY.test(key);
-}
-
-/** Every identity-managed key present in `env`, with its value (or undefined when absent). */
-export function snapshotIdentityEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string | undefined> {
-  const snapshot: Record<string, string | undefined> = {};
-  for (const key of Object.keys(env)) {
-    if (isIdentityManagedKey(key)) snapshot[key] = env[key];
-  }
-  return snapshot;
-}
-
-/**
- * Remove every identity-managed key from `env`. Called BEFORE an activation's
- * own identity is applied: a smaller answer must not leave a bigger answer's
- * GIT_CONFIG index or author behind, and the host's own git/gh calls must not
- * inherit a settled activation's identity.
- */
-export function clearIdentityEnv(env: NodeJS.ProcessEnv = process.env): void {
-  for (const key of Object.keys(env)) {
-    if (isIdentityManagedKey(key)) delete env[key];
-  }
-}
-
-/** Put `env` back to a snapshot: managed keys cleared first, then the snapshot's values. */
-export function restoreIdentityEnv(
-  snapshot: Record<string, string | undefined>,
-  env: NodeJS.ProcessEnv = process.env,
-): void {
-  clearIdentityEnv(env);
-  for (const [key, value] of Object.entries(snapshot)) {
-    if (typeof value === 'string') env[key] = value;
-  }
-}
 
 /**
  * `GIT_CONFIG_COUNT` is authoritative for git: it reads exactly that many
@@ -181,18 +139,6 @@ function describeErrorClass(error: unknown): string {
 }
 
 /**
- * The env `xt identity env` runs in: the host env with this launch's identity on
- * top, and without the launcher's `XTRM_AGENT_NAME`. That name outranks the
- * holder when xt attributes a review, so a lead-launched Specialist would
- * otherwise be named after the lead (CORE-2722).
- */
-function lookupEnv(host: NodeJS.ProcessEnv, base: Record<string, string>): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...host, ...base };
-  delete env.XTRM_AGENT_NAME;
-  return env;
-}
-
-/**
  * The identity env for one launched session. Never throws: on any doubt it
  * returns the holder (and the role name) and nothing else.
  */
@@ -201,9 +147,11 @@ export function resolveAgentIdentityEnv(input: IdentityEnvInput = {}): Record<st
   if (!holder) return {};
   const roleName = (input.roleName ?? '').trim();
   const base: Record<string, string> = { SUBSTRATE_HOLDER: holder };
+  // CORE-2722: the launcher's own name must not survive into the launched agent.
+  base.XTRM_AGENT_NAME = holder;
   if (roleName) {
     base.XTRM_ROLE = roleName;
-    // CORE-2722: the role the agent host reports. Never taken from the xt answer.
+    // The role the agent host reports. Never taken from the xt answer.
     base.XTMUX_AGENT_ROLE = roleName;
   }
 
@@ -234,7 +182,7 @@ export function resolveAgentIdentityEnv(input: IdentityEnvInput = {}): Record<st
   try {
     result = run('xt', ['identity', 'env', '--json'], {
       cwd: input.cwd,
-      env: lookupEnv(input.env ?? process.env, base),
+      env: { ...(input.env ?? process.env), ...base },
       timeoutMs: input.timeoutMs ?? 5000,
     });
   } catch (error) {
@@ -301,11 +249,15 @@ export function specialistPath(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /**
- * The full env one launched Specialist process receives: the agent identity env
- * plus the PATH that makes the shim reachable. Both launch paths call this — the
- * legacy runner's session env and the native host's process.env — so a Specialist
- * never gets the holder without the shim. Without a holder nothing is fabricated,
- * PATH included.
+ * The full env one launched Specialist receives: the agent identity env plus the PATH that
+ * makes the shim reachable. Two callers:
+ *
+ * - the legacy runner, whose child process takes this env whole;
+ * - the native host, whose SHELLS take it through the spawn hook (SPECIALISTS-4456). The host
+ *   itself does not use the PATH half — it composes PATH per spawn from what pi resolved, so
+ *   pi's managed bin directory survives — and it drops the key before handing the rest over.
+ *
+ * Without a holder nothing is fabricated, PATH included.
  */
 export function resolveAgentLaunchEnv(input: IdentityEnvInput = {}): Record<string, string> {
   const identity = resolveAgentIdentityEnv(input);

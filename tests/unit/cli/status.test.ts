@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { resolveObservabilityDbLocation } from '../../../src/specialist/observability-db.js';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 function stripAnsi(input: string): string {
   return input.replace(/\x1b\[[0-9;]*m/g, '');
@@ -90,7 +90,7 @@ describe('status CLI — run()', () => {
   let tempDir = '';
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'specialists-status-'));
+    tempDir = createTempDir('specialists-status-');
     process.chdir(tempDir);
     process.env.SPECIALISTS_JOB_FILE_OUTPUT = 'on';
   });

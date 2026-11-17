@@ -1,6 +1,4 @@
 import { connect } from 'node:net';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -12,6 +10,7 @@ import {
   receiptExpired,
   type ReceiptSource,
 } from '../../../src/activation/transport/peer-transport.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const sources: ReceiptSource[] = [];
 
@@ -20,7 +19,7 @@ afterEach(async () => {
 });
 
 async function startSource(): Promise<{ source: ReceiptSource; socketPath: string }> {
-  const socketPath = join(mkdtempSync(join(tmpdir(), 'receipt-bound-')), 'r.sock');
+  const socketPath = join(tempDir('receipt-bound-'), 'r.sock');
   const source = await createSocketReceiptSource(socketPath);
   sources.push(source);
   return { source, socketPath };

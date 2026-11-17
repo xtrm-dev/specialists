@@ -1,6 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -13,7 +12,6 @@ vi.mock('node:child_process', async (importOriginal) => {
     },
   };
 });
-
 import { createActivationForensicSink } from '../../../src/activation/forensic-sink.js';
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import type { PiAgentSessionEvent, PiAgentSessionLike, PiSdk } from '../../../src/activation/pi-sdk.js';
@@ -22,6 +20,7 @@ import { renderPrometheusProjection, validatePrometheusProjectionText } from '..
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import type { SpecialistWorkItemBoundary, WorkItemView } from '../../../src/activation/workitem-store.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * SPECIALISTS-107: a native activation that reaches a terminal state must produce
@@ -163,7 +162,7 @@ afterEach(() => {
 });
 
 function isolatedStore() {
-  const root = mkdtempSync(join(tmpdir(), 'native-metrics-'));
+  const root = tempDir('native-metrics-');
   scratchDirs.push(root);
   const dbPath = join(root, 'observability.db');
   const client = createObservabilitySqliteClientAtPath(dbPath);
@@ -172,7 +171,7 @@ function isolatedStore() {
 }
 
 function hostWorkspace(): string {
-  const root = mkdtempSync(join(tmpdir(), 'native-metrics-ws-'));
+  const root = tempDir('native-metrics-ws-');
   scratchDirs.push(root);
   return root;
 }
@@ -203,7 +202,7 @@ function readMetricsRows(dbPath: string, jobId: string): MetricsRow[] {
 
 describe('native metrics reachability (SPECIALISTS-107)', () => {
   it('a completed native activation produces exactly one populated metrics row', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'native-metrics-'));
+    const root = tempDir('native-metrics-');
     scratchDirs.push(root);
     const dbPath = join(root, 'observability.db');
     const client = createObservabilitySqliteClientAtPath(dbPath);
@@ -252,7 +251,7 @@ describe('native metrics reachability (SPECIALISTS-107)', () => {
   });
 
   it('aggregating the same activation twice neither duplicates nor drifts the row', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'native-metrics-idem-'));
+    const root = tempDir('native-metrics-idem-');
     scratchDirs.push(root);
     const dbPath = join(root, 'observability.db');
     const client = createObservabilitySqliteClientAtPath(dbPath);
@@ -289,7 +288,7 @@ describe('native metrics reachability (SPECIALISTS-107)', () => {
   });
 
   it('a fixed legacy stream produces the same phase split as the pinned invariant (legacy unchanged)', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'native-metrics-legacy-'));
+    const root = tempDir('native-metrics-legacy-');
     scratchDirs.push(root);
     const dbPath = join(root, 'observability.db');
     const client = createObservabilitySqliteClientAtPath(dbPath);
@@ -310,7 +309,7 @@ describe('native metrics reachability (SPECIALISTS-107)', () => {
   });
 
   it('the native row feeds the shared Prometheus projections with no label leak', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'native-metrics-prom-'));
+    const root = tempDir('native-metrics-prom-');
     scratchDirs.push(root);
     const dbPath = join(root, 'observability.db');
     const client = createObservabilitySqliteClientAtPath(dbPath);
@@ -356,7 +355,7 @@ describe('native metrics reachability (SPECIALISTS-107)', () => {
     // active + waiting (73,615,665) >> elapsed — the incoherent triple on 73% of rows.
     // After the change both rounds' elapsed_s=10 accumulate to 20000 while the phase
     // columns are byte-identical (the 106 boundary: this node never touches the split).
-    const root = mkdtempSync(join(tmpdir(), 'native-metrics-108-'));
+    const root = tempDir('native-metrics-108-');
     scratchDirs.push(root);
     const dbPath = join(root, 'observability.db');
     const client = createObservabilitySqliteClientAtPath(dbPath);
@@ -380,7 +379,7 @@ describe('native metrics reachability (SPECIALISTS-107)', () => {
   });
 
   it('SPECIALISTS-108 degenerate input: zero-span and backwards streams stay non-negative', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'native-metrics-108-deg-'));
+    const root = tempDir('native-metrics-108-deg-');
     scratchDirs.push(root);
     const dbPath = join(root, 'observability.db');
     const client = createObservabilitySqliteClientAtPath(dbPath);
@@ -403,7 +402,7 @@ describe('native metrics reachability (SPECIALISTS-107)', () => {
   });
 
   it('a stopped activation still materialises a row (no terminal lifecycle event exists on that path)', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'native-metrics-stop-'));
+    const root = tempDir('native-metrics-stop-');
     scratchDirs.push(root);
     const dbPath = join(root, 'observability.db');
     const client = createObservabilitySqliteClientAtPath(dbPath);

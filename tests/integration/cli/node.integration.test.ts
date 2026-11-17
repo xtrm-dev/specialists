@@ -1,13 +1,14 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { spawnSync, spawn, execSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { Database } from 'bun:sqlite';
 import { createObservabilitySqliteClient, initSchema } from '../../../src/specialist/observability-sqlite.js';
 import { ensureObservabilityDbFile, resolveObservabilityDbLocation } from '../../../src/specialist/observability-db.js';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 const entry = join(repoRoot, 'src/index.ts');
@@ -36,7 +37,7 @@ describe('integration: sp node CLI surface', () => {
   let coordinatorProcess: ReturnType<typeof spawn> | null = null;
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'sp-node-cli-int-'));
+    tempDir = createTempDir('sp-node-cli-int-');
     execSync('git init', { cwd: tempDir, stdio: 'ignore' });
     execSync('git config user.email "test@example.com"', { cwd: tempDir, stdio: 'ignore' });
     execSync('git config user.name "Test User"', { cwd: tempDir, stdio: 'ignore' });

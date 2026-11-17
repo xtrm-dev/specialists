@@ -33,7 +33,7 @@ jobs:
     outputs:
       package_payload: ${{ steps.filter.outputs.package_payload }}
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
@@ -63,10 +63,10 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.package_payload == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -78,12 +78,13 @@ jobs:
           bun install --frozen-lockfile
           echo 'package-payload: install succeeded'
       - name: Build package payload
-        run: |
-          echo 'package-payload: verifying reproducible distributable payload'
-          NODE_ENV=test bun run build
-          git diff --exit-code -- dist/
-          test -z "$(git status --porcelain --untracked-files=all -- dist/)"
-          echo 'package-payload: build verification succeeded'
+        # One implementation for CI and for contributors (SPECIALISTS-4445): the script rebuilds with
+        # the bun .bun-version pins and fails with the cause (__esm wrapper) and the fix, instead of
+        # a raw bundle diff that two PRs in a row had to reverse-engineer. setup-bun below is given
+        # the same version as a literal, so the version refusal never fires in CI here; the message
+        # is the value. Keep .bun-version, these literals and package.json packageManager in step —
+        # toolchain-pin.yml checks the latter two, nothing checks .bun-version.
+        run: node scripts/check-dist-reproducible.mjs
       - name: Generate npm pack manifest
         run: |
           echo 'package-payload: generating npm pack dry-run manifest'
@@ -134,10 +135,10 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -148,9 +149,12 @@ jobs:
       - name: Build, pack, and smoke installed tarball
         run: |
           set -euo pipefail
-          NODE_ENV=test bun run build
-          git diff --exit-code -- dist/
-          test -z "$(git status --porcelain --untracked-files=all -- dist/)"
+          # The same guard payload-contract uses, so a bundle built by the wrong bun names the cause
+          # here too instead of reporting a raw diff (SPECIALISTS-4445). Check-only on purpose: it
+          # restores dist/ and exits 1 on drift, so this job still FAILS on a non-reproducible bundle
+          # and packs the committed bytes. `--write` would return 0 after a mismatch and pack a bundle
+          # nobody committed.
+          node scripts/check-dist-reproducible.mjs
           tarball_name=$(npm pack --pack-destination /tmp --json | jq -r '.[0].filename')
           tarball="/tmp/$tarball_name"
           test "$tarball_name" = "jaggerxtrm-specialists-$(node -p "require('./package.json').version").tgz"
@@ -174,7 +178,7 @@ jobs:
           EXPECTED_SOURCE_COMMIT="$GITHUB_SHA" npm run release:attest -- --validate "$tarball" /tmp/release-attestation.json
           test -s /tmp/release-attestation.json
       - name: Persist release attestation
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-attestation-${{ github.sha }}
           path: /tmp/release-attestation.json

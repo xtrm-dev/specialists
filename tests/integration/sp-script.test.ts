@@ -1,11 +1,12 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { countArg, getExtensionArgs, readLoggedPiArgv, writeFakePiBinary } from './helpers/fake-pi';
+import { tempDir } from '../utils/temp-dir.js';
 
 const ORIGINAL_CWD = process.cwd();
 const REPO_ROOT = resolve(import.meta.dirname, '../..');
@@ -24,7 +25,7 @@ function waitForExit(child: ChildProcess): Promise<{ code: number | null; stdout
 }
 
 beforeEach(() => {
-  tempRoot = mkdtempSync(join(tmpdir(), 'sp-script-'));
+  tempRoot = tempDir('sp-script-');
   mkdirSync(join(tempRoot, '.specialists', 'user'), { recursive: true });
   mkdirSync(join(tempRoot, 'bin'), { recursive: true });
   writeFileSync(
@@ -264,7 +265,7 @@ describe('sp script', () => {
     const skillDir = join(tempRoot, 'skills', 'ancestor-swap');
     const preScript = join(tempRoot, 'swap-ancestor.sh');
     const argvLog = join(tempRoot, 'pi-ancestor-swap.jsonl');
-    externalRoot = mkdtempSync(join(tmpdir(), 'sp-script-external-'));
+    externalRoot = tempDir('sp-script-external-');
     const externalSkills = join(externalRoot, 'skills');
     mkdirSync(skillDir, { recursive: true });
     mkdirSync(join(externalSkills, 'ancestor-swap'), { recursive: true });

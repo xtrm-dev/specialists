@@ -942,12 +942,12 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
       process.once('exit', handleExit);
       cleanupExitHandler = () => process.off('exit', handleExit);
     }
-    const attempts: Array<{ model: string; text: string; stderr: string }> = [];
+    const attempts: Array<{ model: string; text: string; stderr: string; apiError?: string }> = [];
 
     for (const model of modelCandidates) {
       const systemPrompt = spec.specialist.prompt.system || undefined;
       const systemPromptMode = spec.specialist.prompt.system_prompt_mode;
-      let attempt: { model: string; text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean; outputTooLargeReason?: AttemptFailureReason };
+      let attempt: { model: string; text: string; stderr: string; apiError?: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean; outputTooLargeReason?: AttemptFailureReason };
       try {
         attempt = await runSingleAttempt(prompt, model, input.thinking_level ?? spec.specialist.execution.thinking_level, timeoutMs, assistantTextLimitBytes, options, spec, systemPrompt, systemPromptMode, skillPaths, shouldParseJson ? expectedKeys : [], resolvedToolContract, appendTimelineEvent);
       } catch (error) {
@@ -1079,8 +1079,8 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
         startedAtMs: scriptRunStartedAt,
         finalStatus: 'error',
         outputType: spec.specialist.execution.output_type,
-        output: lastAttempt?.text || lastAttempt?.stderr || 'pi produced no assistant text',
-        error: lastAttempt?.stderr || 'pi produced no assistant text',
+        output: lastAttempt?.text || lastAttempt?.stderr || lastAttempt?.apiError || 'pi produced no assistant text',
+        error: lastAttempt?.stderr || lastAttempt?.apiError || 'pi produced no assistant text',
         errorType: 'internal',
         skillSources,
         variablesKeys: Object.keys(input.variables ?? {}),
@@ -1089,7 +1089,7 @@ export async function runScriptSpecialist(input: ScriptGenerateRequest, options:
       });
     }
     runPostScripts();
-    return { success: false, error: lastAttempt?.stderr || 'pi produced no assistant text', error_type: 'internal', meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model: modelCandidates.at(-1) ?? 'unknown', duration_ms: durationMs, trace_id: traceId } };
+    return { success: false, error: lastAttempt?.stderr || lastAttempt?.apiError || 'pi produced no assistant text', error_type: 'internal', meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model: modelCandidates.at(-1) ?? 'unknown', duration_ms: durationMs, trace_id: traceId } };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const resolvedSpecialist = resolveScriptSpecialistName(input.specialist);
@@ -1158,7 +1158,7 @@ async function runSingleAttempt(
   requiredJsonKeys: string[] = [],
   resolvedToolContract?: ResolvedToolContract,
   appendTimelineEvent?: ScriptTimelineAppender,
-): Promise<{ model: string; text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean; outputTooLargeReason?: AttemptFailureReason }> {
+): Promise<{ model: string; text: string; stderr: string; apiError?: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean; outputTooLargeReason?: AttemptFailureReason }> {
   const extensionSelection = resolveExecutionExtensionSelection(spec.specialist.execution.extensions);
 
   if (options.surface === 'script' && spec.specialist.execution.permission_required !== 'READ_ONLY') {
@@ -1199,6 +1199,7 @@ async function runSingleAttempt(
         }));
       },
       onMetric: (event) => {
+        if (event.type === 'api_error' && event.errorMessage) lastApiError = event.errorMessage;
         if (event.type === 'token_usage') appendTimelineEvent?.(createTokenUsageEvent(event.token_usage, event.source));
         if (event.type === 'finish_reason') appendTimelineEvent?.(createFinishReasonEvent(event.finish_reason, event.source));
         if (event.type === 'turn_summary') appendTimelineEvent?.(createTurnSummaryEvent(event.turn_index, event.token_usage, event.finish_reason));
@@ -1225,6 +1226,11 @@ async function runSingleAttempt(
     let outputTooLargeReason: AttemptFailureReason | undefined;
     let currentAssistantMessage = '';
     let lastCompletedAssistantMessage = '';
+    // DARTHFEEDOR-1207: a provider auth/quota failure can leave both the assistant
+    // text and stderr empty, which surfaced as the useless 'pi produced no assistant
+    // text'. Keep the last api_error metric so the empty-text path can report the
+    // actual provider error instead.
+    let lastApiError = '';
 
     const markAssistantMessageStart = (): void => {
       currentAssistantMessage = '';
@@ -1274,6 +1280,7 @@ async function runSingleAttempt(
         model,
         text: assistantText,
         stderr,
+        apiError: lastApiError,
         exitCode: 0,
         timedOut,
         outputTooLarge,
@@ -1289,6 +1296,7 @@ async function runSingleAttempt(
         model,
         text: assistantText,
         stderr,
+        apiError: lastApiError,
         exitCode: 1,
         timedOut,
         outputTooLarge,
@@ -1413,21 +1421,24 @@ async function runSingleAttempt(
   });
 }
 
-export function classifyAttempt(attempt: { text: string; stderr: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean; outputTooLargeReason?: AttemptFailureReason }): { retryable: boolean; kind: 'success' | 'failure'; error: string; errorType: ScriptSpecialistErrorType; text: string } {
+export function classifyAttempt(attempt: { text: string; stderr: string; apiError?: string; exitCode: number; timedOut: boolean; outputTooLarge: boolean; outputTooLargeReason?: AttemptFailureReason }): { retryable: boolean; kind: 'success' | 'failure'; error: string; errorType: ScriptSpecialistErrorType; text: string } {
   if (attempt.outputTooLarge) {
     if (attempt.outputTooLargeReason === 'assistant_text_too_large') return { retryable: false, kind: 'failure', error: 'assistant message too large', errorType: 'output_too_large', text: attempt.text };
     if (attempt.outputTooLargeReason === 'stderr_too_large') return { retryable: false, kind: 'failure', error: 'stderr too large', errorType: 'output_too_large', text: attempt.text };
     if (attempt.outputTooLargeReason === 'malformed_line_too_large') return { retryable: false, kind: 'failure', error: 'malformed line too large', errorType: 'output_too_large', text: attempt.text };
     return { retryable: false, kind: 'failure', error: 'output exceeded cap', errorType: 'output_too_large', text: attempt.text };
   }
-  if (attempt.timedOut) return { retryable: false, kind: 'failure', error: attempt.stderr || 'timed out', errorType: 'timeout', text: attempt.text };
-  const errorType = mapErrorType(attempt.stderr);
+  if (attempt.timedOut) return { retryable: false, kind: 'failure', error: attempt.stderr || attempt.apiError || 'timed out', errorType: 'timeout', text: attempt.text };
+  // Retryability is decided by the real stderr only: a captured provider api_error is a
+  // DISPLAY aid, and folding it into stderr would make a retryable 5xx look like a final
+  // failure and stop the model-chain walk (SPECIALISTS-4479 review F1).
+  const errorType = mapErrorType(attempt.stderr || attempt.apiError || '');
   const retryable = errorType !== 'auth' && isRetryableModelFailure(attempt.stderr, attempt.text);
   if (attempt.exitCode !== 0) {
-    return { retryable, kind: 'failure', error: attempt.stderr || `pi exit ${attempt.exitCode}`, errorType, text: attempt.text };
+    return { retryable, kind: 'failure', error: attempt.stderr || attempt.apiError || `pi exit ${attempt.exitCode}`, errorType, text: attempt.text };
   }
   if (!attempt.text) {
-    return { retryable, kind: 'failure', error: attempt.stderr || 'pi produced no assistant text', errorType, text: attempt.text };
+    return { retryable, kind: 'failure', error: attempt.stderr || attempt.apiError || 'pi produced no assistant text', errorType, text: attempt.text };
   }
   return { retryable: false, kind: 'success', error: '', errorType: 'internal', text: attempt.text };
 }

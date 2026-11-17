@@ -113,6 +113,7 @@ type AttemptFailureReason = 'assistant_text_too_large' | 'stderr_too_large' | 'm
 export declare function classifyAttempt(attempt: {
     text: string;
     stderr: string;
+    apiError?: string;
     exitCode: number;
     timedOut: boolean;
     outputTooLarge: boolean;

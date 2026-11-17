@@ -2,11 +2,12 @@
 // Covers `sp edit --global` (src/cli/edit.ts runGlobalEdit): --get, --set,
 // $EDITOR flow, mutual exclusion with --scope.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rm, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { getGlobalUserConfigPath } from '../../../src/specialist/global-config.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 async function importEdit() {
   return import('../../../src/cli/edit.js');
@@ -40,7 +41,7 @@ describe('edit CLI — --global --get / --set', () => {
   let originalHome: string | undefined;
 
   beforeEach(async () => {
-    tempHome = await mkdtemp(join(tmpdir(), 'sp-edit-global-'));
+    tempHome = tempDir('sp-edit-global-');
     originalHome = process.env.HOME;
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -297,7 +298,7 @@ describe('edit CLI — --global --get / --set', () => {
 
 describe('edit CLI — the reserved switch key is not a Specialist', () => {
   it('lists only real Specialist names, so the operator switch is not offered as an editable one', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'edit-global-switch-'));
+    const home = tempDir('edit-global-switch-');
     try {
       await seedGlobalConfig(home, { claude_bridge: { enabled: true } });
       const { listGlobalSpecialistNames } = await import('../../../src/specialist/global-config.js');
@@ -314,7 +315,7 @@ describe('edit CLI — --global + --scope rejection (run path)', () => {
   let originalHome: string | undefined;
 
   beforeEach(async () => {
-    tempHome = await mkdtemp(join(tmpdir(), 'sp-edit-global-mutex-'));
+    tempHome = tempDir('sp-edit-global-mutex-');
     originalHome = process.env.HOME;
     process.env.HOME = tempHome;
     delete process.env.XDG_CONFIG_HOME;

@@ -1,17 +1,19 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DispatchRejectedError } from '../../../src/activation/types.js';
 import { provisionWriterWorkspace } from '../../../src/activation/workspace-lease.js';
+import { setRuntimeDiagnosticsSink, resetRuntimeDiagnosticsSink } from '../../../src/utils/runtime-diagnostics.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /** SPECIALISTS-4393: writer worktrees live under .xtrm/worktrees and branch from origin/<default>. */
 
 const dirs: string[] = [];
 afterEach(() => {
   vi.restoreAllMocks();
+  resetRuntimeDiagnosticsSink();
   while (dirs.length > 0) rmSync(dirs.pop() as string, { recursive: true, force: true });
 });
 
@@ -19,7 +21,7 @@ const run = (cwd: string, ...args: string[]): string =>
   execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf-8' }).trim();
 
 function scratch(): string {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'wt-provision-')));
+  const dir = realpathSync(tempDir('wt-provision-'));
   dirs.push(dir);
   return dir;
 }
@@ -54,10 +56,51 @@ describe('provisionWriterWorkspace', () => {
     expect(run(ws.worktreePath, 'rev-parse', 'HEAD')).toBe(remoteTip);
   });
 
+  it('slugifies an Issue ref with leading and trailing punctuation (CORE-2694)', () => {
+    // The slug trim is a scan, not `/^-+|-+$/`; behaviour must stay identical.
+    const { clone } = cloneBehindRemote();
+    const ws = provisionWriterWorkspace(clone, '--CORE-42--', '--Executor--');
+    expect(ws.branch).toBe('sp/core-42');
+    expect(ws.worktreePath).toBe(join(clone, '.xtrm', 'worktrees', `${basename(clone)}-sp-executor-core-42`));
+  });
+
   it('keeps .xtrm/worktrees out of the dispatcher status without touching tracked files', () => {
     const { clone } = cloneBehindRemote();
     provisionWriterWorkspace(clone, 'CORE-2513', 'executor');
     expect(run(clone, 'status', '--porcelain')).toBe('');
+  });
+
+  it('hides runtime state but leaves authored .specialists config visible to git', () => {
+    const { clone } = cloneBehindRemote();
+    // The runtime writes these; the provisioning path must keep them out of the status.
+    for (const dir of ['logs', 'settlements', 'user']) mkdirSync(join(clone, '.specialists', dir), { recursive: true });
+    writeFileSync(join(clone, '.specialists', 'logs', 'runtime-diagnostics.log'), 'x');
+    writeFileSync(join(clone, '.specialists', 'settlements', 'act-settled.jsonl'), 'x');
+    writeFileSync(join(clone, '.specialists', 'version-check.json'), '{}');
+    // Authored source: a project-scope Specialist definition must stay addable.
+    writeFileSync(join(clone, '.specialists', 'user', 'mine.specialist.json'), '{}');
+
+    expect(run(clone, 'status', '--porcelain', '--untracked-files=all'))
+      .toContain('.specialists/logs/runtime-diagnostics.log');
+
+    provisionWriterWorkspace(clone, 'CORE-2514', 'executor');
+
+    const after = run(clone, 'status', '--porcelain', '--untracked-files=all');
+    expect(after).not.toContain('.specialists/logs/');
+    expect(after).not.toContain('.specialists/settlements/');
+    expect(after).not.toContain('version-check.json');
+    expect(after).toContain('.specialists/user/mine.specialist.json');
+  });
+
+  it('writes each info/exclude pattern once, however many worktrees it provisions', () => {
+    const { clone } = cloneBehindRemote();
+    provisionWriterWorkspace(clone, 'CORE-2515', 'executor');
+    const excludePath = join(clone, '.git', 'info', 'exclude');
+    const first = readFileSync(excludePath, 'utf-8');
+
+    provisionWriterWorkspace(clone, 'CORE-2516', 'executor');
+
+    expect(readFileSync(excludePath, 'utf-8')).toBe(first);
   });
 
   it('reuses a worktree already on sp/<slug> at the legacy .worktrees root', () => {
@@ -85,7 +128,8 @@ describe('provisionWriterWorkspace', () => {
     mkdirSync(repo);
     run(repo, 'init', '-q', '-b', 'main');
     run(repo, 'commit', '-q', '--allow-empty', '-m', 'one');
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warn = vi.fn();
+    setRuntimeDiagnosticsSink(warn);
 
     const ws = provisionWriterWorkspace(repo, 'CORE-7', 'executor');
 

@@ -28,6 +28,9 @@ export { createObservabilitySqliteClientAtPath, createObservabilitySqliteClient,
 export type { ObservabilitySqliteClient } from './specialist/observability-sqlite.js';
 export { createSpecialistFeedTool, feedLine, specialistFeedSchema, FEED_DEFAULT_LIMIT, FEED_MAX_LIMIT, FEED_LINE_MAX, } from './tools/specialist/specialist_feed.tool.js';
 export { resolveObservabilityDbLocation } from './specialist/observability-db.js';
+export { asObservabilityReadSource, parseForensicRecord, parseForensicRecords, readActivationInspect, readFleetSnapshot, readForensicWindow, readResultProjection, } from './specialist/observability-read-model.js';
+export type { ActivationInspect, FleetAttention, FleetNode, FleetSnapshot, ForensicCursor, ForensicWindow, ObservabilityReadSource, ReadFleetOptions, ReadForensicWindowOptions, ResultProjection, RuntimeAttachment, } from './specialist/observability-read-model.js';
+export { isForensicAgentInternal } from './specialist/forensic-presentation.js';
 export { evaluateBeadReadiness, extractSections } from './specialist/bead-gate.js';
 export { describeBuildIdentity, hashFileBytes, isBuildStale, readBuildId, shortBuildId, BUILD_ID_BYTES, UNKNOWN_BUILD_ID, } from './activation/build-identity.js';
 export type { BeadRecord } from './specialist/beads.js';

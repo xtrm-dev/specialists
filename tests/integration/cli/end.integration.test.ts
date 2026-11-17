@@ -1,12 +1,13 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { execSync, spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { createObservabilitySqliteClient } from '../../../src/specialist/observability-sqlite.js';
 import { resolveObservabilityDbLocation, ensureObservabilityDbFile } from '../../../src/specialist/observability-db.js';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 const entry = join(repoRoot, 'src/index.ts');
@@ -174,7 +175,7 @@ describe('integration: sp end CLI', () => {
   let tempDir = '';
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'sp-end-integration-'));
+    tempDir = createTempDir('sp-end-integration-');
     await initRepo(tempDir);
 
     const baseBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: tempDir, encoding: 'utf-8' }).trim();

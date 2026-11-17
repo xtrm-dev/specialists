@@ -5,6 +5,8 @@ import * as z from 'zod';
 import { SpecialistLoader, type SpecialistSummary } from '../specialist/loader.js';
 import { SpecialistSchema } from '../specialist/schema.js';
 import {
+  ClaudeBridgeBlockSchema,
+  CLAUDE_BRIDGE_SWITCH_KEY,
   GlobalSpecialistOverrideSchema,
   getGlobalUserConfigPath,
   listGlobalSpecialistNames,
@@ -636,6 +638,8 @@ interface ResolvedGlobalPath {
   specialistName: string;
   fieldSegments: string[];
   schema: z.ZodTypeAny;
+  /** `claude_bridge` is machine configuration, not a Specialist name. */
+  reserved: boolean;
 }
 
 /**
@@ -650,6 +654,11 @@ export function resolveGlobalPath(rawPath: string): ResolvedGlobalPath {
   }
 
   const [specialistName, ...fieldSegments] = segments;
+  // The reserved route block is not a Specialist: resolve it against its own schema before the
+  // name-first parse below, or the switch stays hand-edited JSON (SPECIALISTS-4442, D2).
+  if (specialistName === CLAUDE_BRIDGE_SWITCH_KEY) {
+    return resolveClaudeBridgePath(rawPath, fieldSegments);
+  }
   let schema: z.ZodTypeAny = GlobalSpecialistOverrideSchema;
 
   for (const segment of fieldSegments) {
@@ -668,6 +677,47 @@ export function resolveGlobalPath(rawPath: string): ResolvedGlobalPath {
     specialistName: specialistName!,
     fieldSegments,
     schema: unwrapSchema(schema),
+    reserved: false,
+  };
+}
+
+/**
+ * Dot-path inside the reserved `claude_bridge` block:
+ * `claude_bridge.enabled`, `claude_bridge.default_model`, `claude_bridge.specialists`,
+ * `claude_bridge.models.<name>`. The per-name map is a record, so exactly one trailing segment is
+ * accepted as its key.
+ */
+function resolveClaudeBridgePath(rawPath: string, fieldSegments: string[]): ResolvedGlobalPath {
+  let schema: z.ZodTypeAny = ClaudeBridgeBlockSchema;
+
+  for (let index = 0; index < fieldSegments.length; index += 1) {
+    const segment = fieldSegments[index]!;
+    const unwrapped = unwrapSchema(schema);
+    if (unwrapped instanceof z.ZodRecord) {
+      if (index !== fieldSegments.length - 1) {
+        fail(`Error: invalid global path "${rawPath}" ("${segment}" is a map key, not a nested object field)`);
+      }
+      schema = unwrapped.valueSchema;
+      continue;
+    }
+    if (!(unwrapped instanceof z.ZodObject)) {
+      fail(`Error: invalid global path "${rawPath}" ("${segment}" is not a nested object field)`);
+    }
+    const shape = unwrapped.shape;
+    if (!(segment in shape)) {
+      fail(
+        `Error: invalid global path "${rawPath}". Unknown segment "${segment}". ` +
+        `Available: ${Object.keys(shape).sort().join(', ')}`,
+      );
+    }
+    schema = shape[segment];
+  }
+
+  return {
+    specialistName: CLAUDE_BRIDGE_SWITCH_KEY,
+    fieldSegments,
+    schema: unwrapSchema(schema),
+    reserved: true,
   };
 }
 
@@ -756,10 +806,24 @@ async function runGlobalEdit(args: ParsedArgs): Promise<void> {
     fail(`Error: global config not found at ${location.path}. Run ${yellow('specialists init --global')} first.`);
   }
 
-  const specialistOverride = (existing as Record<string, unknown>)[resolvedPath.specialistName];
-  if (specialistOverride === undefined) {
-    const available = listGlobalSpecialistNames(existing as Record<string, unknown>).join(', ');
-    fail(`Error: specialist "${resolvedPath.specialistName}" not in global config. Available: ${available || 'none'}`);
+  const rawEntry = (existing as Record<string, unknown>)[resolvedPath.specialistName];
+  let specialistOverride: unknown;
+  if (resolvedPath.reserved) {
+    // A missing block is created on --set, so enabling the route never requires hand-editing.
+    const isObject = rawEntry !== null && typeof rawEntry === 'object' && !Array.isArray(rawEntry);
+    if (!isObject && args.action === 'get') {
+      console.log(
+        `${yellow(resolvedPath.specialistName)}.${resolvedPath.fieldSegments.join('.')}: ${dim('(not set)')}`,
+      );
+      return;
+    }
+    specialistOverride = isObject ? rawEntry : {};
+  } else {
+    specialistOverride = rawEntry;
+    if (specialistOverride === undefined) {
+      const available = listGlobalSpecialistNames(existing as Record<string, unknown>).join(', ');
+      fail(`Error: specialist "${resolvedPath.specialistName}" not in global config. Available: ${available || 'none'}`);
+    }
   }
 
   if (args.action === 'get') {
@@ -770,6 +834,10 @@ async function runGlobalEdit(args: ParsedArgs): Promise<void> {
 
   const nextValue = coerceGlobalValue(resolvedPath.schema, args.value!);
   setAtPath(specialistOverride as Record<string, unknown>, resolvedPath.fieldSegments, nextValue);
+  if (resolvedPath.reserved) {
+    // The block may not have existed in the parsed file, so bind the (possibly new) object back.
+    (existing as Record<string, unknown>)[resolvedPath.specialistName] = specialistOverride;
+  }
 
   const updatedJson = `${JSON.stringify(existing, null, 2)}\n`;
   const validation = validateGlobalUserConfig(updatedJson);

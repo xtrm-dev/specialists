@@ -1,10 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Database } from 'bun:sqlite';
+import { tempDir } from '../../utils/temp-dir.js';
 
 let ackRoots: string[] = [];
 
@@ -21,7 +22,7 @@ const hook = join(
 const roots: string[] = [];
 const children: Array<{ kill: (s?: NodeJS.Signals) => boolean }> = [];
 function seed(rows: Array<[string, string]>): string {
-  const root = mkdtempSync(join(tmpdir(), 'wake-watch-'));
+  const root = tempDir('wake-watch-');
   roots.push(root);
   const dbPath = join(root, 'state.db');
   const db = new Database(dbPath);
@@ -77,7 +78,7 @@ function flipUntil(dbPath: string, id: string, state: string, cycles = 40) {
 function watch(dbPath: string, maxMs = 20000, entrypoint = 'cli') {
   // A per-call empty ack dir keeps every test hermetic: the watcher's default ack dir
   // is the real HOME's, and a stray marker there would turn a real wake into a silent no-op.
-  const ackRoot = mkdtempSync(join(tmpdir(), 'wake-watch-ack-'));
+  const ackRoot = tempDir('wake-watch-ack-');
   ackRoots.push(ackRoot);
   return spawnSync('bun', [hook], {
     encoding: 'utf-8',

@@ -1,7 +1,6 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 vi.mock('node:child_process', async (importOriginal) => {
@@ -10,9 +9,9 @@ vi.mock('node:child_process', async (importOriginal) => {
     ...actual,
   };
 });
-
 import { Supervisor } from '../../../src/specialist/supervisor.js';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 function makeRunOptions(name = 'test-specialist') {
   return { name, prompt: 'do something', keepAlive: true };
@@ -33,7 +32,7 @@ describe('Supervisor waiting auto-close', () => {
   beforeEach(() => {
     originalJobFileOutputEnv = process.env.SPECIALISTS_JOB_FILE_OUTPUT;
     process.env.SPECIALISTS_JOB_FILE_OUTPUT = 'on';
-    tmpDir = mkdtempSync(join(tmpdir(), 'supervisor-auto-close-'));
+    tmpDir = tempDir('supervisor-auto-close-');
     jobsDir = join(tmpDir, 'jobs');
     mkdirSync(jobsDir, { recursive: true });
     supervisors = [];

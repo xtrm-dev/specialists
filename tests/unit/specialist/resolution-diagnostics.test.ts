@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { catalogVersion } from '../../utils/catalog-pin.js';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import type { ResolvedToolContract } from '../../../src/specialist/resolved-tool-contract.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const CATALOG = {
   catalog: 'gitnexus',
@@ -99,7 +99,7 @@ describe('resolution diagnostics', () => {
   });
 
   it('loadResolvedConfigReport suppresses disabled GitNexus tools for bare', async () => {
-    const npmGlobalDir = mkdtempSync(join(tmpdir(), 'diag-npm-global-'));
+    const npmGlobalDir = tempDir('diag-npm-global-');
     try {
       mkdirSync(join(npmGlobalDir, 'pi-gitnexus'), { recursive: true });
       mkdirSync(join(npmGlobalDir, 'node_modules', 'pi-gitnexus'), { recursive: true });
@@ -121,7 +121,7 @@ describe('resolution diagnostics', () => {
   });
 
   it('loadResolvedConfigReport restores native fallbacks for catalog mismatch without advertising GitNexus tools', async () => {
-    const npmGlobalDir = mkdtempSync(join(tmpdir(), 'diag-npm-global-'));
+    const npmGlobalDir = tempDir('diag-npm-global-');
     try {
       mkdirSync(join(npmGlobalDir, 'pi-gitnexus'), { recursive: true });
       mkdirSync(join(npmGlobalDir, 'node_modules', 'pi-gitnexus'), { recursive: true });

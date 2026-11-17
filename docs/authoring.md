@@ -82,38 +82,30 @@ This guide is the user-facing reference for authoring `.specialist.json` files. 
 | `expected_output_keys` | `string[]` | unset | script-surface required JSON keys, independent of `response_format`; `sp script`/`runScriptSpecialist` fail closed with `error_type: "invalid_json"` on miss; inert on `sp run` |
 | `output_type` | enum | `"custom"` | semantic archetype: `"codegen"`, `"analysis"`, `"review"`, `"synthesis"`, `"orchestration"`, `"workflow"`, `"research"`, `"custom"` |
 | `permission_required` | `"READ_ONLY" \| "LOW" \| "MEDIUM" \| "HIGH"` | `"READ_ONLY"` | tool-access tier |
-| `claude_bridge` | boolean | `false` | opt-in Claude Code route (SPECIALISTS-4405): serves this Specialist's `claude-bridge/...` models through the Claude Code CLI on the operator's subscription. Only effective together with the machine switch in `~/.config/specialists/user.json`; see [claude-bridge.md](claude-bridge.md) |
+| `claude_bridge` | boolean | `false` | legacy opt-in for the Claude Code route (SPECIALISTS-4405), read only while the operator block in `~/.config/specialists/user.json` has no allow list. The operator's `claude_bridge.specialists` wins for the listed and unlisted case alike; see [claude-bridge.md](claude-bridge.md) |
 | `thinking_level` | `"off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh"` | unset | forwarded to thinking-capable models |
 | `requires_worktree` | boolean | `true` | set `false` for workflow/script-class specialists that should not run in an isolated git worktree; a worktree is not a security sandbox |
 | `auto_commit` | `"never" \| "checkpoint_on_waiting" \| "checkpoint_on_terminal"` | `"never"` | when to auto-commit specialist edits to the worktree |
 | `extensions.serena` | boolean | — | DEPRECATED, ignored (Serena retired, unitAI-e67up.8); legacy specs keep validating |
 | `extensions.gitnexus` | boolean | `true` | `false` disables GitNexus extension injection for this specialist |
 
-### The Claude Code route in a definition
+### The Claude Code route is selected by the operator, not by a definition
 
-`execution.claude_bridge: true` selects the route for one Specialist. It is **not** sufficient on
-its own: the operator must also enable it for the machine, because a definition can live in a
-repository layer and consent cannot.
+Which Specialists may use the Claude Code route is decided once per machine in the reserved
+`claude_bridge` block of `~/.config/specialists/user.json`. The block lists the allowed names and the
+bridge model each one runs on; see [claude-bridge.md](claude-bridge.md). A definition does not select
+the route.
 
-- Keep `claude_bridge` out of shipped definitions. The field defaults to `false` and the resolver
-  requires `true`, so a package spec with no field is already off — adding explicit falses is churn,
-  and adding `true` would ship consent.
-- Set it in a Specialist **spec** layer, next to the model — for example
-  `~/.specialists/user/<name>.specialist.json` (home layer) or `.specialists/user/<name>.specialist.json`
-  inside a project (repository layer, which cannot grant consent on its own):
-
-  ```json
-  { "specialist": { "execution": { "claude_bridge": true, "model": "claude-bridge/claude-sonnet-5-5" } } }
-  ```
-
-  The CLI writes the same layer, so both forms work:
-
-  ```bash
-  sp edit --global --set <name>.execution.claude_bridge true
-  sp edit --global --set <name>.execution.model claude-bridge/claude-sonnet-5-5
-  ```
+- **Keep `claude_bridge` out of shipped definitions.** The field defaults to `false` and the
+  resolver requires `true`, so a package spec with no field is already off — adding explicit falses
+  is churn, and adding `true` would ship consent.
+- `execution.claude_bridge: true` in a home or repository layer is only read while the block has
+  **no** allow list (the legacy shape). Once `claude_bridge.specialists` exists, the list is
+  authoritative both ways: a listed Specialist is on, an unlisted Specialist is off even if a layer
+  set the flag, and the loader prints a provenance warning for the shadowed value. `sp doctor`
+  reports a shadowed flag, so the mismatch is visible rather than silent.
 - Use a `claude-bridge/...` model id. `anthropic/...` is Pi's own API-key provider and does not go
-  through Claude Code.
+  through Claude Code; the block refuses any model that is not `claude-bridge/...`.
 - **Model selection is strict: a refusal is a refusal, at admission and at runtime.** A
   `claude-bridge/...` primary that cannot be admitted ends the dispatch with `model_unavailable`; one
   that is admitted and then fails mid-run ends `failed` on that model, with a `model_fallback` event

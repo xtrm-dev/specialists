@@ -57,6 +57,7 @@ export const DISPATCH_REFUSAL_REASONS = [
   'no_model_configured',
   'model_unavailable',
   'claude_bridge_unavailable',
+  'claude_bridge_route_model_mismatch',
   'extension_tool_shadowed',
   'extension_discovery_failed',
   'context_unresolvable',
@@ -65,6 +66,7 @@ export const DISPATCH_REFUSAL_REASONS = [
   'unguardable_mutating_tools',
   'permission_guard_unavailable',
   'tool_contract_unsatisfied',
+  'system_prompt_not_applied',
   'issue_binding_failed',
   'context_changed',
   'workspace_isolation_unavailable',
@@ -89,6 +91,8 @@ export const FIX_BY_REASON: Record<DispatchRefusalReason, string> = {
     'Check specialist_list for the exact Specialist name and re-dispatch with a known name.',
   claude_bridge_unavailable:
     'The definition enables the Claude Code route but the pi-claude-bridge extension was not found. Install it with `pi install npm:pi-claude-bridge@0.12.0` (pi writes it to <agentDir>/npm, e.g. ~/.pi/agent/npm), or set SPECIALISTS_CLAUDE_BRIDGE_PATH to an absolute entry, or clear execution.claude_bridge and re-dispatch. The operator must also enable the route in ~/.config/specialists/user.json. The refusal note lists every path searched.',
+  claude_bridge_route_model_mismatch:
+    'The Specialist is named in the operator allow list (claude_bridge.specialists in ~/.config/specialists/user.json) but that block resolves no claude-bridge/... model for it. Fix claude_bridge.models.<name> or claude_bridge.default_model, or remove the name from the list, then re-dispatch. The run is refused rather than admitted and billed to another provider.',
   work_item_store_unavailable:
     'The Substrate work boundary could not be opened. Install or upgrade the Substrate package, or set SUBSTRATE_DB (fallback XTRM_STATE_DB) to a writable state file, then re-dispatch.',
   parent_ref_and_ref:
@@ -143,6 +147,8 @@ export const FIX_BY_REASON: Record<DispatchRefusalReason, string> = {
     'READ_ONLY bash was granted without the permission guard in the loaded set. Load the guard extension or remove bash from the READ_ONLY contract and re-dispatch.',
   tool_contract_unsatisfied:
     'The live session did not expose every promised tool. Fix the extension and resource-loader setup so the session exposes the full contract, then re-dispatch.',
+  system_prompt_not_applied:
+    'The live session system prompt did not contain the role prompt. Check the pi SDK resource-loader wiring (systemPrompt / appendSystemPrompt), then re-dispatch.',
   issue_binding_failed:
     'Binding the Issue to this activation failed. Re-read the Issue and re-dispatch.',
   context_changed:

@@ -1,7 +1,7 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { tempDir } from '../../utils/temp-dir.js';
 
 vi.mock('../../../src/specialist/observability-sqlite.js', () => ({
   createObservabilitySqliteClient: () => ({
@@ -21,7 +21,7 @@ describe('Supervisor finalizeWaitingJob', () => {
 
   beforeEach(() => {
     process.env.SPECIALISTS_JOB_FILE_OUTPUT = 'on';
-    tmpDir = mkdtempSync(join(tmpdir(), 'supervisor-finalize-'));
+    tmpDir = tempDir('supervisor-finalize-');
     jobsDir = join(tmpDir, 'jobs');
     mkdirSync(jobsDir, { recursive: true });
   });

@@ -1,6 +1,6 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import {
   GLOBAL_USER_CONFIG_DOC,
@@ -12,6 +12,7 @@ import {
   writeGlobalUserConfig,
   type GlobalUserConfigPath,
 } from '../../../src/specialist/global-config.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 describe('global specialist override config', () => {
   it('buildGlobalUserConfigTemplate includes upgrade-note doc sentinel', () => {
@@ -69,6 +70,32 @@ describe('global specialist override config', () => {
     };
 
     expect(validateGlobalUserConfig(JSON.stringify(existing))).toEqual({ valid: true, errors: [] });
+  });
+
+  it('mergeGlobalUserConfig backfills an entry whose definition is not resolvable here', () => {
+    // The file is shared across machines, so a name this machine cannot resolve is not "removed":
+    // it is an entry with no definition here. Leaving it short made every sp edit --global write
+    // fail the whole-file validation (SPECIALISTS-4448).
+    const existing = { 'frontend-auditor': { execution: { timeout_ms: 900_000 } } };
+    const result = mergeGlobalUserConfig(existing, buildGlobalUserConfigTemplate(['demo']));
+
+    expect(result.notInstalledHere).toEqual(['frontend-auditor']);
+    expect(result.removed).toEqual([]);
+    const merged = result.config['frontend-auditor'] as Record<string, unknown>;
+    const execution = merged.execution as Record<string, unknown>;
+    // Every template field is present, and the one value the operator set survives.
+    expect(execution.timeout_ms).toBe(900_000);
+    expect(Object.keys(execution).sort()).toEqual(Object.keys(buildSpecialistOverrideTemplate().execution).sort());
+    expect(merged.beads_write_notes).toBeNull();
+    expect(merged.skills).toEqual({ paths: [] });
+    expect(validateGlobalUserConfig(JSON.stringify(result.config)).valid).toBe(true);
+  });
+
+  it('mergeGlobalUserConfig keeps the reserved route block verbatim and never backfills it', () => {
+    const existing = { claude_bridge: { enabled: true, specialists: ['demo'] } };
+    const result = mergeGlobalUserConfig(existing, buildGlobalUserConfigTemplate(['demo']));
+    expect(result.config.claude_bridge).toEqual({ enabled: true, specialists: ['demo'] });
+    expect(result.notInstalledHere).toEqual([]);
   });
 
   it('mergeGlobalUserConfig extends pre-extension user.json without clobbering values', () => {
@@ -322,7 +349,7 @@ describe('readValidatedGlobalUserConfig — shared fail-safe read (unitAI-klo6k)
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'sp-global-validated-'));
+    dir = tempDir('sp-global-validated-');
   });
 
   afterEach(() => {
@@ -377,7 +404,7 @@ describe('writeGlobalUserConfig — atomic-write semantics (unitAI-ctb4u.17)', (
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'sp-global-config-'));
+    dir = tempDir('sp-global-config-');
   });
 
   afterEach(() => {

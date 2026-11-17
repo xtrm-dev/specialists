@@ -1,13 +1,14 @@
-import { mkdtemp, mkdir, readdir, stat } from 'node:fs/promises';
+import { mkdir, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * Build a per-test specialists config home for live smoke while keeping real HOME/ ~/.pi.
  * Real HOME keeps provider credentials; XDG_CONFIG_HOME scopes global specialist overrides.
  */
 export async function createLiveSmokeHome(prefix: string): Promise<{ tempHome: string; env: NodeJS.ProcessEnv }> {
-  const tempHome = await mkdtemp(join(tmpdir(), prefix));
+  const tempHome = tempDir(prefix);
   await mkdir(join(tempHome, '.config', 'specialists'), { recursive: true });
 
   return {

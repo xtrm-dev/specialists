@@ -14,9 +14,9 @@ import {
   type WorktreeOptions,
 } from '../../../src/specialist/worktree.js';
 import { spawnSync, execSync } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 describe('deriveBranchName', () => {
   it('creates canonical branch name from beadId and specialist', () => {
@@ -51,7 +51,7 @@ describe('resolveCommonRoot', () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'worktree-root-test-'));
+    tempDir = createTempDir('worktree-root-test-');
     spawnSync('git', ['init'], { cwd: tempDir, stdio: 'ignore' });
     spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tempDir });
     spawnSync('git', ['config', 'user.name', 'Test'], { cwd: tempDir });
@@ -74,7 +74,7 @@ describe('resolveCommonRoot', () => {
   });
 
   it('falls back to cwd when git is unavailable', () => {
-    const nonGitDir = mkdtempSync(join(tmpdir(), 'non-git-wt-'));
+    const nonGitDir = createTempDir('non-git-wt-');
     try {
       const root = resolveCommonRoot(nonGitDir);
       expect(root).toBe(nonGitDir);
@@ -89,7 +89,7 @@ describe('listWorktrees', () => {
   let worktreePath: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'wt-list-test-'));
+    tempDir = createTempDir('wt-list-test-');
     spawnSync('git', ['init'], { cwd: tempDir, stdio: 'ignore' });
     spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tempDir });
     spawnSync('git', ['config', 'user.name', 'Test'], { cwd: tempDir });
@@ -117,7 +117,7 @@ describe('listWorktrees', () => {
   });
 
   it('returns empty map when git is unavailable', () => {
-    const nonGitDir = mkdtempSync(join(tmpdir(), 'non-git-wt-list-'));
+    const nonGitDir = createTempDir('non-git-wt-list-');
     try {
       const worktrees = listWorktrees(nonGitDir);
       expect(worktrees.size).toBe(0);
@@ -132,7 +132,7 @@ describe('findExistingWorktree', () => {
   let worktreePath: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'wt-find-test-'));
+    tempDir = createTempDir('wt-find-test-');
     spawnSync('git', ['init'], { cwd: tempDir, stdio: 'ignore' });
     spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tempDir });
     spawnSync('git', ['config', 'user.name', 'Test'], { cwd: tempDir });
@@ -161,7 +161,7 @@ describe('provisionWorktree', () => {
   let originalCwd: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'wt-provision-test-'));
+    tempDir = createTempDir('wt-provision-test-');
     originalCwd = process.cwd();
     spawnSync('git', ['init'], { cwd: tempDir, stdio: 'ignore' });
     spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tempDir });
@@ -341,7 +341,7 @@ describe('resolveCoordinatorBase', () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'wt-coord-base-'));
+    tempDir = createTempDir('wt-coord-base-');
     spawnSync('git', ['init'], { cwd: tempDir, stdio: 'ignore' });
     spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tempDir });
     spawnSync('git', ['config', 'user.name', 'Test'], { cwd: tempDir });
@@ -422,7 +422,7 @@ describe('provisionWorktree coordinator ancestry', () => {
   let originalCwd: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'wt-ancestry-test-'));
+    tempDir = createTempDir('wt-ancestry-test-');
     originalCwd = process.cwd();
     spawnSync('git', ['init'], { cwd: tempDir, stdio: 'ignore' });
     spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tempDir });

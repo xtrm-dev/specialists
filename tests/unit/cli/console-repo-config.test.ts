@@ -1,8 +1,7 @@
 // Regression for unitAI-29p39 (Wave A): console.json schema + atomic
 // write + first-run auto-discovery primitives.
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -20,6 +19,7 @@ import {
   discoverRepos,
   expandHomePath,
 } from '../../../src/cli/console/repo-discovery.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 describe('console.json — path resolution', () => {
   let savedHome: string | undefined;
@@ -36,7 +36,7 @@ describe('console.json — path resolution', () => {
   });
 
   it('resolves to XDG when set', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'sp-console-cfg-xdg-'));
+    const dir = tempDir('sp-console-cfg-xdg-');
     process.env.XDG_CONFIG_HOME = dir;
     delete process.env.HOME;
     const location = getConsoleConfigPath();
@@ -46,7 +46,7 @@ describe('console.json — path resolution', () => {
   });
 
   it('falls back to ~/.config when XDG unset', () => {
-    const home = mkdtempSync(join(tmpdir(), 'sp-console-cfg-home-'));
+    const home = tempDir('sp-console-cfg-home-');
     process.env.HOME = home;
     delete process.env.XDG_CONFIG_HOME;
     const location = getConsoleConfigPath();
@@ -62,7 +62,7 @@ describe('writeConsoleConfig — atomic semantics', () => {
   let savedXdg: string | undefined;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'sp-console-cfg-write-'));
+    dir = tempDir('sp-console-cfg-write-');
     savedHome = process.env.HOME;
     savedXdg = process.env.XDG_CONFIG_HOME;
     process.env.XDG_CONFIG_HOME = dir;
@@ -109,7 +109,7 @@ describe('readConsoleConfig — drift-safe normalization', () => {
   let savedXdg: string | undefined;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'sp-console-cfg-read-'));
+    dir = tempDir('sp-console-cfg-read-');
     savedHome = process.env.HOME;
     savedXdg = process.env.XDG_CONFIG_HOME;
     process.env.XDG_CONFIG_HOME = dir;
@@ -167,7 +167,7 @@ describe('isConsoleConfigStale', () => {
 
 describe('pruneMissingRepos', () => {
   it('keeps entries whose path still exists as a directory', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'sp-console-prune-'));
+    const dir = tempDir('sp-console-prune-');
     try {
       const kept = pruneMissingRepos([
         { name: 'real', path: dir },
@@ -200,7 +200,7 @@ describe('discoverRepos — base dir scan', () => {
   let savedHome: string | undefined;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'sp-console-discover-'));
+    dir = tempDir('sp-console-discover-');
     savedHome = process.env.HOME;
     process.env.HOME = dir;
   });
@@ -328,7 +328,7 @@ describe('listReposWithContext — current-repo selection (unitAI-29p39)', () =>
   let savedXdg: string | undefined;
 
   beforeEach(() => {
-    baseDir = mkdtempSync(join(tmpdir(), 'sp-console-current-'));
+    baseDir = tempDir('sp-console-current-');
     savedHome = process.env.HOME;
     savedXdg = process.env.XDG_CONFIG_HOME;
     process.env.HOME = baseDir;

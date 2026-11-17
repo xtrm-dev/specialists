@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * PostCompact closes the loop PreCompact opens (unitAI-aiwva.23). Without it the
@@ -16,7 +16,7 @@ const postHook = join(scripts, 'postcompact.mjs');
 
 const tmpRoots: string[] = [];
 function tmpRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), 'postcompact-hook-'));
+  const root = tempDir('postcompact-hook-');
   tmpRoots.push(root);
   return root;
 }

@@ -1,9 +1,10 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm, writeFile, chmod } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile, chmod } from 'node:fs/promises';
 import { execSync, spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 const entry = join(repoRoot, 'src/index.ts');
@@ -87,7 +88,7 @@ describe('integration: merge CLI', () => {
   let tempDir = '';
 
   beforeEach(async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'sp-merge-integration-'));
+    tempDir = createTempDir('sp-merge-integration-');
     await initRepo(tempDir);
 
     const baseBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: tempDir, encoding: 'utf-8' }).trim();

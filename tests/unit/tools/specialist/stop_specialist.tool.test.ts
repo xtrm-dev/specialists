@@ -1,15 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createStopSpecialistTool } from '../../../../src/tools/specialist/stop_specialist.tool.js';
+import { tempDir as createTempDir } from '../../../utils/temp-dir.js';
 
 describe('stop_specialist tool', () => {
   const originalCwd = process.cwd();
   let tempDir = '';
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'specialists-stop-tool-'));
+    tempDir = createTempDir('specialists-stop-tool-');
     process.chdir(tempDir);
   });
 

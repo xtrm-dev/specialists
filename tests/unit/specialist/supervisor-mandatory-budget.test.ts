@@ -1,8 +1,8 @@
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { projectMandatoryRulesInjection, Supervisor } from '../../../src/specialist/supervisor.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const supervisors: Supervisor[] = [];
 const tempDirs: string[] = [];
@@ -22,7 +22,7 @@ afterEach(async () => {
 function makeSupervisor(
   emit: (onEvent: (type: string, details: Record<string, unknown>) => void) => Promise<Record<string, unknown>>,
 ): Supervisor {
-  const root = mkdtempSync(join(tmpdir(), 'supervisor-mandatory-budget-'));
+  const root = tempDir('supervisor-mandatory-budget-');
   tempDirs.push(root);
   const supervisor = new Supervisor({
     jobsDir: join(root, 'jobs'),

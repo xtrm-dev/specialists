@@ -2,8 +2,8 @@
 // issue_ref (and created_issue_ref where an emission pair exists) alongside the
 // bead_* alias, with both spellings equal from the same read.
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+
 import { join } from 'node:path';
 import {
   toActivationCompactView,
@@ -16,6 +16,7 @@ import { createSpecialistResultTool } from '../../../src/tools/specialist/specia
 import { createFeedSpecialistTool } from '../../../src/tools/specialist/feed_specialist.tool.js';
 import { buildChannelFrame } from '../../../src/mcp/channel.js';
 import { CircuitBreaker } from '../../../src/utils/circuitBreaker.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const SNAPSHOT: any = {
   activationId: 'act:dual-1',
@@ -183,7 +184,7 @@ describe('dual-emit issue_ref / bead_id', () => {
   });
 
   it('feed_specialist emits issue_ref == bead_id', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'dual-feed-'));
+    const root = tempDir('dual-feed-');
     tmpRoots.push(root);
     const jobsDir = join(root, 'jobs');
     const jobDir = join(jobsDir, 'job-dual');

@@ -1,9 +1,10 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 const entry = join(repoRoot, 'src/index.ts');
@@ -97,7 +98,7 @@ describe('integration: migration docs and operator guidance alignment', () => {
   });
 
   it('matches docs with real CLI behavior for node help and validate ownership precedence', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-docs-int-'));
+    tempDir = createTempDir('specialists-docs-int-');
     await mkdir(join(tempDir, '.specialists', 'default'), { recursive: true });
     await mkdir(join(tempDir, '.specialists', 'user'), { recursive: true });
 

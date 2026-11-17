@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { countArg, getExtensionArgs, readLoggedPiArgv } from './helpers/fake-pi';
+import { tempDir } from '../utils/temp-dir.js';
 
 const originalCwd = process.cwd();
 let tempRoot = '';
@@ -36,7 +36,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 }
 
 beforeEach(() => {
-  tempRoot = mkdtempSync(join(tmpdir(), 'sp-serve-'));
+  tempRoot = tempDir('sp-serve-');
   serverStdout = '';
   mkdirSync(join(tempRoot, '.specialists', 'user'), { recursive: true });
   mkdirSync(join(tempRoot, 'bin'), { recursive: true });

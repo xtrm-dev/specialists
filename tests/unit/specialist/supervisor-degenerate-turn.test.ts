@@ -3,8 +3,7 @@
 // no tool calls must be nudged exactly once before the session parks in waiting,
 // instead of silently stalling with an empty result.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // Keep the real synchronous process helpers so the SQLite-backed supervisor
@@ -14,6 +13,7 @@ vi.mock('node:child_process', async (importOriginal) => ({
   spawn: vi.fn(() => ({ pid: 1234, unref: vi.fn() })),
 }));
 import { Supervisor } from '../../../src/specialist/supervisor.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 function makeRunOptions(name = 'test-specialist') {
   return { name, prompt: 'do something' };
@@ -45,7 +45,7 @@ describe('Supervisor: degenerate-turn nudge (xtrm-5kwk2)', () => {
   beforeEach(() => {
     originalJobFileOutputEnv = process.env.SPECIALISTS_JOB_FILE_OUTPUT;
     process.env.SPECIALISTS_JOB_FILE_OUTPUT = 'on';
-    tmpDir = mkdtempSync(join(tmpdir(), 'supervisor-degenerate-turn-'));
+    tmpDir = tempDir('supervisor-degenerate-turn-');
     jobsDir = join(tmpDir, 'jobs');
     mkdirSync(jobsDir, { recursive: true });
     supervisors = [];

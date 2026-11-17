@@ -5,14 +5,13 @@
 // Guarded behind PI_INTEGRATION=1 (matches the existing convention for
 // pi-dependent tests). Skipped by default so the fast unit suite is not
 // gated on a Pi binary being installed.
-
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { writeFileSync } from 'node:fs';
 
+import { join, resolve } from 'node:path';
 import { getReadLineNumbersExtensionPath } from '../../../src/pi/read-line-numbers-extension.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const ENABLED = process.env.PI_INTEGRATION === '1';
 const describeIntegration = ENABLED ? describe : describe.skip;
@@ -22,7 +21,7 @@ describeIntegration('read-line-numbers Pi integration', () => {
     const extensionPath = getReadLineNumbersExtensionPath();
     expect(extensionPath).toBeTruthy();
 
-    const dir = mkdtempSync(join(tmpdir(), 'rl-integration-'));
+    const dir = tempDir('rl-integration-');
     const lines = Array.from({ length: 12 }, (_, i) => `fixture-line-${i + 1}`);
     const fixturePath = join(dir, 'fixture.txt');
     writeFileSync(fixturePath, lines.join('\n') + '\n', 'utf8');
@@ -75,7 +74,7 @@ describeIntegration('read-line-numbers Pi integration', () => {
     const extensionPath = getReadLineNumbersExtensionPath();
     expect(extensionPath).toBeTruthy();
 
-    const dir = mkdtempSync(join(tmpdir(), 'rl-integration-eof-'));
+    const dir = tempDir('rl-integration-eof-');
     // Fixture "one\ntwo\n" — Pi's split("\n") counts 3 lines with line 3
     // being the EOF empty. Numbered output must contain "3 | " at trailing.
     const fixturePath = join(dir, 'fixture.txt');

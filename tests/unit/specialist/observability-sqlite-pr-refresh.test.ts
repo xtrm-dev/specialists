@@ -1,12 +1,13 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { Database } from 'bun:sqlite';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
+
 import { join } from 'node:path';
 import {
   createObservabilitySqliteClientAtPath,
   initSchema,
 } from '../../../src/specialist/observability-sqlite.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 describe('observability-sqlite — listJobsNeedingPrDriftRefresh', () => {
   let tempDbPath: string;
@@ -14,7 +15,7 @@ describe('observability-sqlite — listJobsNeedingPrDriftRefresh', () => {
   let sqliteClient: ReturnType<typeof createObservabilitySqliteClientAtPath> | null = null;
 
   beforeEach(() => {
-    tempDbPath = join(mkdtempSync(join(tmpdir(), 'obs-')), 'obs.db');
+    tempDbPath = join(tempDir('obs-'), 'obs.db');
   });
 
   afterEach(() => {

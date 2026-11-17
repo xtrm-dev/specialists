@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { RequiredPreScriptError } from '../../../src/specialist/runner.js';
 import { Supervisor } from '../../../src/specialist/supervisor.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const supervisors: Supervisor[] = [];
 const tempDirs: string[] = [];
@@ -17,7 +17,7 @@ afterEach(async () => {
 describe('Supervisor required pre-script failure persistence', () => {
   it('persists a terminal error and ERROR run_complete event', async () => {
     vi.stubEnv('SPECIALISTS_JOB_FILE_OUTPUT', 'on');
-    const root = mkdtempSync(join(tmpdir(), 'supervisor-required-pre-script-'));
+    const root = tempDir('supervisor-required-pre-script-');
     tempDirs.push(root);
     const failure = new RequiredPreScriptError(
       'Required pre-script "preflight.sh" failed with exit code 5.\nstderr:\nvalidation failed',

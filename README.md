@@ -660,11 +660,13 @@ operator's own subscription login instead of an API key, via
 [`pi-claude-bridge`](https://github.com/elidickinson/pi-claude-bridge). Pi still executes every tool,
 so tiers and the READ_ONLY guard behave as on any other provider.
 
-Two switches must both be on: the operator enables the route once per machine in
-`~/.config/specialists/user.json` (`{"claude_bridge":{"enabled":true}}`), and a definition sets
-`execution.claude_bridge: true` with a `claude-bridge/...` model. A repository cannot enable it on
-its own. With either switch off, a dispatch whose primary model is `claude-bridge/...` is refused
-with `model_unavailable` before a session exists, and admission is not substituted. A run that is
+The operator enables the route once per machine and names who may use it in
+`~/.config/specialists/user.json`; the loader then derives the per-Specialist flag and model from
+that allow list, so no shipped or repository definition needs `execution.claude_bridge`. The
+definition flag is still read when the block carries no allow list, which is the legacy shape. A
+repository cannot enable the route on its own: consent lives outside every repo. With the route off,
+a dispatch whose primary model is `claude-bridge/...` is refused with `model_unavailable` before a
+session exists, and admission is not substituted. A run that is
 admitted and then fails mid-run ends `failed` on that model as well — `fallback_models` is not
 walked, on the native host, the legacy `sp run` runner or the script runner behind `sp script` — so
 a run never moves from the subscription surface to a metered one. See the

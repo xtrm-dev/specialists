@@ -64,6 +64,9 @@ g5np-rpc-extraction/
 .claude/scheduled_tasks.lock
 .claude/hooks/tsconfig-cache.json
 
+# Test coverage reports (vitest run --coverage writes an HTML bundle and coverage-final.json)
+coverage/
+
 # Specialists runtime artifacts
 .specialists/executor-result.md
 .specialists/*-result.md

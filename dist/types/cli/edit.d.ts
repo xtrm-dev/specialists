@@ -3,6 +3,8 @@ interface ResolvedGlobalPath {
     specialistName: string;
     fieldSegments: string[];
     schema: z.ZodTypeAny;
+    /** `claude_bridge` is machine configuration, not a Specialist name. */
+    reserved: boolean;
 }
 /**
  * Resolve a global dot-path of the form <specialist>.<field.path> against the

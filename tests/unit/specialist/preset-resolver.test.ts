@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { mkdtemp } from 'node:fs/promises';
+
+
 import {
   PRESET_REFERENCE_MAX_DEPTH,
   SpecialistPresetConfigError,
@@ -13,6 +13,7 @@ import {
   loadPresets,
   resolvePresetReference,
 } from '../../../src/specialist/preset-resolver.js';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 describe('preset resolver', () => {
   let tempDir: string;
@@ -20,7 +21,7 @@ describe('preset resolver', () => {
 
   beforeEach(async () => {
     originalCwd = process.cwd();
-    tempDir = await mkdtemp(join(tmpdir(), 'preset-resolver-'));
+    tempDir = createTempDir('preset-resolver-');
     process.chdir(tempDir);
     await mkdir('config', { recursive: true });
   });

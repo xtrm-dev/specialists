@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -22,7 +21,6 @@ vi.mock('node:child_process', async (importOriginal) => {
     },
   };
 });
-
 import { toActivationCompactView } from '../../../src/tools/specialist/activation.tool.js';
 import { createSpecialistStatusTool } from '../../../src/tools/specialist/specialist_status.tool.js';
 import { createSpecialistDispatchTool } from '../../../src/tools/specialist/activation.tool.js';
@@ -33,6 +31,7 @@ import { CircuitBreaker } from '../../../src/utils/circuitBreaker.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import { testWorkItems } from '../../utils/test-work-items.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 function contract(extra = 'SCRUTINY\nLOW — routine.') {
   const bodies: Record<string, string> = {
@@ -89,7 +88,7 @@ afterEach(() => {
 });
 
 function tempWorkspace() {
-  const root = mkdtempSync(join(tmpdir(), 'status-display-'));
+  const root = tempDir('status-display-');
   workspaces.push(root);
   return { repositoryRoot: root, worktreePath: root };
 }

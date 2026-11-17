@@ -1,9 +1,10 @@
 // ISSUE: xtrm-wiy5n.4.11 — quarantined from the default test baseline.
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, rm, writeFile, mkdir, symlink } from 'node:fs/promises';
+import { readFile, rm, writeFile, mkdir, symlink } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { spawnSync } from 'node:child_process';
+import { tempDir as createTempDir } from '../../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 
@@ -33,7 +34,7 @@ describe('integration: specialists init', () => {
   });
 
   it('fails with clear xtrm prerequisite hint when not skipped', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-init-'));
+    tempDir = createTempDir('specialists-int-init-');
 
     const result = runCli(['init'], tempDir);
 
@@ -43,7 +44,7 @@ describe('integration: specialists init', () => {
   });
 
   it('writes project-scoped .mcp.json via the real CLI entrypoint', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-init-'));
+    tempDir = createTempDir('specialists-int-init-');
     await setupXtrmStructure(tempDir);
 
     const result = runCli(['init', '--no-xtrm-check'], tempDir);
@@ -63,7 +64,7 @@ describe('integration: specialists init', () => {
   });
 
   it('merges specialists registration into an existing .mcp.json file', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-init-'));
+    tempDir = createTempDir('specialists-int-init-');
     await setupXtrmStructure(tempDir);
     await writeFile(join(tempDir, '.mcp.json'), JSON.stringify({
       mcpServers: {
@@ -81,7 +82,7 @@ describe('integration: specialists init', () => {
   });
 
   it('sync-defaults mirrors specialists, mandatory-rules, and nodes and refreshes drift', async () => {
-    tempDir = await mkdtemp(join(tmpdir(), 'specialists-int-init-'));
+    tempDir = createTempDir('specialists-int-init-');
     await setupXtrmStructure(tempDir);
 
     const first = runCli(['init', '--sync-defaults', '--no-xtrm-check'], tempDir);

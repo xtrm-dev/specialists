@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempDir } from '../../utils/temp-dir.js';
 
 type SupervisorType = typeof import('../../../src/specialist/supervisor.js').Supervisor;
 
@@ -57,7 +57,7 @@ describe('Supervisor dead-status recovery', () => {
     });
 
     ({ Supervisor } = await import('../../../src/specialist/supervisor.js'));
-    tmpDir = mkdtempSync(join(tmpdir(), 'supervisor-read-status-dead-'));
+    tmpDir = tempDir('supervisor-read-status-dead-');
     jobsDir = join(tmpDir, 'jobs');
     mkdirSync(jobsDir, { recursive: true });
     supervisors = [];

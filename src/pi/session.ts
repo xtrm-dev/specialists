@@ -1366,10 +1366,7 @@ function getWorktreeBoundaryExtensionPath(worktreeBoundary: string): string | nu
   try {
     mkdirSync(extensionsDir, { recursive: true });
   } catch (err) {
-    process.stderr.write(
-      `[worktree-boundary] WARN: could not create extensions directory at ${extensionsDir}: ${(err as Error).message}. ` +
-      `Boundary enforcement will NOT apply for this session.\n`,
-    );
+    runtimeWarn('worktree-boundary', `could not create extensions directory at ${extensionsDir}: ${(err as Error).message}. Boundary enforcement will NOT apply for this session.`);
     return null;
   }
   const extensionPath = join(extensionsDir, `worktree-boundary-${boundaryHash}.mjs`);
@@ -1415,10 +1412,7 @@ export default function(pi) {
   try {
     writeFileSync(extensionPath, extensionSource, 'utf-8');
   } catch (err) {
-    process.stderr.write(
-      `[worktree-boundary] WARN: could not write extension file at ${extensionPath}: ${(err as Error).message}. ` +
-      `Boundary enforcement will NOT apply for this session.\n`,
-    );
+    runtimeWarn('worktree-boundary', `could not write extension file at ${extensionPath}: ${(err as Error).message}. Boundary enforcement will NOT apply for this session.`);
     return null;
   }
   return extensionPath;
@@ -1564,9 +1558,7 @@ export class PiAgentSession {
       this.options.extensionSources ?? [],
     );
     for (const { dropped, keptAs } of droppedSources) {
-      process.stderr.write(
-        `[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').\n`,
-      );
+      runtimeWarn('python-kernel', `DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').`);
     }
     for (const source of dedupedSources) {
       args.push('-e', source);

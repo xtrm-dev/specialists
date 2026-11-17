@@ -2,13 +2,14 @@
 // Live HOME strategy for smoke: keep real HOME (and ~/.pi credentials) intact and set XDG_CONFIG_HOME
 // to a temp directory so specialist overrides stay isolated; symlink repoRoot/.beads into tempRepo.
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { spawnSync } from 'node:child_process';
 import { createLiveSmokeHome, snapshotJobIds, waitForNewJobId } from './live-smoke.helpers';
 import type { SupervisorStatus } from '../../../src/specialist/supervisor.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 const runLive = process.env.SPECIALISTS_LIVE_SMOKE === '1';
@@ -66,7 +67,7 @@ describe('live smoke: run fallback chain', () => {
   it.skipIf(!runLive)('walks bad model chain entry to healthy fallback and logs fallback_step telemetry', async () => {
     expect(liveModel).toBeTruthy();
     ({ tempHome, env } = await createLiveSmokeHome('specialists-live-fallback-home-'));
-    tempRepo = await mkdtemp(join(tmpdir(), 'specialists-live-fallback-repo-'));
+    tempRepo = tempDir('specialists-live-fallback-repo-');
 
     expect(run('git', ['init', '-b', 'main'], tempRepo).status).toBe(0);
     // Symlink .beads from repoRoot so sp run dispatched from tempRepo can resolve the bead.

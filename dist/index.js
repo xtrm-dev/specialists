@@ -4614,6 +4614,41 @@ function getGlobalUserConfigPath() {
   }
   return { path: configHomePath, exists: false, source: "config-home" };
 }
+function readClaudeBridgeBlock(location = getGlobalUserConfigPath(), readFile = (path) => readFileSync2(path, "utf-8")) {
+  const absent = { present: false, block: null, error: null, listedNames: [], path: location.path };
+  if (!location.exists)
+    return absent;
+  let raw;
+  try {
+    raw = JSON.parse(readFile(location.path));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ...absent, error: `cannot read ${location.path}: ${message}` };
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ...absent, error: `${location.path} is not a JSON object` };
+  }
+  const entry = raw[CLAUDE_BRIDGE_SWITCH_KEY];
+  if (entry === undefined)
+    return absent;
+  const listedNames = (() => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry))
+      return [];
+    const listed = entry.specialists;
+    return Array.isArray(listed) ? listed.filter((name) => typeof name === "string") : [];
+  })();
+  const parsed = ClaudeBridgeBlockSchema.safeParse(entry);
+  if (!parsed.success) {
+    return {
+      present: true,
+      block: null,
+      error: parsed.error.issues.map((issue) => `${[CLAUDE_BRIDGE_SWITCH_KEY, ...issue.path.map(String)].join(".")}: ${issue.message}`).join("; ") || "invalid claude_bridge block",
+      listedNames,
+      path: location.path
+    };
+  }
+  return { present: true, block: parsed.data, error: null, listedNames, path: location.path };
+}
 function getGlobalSpecialistOverrideLeafPaths() {
   return [
     ...OVERRIDE_ALLOWED_EXECUTION_FIELDS.map((field) => `execution.${field}`),
@@ -4682,18 +4717,23 @@ function mergeGlobalUserConfig(existing, template) {
   const merged = { _doc: GLOBAL_USER_CONFIG_DOC };
   const added = [];
   const extended = [];
+  const notInstalledHere = [];
   const removed = [];
   for (const [name, rawExisting] of Object.entries(existing)) {
     if (name.startsWith("_"))
       continue;
-    const templateOverride = template[name];
-    if (templateOverride && typeof templateOverride === "object") {
-      const normalized = fillMissingDefaults(rawExisting && typeof rawExisting === "object" ? { ...rawExisting } : {}, templateOverride);
-      merged[name] = normalized;
-      extended.push(name);
-    } else {
+    if (name === CLAUDE_BRIDGE_SWITCH_KEY) {
       merged[name] = rawExisting;
-      removed.push(name);
+      continue;
+    }
+    const templateOverride = template[name];
+    const isResolvable = Boolean(templateOverride && typeof templateOverride === "object");
+    const shape = isResolvable ? templateOverride : buildSpecialistOverrideTemplate();
+    const normalized = fillMissingDefaults(rawExisting && typeof rawExisting === "object" ? { ...rawExisting } : {}, shape);
+    merged[name] = normalized;
+    extended.push(name);
+    if (!isResolvable) {
+      notInstalledHere.push(name);
     }
   }
   for (const [name, override] of Object.entries(template)) {
@@ -4704,7 +4744,7 @@ function mergeGlobalUserConfig(existing, template) {
       added.push(name);
     }
   }
-  return { config: merged, added, extended, removed };
+  return { config: merged, added, extended, notInstalledHere, removed };
 }
 function missingTemplatePaths(target, template, prefix, out) {
   if (template === null || typeof template !== "object" || Array.isArray(template))
@@ -4731,13 +4771,14 @@ function analyzeGlobalUserConfigDrift(existing, template, options = {}) {
   for (const [specialist, entry] of Object.entries(existing)) {
     if (specialist.startsWith("_"))
       continue;
+    if (specialist === CLAUDE_BRIDGE_SWITCH_KEY)
+      continue;
     const templateEntry = template[specialist];
-    if (templateEntry && typeof templateEntry === "object") {
-      const missing = [];
-      missingTemplatePaths(entry, templateEntry, "", missing);
-      if (missing.length > 0)
-        report.missingFields[specialist] = missing;
-    }
+    const shape = templateEntry && typeof templateEntry === "object" ? templateEntry : buildSpecialistOverrideTemplate();
+    const missing = [];
+    missingTemplatePaths(entry, shape, "", missing);
+    if (missing.length > 0)
+      report.missingFields[specialist] = missing;
     const extensions = entry?.execution?.extensions;
     if (!extensions || typeof extensions !== "object")
       continue;
@@ -4773,12 +4814,15 @@ function validateGlobalUserConfig(jsonContent) {
   }
   const switchErrors = [];
   if (raw && typeof raw === "object" && !Array.isArray(raw) && CLAUDE_BRIDGE_SWITCH_KEY in raw) {
-    const parsedSwitch = ClaudeBridgeSwitchSchema.safeParse(raw[CLAUDE_BRIDGE_SWITCH_KEY]);
+    const parsedSwitch = ClaudeBridgeBlockSchema.safeParse(raw[CLAUDE_BRIDGE_SWITCH_KEY]);
     if (!parsedSwitch.success) {
-      switchErrors.push({
-        path: CLAUDE_BRIDGE_SWITCH_KEY,
-        message: parsedSwitch.error.issues.map((issue) => issue.message).join("; ") || "invalid switch"
-      });
+      for (const issue of parsedSwitch.error.issues) {
+        const subPath = issue.path.map((part) => typeof part === "number" ? `[${part}]` : part).join(".");
+        switchErrors.push({
+          path: subPath ? `${CLAUDE_BRIDGE_SWITCH_KEY}.${subPath}` : CLAUDE_BRIDGE_SWITCH_KEY,
+          message: issue.message
+        });
+      }
     }
   }
   const result = GlobalUserConfigSchema.safeParse(raw);
@@ -4840,7 +4884,7 @@ function writeGlobalUserConfig(location, config) {
     throw renameError;
   }
 }
-var CONFIG_FILENAME = "user.json", SPECIALISTS_SUBDIR = "specialists", GLOBAL_USER_CONFIG_DOC = "./overrides-guide.md", OverrideExtensionsSchema, OverrideExecutionSchema, OverridePromptSchema, OverrideStallDetectionSchema, OverrideSkillsSchema, OverrideMandatoryRulesSchema, CLAUDE_BRIDGE_SWITCH_KEY = "claude_bridge", ClaudeBridgeSwitchSchema, GlobalSpecialistOverrideSchema, GlobalUserConfigSchema, RETIRED_EXTENSION_SOURCES, BUILTIN_EXTENSION_TOGGLES;
+var CONFIG_FILENAME = "user.json", SPECIALISTS_SUBDIR = "specialists", GLOBAL_USER_CONFIG_DOC = "./overrides-guide.md", OverrideExtensionsSchema, OverrideExecutionSchema, OverridePromptSchema, OverrideStallDetectionSchema, OverrideSkillsSchema, OverrideMandatoryRulesSchema, CLAUDE_BRIDGE_SWITCH_KEY = "claude_bridge", CLAUDE_BRIDGE_MODEL_PREFIX = "claude-bridge/", ClaudeBridgeSpecialistNameSchema, ClaudeBridgeModelSchema, ClaudeBridgeBlockSchema, GlobalSpecialistOverrideSchema, GlobalUserConfigSchema, RETIRED_EXTENSION_SOURCES, BUILTIN_EXTENSION_TOGGLES;
 var init_global_config = __esm(() => {
   init_zod();
   init_schema();
@@ -4872,9 +4916,29 @@ var init_global_config = __esm(() => {
   OverrideMandatoryRulesSchema = objectType({
     template_sets: arrayType(KebabCase).nullable()
   }).strict();
-  ClaudeBridgeSwitchSchema = objectType({
-    enabled: booleanType().default(false)
-  }).strict();
+  ClaudeBridgeSpecialistNameSchema = stringType().regex(/^[a-z][a-z0-9-]*$/, "must be an explicit kebab-case Specialist name (no wildcard, no glob)");
+  ClaudeBridgeModelSchema = stringType().refine((value) => value.startsWith(CLAUDE_BRIDGE_MODEL_PREFIX) && value.length > CLAUDE_BRIDGE_MODEL_PREFIX.length, {
+    message: `must be a ${CLAUDE_BRIDGE_MODEL_PREFIX}... model`
+  });
+  ClaudeBridgeBlockSchema = objectType({
+    enabled: booleanType().default(false),
+    default_model: ClaudeBridgeModelSchema.optional(),
+    specialists: arrayType(ClaudeBridgeSpecialistNameSchema).optional(),
+    models: recordType(stringType(), ClaudeBridgeModelSchema).optional()
+  }).strict().superRefine((block, ctx) => {
+    if (!block.specialists)
+      return;
+    for (const name of block.specialists) {
+      const model = block.models?.[name] ?? block.default_model;
+      if (model === undefined) {
+        ctx.addIssue({
+          code: ZodIssueCode.custom,
+          path: ["specialists"],
+          message: `listed Specialist "${name}" has no bridge model: set models.${name} or default_model ` + `(${CLAUDE_BRIDGE_MODEL_PREFIX}...)`
+        });
+      }
+    }
+  });
   GlobalSpecialistOverrideSchema = objectType({
     execution: OverrideExecutionSchema,
     prompt: OverridePromptSchema.optional(),
@@ -5470,36 +5534,38 @@ var require_Alias = __commonJS(function(exports) {
         if (node.anchor === this.source)
           found = node;
       }
+      if (found && ctx) {
+        const { anchors, doc, maxAliasCount } = ctx;
+        let data = anchors.get(found);
+        if (!data) {
+          toJS.toJS(found, null, ctx);
+          data = anchors.get(found);
+        }
+        if (data?.res === undefined) {
+          const msg = "This should not happen: Alias anchor was not resolved?";
+          throw new ReferenceError(msg);
+        }
+        if (maxAliasCount >= 0) {
+          data.count += 1;
+          if (data.aliasCount === 0)
+            data.aliasCount = getAliasCount(doc, found, anchors);
+          if (data.count * data.aliasCount > maxAliasCount) {
+            const msg = "Excessive alias count indicates a resource exhaustion attack";
+            throw new ReferenceError(msg);
+          }
+        }
+      }
       return found;
     }
     toJSON(_arg, ctx) {
       if (!ctx)
         return { source: this.source };
-      const { anchors, doc, maxAliasCount } = ctx;
-      const source = this.resolve(doc, ctx);
+      const source = this.resolve(ctx.doc, ctx);
       if (!source) {
         const msg = `Unresolved alias (the anchor must be set before the alias): ${this.source}`;
         throw new ReferenceError(msg);
       }
-      let data = anchors.get(source);
-      if (!data) {
-        toJS.toJS(source, null, ctx);
-        data = anchors.get(source);
-      }
-      if (data?.res === undefined) {
-        const msg = "This should not happen: Alias anchor was not resolved?";
-        throw new ReferenceError(msg);
-      }
-      if (maxAliasCount >= 0) {
-        data.count += 1;
-        if (data.aliasCount === 0)
-          data.aliasCount = getAliasCount(doc, source, anchors);
-        if (data.count * data.aliasCount > maxAliasCount) {
-          const msg = "Excessive alias count indicates a resource exhaustion attack";
-          throw new ReferenceError(msg);
-        }
-      }
-      return data.res;
+      return ctx.anchors.get(source).res;
     }
     toString(ctx, _onComment, _onChompKeep) {
       const src = `*${this.source}`;
@@ -9261,33 +9327,32 @@ var require_resolve_flow_scalar = __commonJS(function(exports) {
     }
     if (badChar)
       onError(0, "BAD_SCALAR_START", `Plain value cannot start with ${badChar}`);
-    return foldLines(source);
+    return unfoldLines(source);
   }
   function singleQuotedValue(source, onError) {
     if (source[source.length - 1] !== "'" || source.length === 1)
       onError(source.length, "MISSING_CHAR", "Missing closing 'quote");
-    return foldLines(source.slice(1, -1)).replace(/''/g, "'");
+    return unfoldLines(source.slice(1, -1)).replace(/''/g, "'");
   }
-  function foldLines(source) {
-    let first, line;
-    try {
-      first = new RegExp(`(.*?)(?<![ 	])[ 	]*\r?
-`, "sy");
-      line = new RegExp(`[ 	]*(.*?)(?:(?<![ 	])[ 	]*)?\r?
-`, "sy");
-    } catch {
-      first = /(.*?)[ \t]*\r?\n/sy;
-      line = /[ \t]*(.*?)[ \t]*\r?\n/sy;
-    }
-    let match = first.exec(source);
+  function unfoldLines(source) {
+    const line = /(.*?)\r?\n/sy;
+    let match = line.exec(source);
     if (!match)
       return source;
-    let res = match[1];
+    let trimEnd, trimBoth;
+    try {
+      trimEnd = new RegExp("(?<![ \t])[ \t]+$");
+      trimBoth = new RegExp("^[ \t]+|(?<![ \t])[ \t]+$", "g");
+    } catch {
+      trimEnd = /[ \t]+$/;
+      trimBoth = /^[ \t]+|[ \t]+$/g;
+    }
+    let res = match[1].replace(trimEnd, "");
     let sep = " ";
-    let pos = first.lastIndex;
-    line.lastIndex = pos;
+    let pos = line.lastIndex;
     while (match = line.exec(source)) {
-      if (match[1] === "") {
+      const lm = match[1].replace(trimBoth, "");
+      if (lm === "") {
         if (sep === `
 `)
           res += sep;
@@ -9295,7 +9360,7 @@ var require_resolve_flow_scalar = __commonJS(function(exports) {
           sep = `
 `;
       } else {
-        res += sep + match[1];
+        res += sep + lm;
         sep = " ";
       }
       pos = line.lastIndex;
@@ -12271,6 +12336,77 @@ import { readdir, readFile, stat } from "fs/promises";
 import { basename, join as join6 } from "path";
 import { existsSync as existsSync6, realpathSync as realpathSync2 } from "fs";
 import { homedir as homedir3 } from "os";
+function resolveClaudeBridgeRoute(name, execution, read) {
+  const definitionFlag = execution?.claude_bridge === true;
+  const layerModel = typeof execution?.model === "string" && execution.model !== "" ? execution.model : null;
+  const base = {
+    source: "legacy",
+    reason: "block_absent",
+    listed: false,
+    enabled: definitionFlag,
+    model: null,
+    blockError: read.error,
+    blockPath: read.path,
+    shadowed: []
+  };
+  if (read.error !== null) {
+    const listed = read.listedNames.includes(name);
+    return {
+      ...base,
+      source: "block",
+      reason: listed ? "listed_model_mismatch" : "block_invalid",
+      listed,
+      enabled: false,
+      model: layerModel
+    };
+  }
+  const block = read.block;
+  if (block === null)
+    return base;
+  if (block.enabled !== true) {
+    return { ...base, source: "block", reason: "block_disabled", enabled: false };
+  }
+  if (block.specialists === undefined) {
+    return { ...base, source: "legacy", reason: "legacy_no_list" };
+  }
+  const listed = block.specialists.includes(name);
+  if (!listed) {
+    return {
+      ...base,
+      source: "block",
+      reason: "unlisted",
+      enabled: false,
+      shadowed: definitionFlag ? [{ field: "execution.claude_bridge", layerValue: true, blockValue: false }] : []
+    };
+  }
+  const model = block.models?.[name] ?? block.default_model ?? null;
+  if (model === null || !model.startsWith(CLAUDE_BRIDGE_MODEL_PREFIX)) {
+    return {
+      ...base,
+      source: "block",
+      reason: "listed_model_mismatch",
+      listed: true,
+      enabled: false,
+      model
+    };
+  }
+  const shadowed = [];
+  if ("claude_bridge" in (execution ?? {}) && execution?.claude_bridge !== true) {
+    shadowed.push({ field: "execution.claude_bridge", layerValue: execution?.claude_bridge, blockValue: true });
+  }
+  if (layerModel !== null && layerModel !== model) {
+    shadowed.push({ field: "execution.model", layerValue: layerModel, blockValue: model });
+  }
+  return {
+    ...base,
+    source: "block",
+    reason: "listed",
+    listed: true,
+    enabled: true,
+    model,
+    shadowed
+  };
+}
 async function checkStaleness(summary) {
   if (!summary.filestoWatch?.length || !summary.updated)
     return "OK";
@@ -12308,6 +12444,7 @@ function resolveHomeDir() {
 class SpecialistLoader {
   cache = new Map;
   blockedFieldWarnings = new Map;
+  claudeBridgeDecisions = new Map;
   projectDir;
   homeDir;
   constructor(options = {}) {
@@ -12454,8 +12591,7 @@ class SpecialistLoader {
         if (typeof rawId === "string" && /^[a-z][a-z0-9-]*$/.test(rawId)) {
           safeIds.push(rawId);
         } else {
-          process.stderr.write(`[specialists] mandatory_rules.template_sets: dropping invalid set id '${String(rawId)}' for '${name}' (must be kebab-case)
-`);
+          runtimeWarn("loader", `[specialists] mandatory_rules.template_sets: dropping invalid set id '${String(rawId)}' for '${name}' (must be kebab-case)`);
         }
       }
       baseMandatoryRules[field] = safeIds;
@@ -12479,15 +12615,13 @@ class SpecialistLoader {
     const homeHit = hits.find((h) => h.dir.scope === "home");
     const repoHit = hits.find((h) => h.dir.scope === "user");
     if (homeHit && repoHit && realpathOr(repoHit.resolved.filePath) !== realpathOr(homeHit.resolved.filePath)) {
-      process.stderr.write(`[specialists] warning: '${name}' resolved from repo '${repoHit.resolved.filePath}' shadows home '${homeHit.resolved.filePath}'
-`);
+      runtimeWarn("loader", `[specialists] warning: '${name}' resolved from repo '${repoHit.resolved.filePath}' shadows home '${homeHit.resolved.filePath}'`);
     }
     const baseHit = hits[0];
     const baseContent = await readFile(baseHit.resolved.filePath, "utf-8");
     const base = await parseSpecialist(this.toJson(baseContent, baseHit.resolved.deprecatedYaml));
     if (baseHit.resolved.deprecatedYaml) {
-      process.stderr.write(`[specialists] DEPRECATED: YAML specialist config detected at ${baseHit.resolved.filePath}. Please migrate to .specialist.json
-`);
+      runtimeWarn("loader", `[specialists] DEPRECATED: YAML specialist config detected at ${baseHit.resolved.filePath}. Please migrate to .specialist.json`);
     }
     this.resolveCanonicalPresetReferences(name, base);
     const warnings = [];
@@ -12504,15 +12638,29 @@ class SpecialistLoader {
         overrideRaw = JSON.parse(this.toJson(content, hit.resolved.deprecatedYaml));
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        process.stderr.write(`[specialists] skipping override ${hit.resolved.filePath}: ${msg}
-`);
+        runtimeWarn("loader", `[specialists] skipping override ${hit.resolved.filePath}: ${msg}`);
         continue;
       }
       if (hit.resolved.deprecatedYaml) {
-        process.stderr.write(`[specialists] DEPRECATED: YAML specialist config detected at ${hit.resolved.filePath}. Please migrate to .specialist.json
-`);
+        runtimeWarn("loader", `[specialists] DEPRECATED: YAML specialist config detected at ${hit.resolved.filePath}. Please migrate to .specialist.json`);
       }
       warnings.push(...this.applyOverrideFields(name, base, overrideRaw, "user"));
+    }
+    const executionRecord = base.specialist.execution ?? {};
+    const claudeBridgeDecision = resolveClaudeBridgeRoute(name, executionRecord, readClaudeBridgeBlock());
+    this.claudeBridgeDecisions.set(name, claudeBridgeDecision);
+    if (claudeBridgeDecision.source === "block" && claudeBridgeDecision.reason === "listed") {
+      executionRecord.claude_bridge = true;
+      executionRecord.model = claudeBridgeDecision.model;
+      base.specialist.execution = executionRecord;
+    } else if (claudeBridgeDecision.source === "block") {
+      if (executionRecord.claude_bridge === true || claudeBridgeDecision.reason === "listed_model_mismatch") {
+        executionRecord.claude_bridge = false;
+        base.specialist.execution = executionRecord;
+      }
+    }
+    for (const shadow of claudeBridgeDecision.shadowed) {
+      runtimeWarn("loader", `[specialists] claude_bridge allow list in ${claudeBridgeDecision.blockPath} overrides '${name}' ${shadow.field}: layer value ${JSON.stringify(shadow.layerValue)} ignored, using ${JSON.stringify(shadow.blockValue)}`);
     }
     const top = hits[hits.length - 1];
     resolveSkillsPaths(base, baseHit.dir.path, this.projectDir);
@@ -12589,8 +12737,7 @@ class SpecialistLoader {
           });
         } catch (e) {
           const reason = e instanceof Error ? e.message : String(e);
-          process.stderr.write(`[specialists] skipping ${file} (${specialistName}): ${reason}
-`);
+          runtimeWarn("loader", `[specialists] skipping ${file} (${specialistName}): ${reason}`);
         }
       }
     }
@@ -12605,6 +12752,10 @@ class SpecialistLoader {
       throw new Error(`Specialist not found: ${name}`);
     if (merged.warnings.length)
       this.blockedFieldWarnings.set(name, merged.warnings);
+    const routeDecision = this.claudeBridgeDecisions.get(name);
+    if (routeDecision?.reason === "listed_model_mismatch") {
+      throw new ClaudeBridgeRouteModelMismatchError(name, routeDecision.model, routeDecision.blockPath, routeDecision.blockError);
+    }
     const model = merged.spec.specialist.execution.model;
     if (model === null || model === undefined || model === "") {
       throw new SpecialistMissingModelError(name);
@@ -12636,6 +12787,9 @@ class SpecialistLoader {
       all.push(...warnings);
     return all;
   }
+  getClaudeBridgeDecision(name) {
+    return this.claudeBridgeDecisions.get(name);
+  }
   getGlobalLayerPath() {
     try {
       return getGlobalUserConfigPath();
@@ -12647,9 +12801,11 @@ class SpecialistLoader {
     if (name) {
       this.cache.delete(name);
       this.blockedFieldWarnings.delete(name);
+      this.claudeBridgeDecisions.delete(name);
     } else {
       this.cache.clear();
       this.blockedFieldWarnings.clear();
+      this.claudeBridgeDecisions.clear();
     }
   }
 }
@@ -12738,15 +12894,14 @@ function writeDottedPath(obj, dotted, value) {
   cur[leaf] = value;
 }
 function emitPresetResolved(specialist, field, presetName, resolvedValue, depth) {
-  process.stderr.write(`${JSON.stringify({
+  runtimeWarn("loader", JSON.stringify({
     event: "preset_resolved",
     specialist,
     field,
     preset_name: presetName,
     resolved_value: resolvedValue,
     depth
-  })}
-`);
+  }));
 }
 function resolveSkillsPaths(spec, fileDir, consumerRoot) {
   const rawPaths = spec.specialist.skills?.paths;
@@ -12755,8 +12910,9 @@ function resolveSkillsPaths(spec, fileDir, consumerRoot) {
   const resolved = rawPaths.map((p) => resolveSkillPath(p, { consumerRoot, fileDir }));
   spec.specialist.skills.paths = resolved;
 }
-var STALL_DETECTION_DEFAULTS, SpecialistMissingModelError, SpecialistExtensionSourceCollisionError, PROTOTYPE_POLLUTION_KEYS, NPM_NAME_RE, NPM_SCOPED_NAME_RE;
+var STALL_DETECTION_DEFAULTS, SpecialistMissingModelError, ClaudeBridgeRouteModelMismatchError, SpecialistExtensionSourceCollisionError, PROTOTYPE_POLLUTION_KEYS, NPM_NAME_RE, NPM_SCOPED_NAME_RE;
 var init_loader = __esm(() => {
+  init_runtime_diagnostics();
   init_dist();
   init_schema();
   init_canonical_asset_resolver();
@@ -12776,6 +12932,21 @@ var init_loader = __esm(() => {
       super(`specialist '${specialistName}' has no model configured. ` + `Run: sp edit --global ${specialistName}.execution.model <model-id> ` + `(or 'sp init --global' to create the global user config file first).`);
       this.specialistName = specialistName;
       this.name = "SpecialistMissingModelError";
+    }
+  };
+  ClaudeBridgeRouteModelMismatchError = class ClaudeBridgeRouteModelMismatchError extends Error {
+    specialistName;
+    model;
+    blockPath;
+    blockError;
+    code = "claude_bridge_route_model_mismatch";
+    constructor(specialistName, model, blockPath, blockError) {
+      super(`specialist '${specialistName}' is listed in the claude_bridge block of ${blockPath}, but its ` + `resolved model ${model === null ? "is unset" : `"${model}"`} is not a claude-bridge/... model` + `${blockError ? ` (block error: ${blockError})` : ""}. ` + "Refusing the run rather than loading the bridge and billing another provider: fix " + "claude_bridge.models / claude_bridge.default_model (or remove the name from " + "claude_bridge.specialists) in ~/.config/specialists/user.json and re-dispatch.");
+      this.specialistName = specialistName;
+      this.model = model;
+      this.blockPath = blockPath;
+      this.blockError = blockError;
+      this.name = "ClaudeBridgeRouteModelMismatchError";
     }
   };
   SpecialistExtensionSourceCollisionError = class SpecialistExtensionSourceCollisionError extends Error {
@@ -15637,6 +15808,39 @@ class SqliteClient {
       return statuses;
     }, "listStatuses");
   }
+  listStatusesWindow(filters = {}) {
+    return withRetry(() => {
+      const clauses = [];
+      const params = [];
+      if (filters.sinceMs !== undefined) {
+        clauses.push("updated_at_ms >= ?");
+        params.push(filters.sinceMs);
+      }
+      const statuses = filters.statuses?.filter((status) => typeof status === "string" && status.length > 0) ?? [];
+      if (statuses.length > 0) {
+        clauses.push(`status IN (${statuses.map(() => "?").join(",")})`);
+        params.push(...statuses);
+      }
+      const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+      const limit = Math.max(1, Math.min(filters.limit ?? 100, 500));
+      const rows = this.db.query(`
+        SELECT status_json
+        FROM specialist_jobs
+        ${where}
+        ORDER BY updated_at_ms DESC, job_id DESC
+        LIMIT ?
+      `).all(...params, limit);
+      const result = [];
+      for (const row of rows) {
+        if (!row.status_json)
+          continue;
+        try {
+          result.push(JSON.parse(row.status_json));
+        } catch {}
+      }
+      return result;
+    }, "listStatusesWindow");
+  }
   readPrDriftState(jobId) {
     return withRetry(() => {
       const row = this.db.query(`
@@ -15969,9 +16173,15 @@ class SqliteClient {
     return withRetry(() => {
       const clauses = [];
       const params = [];
+      if (filters.jobIds !== undefined && filters.jobIds.length === 0)
+        return [];
       if (filters.jobId) {
         clauses.push("job_id = ?");
         params.push(filters.jobId);
+      }
+      if (filters.jobIds && filters.jobIds.length > 0) {
+        clauses.push(`job_id IN (${filters.jobIds.map(() => "?").join(",")})`);
+        params.push(...filters.jobIds);
       }
       if (filters.jobIdPrefix) {
         clauses.push("job_id >= ? AND job_id < ?");
@@ -15980,6 +16190,16 @@ class SqliteClient {
       if (filters.sinceMs !== undefined) {
         clauses.push("t >= ?");
         params.push(filters.sinceMs);
+      }
+      if (filters.afterSeq !== undefined) {
+        if (!filters.jobId)
+          throw new Error("readForensicEvents afterSeq requires exact jobId");
+        clauses.push("seq > ?");
+        params.push(filters.afterSeq);
+      }
+      if (filters.attemptId !== undefined) {
+        clauses.push("attempt_id = ?");
+        params.push(filters.attemptId);
       }
       if (filters.eventFamily) {
         clauses.push("event_family = ?");
@@ -15992,15 +16212,28 @@ class SqliteClient {
       const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
       const limit = Math.max(1, Math.min(filters.limit ?? 1000, 1e4));
       const dir = filters.order === "desc" ? "DESC" : "ASC";
+      const orderBy = filters.afterSeq !== undefined ? `seq ${dir}, id ${dir}` : `t ${dir}, seq ${dir}, id ${dir}`;
       return this.db.query(`
         SELECT id, job_id, seq, t, schema_version, event_family, event_name,
                participant_kind, participant_role, participant_id, attempt_id, redaction_status, event_json
         FROM specialist_forensic_events
         ${where}
-        ORDER BY t ${dir}, seq ${dir}, id ${dir}
+        ORDER BY ${orderBy}
         LIMIT ?
       `).all(...params, limit);
     }, "readForensicEvents");
+  }
+  listForensicAttemptIds(jobId) {
+    return withRetry(() => {
+      const rows = this.db.query(`
+        SELECT attempt_id, MIN(seq) AS first_seq
+        FROM specialist_forensic_events
+        WHERE job_id = ? AND attempt_id IS NOT NULL
+        GROUP BY attempt_id
+        ORDER BY first_seq ASC, attempt_id ASC
+      `).all(jobId);
+      return rows.map((row) => row.attempt_id).filter((attemptId) => typeof attemptId === "string" && attemptId.length > 0);
+    }, "listForensicAttemptIds");
   }
   listNativeActivationIds(filters = {}) {
     return withRetry(() => {
@@ -20894,17 +21127,44 @@ function headingOf(line) {
   const whole = canonical(bare.replace(/:$/, "").trim());
   if (ALL_HEADINGS.has(whole))
     return { name: whole };
-  const split = bare.match(/^([A-Za-z][A-Za-z _-]*?)\s*:\s*(.*)$/);
+  const split = splitHeadingLabel(bare);
   if (!split)
     return;
-  const name = canonical(split[1].trim());
+  const name = canonical(split.label);
   if (!ALL_HEADINGS.has(name))
     return;
-  const inlineBody = split[2].trim();
+  const inlineBody = split.body.trim();
   return inlineBody ? { name, inlineBody } : { name };
 }
+function isSpaceChar(c) {
+  return SPACE_CHAR.test(c);
+}
+function isHeadingLabel(text) {
+  const alpha = (code) => code >= 65 && code <= 90 || code >= 97 && code <= 122;
+  if (text.length === 0 || !alpha(text.charCodeAt(0)))
+    return false;
+  for (const c of text) {
+    if (!alpha(c.charCodeAt(0)) && c !== " " && c !== "_" && c !== "-")
+      return false;
+  }
+  return true;
+}
+function splitHeadingLabel(bare) {
+  const colon = bare.indexOf(":");
+  if (colon <= 0)
+    return;
+  let label = bare.slice(0, colon);
+  while (label.length > 0 && isSpaceChar(label[label.length - 1]))
+    label = label.slice(0, -1);
+  if (!isHeadingLabel(label))
+    return;
+  let start = colon + 1;
+  while (start < bare.length && isSpaceChar(bare[start]))
+    start++;
+  return { label, body: bare.slice(start) };
+}
 function scrutinyLevel(description) {
-  const match = description.match(/SCRUTINY\b[^\n]*\n?\s*\**\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i) ?? description.match(/SCRUTINY\b\s*[:\-\u2014]?\s*(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
+  const match = description.match(new RegExp(`SCRUTINY\\b[^\\n]{0,${SCRUTINY_LEVEL_WINDOW}}\\n?\\s{0,20}\\*{0,20}\\s{0,20}(LOW|MEDIUM|HIGH|CRITICAL)\\b`, "i")) ?? description.match(/SCRUTINY\b\s{0,20}[:\-\u2014]?\s{0,20}(LOW|MEDIUM|HIGH|CRITICAL)\b/i);
   return match?.[1]?.toUpperCase();
 }
 function validateContractText(contract) {
@@ -20962,7 +21222,7 @@ function extractPurposeExcerpt(description) {
   }
   return;
 }
-var REQUIRED_SECTIONS, SCRUTINY_LEVELS, ALL_HEADINGS, PURPOSE_EXCERPT_MAX = 60;
+var REQUIRED_SECTIONS, SCRUTINY_LEVELS, SCRUTINY_LEVEL_WINDOW = 200, ALL_HEADINGS, SPACE_CHAR, PURPOSE_EXCERPT_MAX = 60;
 var init_contract_sections = __esm(() => {
   REQUIRED_SECTIONS = [
     "PROBLEM",
@@ -20975,6 +21235,7 @@ var init_contract_sections = __esm(() => {
   ];
   SCRUTINY_LEVELS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
   ALL_HEADINGS = new Set([...REQUIRED_SECTIONS, "SCRUTINY"]);
+  SPACE_CHAR = /\s/;
 });
 
 // src/specialist/beads.ts
@@ -21395,12 +21656,12 @@ function getReadLineNumbersExtensionPath() {
     }
   }
   cached = null;
-  process.stderr.write("[read-line-numbers] WARN: bundled extension not found alongside package. " + `Model-facing read output will not be line-numbered for this session.
-`);
+  runtimeWarn("read-line-numbers", "bundled extension not found alongside package. Model-facing read output will not be line-numbered for this session.");
   return cached;
 }
 var HERE, REL, CANDIDATES, cached;
 var init_read_line_numbers_extension = __esm(() => {
+  init_runtime_diagnostics();
   HERE = dirname8(fileURLToPath3(import.meta.url));
   REL = join15("config", "pi-extensions", "read-line-numbers");
   CANDIDATES = [
@@ -21424,12 +21685,12 @@ function getExtensionToolPolicyExtensionPath() {
     }
   }
   cached2 = null;
-  process.stderr.write("[xtrm-tool-policy] WARN: bundled policy extension not found alongside package. " + `Enabled extension sources will load without the tool-policy gate.
-`);
+  runtimeWarn("xtrm-tool-policy", "bundled policy extension not found alongside package. Enabled extension sources will load without the tool-policy gate.");
   return cached2;
 }
 var HERE2, REL2, CANDIDATES2, cached2, NATIVE_TOOLS_ENV_KEY = "PI_SPECIALIST_ALLOWED_NATIVE_TOOLS", REQUIRED_EXTENSION_TOOLS_ENV_KEY = "PI_SPECIALIST_REQUIRED_EXTENSION_TOOLS";
 var init_extension_tool_policy_extension = __esm(() => {
+  init_runtime_diagnostics();
   HERE2 = dirname9(fileURLToPath4(import.meta.url));
   REL2 = join16("config", "pi-extensions", "extension-tool-policy");
   CANDIDATES2 = [
@@ -21522,28 +21783,35 @@ function claudeBridgeEnabled(execution) {
   return execution?.claude_bridge === true;
 }
 function operatorClaudeBridgeEnabled(location = getGlobalUserConfigPath(), readFile = (path) => readFileSync11(path, "utf-8")) {
-  if (!location.exists)
-    return false;
-  try {
-    const raw = JSON.parse(readFile(location.path));
-    if (!raw || typeof raw !== "object" || Array.isArray(raw))
-      return false;
-    const entry = raw[CLAUDE_BRIDGE_SWITCH_KEY];
-    const parsed = ClaudeBridgeSwitchSchema.safeParse(entry);
-    return parsed.success && parsed.data.enabled === true;
-  } catch {
-    return false;
-  }
+  const read = readClaudeBridgeBlock(location, readFile);
+  return read.error === null && read.block !== null && read.block.enabled === true;
 }
 function claudeBridgeRouteEnabled(execution, operatorEnabled = operatorClaudeBridgeEnabled) {
   return claudeBridgeEnabled(execution) && operatorEnabled();
 }
-function claudeBridgeOffSwitches(execution, operatorEnabled = operatorClaudeBridgeEnabled) {
+function claudeBridgeOffSwitches(execution, operatorEnabled = operatorClaudeBridgeEnabled, specialistName, blockRead = readClaudeBridgeBlock()) {
   const off = [];
-  if (!claudeBridgeEnabled(execution))
-    off.push("the definition flag execution.claude_bridge");
-  if (!operatorEnabled())
+  const block = blockRead.block;
+  const allowListReason = () => {
+    if (specialistName === undefined || block === null || block.specialists === undefined)
+      return null;
+    if (!block.specialists.includes(specialistName)) {
+      return `the operator allow list ${CLAUDE_BRIDGE_SWITCH_KEY}.specialists in ~/.config/specialists/user.json, ` + `which does not name "${specialistName}"`;
+    }
+    return `the operator allow list ${CLAUDE_BRIDGE_SWITCH_KEY}.specialists in ~/.config/specialists/user.json, ` + `which resolves no ${CLAUDE_BRIDGE_PROVIDER}/... model for "${specialistName}"`;
+  };
+  if (blockRead.error !== null) {
+    off.push(`the operator ${CLAUDE_BRIDGE_SWITCH_KEY} block in ${blockRead.path} is invalid (${blockRead.error})`);
+  } else {
+    const allowList = allowListReason();
+    if (allowList !== null)
+      off.push(allowList);
+    else if (!claudeBridgeEnabled(execution))
+      off.push("the definition flag execution.claude_bridge");
+  }
+  if (!operatorEnabled()) {
     off.push(`the operator switch ${CLAUDE_BRIDGE_SWITCH_KEY} in ~/.config/specialists/user.json`);
+  }
   return off;
 }
 function claudeBridgeExtensionProviders(routeEnabled) {
@@ -22927,8 +23195,7 @@ function getWorktreeBoundaryExtensionPath(worktreeBoundary) {
   try {
     mkdirSync8(extensionsDir, { recursive: true });
   } catch (err) {
-    process.stderr.write(`[worktree-boundary] WARN: could not create extensions directory at ${extensionsDir}: ${err.message}. ` + `Boundary enforcement will NOT apply for this session.
-`);
+    runtimeWarn("worktree-boundary", `could not create extensions directory at ${extensionsDir}: ${err.message}. Boundary enforcement will NOT apply for this session.`);
     return null;
   }
   const extensionPath = join19(extensionsDir, `worktree-boundary-${boundaryHash}.mjs`);
@@ -22973,8 +23240,7 @@ export default function(pi) {
   try {
     writeFileSync6(extensionPath, extensionSource, "utf-8");
   } catch (err) {
-    process.stderr.write(`[worktree-boundary] WARN: could not write extension file at ${extensionPath}: ${err.message}. ` + `Boundary enforcement will NOT apply for this session.
-`);
+    runtimeWarn("worktree-boundary", `could not write extension file at ${extensionPath}: ${err.message}. Boundary enforcement will NOT apply for this session.`);
     return null;
   }
   return extensionPath;
@@ -23075,8 +23341,7 @@ class PiAgentSession {
     }
     const { kept: dedupedSources, dropped: droppedSources } = deduplicateExtensionSources(curatedExtensions.dedupeAgainstDynamic, this.options.extensionSources ?? []);
     for (const { dropped, keptAs } of droppedSources) {
-      process.stderr.write(`[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').
-`);
+      runtimeWarn("python-kernel", `DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').`);
     }
     for (const source of dedupedSources) {
       args.push("-e", source);
@@ -25608,6 +25873,34 @@ var init_models = __esm(() => {
   init_loader();
 });
 
+// src/utils/runtime-ignore.ts
+function runtimeIgnorePatterns() {
+  return [...RUNTIME_IGNORE_PATTERNS];
+}
+function runtimeIgnoreExcludePatterns() {
+  return RUNTIME_IGNORE_PATTERNS.map((pattern) => `/${pattern}`);
+}
+var RUNTIME_IGNORE_PATTERNS;
+var init_runtime_ignore = __esm(() => {
+  RUNTIME_IGNORE_PATTERNS = [
+    ".xtrm/worktrees/",
+    ".specialists/jobs/",
+    ".specialists/ready/",
+    ".specialists/settlements/",
+    ".specialists/db/*.db",
+    ".specialists/db/*.db-wal",
+    ".specialists/db/*.db-shm",
+    ".specialists/leases/",
+    ".specialists/interactions/",
+    ".specialists/logs/",
+    ".specialists/trace.jsonl",
+    ".specialists/version-check.json",
+    ".specialists/executor-result.md",
+    ".specialists/*-result.md",
+    ".specialists/sync-docs-report.md"
+  ];
+});
+
 // src/pi/native-specialists-registration.ts
 import { existsSync as existsSync19, mkdirSync as mkdirSync10, readFileSync as readFileSync14, writeFileSync as writeFileSync7 } from "fs";
 import { homedir as homedir7 } from "os";
@@ -26299,8 +26592,8 @@ ${bold5("specialists init --global")}
     if (result.extended.length > 0) {
       ok(`preserved ${result.extended.length} existing specialist${result.extended.length === 1 ? "" : "s"} (user values kept)`);
     }
-    for (const removedName of result.removed) {
-      warn(`${removedName} is no longer shipped but kept in file (remove manually if unwanted)`);
+    for (const missingName of result.notInstalledHere) {
+      warn(`${missingName} is not installed on this machine; its entry is kept in the full template shape`);
     }
   } else {
     writeGlobalUserConfig(location, template);
@@ -26408,6 +26701,7 @@ var init_init = __esm(() => {
   init_observability_db();
   init_observability_sqlite();
   init_canonical_asset_resolver();
+  init_runtime_ignore();
   init_loader();
   init_native_specialists_registration();
   init_global_config();
@@ -26437,14 +26731,7 @@ Rules:
 - Add custom Specialist definitions under \`.specialists/user/\`; current role prompts must preserve pinned-Issue/Journal/settlement/Closure semantics.
 <!-- specialists:end -->
 `.trimStart();
-  GITIGNORE_ENTRIES = [
-    ".specialists/jobs/",
-    ".specialists/ready/",
-    ".specialists/settlements/",
-    ".specialists/db/*.db",
-    ".specialists/db/*.db-wal",
-    ".specialists/db/*.db-shm"
-  ];
+  GITIGNORE_ENTRIES = runtimeIgnorePatterns();
   MCP_SERVER_CONFIG = { command: "specialists", args: [] };
   LEGACY_HOOK_NAME = /^specialists-[\w.-]+\.mjs$/;
   LEGACY_HOOK_COMMAND = /\.claude\/hooks\/(specialists-[\w.-]+\.mjs)/;
@@ -27538,32 +27825,7 @@ function isAllowed(key) {
   return GIT_CONFIG_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 function warnIdentityEnv(message) {
-  process.stderr.write(`[specialists] identity-env: ${message}
-`);
-}
-function isIdentityManagedKey(key) {
-  return IDENTITY_MANAGED_KEY.test(key);
-}
-function snapshotIdentityEnv(env = process.env) {
-  const snapshot = {};
-  for (const key of Object.keys(env)) {
-    if (isIdentityManagedKey(key))
-      snapshot[key] = env[key];
-  }
-  return snapshot;
-}
-function clearIdentityEnv(env = process.env) {
-  for (const key of Object.keys(env)) {
-    if (isIdentityManagedKey(key))
-      delete env[key];
-  }
-}
-function restoreIdentityEnv(snapshot, env = process.env) {
-  clearIdentityEnv(env);
-  for (const [key, value] of Object.entries(snapshot)) {
-    if (typeof value === "string")
-      env[key] = value;
-  }
+  runtimeWarn("identity-env", `[specialists] identity-env: ${message}`);
 }
 function keepConsistentGitConfig(env, warn) {
   const gitConfigKeys = Object.keys(env).filter((key) => GIT_CONFIG_PREFIXES.some((prefix) => key.startsWith(prefix)));
@@ -27684,8 +27946,9 @@ function specialistHolderName(specialistName, jobId, pid = process.pid) {
   const job = (jobId ?? "").trim().replace(/[^A-Za-z0-9]/g, "");
   return job ? `sp-${name}-${job.slice(0, 8)}` : `sp-${name}-${pid}`;
 }
-var IDENTITY_ENV_ALLOWLIST, GIT_CONFIG_PREFIXES, GIT_CONFIG_COUNT_KEY = "GIT_CONFIG_COUNT", GIT_CONFIG_KEY_PREFIX = "GIT_CONFIG_KEY_", GIT_CONFIG_VALUE_PREFIX = "GIT_CONFIG_VALUE_", launcherWarning, IDENTITY_MANAGED_KEY;
+var IDENTITY_ENV_ALLOWLIST, GIT_CONFIG_PREFIXES, GIT_CONFIG_COUNT_KEY = "GIT_CONFIG_COUNT", GIT_CONFIG_KEY_PREFIX = "GIT_CONFIG_KEY_", GIT_CONFIG_VALUE_PREFIX = "GIT_CONFIG_VALUE_", launcherWarning;
 var init_identity_env = __esm(() => {
+  init_runtime_diagnostics();
   IDENTITY_ENV_ALLOWLIST = [
     "SUBSTRATE_HOLDER",
     "XTRM_ROLE",
@@ -27696,7 +27959,6 @@ var init_identity_env = __esm(() => {
   ];
   GIT_CONFIG_PREFIXES = ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"];
   launcherWarning = warnIdentityEnv;
-  IDENTITY_MANAGED_KEY = /^(?:SUBSTRATE_HOLDER|XTRM_ROLE|GIT_AUTHOR_NAME|GIT_AUTHOR_EMAIL|GIT_COMMITTER_NAME|GIT_COMMITTER_EMAIL|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+)$/;
 });
 
 // src/utils/circuitBreaker.ts
@@ -30212,8 +30474,8 @@ ${mandatoryRulesBlock}`;
         startedAtMs: scriptRunStartedAt,
         finalStatus: "error",
         outputType: spec.specialist.execution.output_type,
-        output: lastAttempt?.text || lastAttempt?.stderr || "pi produced no assistant text",
-        error: lastAttempt?.stderr || "pi produced no assistant text",
+        output: lastAttempt?.text || lastAttempt?.stderr || lastAttempt?.apiError || "pi produced no assistant text",
+        error: lastAttempt?.stderr || lastAttempt?.apiError || "pi produced no assistant text",
         errorType: "internal",
         skillSources,
         variablesKeys: Object.keys(input.variables ?? {}),
@@ -30222,7 +30484,7 @@ ${mandatoryRulesBlock}`;
       });
     }
     runPostScripts();
-    return { success: false, error: lastAttempt?.stderr || "pi produced no assistant text", error_type: "internal", meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model: modelCandidates.at(-1) ?? "unknown", duration_ms: durationMs, trace_id: traceId } };
+    return { success: false, error: lastAttempt?.stderr || lastAttempt?.apiError || "pi produced no assistant text", error_type: "internal", meta: { specialist: resolvedSpecialist, requested_specialist: input.requested_specialist ?? input.specialist, resolved_specialist: resolvedSpecialist, model: modelCandidates.at(-1) ?? "unknown", duration_ms: durationMs, trace_id: traceId } };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const resolvedSpecialist = resolveScriptSpecialistName(input.specialist);
@@ -30303,6 +30565,8 @@ async function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assista
         }));
       },
       onMetric: (event) => {
+        if (event.type === "api_error" && event.errorMessage)
+          lastApiError = event.errorMessage;
         if (event.type === "token_usage")
           appendTimelineEvent?.(createTokenUsageEvent(event.token_usage, event.source));
         if (event.type === "finish_reason")
@@ -30333,6 +30597,7 @@ async function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assista
     let outputTooLargeReason;
     let currentAssistantMessage = "";
     let lastCompletedAssistantMessage = "";
+    let lastApiError = "";
     const markAssistantMessageStart = () => {
       currentAssistantMessage = "";
     };
@@ -30380,6 +30645,7 @@ async function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assista
         model,
         text: assistantText,
         stderr,
+        apiError: lastApiError,
         exitCode: 0,
         timedOut,
         outputTooLarge,
@@ -30396,6 +30662,7 @@ async function runSingleAttempt(prompt, model, thinkingLevel, timeoutMs, assista
         model,
         text: assistantText,
         stderr,
+        apiError: lastApiError,
         exitCode: 1,
         timedOut,
         outputTooLarge,
@@ -30525,14 +30792,14 @@ function classifyAttempt(attempt) {
     return { retryable: false, kind: "failure", error: "output exceeded cap", errorType: "output_too_large", text: attempt.text };
   }
   if (attempt.timedOut)
-    return { retryable: false, kind: "failure", error: attempt.stderr || "timed out", errorType: "timeout", text: attempt.text };
-  const errorType = mapErrorType(attempt.stderr);
+    return { retryable: false, kind: "failure", error: attempt.stderr || attempt.apiError || "timed out", errorType: "timeout", text: attempt.text };
+  const errorType = mapErrorType(attempt.stderr || attempt.apiError || "");
   const retryable = errorType !== "auth" && isRetryableModelFailure(attempt.stderr, attempt.text);
   if (attempt.exitCode !== 0) {
-    return { retryable, kind: "failure", error: attempt.stderr || `pi exit ${attempt.exitCode}`, errorType, text: attempt.text };
+    return { retryable, kind: "failure", error: attempt.stderr || attempt.apiError || `pi exit ${attempt.exitCode}`, errorType, text: attempt.text };
   }
   if (!attempt.text) {
-    return { retryable, kind: "failure", error: attempt.stderr || "pi produced no assistant text", errorType, text: attempt.text };
+    return { retryable, kind: "failure", error: attempt.stderr || attempt.apiError || "pi produced no assistant text", errorType, text: attempt.text };
   }
   return { retryable: false, kind: "success", error: "", errorType: "internal", text: attempt.text };
 }
@@ -31222,6 +31489,9 @@ function resolveGlobalPath(rawPath) {
     fail6(`Error: global path must be <specialist>.<field.path>, got: "${rawPath}"`);
   }
   const [specialistName, ...fieldSegments] = segments;
+  if (specialistName === CLAUDE_BRIDGE_SWITCH_KEY) {
+    return resolveClaudeBridgePath(rawPath, fieldSegments);
+  }
   let schema = GlobalSpecialistOverrideSchema;
   for (const segment of fieldSegments) {
     const unwrapped = unwrapSchema(schema);
@@ -31237,7 +31507,36 @@ function resolveGlobalPath(rawPath) {
   return {
     specialistName,
     fieldSegments,
-    schema: unwrapSchema(schema)
+    schema: unwrapSchema(schema),
+    reserved: false
+  };
+}
+function resolveClaudeBridgePath(rawPath, fieldSegments) {
+  let schema = ClaudeBridgeBlockSchema;
+  for (let index = 0;index < fieldSegments.length; index += 1) {
+    const segment = fieldSegments[index];
+    const unwrapped = unwrapSchema(schema);
+    if (unwrapped instanceof ZodRecord) {
+      if (index !== fieldSegments.length - 1) {
+        fail6(`Error: invalid global path "${rawPath}" ("${segment}" is a map key, not a nested object field)`);
+      }
+      schema = unwrapped.valueSchema;
+      continue;
+    }
+    if (!(unwrapped instanceof ZodObject)) {
+      fail6(`Error: invalid global path "${rawPath}" ("${segment}" is not a nested object field)`);
+    }
+    const shape = unwrapped.shape;
+    if (!(segment in shape)) {
+      fail6(`Error: invalid global path "${rawPath}". Unknown segment "${segment}". ` + `Available: ${Object.keys(shape).sort().join(", ")}`);
+    }
+    schema = shape[segment];
+  }
+  return {
+    specialistName: CLAUDE_BRIDGE_SWITCH_KEY,
+    fieldSegments,
+    schema: unwrapSchema(schema),
+    reserved: true
   };
 }
 function coerceGlobalValue(schema, rawValue) {
@@ -31307,10 +31606,21 @@ ${errorList}
   if (existing === null) {
     fail6(`Error: global config not found at ${location.path}. Run ${yellow8("specialists init --global")} first.`);
   }
-  const specialistOverride = existing[resolvedPath.specialistName];
-  if (specialistOverride === undefined) {
-    const available = listGlobalSpecialistNames(existing).join(", ");
-    fail6(`Error: specialist "${resolvedPath.specialistName}" not in global config. Available: ${available || "none"}`);
+  const rawEntry = existing[resolvedPath.specialistName];
+  let specialistOverride;
+  if (resolvedPath.reserved) {
+    const isObject = rawEntry !== null && typeof rawEntry === "object" && !Array.isArray(rawEntry);
+    if (!isObject && args.action === "get") {
+      console.log(`${yellow8(resolvedPath.specialistName)}.${resolvedPath.fieldSegments.join(".")}: ${dim7("(not set)")}`);
+      return;
+    }
+    specialistOverride = isObject ? rawEntry : {};
+  } else {
+    specialistOverride = rawEntry;
+    if (specialistOverride === undefined) {
+      const available = listGlobalSpecialistNames(existing).join(", ");
+      fail6(`Error: specialist "${resolvedPath.specialistName}" not in global config. Available: ${available || "none"}`);
+    }
   }
   if (args.action === "get") {
     const value = getAtPath(specialistOverride, resolvedPath.fieldSegments);
@@ -31319,6 +31629,9 @@ ${errorList}
   }
   const nextValue = coerceGlobalValue(resolvedPath.schema, args.value);
   setAtPath(specialistOverride, resolvedPath.fieldSegments, nextValue);
+  if (resolvedPath.reserved) {
+    existing[resolvedPath.specialistName] = specialistOverride;
+  }
   const updatedJson = `${JSON.stringify(existing, null, 2)}
 `;
   const validation = validateGlobalUserConfig(updatedJson);
@@ -45644,6 +45957,167 @@ var init_components = __esm(() => {
   VIEWS = ["all", "ps", "feed", "job", "result", "bead", "diff", "config", "repoConfig"];
 });
 
+// src/specialist/forensic-presentation.ts
+function isForensicAgentInternal(event) {
+  if (event.event_family === "turn")
+    return true;
+  if (event.event_family === "tool")
+    return true;
+  const name = event.event_name;
+  return name === "model.token_usage.recorded" || name === "model.finish_reason.recorded" || name.startsWith("model.meta") || name === "mcp.call.started" || name === "mcp.call.completed" || name === "mcp.call.failed" || name === "mcp.latency.observed";
+}
+
+// src/specialist/runtime-origin-reconstruct.ts
+var init_runtime_origin_reconstruct = () => {};
+
+// src/specialist/observability-read-model.ts
+function parseForensicRecord(record) {
+  try {
+    const event = JSON.parse(record.event_json);
+    if (!event || typeof event !== "object")
+      return null;
+    if (typeof event.t_unix_ms !== "number")
+      return null;
+    if (typeof event.event_family !== "string" || typeof event.event_name !== "string")
+      return null;
+    if (!event.correlation || typeof event.correlation !== "object")
+      return null;
+    if (!event.resource || typeof event.resource !== "object")
+      return null;
+    if (!event.body || typeof event.body !== "object")
+      return null;
+    if (!event.redaction || typeof event.redaction !== "object")
+      return null;
+    return { record, event };
+  } catch {
+    return null;
+  }
+}
+function parseForensicRecords(records) {
+  const parsed = [];
+  let invalidRecords = 0;
+  for (const record of records) {
+    const value = parseForensicRecord(record);
+    if (value)
+      parsed.push(value);
+    else
+      invalidRecords += 1;
+  }
+  parsed.sort((a, b) => a.record.seq - b.record.seq || a.record.id - b.record.id);
+  return { parsed, invalidRecords };
+}
+function readForensicWindow(source, options) {
+  const limit = clamp(options.limit ?? DEFAULT_CHRONOLOGY_LIMIT, 1, MAX_CHRONOLOGY_LIMIT);
+  let readAhead = options.allEvents ? Math.min(MAX_CHRONOLOGY_LIMIT, limit + 1) : Math.min(MAX_CHRONOLOGY_LIMIT, Math.max(limit + 1, limit * MAX_READ_AHEAD_FACTOR));
+  let raw = [];
+  let visible = [];
+  let invalidRecords = 0;
+  while (true) {
+    raw = source.readForensicEvents({
+      jobId: options.jobId,
+      ...options.after ? { afterSeq: options.after.seq } : {},
+      ...options.attemptId ? { attemptId: options.attemptId } : {},
+      limit: readAhead,
+      order: options.after ? "asc" : "desc"
+    });
+    const parsedResult = parseForensicRecords(raw);
+    invalidRecords = parsedResult.invalidRecords;
+    visible = options.allEvents ? parsedResult.parsed : parsedResult.parsed.filter(({ event }) => !isForensicAgentInternal(event));
+    const storageExhausted = raw.length < readAhead;
+    if (visible.length >= limit || storageExhausted || readAhead >= MAX_CHRONOLOGY_LIMIT)
+      break;
+    readAhead = Math.min(MAX_CHRONOLOGY_LIMIT, readAhead * 2);
+  }
+  const page = options.after ? visible.slice(0, limit) : visible.slice(-limit);
+  const last = page[page.length - 1];
+  const lastScanned = raw[raw.length - 1];
+  const cursorSeq = options.after && visible.length <= page.length && lastScanned ? Math.max(last?.record.seq ?? 0, lastScanned.seq) : last?.record.seq;
+  return {
+    events: page.map(({ event }) => event),
+    rows: page.map(({ event }) => forensicEventToRow(event)),
+    ...cursorSeq !== undefined ? { cursor: { seq: cursorSeq } } : {},
+    invalidRecords,
+    hasMore: visible.length > page.length || raw.length >= readAhead
+  };
+}
+function asObservabilityReadSource(client) {
+  return client;
+}
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, Math.floor(value)));
+}
+var DEFAULT_CHRONOLOGY_LIMIT = 200, MAX_CHRONOLOGY_LIMIT = 2000, MAX_READ_AHEAD_FACTOR = 4;
+var init_observability_read_model = __esm(() => {
+  init_forensic_renderer();
+  init_runtime_origin_reconstruct();
+});
+
+// src/cli/console/observability-runtime.ts
+import { existsSync as existsSync34 } from "fs";
+function withForensicObservability(runtime) {
+  const baseReadFeed = runtime.readFeed.bind(runtime);
+  return new Proxy(runtime, {
+    get(target, property) {
+      if (property !== "readFeed") {
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+      return async (args) => {
+        if ((args.source ?? "forensic") !== "forensic")
+          return baseReadFeed(args);
+        const client = openReadClient(args.repo);
+        if (!client)
+          return baseReadFeed(args);
+        try {
+          const window = readForensicWindow(asObservabilityReadSource(client), {
+            jobId: args.jobId,
+            ...typeof args.fromSeq === "number" && args.fromSeq > 0 ? { after: { seq: args.fromSeq - 1 } } : {},
+            limit: args.limit,
+            allEvents: true
+          });
+          return window.events.map((event, index) => forensicEventToFeedRow(event, {
+            jobId: typeof event.correlation.job_id === "string" ? event.correlation.job_id : args.jobId,
+            specialist: event.resource.participant_role ?? "unknown",
+            ...typeof event.correlation.bead_id === "string" ? { beadId: event.correlation.bead_id } : {},
+            ...typeof event.correlation.node_id === "string" ? { nodeId: event.correlation.node_id } : {},
+            ...typeof event.resource.repo === "string" ? { repo: event.resource.repo } : {},
+            ...typeof event.resource.model === "string" ? { model: event.resource.model } : {},
+            ...typeof event.correlation.chain_id === "string" ? { chainId: event.correlation.chain_id } : {},
+            ...typeof event.correlation.chain_root_job_id === "string" ? { chainRootJobId: event.correlation.chain_root_job_id } : {},
+            ...typeof event.correlation.chain_root_bead_id === "string" ? { chainRootBeadId: event.correlation.chain_root_bead_id } : {},
+            ...typeof event.correlation.epic_id === "string" ? { epicId: event.correlation.epic_id } : {},
+            ...typeof event.correlation.pi_session_id === "string" ? { piSessionId: event.correlation.pi_session_id } : {},
+            ...typeof event.correlation.workspace_id === "string" ? { workspaceId: event.correlation.workspace_id } : {},
+            ...typeof event.correlation.conversation_id === "string" ? { conversationId: event.correlation.conversation_id } : {},
+            ...typeof event.correlation.trace_id === "string" ? { traceId: event.correlation.trace_id } : {},
+            ...typeof event.correlation.span_id === "string" ? { spanId: event.correlation.span_id } : {},
+            ...typeof event.correlation.parent_span_id === "string" ? { parentSpanId: event.correlation.parent_span_id } : {}
+          }, index));
+        } finally {
+          client.close();
+        }
+      };
+    }
+  });
+}
+function openReadClient(repo) {
+  if (repo.dbPath) {
+    if (!existsSync34(repo.dbPath))
+      return null;
+    return createObservabilitySqliteClientAtPath(repo.dbPath);
+  }
+  const location = resolveObservabilityDbLocation(repo.path);
+  if (!existsSync34(location.dbPath))
+    return null;
+  return createObservabilitySqliteClient(repo.path);
+}
+var init_observability_runtime = __esm(() => {
+  init_observability_db();
+  init_observability_sqlite();
+  init_observability_read_model();
+  init_forensic();
+});
+
 // src/cli/console.ts
 async function run17() {
   const terminal = new ProcessTerminal;
@@ -45654,7 +46128,7 @@ async function run17() {
     resolveExit = resolve;
   });
   const app = new ConsoleApp({
-    runtime: createRuntimeClient(process.cwd()),
+    runtime: withForensicObservability(createRuntimeClient(process.cwd())),
     requestRender: () => tui.requestRender(),
     rows: () => terminal.rows,
     stop: () => resolveExit?.()
@@ -45684,6 +46158,7 @@ var init_console = __esm(() => {
   init_dist3();
   init_components();
   init_runtime();
+  init_observability_runtime();
 });
 
 // src/specialist/hooks.ts
@@ -45723,7 +46198,7 @@ class HookEmitter {
 var init_hooks = () => {};
 
 // src/specialist/worktree.ts
-import { existsSync as existsSync34, symlinkSync as symlinkSync2, mkdirSync as mkdirSync17, rmSync as rmSync5 } from "fs";
+import { existsSync as existsSync35, symlinkSync as symlinkSync2, mkdirSync as mkdirSync17, rmSync as rmSync5 } from "fs";
 import { join as join39, resolve as resolve17 } from "path";
 import { spawnSync as spawnSync18, execFileSync as execFileSync3 } from "child_process";
 function deriveBranchName(beadId, specialistName) {
@@ -45849,7 +46324,7 @@ function markBeadsSkipWorktree(worktreePath) {
 function symlinkPiNpmCache(commonRoot, worktreePath) {
   const source = join39(commonRoot, ".pi", "npm");
   const target = join39(worktreePath, ".pi", "npm");
-  if (!existsSync34(source) || existsSync34(target))
+  if (!existsSync35(source) || existsSync35(target))
     return;
   try {
     mkdirSync17(join39(worktreePath, ".pi"), { recursive: true });
@@ -46104,7 +46579,7 @@ var init_epic_reconciler = __esm(() => {
 
 // src/cli/merge.ts
 import { spawnSync as spawnSync19 } from "child_process";
-import { existsSync as existsSync35, readFileSync as readFileSync28, readdirSync as readdirSync12 } from "fs";
+import { existsSync as existsSync36, readFileSync as readFileSync28, readdirSync as readdirSync12 } from "fs";
 import { join as join41 } from "path";
 function parseOptions(argv) {
   let target = "";
@@ -46345,12 +46820,12 @@ function readAllJobStatuses() {
     }
   }
   const jobsDir = join41(process.cwd(), ".specialists", "jobs");
-  if (!existsSync35(jobsDir))
+  if (!existsSync36(jobsDir))
     return [];
   const statuses = [];
   for (const jobId of readdirSync12(jobsDir)) {
     const statusFile = join41(jobsDir, jobId, "status.json");
-    if (!existsSync35(statusFile))
+    if (!existsSync36(statusFile))
       continue;
     try {
       const raw = JSON.parse(readFileSync28(statusFile, "utf-8"));
@@ -46707,7 +47182,7 @@ ${conflicts.map((file) => `- ${file}`).join(`
   throw new Error(`Merge conflict while merging '${branch}'.${context}`);
 }
 function runTypecheckGate(cwd = process.cwd()) {
-  const hasTypeScriptConfig = existsSync35(join41(cwd, "tsconfig.json")) || readdirSync12(cwd).some((entry) => entry.startsWith("tsconfig") && entry.endsWith(".json"));
+  const hasTypeScriptConfig = existsSync36(join41(cwd, "tsconfig.json")) || readdirSync12(cwd).some((entry) => entry.startsWith("tsconfig") && entry.endsWith(".json"));
   if (!hasTypeScriptConfig) {
     console.log("TypeScript gate: skipped (no tsconfig \u2014 non-TS repo)");
     return;
@@ -46722,7 +47197,7 @@ ${stderr || stdout || "Unknown tsc error"}`);
 }
 function hasNodeBuildScript(cwd) {
   const packageJsonPath = join41(cwd, "package.json");
-  if (!existsSync35(packageJsonPath))
+  if (!existsSync36(packageJsonPath))
     return false;
   try {
     const pkg = JSON.parse(readFileSync28(packageJsonPath, "utf8"));
@@ -47131,7 +47606,7 @@ function createPiJsonProjector(context) {
 
 // src/cli/run.ts
 import { dirname as dirname24, join as join42, resolve as resolve18, sep as sep4 } from "path";
-import { constants as fsConstants, existsSync as existsSync36, fstatSync as fstatSync2, openSync as openSync4, readFileSync as readFileSync29, readSync, readdirSync as readdirSync13, realpathSync as realpathSync5, statSync as statSync10, closeSync as closeSync3 } from "fs";
+import { constants as fsConstants, existsSync as existsSync37, fstatSync as fstatSync2, openSync as openSync4, readFileSync as readFileSync29, readSync, readdirSync as readdirSync13, realpathSync as realpathSync5, statSync as statSync10, closeSync as closeSync3 } from "fs";
 import { randomBytes } from "crypto";
 import { spawn as cpSpawn, execFileSync as execFileSync4, execSync as execSync6 } from "child_process";
 function formatBackgroundLaunchLine(opts) {
@@ -47411,7 +47886,7 @@ function resolveNewestJobIdFromDb(cwd, jobsDir, specialist, previousLatest, minS
     const newest = sqliteClient.listStatuses().filter((status) => {
       if (status.specialist !== specialist || status.id === previousLatest || status.started_at_ms < minStartedAtMs)
         return false;
-      return existsSync36(join42(jobsDir, status.id, "status.json"));
+      return existsSync37(join42(jobsDir, status.id, "status.json"));
     }).sort((left, right) => right.started_at_ms - left.started_at_ms || left.id.localeCompare(right.id))[0];
     return newest?.id ?? "";
   } catch {
@@ -48847,7 +49322,7 @@ var init_node_resolve = __esm(() => {
 });
 
 // src/specialist/job-control.ts
-import { existsSync as existsSync37, readFileSync as readFileSync30, writeFileSync as writeFileSync18 } from "fs";
+import { existsSync as existsSync38, readFileSync as readFileSync30, writeFileSync as writeFileSync18 } from "fs";
 import { join as join43 } from "path";
 
 class JobControl {
@@ -48927,7 +49402,7 @@ class JobControl {
         return sqliteResult;
     } catch {}
     const resultPath = this.resultPath(jobId);
-    if (!existsSync37(resultPath))
+    if (!existsSync38(resultPath))
       return null;
     try {
       return readFileSync30(resultPath, "utf-8");
@@ -51040,7 +51515,7 @@ var init_node_supervisor = __esm(() => {
 });
 
 // src/cli/node.ts
-import { existsSync as existsSync38, readFileSync as readFileSync31, readdirSync as readdirSync14 } from "fs";
+import { existsSync as existsSync39, readFileSync as readFileSync31, readdirSync as readdirSync14 } from "fs";
 import { randomUUID as randomUUID3 } from "crypto";
 import { basename as basename8, join as join44, resolve as resolve19 } from "path";
 function parseNodeArgs(argv) {
@@ -51243,7 +51718,7 @@ function discoverNodeConfigs(cwd) {
   const discoveredByName = new Map;
   for (const directory of NODE_DISCOVERY_DIRS) {
     const absoluteDir = resolve19(cwd, directory.path);
-    if (!existsSync38(absoluteDir))
+    if (!existsSync39(absoluteDir))
       continue;
     const files = readdirSync14(absoluteDir).filter((fileName) => fileName.endsWith(NODE_CONFIG_SUFFIX));
     for (const fileName of files) {
@@ -51265,7 +51740,7 @@ function getNodeDiscoverySummary() {
 }
 function resolveNodeConfigPath(cwd, input) {
   const explicitPath = resolve19(cwd, input);
-  if (existsSync38(explicitPath)) {
+  if (existsSync39(explicitPath)) {
     return { name: toNodeName(explicitPath), path: explicitPath, source: "repo" };
   }
   const normalizedName = input.endsWith(NODE_CONFIG_SUFFIX) ? input.slice(0, -NODE_CONFIG_SUFFIX.length) : input;
@@ -52630,7 +53105,7 @@ var init_epic = __esm(() => {
 
 // src/cli/status.ts
 import { spawnSync as spawnSync22 } from "child_process";
-import { existsSync as existsSync39, readFileSync as readFileSync32 } from "fs";
+import { existsSync as existsSync40, readFileSync as readFileSync32 } from "fs";
 import { join as join45 } from "path";
 function ok2(msg) {
   console.log(`  ${green9("\u2713")} ${msg}`);
@@ -52729,7 +53204,7 @@ function countJobEvents(sqliteClient, jobsDir, jobId) {
     return 0;
   }
   const eventsFile = join45(jobsDir, jobId, "events.jsonl");
-  if (!existsSync39(eventsFile))
+  if (!existsSync40(eventsFile))
     return 0;
   const raw = readFileSync32(eventsFile, "utf-8").trim();
   if (!raw)
@@ -52766,7 +53241,7 @@ function getLatestContextSnapshot(sqliteClient, jobsDir, jobId) {
     return null;
   }
   const eventsFile = join45(jobsDir, jobId, "events.jsonl");
-  if (!existsSync39(eventsFile))
+  if (!existsSync40(eventsFile))
     return null;
   const lines = readFileSync32(eventsFile, "utf-8").split(`
 `);
@@ -52866,12 +53341,12 @@ async function run20() {
 `).slice(1).map((line) => line.split(/\s+/)[0]).filter(Boolean)) : new Set;
     const bdInstalled = isInstalled2("bd");
     const bdVersion = bdInstalled ? cmd("bd", ["--version"]) : null;
-    const beadsPresent = existsSync39(join45(process.cwd(), ".beads"));
+    const beadsPresent = existsSync40(join45(process.cwd(), ".beads"));
     const specialistsBin = cmd("which", ["specialists"]);
     const jobsDir = resolveJobsDir();
     const jobFileOutputMode = detectJobFileOutputMode();
     let jobs = [];
-    if (existsSync39(jobsDir)) {
+    if (existsSync40(jobsDir)) {
       supervisor = new Supervisor({
         runner: null,
         runOptions: null,
@@ -53210,7 +53685,7 @@ function formatActivationAge(nowMs, atMs) {
 }
 
 // src/specialist/native-activation-ownership.ts
-import { existsSync as existsSync40 } from "fs";
+import { existsSync as existsSync41 } from "fs";
 function resolveSessionHolder(env = process.env) {
   for (const key of ["XTRM_SESSION_NAME", "XTRM_SESSION_ID"]) {
     const value = (env[key] ?? "").trim();
@@ -53253,7 +53728,7 @@ function resolveNativeActivationOwnership(opts = {}) {
     };
   }
   const dbPath = opts.dbPath ?? resolveAuthorityDbPath(opts.env);
-  if (!existsSync40(dbPath)) {
+  if (!existsSync41(dbPath)) {
     return {
       kind: "unavailable",
       reason: "authority_store_absent",
@@ -54452,7 +54927,7 @@ var init_ps = __esm(() => {
 });
 
 // src/cli/result.ts
-import { existsSync as existsSync41, readFileSync as readFileSync33 } from "fs";
+import { existsSync as existsSync42, readFileSync as readFileSync33 } from "fs";
 import { join as join46 } from "path";
 function isNativeActivationId(ref) {
   return /^act:[^:]+$/.test(ref);
@@ -54580,13 +55055,13 @@ function findMissingNativeAttemptError(sqliteClient, supervisor, activationId, r
   if (!sqliteClient) {
     return `Cannot verify attempt '${requestedAttemptId}' for activation '${activationId}': observability database is unavailable. Run: specialists db setup`;
   }
-  let attemptRows;
+  let attemptIds;
   try {
-    attemptRows = sqliteClient.readForensicEvents({ jobId: activationId, limit: 1e4 });
+    attemptIds = sqliteClient.listForensicAttemptIds(activationId);
   } catch {
     return `Cannot verify attempt '${requestedAttemptId}' for activation '${activationId}': forensic read failed.`;
   }
-  if (!attemptRows.some((row) => row.attempt_id === requestedAttemptId)) {
+  if (!attemptIds.includes(requestedAttemptId)) {
     return `No such attempt '${requestedAttemptId}' for activation '${activationId}'.`;
   }
   return null;
@@ -54598,7 +55073,7 @@ function readTimelineEventsForResult(sqliteClient, jobsDir, jobId) {
     } catch {}
   }
   const eventsPath = join46(jobsDir, jobId, "events.jsonl");
-  if (!existsSync41(eventsPath))
+  if (!existsSync42(eventsPath))
     return [];
   return readFileSync33(eventsPath, "utf-8").split(`
 `).map((line) => line.trim()).filter(Boolean).map((line) => parseTimelineEvent(line)).filter((event) => event !== null);
@@ -54854,7 +55329,7 @@ async function run22() {
       } catch (error) {
         console.warn(`SQLite result read failed for job ${jobId}; falling back to result.txt`, error);
       }
-      if (existsSync41(resultPath)) {
+      if (existsSync42(resultPath)) {
         return readFileSync33(resultPath, "utf-8");
       }
       try {
@@ -55073,7 +55548,7 @@ var init_result = __esm(() => {
 });
 
 // src/specialist/timeline-query.ts
-import { existsSync as existsSync42, readdirSync as readdirSync15, readFileSync as readFileSync34 } from "fs";
+import { existsSync as existsSync43, readdirSync as readdirSync15, readFileSync as readFileSync34 } from "fs";
 import { basename as basename9, join as join47 } from "path";
 function readJobEvents(jobDir) {
   const jobId = basename9(jobDir);
@@ -55087,7 +55562,7 @@ function readJobEvents(jobDir) {
   if (process.env.SPECIALISTS_JOB_FILE_OUTPUT !== "on")
     return [];
   const eventsPath = join47(jobDir, "events.jsonl");
-  if (!existsSync42(eventsPath))
+  if (!existsSync43(eventsPath))
     return [];
   const content = readFileSync34(eventsPath, "utf-8");
   const lines = content.split(`
@@ -55133,7 +55608,7 @@ function readAllJobEvents(jobsDir, jobId) {
   } catch {}
   if (process.env.SPECIALISTS_JOB_FILE_OUTPUT !== "on")
     return [];
-  if (!existsSync42(jobsDir))
+  if (!existsSync43(jobsDir))
     return [];
   const batches = [];
   const entries = readdirSync15(jobsDir);
@@ -55150,7 +55625,7 @@ function readAllJobEvents(jobsDir, jobId) {
     const statusPath = join47(jobDir, "status.json");
     let specialist = "unknown";
     let beadId;
-    if (existsSync42(statusPath)) {
+    if (existsSync43(statusPath)) {
       try {
         const status = JSON.parse(readFileSync34(statusPath, "utf-8"));
         specialist = status.specialist ?? "unknown";
@@ -55217,7 +55692,7 @@ var init_timeline_query = __esm(() => {
 // src/cli/feed.ts
 import {
   closeSync as closeSync4,
-  existsSync as existsSync43,
+  existsSync as existsSync44,
   openSync as openSync5,
   readFileSync as readFileSync35,
   readdirSync as readdirSync16,
@@ -55701,7 +56176,7 @@ function listMatchingJobIds(sqliteClient, jobsDir, options) {
       jobIds.add(status.id);
     }
   } catch {}
-  if (existsSync43(jobsDir)) {
+  if (existsSync44(jobsDir)) {
     for (const entry of readdirSync16(jobsDir)) {
       const jobDir = join48(jobsDir, entry);
       try {
@@ -55943,7 +56418,7 @@ async function run23() {
         return false;
       }
     })();
-    if (!existsSync43(jobsDir) && !hasSqliteStatuses) {
+    if (!existsSync44(jobsDir) && !hasSqliteStatuses) {
       if (options.jobId && sqliteClient) {
         console.log(dim9(`job ${options.jobId} not found in .specialists/db/observability.db`));
       } else {
@@ -56860,7 +57335,7 @@ var init_metrics = __esm(() => {
 });
 
 // src/cli/log.ts
-import { existsSync as existsSync44, readdirSync as readdirSync17, statSync as statSync12 } from "fs";
+import { existsSync as existsSync45, readdirSync as readdirSync17, statSync as statSync12 } from "fs";
 import { basename as basename11, join as join49 } from "path";
 function parseSince4(value) {
   if (value.includes("T") || value.includes("-"))
@@ -56952,7 +57427,7 @@ function parseArgs15(argv) {
 }
 function discoverDbTargets(cwd, repoFilter) {
   const cwdLocation = resolveObservabilityDbLocation(cwd);
-  if (existsSync44(cwdLocation.dbPath)) {
+  if (existsSync45(cwdLocation.dbPath)) {
     const repo = basename11(cwdLocation.gitRoot);
     if (!repoFilter || repo === repoFilter) {
       return [{ repo, root: cwdLocation.gitRoot, dbPath: cwdLocation.dbPath, source: "cwd" }];
@@ -56975,7 +57450,7 @@ function discoverDbTargets(cwd, repoFilter) {
       continue;
     }
     const dbPath = join49(root, ".specialists", "db", "observability.db");
-    if (!existsSync44(dbPath))
+    if (!existsSync45(dbPath))
       continue;
     if (repoFilter && entry !== repoFilter)
       continue;
@@ -56993,14 +57468,6 @@ function matches(status, options) {
   if (options.nodeId && status.node_id !== options.nodeId)
     return false;
   return true;
-}
-function isForensicAgentInternal(event) {
-  if (event.event_family === "turn")
-    return true;
-  if (event.event_family === "tool")
-    return true;
-  const name = event.event_name;
-  return name === "model.token_usage.recorded" || name === "model.finish_reason.recorded" || name.startsWith("model.meta") || name === "mcp.call.started" || name === "mcp.call.completed" || name === "mcp.call.failed" || name === "mcp.latency.observed";
 }
 function isRuntimeEvent(event) {
   if (RUNTIME_EVENT_TYPES.has(event.type))
@@ -57693,12 +58160,12 @@ async function run30() {
 }
 
 // src/specialist/worktree-gc.ts
-import { existsSync as existsSync45, readdirSync as readdirSync18, readFileSync as readFileSync36 } from "fs";
+import { existsSync as existsSync46, readdirSync as readdirSync18, readFileSync as readFileSync36 } from "fs";
 import { join as join50 } from "path";
 import { spawnSync as spawnSync25 } from "child_process";
 function readJobStatus2(jobDir) {
   const statusPath = join50(jobDir, "status.json");
-  if (!existsSync45(statusPath))
+  if (!existsSync46(statusPath))
     return null;
   try {
     return JSON.parse(readFileSync36(statusPath, "utf-8"));
@@ -57723,7 +58190,7 @@ function collectWorktreeGcCandidates(jobsDir) {
       const worktreePath = status.worktree_path;
       if (!worktreePath)
         return null;
-      if (!existsSync45(worktreePath))
+      if (!existsSync46(worktreePath))
         return null;
       return {
         jobId: status.id,
@@ -57735,7 +58202,7 @@ function collectWorktreeGcCandidates(jobsDir) {
   }
   if (!getFileFallbackEnabled())
     return [];
-  if (!existsSync45(jobsDir))
+  if (!existsSync46(jobsDir))
     return [];
   const candidates = [];
   for (const entry of readdirSync18(jobsDir, { withFileTypes: true })) {
@@ -57751,7 +58218,7 @@ function collectWorktreeGcCandidates(jobsDir) {
     const { worktree_path: worktreePath, branch } = status;
     if (!worktreePath)
       continue;
-    if (!existsSync45(worktreePath))
+    if (!existsSync46(worktreePath))
       continue;
     candidates.push({
       jobId: status.id,
@@ -57793,7 +58260,7 @@ var init_worktree_gc = __esm(() => {
 });
 
 // src/cli/clean.ts
-import { existsSync as existsSync46, readFileSync as readFileSync37, readdirSync as readdirSync19, rmSync as rmSync7, statSync as statSync13 } from "fs";
+import { existsSync as existsSync47, readFileSync as readFileSync37, readdirSync as readdirSync19, rmSync as rmSync7, statSync as statSync13 } from "fs";
 import { join as join51 } from "path";
 function parseDuration2(raw) {
   const match = /^(\d+)(ms|s|m|h|d)$/i.exec(raw.trim());
@@ -57982,7 +58449,7 @@ function readCompletedJobDirectory(baseDirectory, entry) {
   if (containsProtectedSqliteArtifact(directoryPath))
     return null;
   const statusFilePath = join51(directoryPath, "status.json");
-  if (!existsSync46(statusFilePath))
+  if (!existsSync47(statusFilePath))
     return null;
   let statusData;
   try {
@@ -58001,7 +58468,7 @@ function collectCompletedJobs(jobsDirectoryPath) {
   if (statuses.length > 0) {
     return statuses.filter((status) => COMPLETED_STATUSES.has(status.status)).map((status) => {
       const directoryPath = join51(jobsDirectoryPath, status.id);
-      if (!existsSync46(directoryPath) || containsProtectedSqliteArtifact(directoryPath))
+      if (!existsSync47(directoryPath) || containsProtectedSqliteArtifact(directoryPath))
         return null;
       const { createdAtMs, completedAtMs } = getJobTimestamps(status);
       return { id: status.id, directoryPath, completedAtMs, createdAtMs, sizeBytes: readDirectorySizeBytes(directoryPath) };
@@ -58355,7 +58822,7 @@ async function run31() {
     console.log(`Hid ${hiddenCount} terminal row(s) from default ps.`);
     return;
   }
-  if (!existsSync46(jobsDirectoryPath)) {
+  if (!existsSync47(jobsDirectoryPath)) {
     console.log("No jobs directory found.");
     return;
   }
@@ -58870,10 +59337,10 @@ var init_attach = __esm(() => {
 });
 
 // src/specialist/drift-detector.ts
-import { existsSync as existsSync47, readFileSync as readFileSync38, readdirSync as readdirSync20, rmSync as rmSync8 } from "fs";
+import { existsSync as existsSync48, readFileSync as readFileSync38, readdirSync as readdirSync20, rmSync as rmSync8 } from "fs";
 import { join as join52, resolve as resolve20, relative as relative4 } from "path";
 function listFiles(root) {
-  if (!existsSync47(root))
+  if (!existsSync48(root))
     return [];
   const out = [];
   const visit = (dir) => {
@@ -58913,12 +59380,12 @@ function detectDriftForRepo(repoRoot) {
       { scope: "user", dir: resolve20(repoRoot, ".specialists/user") }
     ];
     for (const { scope, dir } of scopes) {
-      if (!existsSync47(dir))
+      if (!existsSync48(dir))
         continue;
       for (const file of listFiles(dir)) {
         const rel = relPath(file, dir);
         const canonicalPath = join52(asset.canonicalDir, rel);
-        if (!existsSync47(canonicalPath))
+        if (!existsSync48(canonicalPath))
           continue;
         const bytesEqual = readFileSync38(file).equals(readFileSync38(canonicalPath));
         findings.push(makeFinding(repoRoot, asset.kind, scope, file, canonicalPath, bytesEqual));
@@ -59339,7 +59806,7 @@ ${detail.missing.map((m) => `  - ${m}`).join(`
 // src/activation/workspace-lease.ts
 import { execFileSync as execFileSync5, spawnSync as spawnSync27 } from "child_process";
 import { createHash as createHash8 } from "crypto";
-import { appendFileSync as appendFileSync7, existsSync as existsSync48, linkSync, mkdirSync as mkdirSync19, readFileSync as readFileSync39, realpathSync as realpathSync6, renameSync as renameSync6, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync21 } from "fs";
+import { appendFileSync as appendFileSync7, existsSync as existsSync49, linkSync, mkdirSync as mkdirSync19, readFileSync as readFileSync39, realpathSync as realpathSync6, renameSync as renameSync6, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync21 } from "fs";
 import { basename as basename12, dirname as dirname25, join as join53 } from "path";
 function workspaceIdentityFor(cwd) {
   return { repositoryRoot: cwd, worktreePath: cwd };
@@ -59369,10 +59836,20 @@ function resolveWorktreeBase(git) {
   git("fetch", "origin", defaultBranch);
   return `origin/${defaultBranch}`;
 }
+function slugify2(value) {
+  const lowered = value.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  let start = 0;
+  let end = lowered.length;
+  while (start < end && lowered[start] === "-")
+    start++;
+  while (end > start && lowered[end - 1] === "-")
+    end--;
+  return lowered.slice(start, end);
+}
 function provisionWriterWorkspace(cwd, issueRef, role) {
   const git = (...args) => execFileSync5("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-  const slug = issueRef.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  const roleSlug = role.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const slug = slugify2(issueRef);
+  const roleSlug = slugify2(role);
   const branch = `sp/${slug}`;
   try {
     const existing = git("worktree", "list", "--porcelain").split(`
@@ -59384,11 +59861,15 @@ function provisionWriterWorkspace(cwd, issueRef, role) {
     if (!worktreePath) {
       const mainRoot = dirname25(git("rev-parse", "--path-format=absolute", "--git-common-dir"));
       worktreePath = join53(mainRoot, ".xtrm", "worktrees", `${basename12(mainRoot)}-sp-${roleSlug}-${slug}`);
-      if (spawnSync27("git", ["check-ignore", "-q", join53(worktreePath, "x")], { cwd: mainRoot }).status !== 0) {
-        appendFileSync7(git("rev-parse", "--path-format=absolute", "--git-path", "info/exclude"), `
-/.xtrm/worktrees/
+      const excludePath = git("rev-parse", "--path-format=absolute", "--git-path", "info/exclude");
+      const existing = existsSync49(excludePath) ? readFileSync39(excludePath, "utf-8").split(`
+`) : [];
+      const additions = runtimeIgnoreExcludePatterns().filter((pattern) => !existing.includes(pattern)).filter((pattern) => pattern.includes("*") || spawnSync27("git", ["check-ignore", "-q", join53(mainRoot, pattern.slice(1), "x")], { cwd: mainRoot }).status !== 0).join(`
 `);
-      }
+      if (additions)
+        appendFileSync7(excludePath, `
+` + additions + `
+`);
       const branchExists = spawnSync27("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd }).status === 0;
       const base = branchExists ? undefined : resolveWorktreeBase(git);
       git("worktree", "add", ...base ? ["-b", branch, worktreePath, base] : [worktreePath, branch]);
@@ -59411,7 +59892,7 @@ function removeWriterWorkspace(cwd, workspace) {
 }
 function procLeaseProbe() {
   return {
-    canVerify: () => existsSync48("/proc/self/stat"),
+    canVerify: () => existsSync49("/proc/self/stat"),
     startTicks(pid) {
       try {
         const stat = readFileSync39(`/proc/${pid}/stat`, "utf-8");
@@ -59446,7 +59927,7 @@ function leasePath(workspace) {
 }
 function inspect(workspace, probe = procLeaseProbe()) {
   const path = leasePath(workspace);
-  if (!existsSync48(path))
+  if (!existsSync49(path))
     return { state: "free" };
   let lease;
   try {
@@ -59590,6 +60071,7 @@ function admitToolCall(input, probe = procLeaseProbe()) {
 var NON_MUTATING_TOOLS, WORKSPACE_WRITE_TOOLS;
 var init_workspace_lease = __esm(() => {
   init_runtime_diagnostics();
+  init_runtime_ignore();
   init_types3();
   NON_MUTATING_TOOLS = new Set([
     "read",
@@ -59607,7 +60089,7 @@ var init_workspace_lease = __esm(() => {
 });
 
 // src/activation/workspace-reconcile.ts
-import { appendFileSync as appendFileSync8, existsSync as existsSync49, mkdirSync as mkdirSync20, readdirSync as readdirSync21, readFileSync as readFileSync40, unlinkSync as unlinkSync3 } from "fs";
+import { appendFileSync as appendFileSync8, existsSync as existsSync50, mkdirSync as mkdirSync20, readdirSync as readdirSync21, readFileSync as readFileSync40, unlinkSync as unlinkSync3 } from "fs";
 import { userInfo } from "os";
 import { join as join54 } from "path";
 function reconcile(workspace, request, options = {}) {
@@ -59685,7 +60167,7 @@ function appendRecord(workspace, record) {
 `, { mode: 384 });
 }
 function readLogAt(path) {
-  if (!existsSync49(path))
+  if (!existsSync50(path))
     return [];
   const out = [];
   for (const line of readFileSync40(path, "utf-8").split(`
@@ -59733,7 +60215,7 @@ function leaseScopeFor(cwd) {
 }
 function projectUncertainWorkspaces(scope, probe = procLeaseProbe()) {
   const dir = leaseDir(scope);
-  if (!existsSync49(dir))
+  if (!existsSync50(dir))
     return [];
   const out = [];
   for (const entry of readdirSync21(dir)) {
@@ -60081,9 +60563,9 @@ var init_dead_job_audit = __esm(() => {
 });
 
 // src/specialist/channel-doctor.ts
-import { existsSync as existsSync50, readFileSync as readFileSync41 } from "fs";
+import { existsSync as existsSync51, readFileSync as readFileSync41 } from "fs";
 function readJson2(path) {
-  if (!existsSync50(path))
+  if (!existsSync51(path))
     return { exists: false, value: null, parseError: null };
   try {
     return { exists: true, value: JSON.parse(readFileSync41(path, "utf8")), parseError: null };
@@ -60097,7 +60579,7 @@ function isRecord3(value) {
 function checkCapabilityDeclared(serverSourcePath) {
   const id = 1;
   const name = "MCP server declares the claude/channel capability";
-  if (!existsSync50(serverSourcePath)) {
+  if (!existsSync51(serverSourcePath)) {
     return { id, name, status: "unknown", detail: `server source not found at ${serverSourcePath}` };
   }
   const source = readFileSync41(serverSourcePath, "utf8");
@@ -60233,7 +60715,7 @@ var init_channel_doctor = () => {};
 // src/cli/doctor.ts
 import { createHash as createHash10 } from "crypto";
 import { spawnSync as spawnSync28 } from "child_process";
-import { existsSync as existsSync51, mkdirSync as mkdirSync21, readdirSync as readdirSync22, readFileSync as readFileSync42, writeFileSync as writeFileSync22 } from "fs";
+import { existsSync as existsSync52, mkdirSync as mkdirSync21, readdirSync as readdirSync22, readFileSync as readFileSync42, writeFileSync as writeFileSync22 } from "fs";
 import { homedir as homedir13 } from "os";
 import { join as join55, relative as relative5, resolve as resolve23 } from "path";
 import { fileURLToPath as fileURLToPath10 } from "url";
@@ -60265,7 +60747,7 @@ function isInstalled3(bin) {
   return spawnSync28("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
 function loadJson2(path) {
-  if (!existsSync51(path))
+  if (!existsSync52(path))
     return null;
   try {
     return JSON.parse(readFileSync42(path, "utf8"));
@@ -60310,7 +60792,7 @@ function checkBd() {
     return true;
   }
   hint(`bd installed  ${dim14(sp("bd", ["--version"]).stdout || "")}  ${dim14("(legacy compatibility only)")}`);
-  if (existsSync51(join55(CWD, ".beads")))
+  if (existsSync52(join55(CWD, ".beads")))
     hint(".beads/ present \u2014 historical/legacy workspace available");
   else
     ok3("no .beads/ workspace \u2014 expected for a Substrate-first project");
@@ -60337,7 +60819,7 @@ async function checkSubstrateRuntime() {
       return;
     }
     const manifestPath = join55(dir, "package.json");
-    if (!existsSync51(manifestPath)) {
+    if (!existsSync52(manifestPath)) {
       warn3(`no package.json at ${dir} \u2014 native dispatch will be refused`);
       fix("point XTRM_SUBSTRATE_DIR at a @jaggerxtrm/substrate checkout");
       return;
@@ -60372,7 +60854,7 @@ async function checkSubstrateRuntime() {
     }
     ok3("IssueService context reader present");
     const dbPath = resolveWorkItemDbPath();
-    if (!existsSync51(dbPath)) {
+    if (!existsSync52(dbPath)) {
       warn3(`work store not present at ${dbPath}`);
       fix("run `xt init`, or `sb init`, or set SUBSTRATE_DB to an existing store");
       return;
@@ -60397,7 +60879,7 @@ function resolveManagedSettingsPath() {
 }
 function resolveServerSourcePath() {
   const distPath = fileURLToPath10(new URL("../../dist/index.js", import.meta.url));
-  if (existsSync51(distPath))
+  if (existsSync52(distPath))
     return distPath;
   return fileURLToPath10(new URL("../mcp/v2-server.ts", import.meta.url));
 }
@@ -60536,12 +61018,12 @@ function collectFileHashes(rootDir) {
       hashes.set(relPath, hashFile(fullPath));
     }
   };
-  if (existsSync51(rootDir))
+  if (existsSync52(rootDir))
     visit(rootDir);
   return hashes;
 }
 function resolvePackageAssetDir(relativePath) {
-  return resolveCanonicalAssetDir(relativePath) ?? (existsSync51(join55(CWD, "config", relativePath)) ? join55(CWD, "config", relativePath) : null);
+  return resolveCanonicalAssetDir(relativePath) ?? (existsSync52(join55(CWD, "config", relativePath)) ? join55(CWD, "config", relativePath) : null);
 }
 function checkSkillDrift() {
   section3(`Skills \u2014 global default pool  (~/${relative5(homedir13(), GLOBAL_DEFAULT_SKILLS_DIR)})`);
@@ -60551,7 +61033,7 @@ function checkSkillDrift() {
     fix("restore config/skills/ or install package assets");
     return false;
   }
-  if (!existsSync51(GLOBAL_DEFAULT_SKILLS_DIR)) {
+  if (!existsSync52(GLOBAL_DEFAULT_SKILLS_DIR)) {
     fail9(`${GLOBAL_DEFAULT_SKILLS_DIR} missing`);
     fix("reinstall xtrm-tools (skills are vendored globally)");
     return false;
@@ -60586,7 +61068,7 @@ function checkSkillDrift() {
 }
 function checkUserOverlayDrift() {
   section3("User specialist overlays");
-  if (!existsSync51(USER_SPECIALISTS_DIR)) {
+  if (!existsSync52(USER_SPECIALISTS_DIR)) {
     ok3("no user overlays present");
     return true;
   }
@@ -60605,7 +61087,7 @@ function checkUserOverlayDrift() {
       warn3(`${name}: failed to parse \u2014 skipping drift check`);
       continue;
     }
-    if (!defaultPath || !existsSync51(defaultPath)) {
+    if (!defaultPath || !existsSync52(defaultPath)) {
       ok3(`${name}: user-only overlay (no package default to drift from)`);
       continue;
     }
@@ -60637,14 +61119,14 @@ function checkRuntimeDirs() {
   const jobsDir = join55(rootDir, "jobs");
   const readyDir = join55(rootDir, "ready");
   let allOk = true;
-  if (!existsSync51(rootDir)) {
+  if (!existsSync52(rootDir)) {
     warn3(".specialists/ not found in current project");
     fix("specialists init");
     allOk = false;
   } else {
     ok3(".specialists/ present");
     for (const [subDir, label] of [[jobsDir, "jobs"], [readyDir, "ready"]]) {
-      if (!existsSync51(subDir)) {
+      if (!existsSync52(subDir)) {
         warn3(`.specialists/${label}/ missing \u2014 auto-creating`);
         mkdirSync21(subDir, { recursive: true });
         ok3(`.specialists/${label}/ created`);
@@ -60659,7 +61141,7 @@ function checkClaudeMdFragments() {
   section3("CLAUDE.md fragments");
   const projectRoot = process.cwd();
   const claudeMd = join55(projectRoot, "CLAUDE.md");
-  if (!existsSync51(claudeMd)) {
+  if (!existsSync52(claudeMd)) {
     warn3("No CLAUDE.md in project root \u2014 skipping fragment check");
     return true;
   }
@@ -60837,6 +61319,7 @@ async function checkSpecialistOverrides() {
       }
     }
   }
+  const claudeBridgeOk = await checkClaudeBridgeRoute(loader, summaries, globalLayer);
   const selection = (() => {
     if (!globalLayer.exists)
       return null;
@@ -60844,6 +61327,7 @@ async function checkSpecialistOverrides() {
     if (config === null) {
       if (invalidReason !== null) {
         warn3(`global user config ${invalidReason}; mandatory-rules selection report skipped`);
+        fix("sp init --global   (backfills the full override template into every entry; keeps every value you set)");
       }
       return null;
     }
@@ -60911,7 +61395,75 @@ async function checkSpecialistOverrides() {
   }
   const stripFailures = warnings.filter((w) => w.severity === "strip").length;
   const missingFailures = globalLayer.exists ? missing.length : 0;
-  return stripFailures === 0 && missingFailures === 0;
+  return stripFailures === 0 && missingFailures === 0 && claudeBridgeOk;
+}
+async function checkClaudeBridgeRoute(loader, summaries, globalLayer) {
+  const read = readClaudeBridgeBlock(globalLayer);
+  if (read.error !== null) {
+    fail9(`claude_bridge block is invalid: ${read.error}`);
+    fix(`correct the block in ${read.path} (sp edit --global ${CLAUDE_BRIDGE_SWITCH_KEY}.<field>), or remove it`);
+    for (const name of read.listedNames) {
+      const decision = loader.getClaudeBridgeDecision(name);
+      fail9(`${name}: listed in ${CLAUDE_BRIDGE_SWITCH_KEY}.specialists but the block resolves no ` + `${CLAUDE_BRIDGE_PROVIDER}/... model${decision?.model ? ` (resolved ${JSON.stringify(decision.model)})` : ""} ` + "\u2014 a dispatch is refused, never run inert on another provider");
+    }
+    return false;
+  }
+  const block = read.block;
+  if (block === null) {
+    ok3("Claude Code route: off (no claude_bridge block)");
+    return true;
+  }
+  if (block.enabled !== true) {
+    ok3("Claude Code route: off (claude_bridge.enabled is false)");
+    return true;
+  }
+  if (block.specialists === undefined) {
+    warn3("Claude Code route: legacy shape \u2014 enabled without an allow list, so the merged definition flag decides");
+    fix(`sp edit --global ${CLAUDE_BRIDGE_SWITCH_KEY}.specialists '["<name>"]'   (explicit allow list; deals with the repository-writable flag)`);
+    return true;
+  }
+  if (block.specialists.length === 0) {
+    ok3("Claude Code route: enabled with an empty allow list \u2014 off for every Specialist");
+    return true;
+  }
+  const known = new Set(summaries.map((summary) => summary.name));
+  const unknown = block.specialists.filter((name) => !known.has(name));
+  ok3(`Claude Code route: allow list ${block.specialists.join(", ")}${block.default_model ? ` (default ${block.default_model})` : ""}`);
+  if (unknown.length > 0) {
+    warn3(`allow list names Specialist(s) that do not resolve: ${unknown.join(", ")}`);
+    fix(`remove them from ${read.path}, or fix the name`);
+  }
+  for (const summary of summaries) {
+    const decision = loader.getClaudeBridgeDecision(summary.name);
+    if (decision?.reason === "unlisted" && decision.shadowed.some((shadow) => shadow.field === "execution.claude_bridge")) {
+      warn3(`${summary.name}: requests the Claude Code route (execution.claude_bridge: true) but the operator ` + "allow list does not name it, so the route is off");
+      fix(`sp edit --global ${CLAUDE_BRIDGE_SWITCH_KEY}.specialists '["${summary.name}"]'   (only if intended)`);
+    }
+    for (const shadow of decision?.shadowed ?? []) {
+      if (shadow.field === "execution.claude_bridge" && decision?.reason === "unlisted")
+        continue;
+      warn3(`${summary.name}: allow list shadows ${shadow.field} ` + `(${JSON.stringify(shadow.layerValue)} -> ${JSON.stringify(shadow.blockValue)})`);
+    }
+    if (!isBridgedModel(summary.model))
+      continue;
+    const spec = await loader.getEffective(summary.name).catch(() => null);
+    const execution = spec?.specialist.execution;
+    const fallbacks = execution?.fallback_models ?? [];
+    if (fallbacks.length > 0 || execution?.fallback_model) {
+      warn3(`${summary.name}: primary ${summary.model} is bridged, so fallbacks never run`);
+      fix(`remove execution.fallback_model/fallback_models for ${summary.name}`);
+    }
+  }
+  const { config } = readValidatedGlobalUserConfig(globalLayer);
+  if (config !== null) {
+    const listed = new Set(block.specialists);
+    const redundant = Object.entries(config).filter(([name, entry]) => listed.has(name) && entry?.execution?.claude_bridge !== undefined).map(([name]) => name).sort();
+    if (redundant.length > 0) {
+      warn3(`${CLAUDE_BRIDGE_SWITCH_KEY}.specialists owns the route for: ${redundant.join(", ")}`);
+      fix(`sp edit --global <name>.execution.claude_bridge null   (the per-Specialist flag is now redundant)`);
+    }
+  }
+  return true;
 }
 function renderDriftTable(root, json = false) {
   const report = detectDriftUnderRoot(root);
@@ -61006,7 +61558,7 @@ function cleanupProcesses(jobsDir, dryRun) {
   };
   for (const jobId of entries) {
     const statusPath = join55(jobsDir, jobId, "status.json");
-    if (!existsSync51(statusPath))
+    if (!existsSync52(statusPath))
       continue;
     try {
       const status = JSON.parse(readFileSync42(statusPath, "utf8"));
@@ -61095,7 +61647,7 @@ function checkZombieJobs() {
   section3("Background jobs");
   hint(`watchdog mode: ${resolveWatchdogMode()}`);
   const jobsDir = join55(CWD, ".specialists", "jobs");
-  if (!existsSync51(jobsDir)) {
+  if (!existsSync52(jobsDir)) {
     hint("No .specialists/jobs/ \u2014 skipping");
     return true;
   }
@@ -61322,6 +61874,7 @@ var init_doctor = __esm(() => {
   init_dead_job_audit();
   init_loader();
   init_global_config();
+  init_claude_bridge();
   init_channel_doctor();
   init_tool_catalog();
   init_session();
@@ -61336,7 +61889,7 @@ var init_doctor = __esm(() => {
 
 // src/specialist/benchmarks.ts
 import { randomUUID as randomUUID4 } from "crypto";
-import { closeSync as closeSync5, existsSync as existsSync52, fsyncSync as fsyncSync2, mkdirSync as mkdirSync22, openSync as openSync6, readFileSync as readFileSync43, renameSync as renameSync7, writeFileSync as writeFileSync23 } from "fs";
+import { closeSync as closeSync5, existsSync as existsSync53, fsyncSync as fsyncSync2, mkdirSync as mkdirSync22, openSync as openSync6, readFileSync as readFileSync43, renameSync as renameSync7, writeFileSync as writeFileSync23 } from "fs";
 import { homedir as homedir14 } from "os";
 import { dirname as dirname26, join as join56 } from "path";
 async function loadBenchmarkSnapshot(options = {}) {
@@ -61371,7 +61924,7 @@ async function loadSourceSnapshot(source, options, warn) {
   return cached ? toSnapshot(cached) : null;
 }
 function readCache2(path, options, warn) {
-  if (!existsSync52(path))
+  if (!existsSync53(path))
     return null;
   try {
     const parsed = JSON.parse(readFileSync43(path, "utf8"));
@@ -62124,7 +62677,7 @@ var init_setup = __esm(() => {
 });
 
 // src/cli/serve-hot-reload.ts
-import { existsSync as existsSync53, readdirSync as readdirSync24, statSync as statSync14, watch as fsWatch } from "fs";
+import { existsSync as existsSync54, readdirSync as readdirSync24, statSync as statSync14, watch as fsWatch } from "fs";
 import { join as join58 } from "path";
 function specialistNameFromFile(file) {
   const match = file.match(/^(.+)\.specialist\.(json|yaml)$/);
@@ -62132,7 +62685,7 @@ function specialistNameFromFile(file) {
 }
 function snapshotMtimes(dir) {
   const out = new Map;
-  if (!existsSync53(dir))
+  if (!existsSync54(dir))
     return out;
   const entries = readdirSync24(dir).filter((name) => specialistNameFromFile(name) !== null);
   for (const name of entries) {
@@ -62194,7 +62747,7 @@ function createUserDirWatcher(opts) {
       for (const file of changed)
         queue(file);
     }, opts.pollMs);
-  } else if (existsSync53(opts.userDir)) {
+  } else if (existsSync54(opts.userDir)) {
     try {
       watcher = fsWatch(opts.userDir, { persistent: false }, (_eventType, filename) => {
         queue(filename ? String(filename) : null);
@@ -62228,7 +62781,7 @@ import { randomUUID as randomUUID6 } from "crypto";
 import { once } from "events";
 import { spawnSync as spawnSync30 } from "child_process";
 import { access, readdir as readdir2, readFile as readFile4, constants as constants3 } from "fs/promises";
-import { existsSync as existsSync54 } from "fs";
+import { existsSync as existsSync55 } from "fs";
 import { homedir as homedir16 } from "os";
 import { join as join59 } from "path";
 function createReadinessState() {
@@ -62246,7 +62799,7 @@ function pruneAuditFailures(state, now = Date.now()) {
   }
 }
 async function checkUserDirSpecs(userDir) {
-  if (!existsSync54(userDir))
+  if (!existsSync55(userDir))
     return "empty";
   const entries = await readdir2(userDir).catch(() => []);
   const specFiles = entries.filter((name) => name.endsWith(".specialist.json") || name.endsWith(".specialist.yaml"));
@@ -64459,7 +65012,7 @@ var init_tool_schema = __esm(() => {
   STRIPPED_KEYS = new Set(["$schema", "default"]);
 });
 
-// node_modules/@modelcontextprotocol/server/dist/chunk-Br0eD_fh.mjs
+// node_modules/@modelcontextprotocol/server/dist/chunk-vYduTEsO.mjs
 var __create, __defProp2, __getOwnPropDesc, __getOwnPropNames, __getProtoOf, __hasOwnProp, __commonJSMin = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports), __exportAll = (all, symbols) => {
   let target = {};
   for (var name in all) {
@@ -64489,7 +65042,7 @@ var __create, __defProp2, __getOwnPropDesc, __getOwnPropNames, __getProtoOf, __h
   value: mod,
   enumerable: true
 }) : target, mod));
-var init_chunk_Br0eD_fh = __esm(() => {
+var init_chunk_vYduTEsO = __esm(() => {
   __create = Object.create;
   __defProp2 = Object.defineProperty;
   __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -64498,7 +65051,7 @@ var init_chunk_Br0eD_fh = __esm(() => {
   __hasOwnProp = Object.prototype.hasOwnProperty;
 });
 
-// node_modules/@modelcontextprotocol/server/dist/dialects-DoSzNhcb.mjs
+// node_modules/@modelcontextprotocol/server/dist/dialects-CDpMbily.mjs
 function declares2019Dialect($schema) {
   return typeof $schema === "string" && DRAFT_2019_09_URIS.has($schema.replace(/#$/, ""));
 }
@@ -64515,7 +65068,7 @@ function declaredDialect(schema, remedy) {
   throw new Error(`JSON Schema declares an unsupported dialect ("$schema": "${schema.$schema.slice(0, 200)}"). The default validator supports JSON Schema 2020-12, 2019-09, draft-07, and draft-06; ${remedy}`);
 }
 var DRAFT_2020_12_URIS, DRAFT_2019_09_URIS, DRAFT_07_URIS, DRAFT_06_URIS;
-var init_dialects_DoSzNhcb = __esm(() => {
+var init_dialects_CDpMbily = __esm(() => {
   DRAFT_2020_12_URIS = new Set(["https://json-schema.org/draft/2020-12/schema", "http://json-schema.org/draft/2020-12/schema"]);
   DRAFT_2019_09_URIS = new Set(["https://json-schema.org/draft/2019-09/schema", "http://json-schema.org/draft/2019-09/schema"]);
   DRAFT_07_URIS = new Set(["https://json-schema.org/draft-07/schema", "http://json-schema.org/draft-07/schema"]);
@@ -64605,7 +65158,7 @@ function mergeDefs(...defs) {
 function esc(str) {
   return JSON.stringify(str);
 }
-function slugify2(input) {
+function slugify3(input) {
   return input.toLowerCase().trim().replace(/[^\w\s-]/g, "").replace(/[\s_-]+/g, "-").replace(/^-+|-+$/g, "");
 }
 function isObject2(data) {
@@ -68412,7 +68965,7 @@ function _toUpperCase() {
   return _overwrite((input) => input.toUpperCase());
 }
 function _slugify() {
-  return _overwrite((input) => slugify2(input));
+  return _overwrite((input) => slugify3(input));
 }
 function _array(Class, element, params) {
   return new Class({
@@ -70523,9 +71076,9 @@ var init_v4 = __esm(() => {
   init_classic();
 });
 
-// node_modules/@modelcontextprotocol/core/dist/auth-CUe6YdwF.mjs
-var LATEST_PROTOCOL_VERSION = "2025-11-25", SUPPORTED_PROTOCOL_VERSIONS, RELATED_TASK_META_KEY = "io.modelcontextprotocol/related-task", PROTOCOL_VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion", CLIENT_INFO_META_KEY = "io.modelcontextprotocol/clientInfo", SERVER_INFO_META_KEY = "io.modelcontextprotocol/serverInfo", CLIENT_CAPABILITIES_META_KEY = "io.modelcontextprotocol/clientCapabilities", SUBSCRIPTION_ID_META_KEY = "io.modelcontextprotocol/subscriptionId", LOG_LEVEL_META_KEY = "io.modelcontextprotocol/logLevel", JSONRPC_VERSION = "2.0", JSONValueSchema, JSONObjectSchema, JSONArraySchema, ProgressTokenSchema, CursorSchema, TaskMetadataSchema, RelatedTaskMetadataSchema, RequestMetaSchema, BaseRequestParamsSchema, TaskAugmentedRequestParamsSchema, RequestSchema, NotificationsParamsSchema, NotificationSchema, ResultMetaObjectSchema, ResultSchema, RequestIdSchema, JSONRPCRequestSchema, JSONRPCNotificationSchema, JSONRPCResultResponseSchema, JSONRPCErrorResponseSchema, JSONRPCMessageSchema, JSONRPCResponseSchema, EmptyResultSchema, CancelledNotificationParamsSchema, CancelledNotificationSchema, IconSchema, IconsSchema, BaseMetadataSchema, ImplementationSchema, FormElicitationCapabilitySchema, ElicitationCapabilitySchema, ClientTasksCapabilitySchema, ServerTasksCapabilitySchema, ClientCapabilitiesSchema, InitializeRequestParamsSchema, InitializeRequestSchema, ServerCapabilitiesSchema, InitializeResultSchema, InitializedNotificationSchema, DiscoverRequestSchema, DiscoverResultSchema, PingRequestSchema, ProgressSchema, ProgressNotificationParamsSchema, ProgressNotificationSchema, PaginatedRequestParamsSchema, PaginatedRequestSchema, PaginatedResultSchema, ResourceContentsSchema, TextResourceContentsSchema, Base64Schema, BlobResourceContentsSchema, RoleSchema, AnnotationsSchema, ResourceSchema, ResourceTemplateSchema, ListResourcesRequestSchema, ListResourcesResultSchema, ListResourceTemplatesRequestSchema, ListResourceTemplatesResultSchema, ResourceRequestParamsSchema, ReadResourceRequestParamsSchema, ReadResourceRequestSchema, ReadResourceResultSchema, ResourceListChangedNotificationSchema, SubscribeRequestParamsSchema, SubscribeRequestSchema, UnsubscribeRequestParamsSchema, UnsubscribeRequestSchema, SubscriptionFilterSchema, SubscriptionsListenRequestParamsSchema, SubscriptionsListenRequestSchema, SubscriptionsAcknowledgedNotificationParamsSchema, SubscriptionsAcknowledgedNotificationSchema, SubscriptionsListenResultMetaSchema, SubscriptionsListenResultSchema, ResourceUpdatedNotificationParamsSchema, ResourceUpdatedNotificationSchema, PromptArgumentSchema, PromptSchema2, ListPromptsRequestSchema, ListPromptsResultSchema, GetPromptRequestParamsSchema, GetPromptRequestSchema, TextContentSchema, ImageContentSchema, AudioContentSchema, ToolUseContentSchema, EmbeddedResourceSchema, ResourceLinkSchema, ContentBlockSchema, PromptMessageSchema, GetPromptResultSchema, PromptListChangedNotificationSchema, ToolAnnotationsSchema, ToolExecutionSchema, ToolSchema, ListToolsRequestSchema, ListToolsResultSchema, CallToolResultSchema, CompatibilityCallToolResultSchema, CallToolRequestParamsSchema, CallToolRequestSchema, ToolListChangedNotificationSchema, ListChangedOptionsBaseSchema, LoggingLevelSchema, SetLevelRequestParamsSchema, SetLevelRequestSchema, LoggingMessageNotificationParamsSchema, LoggingMessageNotificationSchema, ModelHintSchema, ModelPreferencesSchema, ToolChoiceSchema, ToolResultContentSchema, SamplingContentSchema, SamplingMessageContentBlockSchema, SamplingMessageSchema, CreateMessageRequestParamsSchema, CreateMessageRequestSchema, CreateMessageResultSchema, CreateMessageResultWithToolsSchema, BooleanSchemaSchema, StringSchemaSchema, NumberSchemaSchema, UntitledSingleSelectEnumSchemaSchema, TitledSingleSelectEnumSchemaSchema, LegacyTitledEnumSchemaSchema, SingleSelectEnumSchemaSchema, UntitledMultiSelectEnumSchemaSchema, TitledMultiSelectEnumSchemaSchema, MultiSelectEnumSchemaSchema, EnumSchemaSchema, PrimitiveSchemaDefinitionSchema, ElicitRequestFormParamsSchema, ElicitRequestURLParamsSchema, ElicitRequestParamsSchema, ElicitRequestSchema, ElicitationCompleteNotificationParamsSchema, ElicitationCompleteNotificationSchema, ElicitResultSchema, ResourceTemplateReferenceSchema, PromptReferenceSchema, CompleteRequestParamsSchema, CompleteRequestSchema, CompleteResultSchema, RootSchema, ListRootsRequestSchema, ListRootsResultSchema, RootsListChangedNotificationSchema, TaskCreationParamsSchema, TaskStatusSchema, TaskSchema, CreateTaskResultSchema, TaskStatusNotificationParamsSchema, TaskStatusNotificationSchema, GetTaskRequestSchema, GetTaskResultSchema, GetTaskPayloadRequestSchema, GetTaskPayloadResultSchema, ListTasksRequestSchema, ListTasksResultSchema, CancelTaskRequestSchema, CancelTaskResultSchema, ClientRequestSchema, ClientNotificationSchema, ClientResultSchema, ServerRequestSchema, ServerNotificationSchema, ServerResultSchema, SafeUrlSchema, OAuthProtectedResourceMetadataSchema, OAuthMetadataSchema, OpenIdProviderMetadataSchema, OpenIdProviderDiscoveryMetadataSchema, OAuthTokensSchema, IdJagTokenExchangeResponseSchema, OAuthErrorResponseSchema, OptionalSafeUrlSchema, OAuthClientMetadataSchema, OAuthClientInformationSchema, OAuthClientInformationFullSchema, OAuthClientRegistrationErrorSchema, OAuthTokenRevocationRequestSchema;
-var init_auth_CUe6YdwF = __esm(() => {
+// node_modules/@modelcontextprotocol/core/dist/schemas-DscsoNZN.mjs
+var LATEST_PROTOCOL_VERSION = "2025-11-25", SUPPORTED_PROTOCOL_VERSIONS, RELATED_TASK_META_KEY = "io.modelcontextprotocol/related-task", PROTOCOL_VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion", CLIENT_INFO_META_KEY = "io.modelcontextprotocol/clientInfo", SERVER_INFO_META_KEY = "io.modelcontextprotocol/serverInfo", CLIENT_CAPABILITIES_META_KEY = "io.modelcontextprotocol/clientCapabilities", SUBSCRIPTION_ID_META_KEY = "io.modelcontextprotocol/subscriptionId", LOG_LEVEL_META_KEY = "io.modelcontextprotocol/logLevel", JSONRPC_VERSION = "2.0", JSONValueSchema, JSONObjectSchema, JSONArraySchema, ProgressTokenSchema, CursorSchema, TaskMetadataSchema, RelatedTaskMetadataSchema, RequestMetaSchema, BaseRequestParamsSchema, TaskAugmentedRequestParamsSchema, RequestSchema, NotificationsParamsSchema, NotificationSchema, ResultMetaObjectSchema, ResultSchema, RequestIdSchema, JSONRPCRequestSchema, JSONRPCNotificationSchema, JSONRPCResultResponseSchema, JSONRPCErrorResponseSchema, JSONRPCMessageSchema, JSONRPCResponseSchema, EmptyResultSchema, CancelledNotificationParamsSchema, CancelledNotificationSchema, IconSchema, IconsSchema, BaseMetadataSchema, ImplementationSchema, FormElicitationCapabilitySchema, ElicitationCapabilitySchema, ClientTasksCapabilitySchema, ServerTasksCapabilitySchema, ClientCapabilitiesSchema, InitializeRequestParamsSchema, InitializeRequestSchema, ServerCapabilitiesSchema, InitializeResultSchema, InitializedNotificationSchema, DiscoverRequestSchema, DiscoverResultSchema, PingRequestSchema, ProgressSchema, ProgressNotificationParamsSchema, ProgressNotificationSchema, PaginatedRequestParamsSchema, PaginatedRequestSchema, PaginatedResultSchema, ResourceContentsSchema, TextResourceContentsSchema, Base64Schema, BlobResourceContentsSchema, RoleSchema, AnnotationsSchema, ResourceSchema, ResourceTemplateSchema, ListResourcesRequestSchema, ListResourcesResultSchema, ListResourceTemplatesRequestSchema, ListResourceTemplatesResultSchema, ResourceRequestParamsSchema, ReadResourceRequestParamsSchema, ReadResourceRequestSchema, ReadResourceResultSchema, ResourceListChangedNotificationSchema, SubscribeRequestParamsSchema, SubscribeRequestSchema, UnsubscribeRequestParamsSchema, UnsubscribeRequestSchema, SubscriptionFilterSchema, SubscriptionsListenRequestParamsSchema, SubscriptionsListenRequestSchema, SubscriptionsAcknowledgedNotificationParamsSchema, SubscriptionsAcknowledgedNotificationSchema, SubscriptionsListenResultMetaSchema, SubscriptionsListenResultSchema, ResourceUpdatedNotificationParamsSchema, ResourceUpdatedNotificationSchema, PromptArgumentSchema, PromptSchema2, ListPromptsRequestSchema, ListPromptsResultSchema, GetPromptRequestParamsSchema, GetPromptRequestSchema, TextContentSchema, ImageContentSchema, AudioContentSchema, ToolUseContentSchema, EmbeddedResourceSchema, ResourceLinkSchema, ContentBlockSchema, PromptMessageSchema, GetPromptResultSchema, PromptListChangedNotificationSchema, ToolAnnotationsSchema, ToolExecutionSchema, ToolSchema, ListToolsRequestSchema, ListToolsResultSchema, CallToolResultSchema, CompatibilityCallToolResultSchema, CallToolRequestParamsSchema, CallToolRequestSchema, ToolListChangedNotificationSchema, ListChangedOptionsBaseSchema, LoggingLevelSchema, SetLevelRequestParamsSchema, SetLevelRequestSchema, LoggingMessageNotificationParamsSchema, LoggingMessageNotificationSchema, ModelHintSchema, ModelPreferencesSchema, ToolChoiceSchema, ToolResultContentSchema, SamplingContentSchema, SamplingMessageContentBlockSchema, SamplingMessageSchema, CreateMessageRequestParamsSchema, CreateMessageRequestSchema, CreateMessageResultSchema, CreateMessageResultWithToolsSchema, BooleanSchemaSchema, StringSchemaSchema, NumberSchemaSchema, UntitledSingleSelectEnumSchemaSchema, TitledSingleSelectEnumSchemaSchema, LegacyTitledEnumSchemaSchema, SingleSelectEnumSchemaSchema, UntitledMultiSelectEnumSchemaSchema, TitledMultiSelectEnumSchemaSchema, MultiSelectEnumSchemaSchema, EnumSchemaSchema, PrimitiveSchemaDefinitionSchema, ElicitRequestFormParamsSchema, ElicitRequestURLParamsSchema, ElicitRequestParamsSchema, ElicitRequestSchema, ElicitationCompleteNotificationParamsSchema, ElicitationCompleteNotificationSchema, ElicitResultSchema, ResourceTemplateReferenceSchema, PromptReferenceSchema, CompleteRequestParamsSchema, CompleteRequestSchema, CompleteResultSchema, RootSchema, ListRootsRequestSchema, ListRootsResultSchema, RootsListChangedNotificationSchema, TaskCreationParamsSchema, TaskStatusSchema, TaskSchema, CreateTaskResultSchema, TaskStatusNotificationParamsSchema, TaskStatusNotificationSchema, GetTaskRequestSchema, GetTaskResultSchema, GetTaskPayloadRequestSchema, GetTaskPayloadResultSchema, ListTasksRequestSchema, ListTasksResultSchema, CancelTaskRequestSchema, CancelTaskResultSchema, ClientRequestSchema, ClientNotificationSchema, ClientResultSchema, ServerRequestSchema, ServerNotificationSchema, ServerResultSchema;
+var init_schemas_DscsoNZN = __esm(() => {
   init_v4();
   SUPPORTED_PROTOCOL_VERSIONS = [
     LATEST_PROTOCOL_VERSION,
@@ -71306,6 +71859,12 @@ var init_auth_CUe6YdwF = __esm(() => {
     ListToolsResultSchema,
     SubscriptionsListenResultSchema
   ]);
+});
+
+// node_modules/@modelcontextprotocol/core/dist/auth-UMQCo-ad.mjs
+var SafeUrlSchema, OAuthProtectedResourceMetadataSchema, OAuthMetadataSchema, OpenIdProviderMetadataSchema, OpenIdProviderDiscoveryMetadataSchema, OAuthTokensSchema, IdJagTokenExchangeResponseSchema, OAuthErrorResponseSchema, OptionalSafeUrlSchema, OAuthClientMetadataSchema, OAuthClientInformationSchema, OAuthClientInformationFullSchema, OAuthClientRegistrationErrorSchema, OAuthTokenRevocationRequestSchema;
+var init_auth_UMQCo_ad = __esm(() => {
+  init_v4();
   SafeUrlSchema = url().superRefine((val, ctx) => {
     if (!URL.canParse(val)) {
       ctx.addIssue({
@@ -71355,7 +71914,8 @@ var init_auth_CUe6YdwF = __esm(() => {
     introspection_endpoint_auth_signing_alg_values_supported: array2(string3()).optional(),
     code_challenge_methods_supported: array2(string3()).optional(),
     client_id_metadata_document_supported: boolean3().optional(),
-    authorization_response_iss_parameter_supported: boolean3().optional().catch(undefined)
+    authorization_response_iss_parameter_supported: boolean3().optional().catch(undefined),
+    dpop_signing_alg_values_supported: array2(string3()).optional()
   });
   OpenIdProviderMetadataSchema = looseObject({
     issuer: string3(),
@@ -71406,7 +71966,8 @@ var init_auth_CUe6YdwF = __esm(() => {
     token_type: string3(),
     expires_in: number4().optional(),
     scope: string3().optional(),
-    refresh_token: string3().optional()
+    refresh_token: string3().optional(),
+    issuer: string3().optional().catch(undefined)
   }).strip();
   IdJagTokenExchangeResponseSchema = object2({
     issued_token_type: literal2("urn:ietf:params:oauth:token-type:id-jag"),
@@ -71446,7 +72007,8 @@ var init_auth_CUe6YdwF = __esm(() => {
     client_id: string3(),
     client_secret: string3().optional(),
     client_id_issued_at: number3().optional(),
-    client_secret_expires_at: number3().optional()
+    client_secret_expires_at: number3().optional(),
+    issuer: string3().optional().catch(undefined)
   }).strip();
   OAuthClientInformationFullSchema = OAuthClientMetadataSchema.merge(OAuthClientInformationSchema);
   OAuthClientRegistrationErrorSchema = object2({
@@ -71461,7 +72023,8 @@ var init_auth_CUe6YdwF = __esm(() => {
 
 // node_modules/@modelcontextprotocol/core/dist/internal.mjs
 var init_internal = __esm(() => {
-  init_auth_CUe6YdwF();
+  init_schemas_DscsoNZN();
+  init_auth_UMQCo_ad();
 });
 
 // node_modules/@modelcontextprotocol/server/node_modules/zod/v4/core/util.js
@@ -71547,7 +72110,7 @@ function mergeDefs2(...defs) {
 function esc2(str) {
   return JSON.stringify(str);
 }
-function slugify3(input) {
+function slugify4(input) {
   return input.toLowerCase().trim().replace(/[^\w\s-]/g, "").replace(/[\s_-]+/g, "-").replace(/^-+|-+$/g, "");
 }
 function isObject3(data) {
@@ -75334,7 +75897,7 @@ function _toUpperCase2() {
   return _overwrite2((input) => input.toUpperCase());
 }
 function _slugify2() {
-  return _overwrite2((input) => slugify3(input));
+  return _overwrite2((input) => slugify4(input));
 }
 function _array2(Class, element, params) {
   return new Class({
@@ -77617,7 +78180,7 @@ var init_v42 = __esm(() => {
   init_classic2();
 });
 
-// node_modules/@modelcontextprotocol/server/dist/src-CX2iR2pK.mjs
+// node_modules/@modelcontextprotocol/server/dist/src-DdvbAHrR.mjs
 function stampErrorBrands(instance, ctor) {
   const brands = /* @__PURE__ */ new Set;
   let current = ctor;
@@ -79629,7 +80192,8 @@ function build() {
     ListResourceTemplatesResultResponseSchema: wireResultResponse(ListResourceTemplatesResultSchema$1),
     ReadResourceResultResponseSchema: wireResultResponse(union3([ReadResourceResultSchema$1, InputRequiredResultSchema])),
     CompleteResultResponseSchema: wireResultResponse(CompleteResultSchema$1),
-    DiscoverResultResponseSchema: wireResultResponse(DiscoverResultSchema$1)
+    DiscoverResultResponseSchema: wireResultResponse(DiscoverResultSchema$1),
+    SubscriptionsListenResultResponseSchema: wireResultResponse(SubscriptionsListenResultSchema$1)
   };
 }
 function buildSchemas2026() {
@@ -79868,6 +80432,9 @@ function isSpecRequestMethod(method) {
 function isSpecNotificationMethod(method) {
   return ALL_CODECS.some((codec) => codec.hasNotificationMethod(method));
 }
+function isExtensionReusedRequestMethod(method) {
+  return method === "tasks/get" || method === "tasks/cancel";
+}
 function isPlainObject$3(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -79899,6 +80466,7 @@ function assertCompleteRequestResourceTemplate(request) {
 function scanXMcpHeaderDeclarations(inputSchema) {
   const declarations = [];
   const seenLower = /* @__PURE__ */ new Map;
+  let numberFault;
   const visit = (node, path, reachable) => {
     if (node === null || typeof node !== "object")
       return;
@@ -79912,8 +80480,12 @@ function scanXMcpHeaderDeclarations(inputSchema) {
       if (!RFC9110_TOKEN.test(raw))
         return `${pathName(path)}: x-mcp-header '${raw}' is not a valid RFC 9110 token (no spaces, control characters or HTTP delimiters)`;
       const type = typeof schema.type === "string" ? schema.type : undefined;
-      if (type === undefined || !PERMITTED_X_MCP_HEADER_TYPES.has(type))
-        return `${pathName(path)}: x-mcp-header is only permitted on primitive-typed properties (string, integer, boolean); got ${type ?? "<none>"}`;
+      if (type === undefined || !PERMITTED_X_MCP_HEADER_TYPES.has(type)) {
+        const fault$1 = `${pathName(path)}: x-mcp-header is only permitted on primitive-typed properties (string, integer, boolean); got ${type ?? "<none>"}`;
+        if (type !== "number")
+          return fault$1;
+        numberFault ??= fault$1;
+      }
       const lower = raw.toLowerCase();
       const prior = seenLower.get(lower);
       if (prior !== undefined)
@@ -79945,12 +80517,18 @@ function scanXMcpHeaderDeclarations(inputSchema) {
     }
   };
   const fault = visit(inputSchema, [], true);
-  return fault === undefined ? {
+  if (fault !== undefined)
+    return {
+      valid: false,
+      reason: numberFault ?? fault
+    };
+  return numberFault === undefined ? {
     valid: true,
     declarations
   } : {
     valid: false,
-    reason: fault
+    reason: numberFault,
+    declarations
   };
 }
 function pathName(path) {
@@ -80046,8 +80624,11 @@ function standardSchemaToJsonSchema(schema, io = "input") {
     ...result
   };
 }
-function isProvablyObjectShapedRoot(schema) {
+function isProvablyObjectShapedRoot(schema, root = schema) {
   if ("properties" in schema || "patternProperties" in schema || "additionalProperties" in schema || "required" in schema)
+    return true;
+  const ref = typeof schema.$ref === "string" && LOCAL_DEFINITION_REF.exec(schema.$ref);
+  if (ref && root[ref[1]]?.[ref[2]]?.type === "object")
     return true;
   for (const key of [
     "oneOf",
@@ -80056,7 +80637,7 @@ function isProvablyObjectShapedRoot(schema) {
   ]) {
     const members = schema[key];
     if (Array.isArray(members) && members.length > 0)
-      return members.every((m) => m !== null && typeof m === "object" && (m.type === "object" || isProvablyObjectShapedRoot(m)));
+      return members.every((m) => m !== null && typeof m === "object" && (m.type === "object" || isProvablyObjectShapedRoot(m, "$id" in m ? {} : root)));
   }
   return false;
 }
@@ -80400,7 +80981,8 @@ function manualInputRequiredValue(decoded) {
   return {
     resultType: "input_required",
     inputRequests: decoded.inputRequests,
-    ...decoded.requestState !== undefined && { requestState: decoded.requestState }
+    ...decoded.requestState !== undefined && { requestState: decoded.requestState },
+    ...decoded._meta !== undefined && { _meta: decoded._meta }
   };
 }
 function deserializeMessage(line) {
@@ -80500,7 +81082,7 @@ function fromJsonSchema(schema, validator) {
     }
   } };
 }
-var BRANDS, OAuthError, SdkErrorCode, SdkError, SdkHttpError, FIRST_MODERN_PROTOCOL_VERSION = "2026-07-28", SUPPORTED_MODERN_PROTOCOL_VERSIONS, TOOL_RESULT_FOREIGN_FAMILY_KEYS, memo$1, REF_REWRITE_DATA_POSITION_KEYS, REF_REWRITE_NAME_MAP_KEYS, requestMethodKeys$1, notificationMethodKeys$1, resultMethodKeys, maps$1, rev2025RequestMethods, rev2025NotificationMethods, NOT_IN_ERA$1, rev2025Codec, memo3, CACHEABLE_RESULT_METHODS, RESULT_CACHE_HINT_FALLBACK, ProtocolErrorCode, ProtocolError, ResourceNotFoundError, UrlElicitationRequiredError, UnsupportedProtocolVersionError, MissingRequiredClientCapabilityError, DEFAULT_CACHE_TTL_MS = 0, DEFAULT_CACHE_SCOPE = "private", EXTENDED_RESULT_TYPE_METHODS, INPUT_REQUEST_METHODS_2026, maps, requestMethodKeys, notificationMethodKeys, rev2026RequestMethods, rev2026NotificationMethods, NOT_IN_ERA, REQUIRED_ENVELOPE_KEYS, rev2026Codec, wireResultSchemasMemo, MODERN_WIRE_REVISION = "2026-07-28", ALL_CODECS, schemas_exports, isJSONRPCRequest = (value) => JSONRPCRequestSchema.safeParse(value).success, isJSONRPCNotification = (value) => JSONRPCNotificationSchema.safeParse(value).success, isJSONRPCResultResponse = (value) => JSONRPCResultResponseSchema.safeParse(value).success, isJSONRPCErrorResponse = (value) => JSONRPCErrorResponseSchema.safeParse(value).success, isInputRequiredResult = (value) => typeof value === "object" && value !== null && !Array.isArray(value) && value.resultType === "input_required", X_MCP_HEADER_KEY = "x-mcp-header", RFC9110_TOKEN, PERMITTED_X_MCP_HEADER_TYPES, NON_REACHABLE_SUBSCHEMA_KEYWORDS, OBJECT_VALUED_SUBSCHEMA_KEYWORDS, HEADER_MISMATCH_ERROR_CODE = -32020, INBOUND_VALIDATION_LADDER, LADDER_ERROR_HTTP_STATUS, warnedZodFallback = false, JSON_SCHEMA_CONVERSION_TARGET = "draft-2020-12", DATETIME_FRACTION_DIGITS, ANNOTATION_ONLY_JSON_SCHEMA_KEYWORDS, ROOT_KEYS, PROPERTY_KEYS_BY_TYPE, SUPPORTED_STRING_FORMATS, inputRequired, REQUEST_STATE_ONLY_LEG_PACING_MS = 250, SPEC_SCHEMA_KEYS, authSchemas, _specTypeSchemas, _isSpecType, specTypeSchemas, isSpecType, DEFAULT_REQUEST_TIMEOUT_MSEC = 60000, RESERVED_ENVELOPE_META_KEYS, RETRY_PARAMS_KEYS, NO_REQUEST_STATE, writeNegotiatedProtocolVersion, Protocol, require_content_type, import_content_type, STDIO_DEFAULT_MAX_BUFFER_SIZE, ReadBuffer = class {
+var BRANDS, OAuthError, SdkErrorCode, SdkError, SdkHttpError, FIRST_MODERN_PROTOCOL_VERSION = "2026-07-28", SUPPORTED_MODERN_PROTOCOL_VERSIONS, TOOL_RESULT_FOREIGN_FAMILY_KEYS, memo$1, REF_REWRITE_DATA_POSITION_KEYS, REF_REWRITE_NAME_MAP_KEYS, requestMethodKeys$1, notificationMethodKeys$1, resultMethodKeys, maps$1, rev2025RequestMethods, rev2025NotificationMethods, NOT_IN_ERA$1, rev2025Codec, memo3, CACHEABLE_RESULT_METHODS, RESULT_CACHE_HINT_FALLBACK, ProtocolErrorCode, ProtocolError, ResourceNotFoundError, UrlElicitationRequiredError, UnsupportedProtocolVersionError, MissingRequiredClientCapabilityError, DEFAULT_CACHE_TTL_MS = 0, DEFAULT_CACHE_SCOPE = "private", EXTENDED_RESULT_TYPE_METHODS, INPUT_REQUEST_METHODS_2026, maps, requestMethodKeys, notificationMethodKeys, rev2026RequestMethods, rev2026NotificationMethods, NOT_IN_ERA, REQUIRED_ENVELOPE_KEYS, rev2026Codec, wireResultSchemasMemo, MODERN_WIRE_REVISION = "2026-07-28", ALL_CODECS, schemas_exports, isJSONRPCRequest = (value) => JSONRPCRequestSchema.safeParse(value).success, isJSONRPCNotification = (value) => JSONRPCNotificationSchema.safeParse(value).success, isJSONRPCResultResponse = (value) => JSONRPCResultResponseSchema.safeParse(value).success, isJSONRPCErrorResponse = (value) => JSONRPCErrorResponseSchema.safeParse(value).success, isInputRequiredResult = (value) => typeof value === "object" && value !== null && !Array.isArray(value) && value.resultType === "input_required", X_MCP_HEADER_KEY = "x-mcp-header", RFC9110_TOKEN, PERMITTED_X_MCP_HEADER_TYPES, NON_REACHABLE_SUBSCHEMA_KEYWORDS, OBJECT_VALUED_SUBSCHEMA_KEYWORDS, HEADER_MISMATCH_ERROR_CODE = -32020, INBOUND_VALIDATION_LADDER, LADDER_ERROR_HTTP_STATUS, warnedZodFallback = false, JSON_SCHEMA_CONVERSION_TARGET = "draft-2020-12", LOCAL_DEFINITION_REF, DATETIME_FRACTION_DIGITS, ANNOTATION_ONLY_JSON_SCHEMA_KEYWORDS, ROOT_KEYS, PROPERTY_KEYS_BY_TYPE, SUPPORTED_STRING_FORMATS, inputRequired, REQUEST_STATE_ONLY_LEG_PACING_MS = 250, SPEC_SCHEMA_KEYS, authSchemas, _specTypeSchemas, _isSpecType, specTypeSchemas, isSpecType, DEFAULT_REQUEST_TIMEOUT_MSEC = 60000, RESERVED_ENVELOPE_META_KEYS, RETRY_PARAMS_KEYS, NO_REQUEST_STATE, writeNegotiatedProtocolVersion, Protocol, require_content_type, import_content_type, STDIO_DEFAULT_MAX_BUFFER_SIZE, ReadBuffer = class {
   _buffer;
   _maxBufferSize;
   constructor(options) {
@@ -80535,9 +81117,9 @@ var BRANDS, OAuthError, SdkErrorCode, SdkError, SdkHttpError, FIRST_MODERN_PROTO
     this._buffer = undefined;
   }
 }, TOOL_NAME_REGEX;
-var init_src_CX2iR2pK = __esm(() => {
-  init_chunk_Br0eD_fh();
-  init_dialects_DoSzNhcb();
+var init_src_DdvbAHrR = __esm(() => {
+  init_chunk_vYduTEsO();
+  init_dialects_CDpMbily();
   init_internal();
   init_v42();
   BRANDS = Symbol.for("mcp.sdk.errorBrands");
@@ -80607,8 +81189,8 @@ var init_src_CX2iR2pK = __esm(() => {
         throw new TypeError("isInstance must be called on the class (e.g. `SdkError.isInstance(value)`); for callbacks use `v => SdkError.isInstance(v)`");
       return brandedHasInstance(this, value);
     }
-    constructor(code, message, data) {
-      super(message);
+    constructor(code, message, data, options) {
+      super(message, options);
       this.code = code;
       this.data = data;
       this.name = "SdkError";
@@ -80619,8 +81201,8 @@ var init_src_CX2iR2pK = __esm(() => {
     static {
       Object.defineProperty(this, "mcpBrand", { value: "mcp.SdkHttpError" });
     }
-    constructor(code, message, data) {
-      super(code, message, data);
+    constructor(code, message, data, options) {
+      super(code, message, data, options);
       this.name = "SdkHttpError";
     }
     get status() {
@@ -80997,6 +81579,8 @@ var init_src_CX2iR2pK = __esm(() => {
         const rawInputRequests = raw["inputRequests"];
         const inputRequests = isPlainObject$4(rawInputRequests) ? rawInputRequests : {};
         const requestState = raw["requestState"];
+        const metaParse = raw["_meta"] === undefined ? undefined : buildSchemas2026().ResultMetaSchema.safeParse(raw["_meta"]);
+        const meta = metaParse?.success ? metaParse.data : undefined;
         if (Object.keys(inputRequests).length === 0 && typeof requestState !== "string")
           return {
             kind: "invalid",
@@ -81008,7 +81592,8 @@ var init_src_CX2iR2pK = __esm(() => {
         return {
           kind: "input_required",
           inputRequests,
-          ...typeof requestState === "string" && { requestState }
+          ...typeof requestState === "string" && { requestState },
+          ...meta !== undefined && { _meta: meta }
         };
       }
       if (rawResultType !== "complete")
@@ -81221,8 +81806,7 @@ var init_src_CX2iR2pK = __esm(() => {
   PERMITTED_X_MCP_HEADER_TYPES = new Set([
     "string",
     "integer",
-    "boolean",
-    "number"
+    "boolean"
   ]);
   NON_REACHABLE_SUBSCHEMA_KEYWORDS = [
     "items",
@@ -81309,7 +81893,7 @@ var init_src_CX2iR2pK = __esm(() => {
       evaluatedAt: "pre-dispatch",
       codes: [HEADER_MISMATCH_ERROR_CODE],
       conformance: ["http-header-validation"],
-      rationale: "SEP-2243 standard `Mcp-Method` / `Mcp-Name` headers \u2014 presence, sentinel decoding, and `Mcp-Name` \u2194 body cross-check \u2014 are validated by the HTTP entry on a modern-classified request after the supported-revision gate and before dispatch. The classifier\u2019s own header-mismatch cells (protocol-version, `Mcp-Method` mismatch) stay on the edge `era-classification` rung; this rung carries the entry-layer presence/`Mcp-Name` half. Evaluated before the capability gate, the factory call, and the `Mcp-Param-*` rung so a request that fails several rungs is answered by the standard-header rung first. The documented order (after method-registry 5 and request-params 6) is NOT the observed precedence: serveModern evaluates this rung immediately after the supported-revision gate, so a request that also fails a dispatch rung is answered here before the dispatch rungs (5\u20136) are consulted."
+      rationale: "SEP-2243 standard `MCP-Protocol-Version` / `Mcp-Method` / `Mcp-Name` headers \u2014 presence, sentinel decoding, and `Mcp-Name` \u2194 body cross-check \u2014 are validated by the HTTP entry on a modern-classified request after the supported-revision gate and before dispatch. The spec requires `MCP-Protocol-Version` and `Mcp-Method` on every modern *request* POST (`Mcp-Name` only for the methods that mirror `params.name` / `params.uri` / `params.taskId`, see `MCP_NAME_HEADER_SOURCE`) and names them in that order, so a request missing several is answered by the earliest. Notification POSTs are exempt: the presence half runs on requests only, so a modern-enveloped notification is dispatched even with no standard headers at all. The classifier\u2019s own header-mismatch cells (protocol-version, `Mcp-Method` mismatch) stay on the edge `era-classification` rung; this rung carries the entry-layer presence/`Mcp-Name` half \u2014 including the missing `MCP-Protocol-Version` cell, which cannot live on the edge rung without breaking body-primary classification. Evaluated before the capability gate, the factory call, and the `Mcp-Param-*` rung so a request that fails several rungs is answered by the standard-header rung first. The documented order (after method-registry 5 and request-params 6) is NOT the observed precedence: serveModern evaluates this rung immediately after the supported-revision gate, so a request that also fails a dispatch rung is answered here before the dispatch rungs (5\u20136) are consulted."
     },
     {
       rung: "client-capabilities",
@@ -81336,6 +81920,7 @@ var init_src_CX2iR2pK = __esm(() => {
     [ProtocolErrorCode.MissingRequiredClientCapability]: 400,
     [HEADER_MISMATCH_ERROR_CODE]: 400
   };
+  LOCAL_DEFINITION_REF = /^#\/(\$defs|definitions)\/([^/~%]+)$/;
   DATETIME_FRACTION_DIGITS = /\\\.\\d\{(\d+)\}/;
   ANNOTATION_ONLY_JSON_SCHEMA_KEYWORDS = new Set([
     "$comment",
@@ -81587,6 +82172,7 @@ var init_src_CX2iR2pK = __esm(() => {
     _transport;
     _requestMessageId = 0;
     _requestHandlers = /* @__PURE__ */ new Map;
+    _customSchemaRequestMethods = /* @__PURE__ */ new Set;
     _requestHandlerAbortControllers = /* @__PURE__ */ new Map;
     _notificationHandlers = /* @__PURE__ */ new Map;
     _responseHandlers = /* @__PURE__ */ new Map;
@@ -81643,7 +82229,7 @@ var init_src_CX2iR2pK = __esm(() => {
       return this._requestHandlers.get(method);
     }
     async _oncancel(notification) {
-      if (!notification.params.requestId)
+      if (notification.params.requestId === undefined)
         return;
       this._requestHandlerAbortControllers.get(notification.params.requestId)?.abort(notification.params.reason);
     }
@@ -81786,7 +82372,7 @@ var init_src_CX2iR2pK = __esm(() => {
           return;
         }
       }
-      if (isSpecRequestMethod(request.method) && !codec.hasRequestMethod(request.method)) {
+      if (isSpecRequestMethod(request.method) && !codec.hasRequestMethod(request.method) && !(isExtensionReusedRequestMethod(request.method) && this._customSchemaRequestMethods.has(request.method))) {
         sendErrorResponse(ProtocolErrorCode.MethodNotFound, "Method not found");
         return;
       }
@@ -81918,9 +82504,12 @@ var init_src_CX2iR2pK = __esm(() => {
     }
     request(request, schemaOrOptions, maybeOptions) {
       const codec = this._resolveOutboundCodec(request.method);
-      this._assertOutboundRequestInEra(codec, request.method);
-      if (isStandardSchema(schemaOrOptions))
+      if (isStandardSchema(schemaOrOptions)) {
+        if (!isExtensionReusedRequestMethod(request.method))
+          this._assertOutboundRequestInEra(codec, request.method);
         return this._requestWithSchemaViaCodec(codec, request, schemaOrOptions, maybeOptions);
+      }
+      this._assertOutboundRequestInEra(codec, request.method);
       const validate = codecResultValidator(codec, request.method);
       if (validate === undefined)
         throw new TypeError(`'${request.method}' is not a spec method; pass a result schema as the second argument to request().`);
@@ -82000,20 +82589,21 @@ var init_src_CX2iR2pK = __esm(() => {
           if (responseReceived)
             return;
           this._progressHandlers.delete(messageId);
-          if (requestAbort === undefined)
-            this._transport?.send(this._envelopeOutbound({
-              jsonrpc: "2.0",
-              method: "notifications/cancelled",
-              params: {
-                requestId: messageId,
-                reason: String(reason)
-              }
-            }), {
-              relatedRequestId,
-              resumptionToken,
-              onresumptiontoken
-            }).catch((error) => this._onerror(/* @__PURE__ */ new Error(`Failed to send cancellation: ${error}`)));
-          else
+          if (requestAbort === undefined) {
+            if (request.method !== "initialize")
+              this._transport?.send(this._envelopeOutbound({
+                jsonrpc: "2.0",
+                method: "notifications/cancelled",
+                params: {
+                  requestId: messageId,
+                  reason: String(reason)
+                }
+              }), {
+                relatedRequestId,
+                resumptionToken,
+                onresumptiontoken
+              }).catch((error) => this._onerror(/* @__PURE__ */ new Error(`Failed to send cancellation: ${error}`)));
+          } else
             requestAbort.abort();
           reject(reason instanceof SdkError ? reason : new SdkError(SdkErrorCode.RequestTimeout, String(reason)));
         };
@@ -82080,7 +82670,7 @@ var init_src_CX2iR2pK = __esm(() => {
       });
     }
     async notification(notification, options) {
-      return this._notificationViaCodec(this._resolveOutboundCodec(notification.method), notification, options);
+      return await this._notificationViaCodec(this._resolveOutboundCodec(notification.method), notification, options);
     }
     async _notificationViaCodec(codec, notification, options) {
       if (!this._transport)
@@ -82095,7 +82685,7 @@ var init_src_CX2iR2pK = __esm(() => {
         jsonrpc: "2.0",
         ...notification
       });
-      if ((this._options?.debouncedNotificationMethods ?? []).includes(notification.method) && !notification.params && !options?.relatedRequestId) {
+      if ((this._options?.debouncedNotificationMethods ?? []).includes(notification.method) && !notification.params && options?.relatedRequestId === undefined) {
         if (this._pendingDebouncedNotifications.has(notification.method))
           return;
         this._pendingDebouncedNotifications.add(notification.method);
@@ -82136,6 +82726,10 @@ var init_src_CX2iR2pK = __esm(() => {
         };
       else
         throw new TypeError("setRequestHandler: handler is required");
+      if (typeof schemasOrHandler === "function")
+        this._customSchemaRequestMethods.delete(method);
+      else
+        this._customSchemaRequestMethods.add(method);
       this._requestHandlers.set(method, this._wrapHandler(method, stored));
     }
     _wrapHandler(_method, handler) {
@@ -82144,6 +82738,7 @@ var init_src_CX2iR2pK = __esm(() => {
     _outboundServerInfo() {}
     removeRequestHandler(method) {
       this._requestHandlers.delete(method);
+      this._customSchemaRequestMethods.delete(method);
     }
     assertCanSetRequestHandler(method) {
       if (this._requestHandlers.has(method))
@@ -82241,7 +82836,7 @@ var init_src_CX2iR2pK = __esm(() => {
   TOOL_NAME_REGEX = /^[A-Za-z0-9._-]{1,128}$/;
 });
 
-// node_modules/@modelcontextprotocol/server/dist/ajvProvider-CEoC__sr.mjs
+// node_modules/@modelcontextprotocol/server/dist/ajvProvider-DyjnscPj.mjs
 function createDefaultAjvInstance(engineClass) {
   const ajv = new engineClass({
     strict: false,
@@ -82290,9 +82885,9 @@ var require_code$1, require_scope, require_codegen, require_util, require_names,
     };
   }
 }, Ajv;
-var init_ajvProvider_CEoC__sr = __esm(() => {
-  init_chunk_Br0eD_fh();
-  init_dialects_DoSzNhcb();
+var init_ajvProvider_DyjnscPj = __esm(() => {
+  init_chunk_vYduTEsO();
+  init_dialects_CDpMbily();
   require_code$1 = /* @__PURE__ */ __commonJSMin((exports) => {
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.regexpCode = exports.getEsmExportName = exports.getProperty = exports.safeStringify = exports.stringify = exports.strConcat = exports.addCodeArg = exports.str = exports._ = exports.nil = exports._Code = exports.Name = exports.IDENTIFIER = exports._CodeOrName = undefined;
@@ -85251,6 +85846,25 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
   require_utils = /* @__PURE__ */ __commonJSMin((exports, module) => {
     const isUUID = RegExp.prototype.test.bind(/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/iu);
     const isIPv4 = RegExp.prototype.test.bind(/^(?:(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)$/u);
+    const isPort = RegExp.prototype.test.bind(/^\d*$/u);
+    const isHexPair = RegExp.prototype.test.bind(/^[\da-f]{2}$/iu);
+    const isUnreserved = RegExp.prototype.test.bind(/^[\da-z\-._~]$/iu);
+    const isPathCharacter = RegExp.prototype.test.bind(/^[A-Za-z0-9\-._~!$&'()*+,;=:@/]$/u);
+    const isQueryFragmentCharacter = RegExp.prototype.test.bind(/^[A-Za-z0-9\-._~!$&'()*+,;=:@/?]$/u);
+    const isUserinfoCharacter = RegExp.prototype.test.bind(/^[A-Za-z0-9\-._~!$&'()*+,;=:]$/u);
+    const BYTE_HEX = new Array(256);
+    {
+      const HEX_DIGITS = "0123456789ABCDEF";
+      for (let i = 0;i < 256; i++)
+        BYTE_HEX[i] = "%" + HEX_DIGITS[i >> 4] + HEX_DIGITS[i & 15];
+    }
+    function percentEncodeNonAscii(cp) {
+      if (cp < 2048)
+        return BYTE_HEX[192 | cp >> 6] + BYTE_HEX[128 | cp & 63];
+      if (cp < 65536)
+        return BYTE_HEX[224 | cp >> 12] + BYTE_HEX[128 | cp >> 6 & 63] + BYTE_HEX[128 | cp & 63];
+      return BYTE_HEX[240 | cp >> 18] + BYTE_HEX[128 | cp >> 12 & 63] + BYTE_HEX[128 | cp >> 6 & 63] + BYTE_HEX[128 | cp & 63];
+    }
     function stringArrayToHexStripped(input) {
       let acc = "";
       let code = 0;
@@ -85272,96 +85886,140 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
       }
       return acc;
     }
+    const isHextet = RegExp.prototype.test.bind(/^[\dA-Fa-f]{1,4}$/);
+    const isIPvFuture = RegExp.prototype.test.bind(/^[vV][\dA-Fa-f]+\.[A-Za-z\d\-._~!$&'()*+,;=:]+$/);
+    const isZoneCharacter = RegExp.prototype.test.bind(/^[A-Za-z\d\-._~]$/);
     const nonSimpleDomain = RegExp.prototype.test.bind(/[^!"$&'()*+,\-.;=_`a-z{}~]/u);
-    function consumeIsZone(buffer) {
-      buffer.length = 0;
-      return true;
-    }
-    function consumeHextets(buffer, address, output) {
-      if (buffer.length) {
-        const hex = stringArrayToHexStripped(buffer);
-        if (hex !== "")
-          address.push(hex);
-        else {
-          output.error = true;
-          return false;
+    function isZoneIdentifier(zone) {
+      if (zone.length === 0)
+        return false;
+      for (let i = 0;i < zone.length; i++) {
+        if (isZoneCharacter(zone[i]))
+          continue;
+        if (zone[i] === "%" && i + 2 < zone.length && isHexPair(zone.slice(i + 1, i + 3))) {
+          i += 2;
+          continue;
         }
-        buffer.length = 0;
+        return false;
       }
       return true;
     }
-    function getIPV6(input) {
-      let tokenCount = 0;
-      const output = {
-        error: false,
-        address: "",
-        zone: ""
-      };
-      const address = [];
-      const buffer = [];
-      let endipv6Encountered = false;
-      let endIpv6 = false;
-      let consume = consumeHextets;
-      for (let i = 0;i < input.length; i++) {
-        const cursor = input[i];
-        if (cursor === "[" || cursor === "]")
-          continue;
-        if (cursor === ":") {
-          if (endipv6Encountered === true)
-            endIpv6 = true;
-          if (!consume(buffer, address, output))
-            break;
-          if (++tokenCount > 7) {
-            output.error = true;
-            break;
+    function compressIPv6ZeroRun(hextets) {
+      let bestStart = -1;
+      let bestLength = 0;
+      let runStart = -1;
+      let runLength = 0;
+      for (let i = 0;i < hextets.length; i++)
+        if (hextets[i] === "0") {
+          if (runStart === -1)
+            runStart = i;
+          runLength++;
+          if (runLength > bestLength) {
+            bestLength = runLength;
+            bestStart = runStart;
           }
-          if (i > 0 && input[i - 1] === ":")
-            endipv6Encountered = true;
-          address.push(":");
-          continue;
-        } else if (cursor === "%") {
-          if (!consume(buffer, address, output))
-            break;
-          consume = consumeIsZone;
         } else {
-          buffer.push(cursor);
+          runStart = -1;
+          runLength = 0;
+        }
+      if (bestLength < 2)
+        return hextets.join(":");
+      const head = hextets.slice(0, bestStart).join(":");
+      const tail = hextets.slice(bestStart + bestLength).join(":");
+      return head + "::" + tail;
+    }
+    function normalizeIPv6Address(input) {
+      const compression = input.indexOf("::");
+      if (compression !== -1 && input.indexOf("::", compression + 1) !== -1)
+        return;
+      const left = compression === -1 ? input.split(":") : input.slice(0, compression).split(":");
+      const right = compression === -1 ? [] : input.slice(compression + 2).split(":");
+      if (compression !== -1) {
+        if (left.length === 1 && left[0] === "")
+          left.length = 0;
+        if (right.length === 1 && right[0] === "")
+          right.length = 0;
+      }
+      const parts = left.concat(right);
+      let hextetCount = 0;
+      for (let i = 0;i < parts.length; i++) {
+        const part = parts[i];
+        if (part === "")
+          return;
+        if (part.indexOf(".") !== -1) {
+          if (i !== parts.length - 1 || compression !== -1 && right.length === 0 || !isIPv4(part))
+            return;
+          hextetCount += 2;
           continue;
         }
+        if (!isHextet(part))
+          return;
+        parts[i] = parseInt(part, 16).toString(16);
+        hextetCount++;
       }
-      if (buffer.length)
-        if (consume === consumeIsZone)
-          output.zone = buffer.join("");
-        else if (endIpv6)
-          address.push(buffer.join(""));
-        else
-          address.push(stringArrayToHexStripped(buffer));
-      output.address = address.join("");
-      return output;
+      if (compression === -1) {
+        if (hextetCount !== 8)
+          return;
+        return compressIPv6ZeroRun(parts);
+      }
+      if (hextetCount >= 8)
+        return;
+      const expanded = parts.slice(0, left.length);
+      for (let i = hextetCount;i < 8; i++)
+        expanded.push("0");
+      for (let i = left.length;i < parts.length; i++)
+        expanded.push(parts[i]);
+      return compressIPv6ZeroRun(expanded);
     }
     function normalizeIPv6(host) {
-      if (findToken(host, ":") < 2)
+      const bracketed = host[0] === "[" && host[host.length - 1] === "]";
+      if ((host[0] === "[" || host[host.length - 1] === "]") && !bracketed)
         return {
           host,
-          isIPV6: false
+          isIPV6: false,
+          error: true
         };
-      const ipv6 = getIPV6(host);
-      if (!ipv6.error) {
-        let newHost = ipv6.address;
-        let escapedHost = ipv6.address;
-        if (ipv6.zone) {
-          newHost += "%" + ipv6.zone;
-          escapedHost += "%25" + ipv6.zone;
-        }
+      let input = bracketed ? host.slice(1, -1) : host;
+      if (bracketed && isIPvFuture(input)) {
+        input = input.toLowerCase();
         return {
-          host: newHost,
-          isIPV6: true,
-          escapedHost
+          host: `[${input}]`,
+          escapedHost: input,
+          isIPV6: false,
+          isIPVFuture: true
         };
-      } else
+      }
+      if (findToken(input, ":") < 2)
         return {
           host,
-          isIPV6: false
+          isIPV6: false,
+          error: bracketed
         };
+      let zoneIdentifier = "";
+      const zoneSeparator = input.indexOf("%");
+      if (zoneSeparator !== -1) {
+        const separatorLength = input.slice(zoneSeparator, zoneSeparator + 3).toLowerCase() === "%25" ? 3 : 1;
+        zoneIdentifier = input.slice(zoneSeparator + separatorLength);
+        if (!isZoneIdentifier(zoneIdentifier))
+          return {
+            host,
+            isIPV6: false,
+            error: true
+          };
+        input = input.slice(0, zoneSeparator);
+      }
+      const address = normalizeIPv6Address(input);
+      if (address === undefined)
+        return {
+          host,
+          isIPV6: false,
+          error: true
+        };
+      return {
+        host: address + (zoneIdentifier ? "%" + zoneIdentifier : ""),
+        escapedHost: address + (zoneIdentifier ? "%25" + zoneIdentifier : ""),
+        isIPV6: true
+      };
     }
     function findToken(str, token) {
       let ind = 0;
@@ -85443,49 +86101,256 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
       }
       return output.join("");
     }
-    function normalizeComponentEncoding(component, esc) {
-      const func = esc !== true ? escape : unescape;
-      if (component.scheme !== undefined)
-        component.scheme = func(component.scheme);
-      if (component.userinfo !== undefined)
-        component.userinfo = func(component.userinfo);
-      if (component.host !== undefined)
-        component.host = func(component.host);
-      if (component.path !== undefined)
-        component.path = func(component.path);
-      if (component.query !== undefined)
-        component.query = func(component.query);
-      if (component.fragment !== undefined)
-        component.fragment = func(component.fragment);
-      return component;
+    const HOST_DELIMS = {
+      "@": "%40",
+      "/": "%2F",
+      "?": "%3F",
+      "#": "%23",
+      ":": "%3A"
+    };
+    const HOST_DELIM_RE = /[@/?#:]/g;
+    const HOST_DELIM_NO_COLON_RE = /[@/?#]/g;
+    function reescapeHostDelimiters(host, isIP) {
+      const re = isIP ? HOST_DELIM_NO_COLON_RE : HOST_DELIM_RE;
+      re.lastIndex = 0;
+      return host.replace(re, (ch) => HOST_DELIMS[ch]);
+    }
+    function normalizePercentEncoding(input, decodeUnreserved = false) {
+      if (input.indexOf("%") === -1)
+        return input;
+      let output = "";
+      for (let i = 0;i < input.length; i++) {
+        if (input[i] === "%" && i + 2 < input.length) {
+          const hex = input.slice(i + 1, i + 3);
+          if (isHexPair(hex)) {
+            const normalizedHex = hex.toUpperCase();
+            const decoded = String.fromCharCode(parseInt(normalizedHex, 16));
+            if (decodeUnreserved && isUnreserved(decoded))
+              output += decoded;
+            else
+              output += "%" + normalizedHex;
+            i += 2;
+            continue;
+          }
+        }
+        output += input[i];
+      }
+      return output;
+    }
+    function normalizePathEncoding(input) {
+      let output = "";
+      for (let i = 0;i < input.length; i++) {
+        const ch = input[i];
+        if (ch === "%" && i + 2 < input.length) {
+          const hex = input.slice(i + 1, i + 3);
+          if (isHexPair(hex)) {
+            const normalizedHex = hex.toUpperCase();
+            const decoded = String.fromCharCode(parseInt(normalizedHex, 16));
+            if (decoded !== "." && isUnreserved(decoded))
+              output += decoded;
+            else
+              output += "%" + normalizedHex;
+            i += 2;
+            continue;
+          }
+        }
+        if (isPathCharacter(ch))
+          output += ch;
+        else {
+          const code = input.charCodeAt(i);
+          if (code < 128)
+            output += isEscapeSafe(code) ? ch : BYTE_HEX[code];
+          else if (code < 55296 || code > 57343)
+            output += percentEncodeNonAscii(code);
+          else if (code <= 56319 && i + 1 < input.length) {
+            const low = input.charCodeAt(i + 1);
+            if (low >= 56320 && low <= 57343) {
+              output += percentEncodeNonAscii(65536 + (code - 55296 << 10) + (low - 56320));
+              i++;
+            } else
+              output += percentEncodeNonAscii(65533);
+          } else
+            output += percentEncodeNonAscii(65533);
+        }
+      }
+      return output;
+    }
+    function serializePathEncoding(input, pathNoScheme = false) {
+      let output = "";
+      let firstSegment = pathNoScheme && input[0] !== "/";
+      for (let i = 0;i < input.length; i++) {
+        const ch = input[i];
+        if (ch === "%" && i + 2 < input.length) {
+          const hex = input.slice(i + 1, i + 3);
+          if (isHexPair(hex)) {
+            output += "%" + hex.toUpperCase();
+            i += 2;
+            continue;
+          }
+        }
+        if (ch === "/")
+          firstSegment = false;
+        if (isPathCharacter(ch) && (ch !== ":" || !firstSegment))
+          output += ch;
+        else {
+          const code = input.charCodeAt(i);
+          if (code < 128)
+            output += BYTE_HEX[code];
+          else if (code < 55296 || code > 57343)
+            output += percentEncodeNonAscii(code);
+          else if (code <= 56319 && i + 1 < input.length) {
+            const low = input.charCodeAt(i + 1);
+            if (low >= 56320 && low <= 57343) {
+              output += percentEncodeNonAscii(65536 + (code - 55296 << 10) + (low - 56320));
+              i++;
+            } else
+              output += percentEncodeNonAscii(65533);
+          } else
+            output += percentEncodeNonAscii(65533);
+        }
+      }
+      return output;
+    }
+    function encodeComponent(input, isAllowed) {
+      let output = "";
+      for (let i = 0;i < input.length; i++) {
+        const ch = input[i];
+        if (ch === "%" && i + 2 < input.length) {
+          const hex = input.slice(i + 1, i + 3);
+          if (isHexPair(hex)) {
+            output += "%" + hex.toUpperCase();
+            i += 2;
+            continue;
+          }
+        }
+        if (isAllowed(ch))
+          output += ch;
+        else {
+          const code = input.charCodeAt(i);
+          if (code < 128)
+            output += BYTE_HEX[code];
+          else if (code < 55296 || code > 57343)
+            output += percentEncodeNonAscii(code);
+          else if (code <= 56319 && i + 1 < input.length) {
+            const low = input.charCodeAt(i + 1);
+            if (low >= 56320 && low <= 57343) {
+              output += percentEncodeNonAscii(65536 + (code - 55296 << 10) + (low - 56320));
+              i++;
+            } else
+              output += percentEncodeNonAscii(65533);
+          } else
+            output += percentEncodeNonAscii(65533);
+        }
+      }
+      return output;
+    }
+    function encodeUserinfo(input) {
+      return encodeComponent(input, isUserinfoCharacter);
+    }
+    function encodeQuery(input) {
+      return encodeComponent(input, isQueryFragmentCharacter);
+    }
+    function encodeFragment(input) {
+      return encodeComponent(input, isQueryFragmentCharacter);
+    }
+    function isEscapeSafe(cp) {
+      return cp >= 48 && cp <= 57 || cp >= 65 && cp <= 90 || cp >= 97 && cp <= 122 || cp === 42 || cp === 43 || cp === 45 || cp === 46 || cp === 47 || cp === 64 || cp === 95;
+    }
+    function normalizeQueryFragmentEncoding(input) {
+      let output = "";
+      for (let i = 0;i < input.length; i++) {
+        const ch = input[i];
+        if (ch === "%" && i + 2 < input.length) {
+          const hex = input.slice(i + 1, i + 3);
+          if (isHexPair(hex)) {
+            const normalizedHex = hex.toUpperCase();
+            const decoded = String.fromCharCode(parseInt(normalizedHex, 16));
+            if (isUnreserved(decoded))
+              output += decoded;
+            else
+              output += "%" + normalizedHex;
+            i += 2;
+            continue;
+          }
+        }
+        if (isQueryFragmentCharacter(ch))
+          output += ch;
+        else {
+          const code = input.charCodeAt(i);
+          if (code < 128)
+            output += isEscapeSafe(code) ? ch : BYTE_HEX[code];
+          else if (code < 55296 || code > 57343)
+            output += percentEncodeNonAscii(code);
+          else if (code <= 56319 && i + 1 < input.length) {
+            const low = input.charCodeAt(i + 1);
+            if (low >= 56320 && low <= 57343) {
+              output += percentEncodeNonAscii(65536 + (code - 55296 << 10) + (low - 56320));
+              i++;
+            } else
+              output += percentEncodeNonAscii(65533);
+          } else
+            output += percentEncodeNonAscii(65533);
+        }
+      }
+      return output;
+    }
+    function escapePreservingEscapes(input) {
+      let output = "";
+      for (let i = 0;i < input.length; i++) {
+        if (input[i] === "%" && i + 2 < input.length) {
+          const hex = input.slice(i + 1, i + 3);
+          if (isHexPair(hex)) {
+            output += "%" + hex.toUpperCase();
+            i += 2;
+            continue;
+          }
+        }
+        output += escape(input[i]);
+      }
+      return output;
     }
     function recomposeAuthority(component) {
       const uriTokens = [];
       if (component.userinfo !== undefined) {
-        uriTokens.push(component.userinfo);
+        uriTokens.push(encodeUserinfo(component.userinfo));
         uriTokens.push("@");
       }
       if (component.host !== undefined) {
-        let host = unescape(component.host);
+        let host = component.host;
         if (!isIPv4(host)) {
-          const ipV6res = normalizeIPv6(host);
-          if (ipV6res.isIPV6 === true)
+          let ipV6res = normalizeIPv6(host);
+          if (ipV6res.isIPV6 !== true && ipV6res.isIPVFuture !== true) {
+            host = normalizePercentEncoding(host, true);
+            ipV6res = normalizeIPv6(host);
+          }
+          if (ipV6res.isIPV6 === true || ipV6res.isIPVFuture === true)
             host = `[${ipV6res.escapedHost}]`;
           else
-            host = component.host;
+            host = reescapeHostDelimiters(host, false);
         }
         uriTokens.push(host);
       }
       if (typeof component.port === "number" || typeof component.port === "string") {
+        const port = String(component.port);
+        if (!isPort(port))
+          throw new TypeError("URI port is malformed.");
         uriTokens.push(":");
-        uriTokens.push(String(component.port));
+        uriTokens.push(port);
       }
       return uriTokens.length ? uriTokens.join("") : undefined;
     }
     module.exports = {
       nonSimpleDomain,
       recomposeAuthority,
-      normalizeComponentEncoding,
+      reescapeHostDelimiters,
+      normalizePercentEncoding,
+      normalizePathEncoding,
+      serializePathEncoding,
+      normalizeQueryFragmentEncoding,
+      encodeUserinfo,
+      encodeQuery,
+      encodeFragment,
+      escapePreservingEscapes,
       removeDotSegments,
       isIPv4,
       isUUID,
@@ -85495,7 +86360,7 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
   });
   require_schemes = /* @__PURE__ */ __commonJSMin((exports, module) => {
     const { isUUID } = require_utils();
-    const URN_REG = /([\da-z][\d\-a-z]{0,31}):((?:[\w!$'()*+,\-.:;=@]|%[\da-f]{2})+)/iu;
+    const URN_REG = /^([\da-z][\d\-a-z]{0,31}):((?:[\w!$'()*+,\-./:;=@]|%[\da-f]{2})+)$/iu;
     const supportedSchemeNames = [
       "http",
       "https",
@@ -85545,9 +86410,10 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
         wsComponent.secure = undefined;
       }
       if (wsComponent.resourceName) {
-        const [path, query] = wsComponent.resourceName.split("?");
+        const queryIndex = wsComponent.resourceName.indexOf("?");
+        const path = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
         wsComponent.path = path && path !== "/" ? path : undefined;
-        wsComponent.query = query;
+        wsComponent.query = queryIndex === -1 ? undefined : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = undefined;
       }
       wsComponent.fragment = undefined;
@@ -85559,7 +86425,7 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
         return urnComponent;
       }
       const matches = urnComponent.path.match(URN_REG);
-      if (matches) {
+      if (matches && matches[0] === urnComponent.path) {
         const scheme = options.scheme || urnComponent.scheme || "urn";
         urnComponent.nid = matches[1].toLowerCase();
         urnComponent.nss = matches[2];
@@ -85654,18 +86520,37 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
     };
   });
   require_fast_uri = /* @__PURE__ */ __commonJSMin((exports, module) => {
-    const { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizeComponentEncoding, isIPv4, nonSimpleDomain } = require_utils();
+    const { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizePercentEncoding, normalizePathEncoding, serializePathEncoding, normalizeQueryFragmentEncoding, encodeQuery, encodeFragment, reescapeHostDelimiters, isIPv4, nonSimpleDomain } = require_utils();
     const { SCHEMES, getSchemeHandler } = require_schemes();
+    const VALID_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*$/u;
+    const MALFORMED_SCHEME_ERROR = "URI scheme is malformed.";
+    function decodeValidScheme(scheme) {
+      const decodedScheme = unescape(String(scheme));
+      if (!VALID_SCHEME.test(decodedScheme))
+        throw new TypeError(MALFORMED_SCHEME_ERROR);
+      return decodedScheme;
+    }
     function normalize(uri, options) {
       if (typeof uri === "string")
-        uri = serialize(parse(uri, options), options);
+        uri = normalizeString(uri, options);
       else if (typeof uri === "object")
         uri = parse(serialize(uri, options), options);
       return uri;
     }
     function resolve(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
-      const resolved = resolveComponent(parse(baseURI, schemelessOptions), parse(relativeURI, schemelessOptions), schemelessOptions, true);
+      const { parsed: baseParsed, malformedAuthorityOrPort: baseMalformed, malformedPercentEncoding: baseMalformedPercentEncoding, malformedSchemeSpecific: baseMalformedSchemeSpecific, malformedHost: baseMalformedHost, malformedScheme: baseMalformedScheme } = parseWithStatus(baseURI, schemelessOptions);
+      const { parsed: relativeParsed, malformedAuthorityOrPort: relativeMalformed, malformedPercentEncoding: relativeMalformedPercentEncoding, malformedSchemeSpecific: relativeMalformedSchemeSpecific, malformedHost: relativeMalformedHost, malformedScheme: relativeMalformedScheme } = parseWithStatus(relativeURI, schemelessOptions);
+      if (baseMalformed || relativeMalformed || baseMalformedPercentEncoding || relativeMalformedPercentEncoding || baseMalformedSchemeSpecific || relativeMalformedSchemeSpecific || baseMalformedHost || relativeMalformedHost || baseMalformedScheme || relativeMalformedScheme)
+        throw new Error(baseParsed.error || relativeParsed.error || "URI is malformed.");
+      const resolved = resolveComponent(baseParsed, relativeParsed, schemelessOptions, true);
+      const resolvedSchemeHandler = getSchemeHandler(options && options.scheme || resolved.scheme);
+      const resolvedHost = resolved.host;
+      const resolvedHostIsIP = resolvedHost !== undefined && resolvedHost !== "" && (isIPv4(resolvedHost) || normalizeIPv6(resolvedHost).isIPV6);
+      canonicalizeHost(resolved, options || {}, resolvedSchemeHandler, resolvedHostIsIP);
+      const encodedASCIIHost = resolvedHost && resolvedHost.indexOf("%") !== -1 && !/\P{ASCII}/u.test(resolvedHost);
+      if (resolved.error && !encodedASCIIHost)
+        throw new Error(resolved.error);
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
@@ -85721,29 +86606,9 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
       return target;
     }
     function equal(uriA, uriB, options) {
-      if (typeof uriA === "string") {
-        uriA = unescape(uriA);
-        uriA = serialize(normalizeComponentEncoding(parse(uriA, options), true), {
-          ...options,
-          skipEscape: true
-        });
-      } else if (typeof uriA === "object")
-        uriA = serialize(normalizeComponentEncoding(uriA, true), {
-          ...options,
-          skipEscape: true
-        });
-      if (typeof uriB === "string") {
-        uriB = unescape(uriB);
-        uriB = serialize(normalizeComponentEncoding(parse(uriB, options), true), {
-          ...options,
-          skipEscape: true
-        });
-      } else if (typeof uriB === "object")
-        uriB = serialize(normalizeComponentEncoding(uriB, true), {
-          ...options,
-          skipEscape: true
-        });
-      return uriA.toLowerCase() === uriB.toLowerCase();
+      const normalizedA = normalizeComparableURI(uriA, options);
+      const normalizedB = normalizeComparableURI(uriB, options);
+      return normalizedA !== undefined && normalizedB !== undefined && normalizedA === normalizedB;
     }
     function serialize(cmpts, opts) {
       const component = {
@@ -85764,18 +86629,22 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
       };
       const options = Object.assign({}, opts);
       const uriTokens = [];
+      if (component.scheme)
+        component.scheme = decodeValidScheme(component.scheme);
       const schemeHandler = getSchemeHandler(options.scheme || component.scheme);
       if (schemeHandler && schemeHandler.serialize)
         schemeHandler.serialize(component, options);
+      const hasAuthority = component.userinfo !== undefined || component.host !== undefined || component.port !== undefined;
+      const pathNoScheme = !options.skipEscape && component.scheme === undefined && !hasAuthority;
       if (component.path !== undefined)
-        if (!options.skipEscape) {
-          component.path = escape(component.path);
-          if (component.scheme !== undefined)
-            component.path = component.path.split("%3A").join(":");
-        } else
-          component.path = unescape(component.path);
-      if (options.reference !== "suffix" && component.scheme)
+        if (!options.skipEscape)
+          component.path = serializePathEncoding(component.path, pathNoScheme);
+        else
+          component.path = normalizePercentEncoding(component.path);
+      if (options.reference !== "suffix" && component.scheme) {
+        component.scheme = decodeValidScheme(component.scheme);
         uriTokens.push(component.scheme, ":");
+      }
       const authority = recomposeAuthority(component);
       if (authority !== undefined) {
         if (options.reference !== "suffix")
@@ -85788,18 +86657,56 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
         let s = component.path;
         if (!options.absolutePath && (!schemeHandler || !schemeHandler.absolutePath))
           s = removeDotSegments(s);
+        if (pathNoScheme)
+          s = serializePathEncoding(s, true);
         if (authority === undefined && s[0] === "/" && s[1] === "/")
           s = "/%2F" + s.slice(2);
         uriTokens.push(s);
       }
       if (component.query !== undefined)
-        uriTokens.push("?", component.query);
+        uriTokens.push("?", encodeQuery(component.query));
       if (component.fragment !== undefined)
-        uriTokens.push("#", component.fragment);
+        uriTokens.push("#", encodeFragment(component.fragment));
       return uriTokens.join("");
     }
     const URI_PARSE = /^(?:([^#/:?]+):)?(?:\/\/((?:([^#/?@]*)@)?(\[[^#/?\]]+\]|[^#/:?]*)(?::(\d*))?))?([^#?]*)(?:\?([^#]*))?(?:#((?:.|[\n\r])*))?/u;
-    function parse(uri, opts) {
+    const AUTHORITY_PREFIX = /^(?:[^#/:?]+:)?\/\/([^/?#]*)/;
+    const AUTHORITY_INTRODUCER_REGION = /^(?:[^#/:?]+:)?([/\\\t\n\r]*)/;
+    function getParseError(parsed, matches) {
+      if (matches[2] !== undefined && parsed.path && parsed.path[0] !== "/")
+        return 'URI path must start with "/" when authority is present.';
+      if (typeof parsed.port === "number" && (parsed.port < 0 || parsed.port > 65535))
+        return "URI port is malformed.";
+    }
+    function hasMalformedPercentEncoding(component) {
+      if (component === undefined)
+        return false;
+      let percent = component.indexOf("%");
+      while (percent !== -1) {
+        if (percent + 2 >= component.length || !/^[\da-f]{2}$/iu.test(component.slice(percent + 1, percent + 3)))
+          return true;
+        percent = component.indexOf("%", percent + 3);
+      }
+      return false;
+    }
+    function isIPLiteral(host) {
+      return host[0] === "[" && host[host.length - 1] === "]";
+    }
+    function hasMalformedComponentPercentEncoding(matches) {
+      const host = matches[4];
+      return hasMalformedPercentEncoding(matches[3]) || host !== undefined && !isIPLiteral(host) && hasMalformedPercentEncoding(host) || hasMalformedPercentEncoding(matches[6]) || hasMalformedPercentEncoding(matches[7]) || hasMalformedPercentEncoding(matches[8]);
+    }
+    function canonicalizeHost(parsed, options, schemeHandler, isIP) {
+      if (!options.unicodeSupport && (!schemeHandler || !schemeHandler.unicodeSupport) && parsed.host && !isIPLiteral(parsed.host) && (options.domainHost || schemeHandler && schemeHandler.domainHost) && isIP === false && nonSimpleDomain(parsed.host))
+        try {
+          parsed.host = new URL("http://" + parsed.host).hostname;
+        } catch (e) {
+          parsed.error = parsed.error || "Host's domain name can not be converted to ASCII: " + e;
+          return true;
+        }
+      return false;
+    }
+    function parseWithStatus(uri, opts) {
       const options = Object.assign({}, opts);
       const parsed = {
         scheme: undefined,
@@ -85810,12 +86717,37 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
         query: undefined,
         fragment: undefined
       };
+      let malformedAuthorityOrPort = false;
+      let malformedPercentEncoding = false;
+      let malformedSchemeSpecific = false;
+      let malformedHost = false;
+      let malformedIPLiteral = false;
+      let malformedScheme = false;
       let isIP = false;
       if (options.reference === "suffix")
         if (options.scheme)
           uri = options.scheme + ":" + uri;
         else
           uri = "//" + uri;
+      const authorityMatch = uri.match(AUTHORITY_PREFIX);
+      if (authorityMatch !== null && authorityMatch[1].indexOf("\\") !== -1) {
+        parsed.error = "URI authority must not contain a literal backslash.";
+        malformedAuthorityOrPort = true;
+      }
+      const introducerMatch = uri.match(AUTHORITY_INTRODUCER_REGION);
+      if (introducerMatch !== null) {
+        const region = introducerMatch[1];
+        const normalizedRegion = region.replace(/[\t\n\r]/g, "");
+        if (normalizedRegion.length >= 2) {
+          if (normalizedRegion.slice(0, 2) !== "//") {
+            parsed.error = parsed.error || "URI authority must not contain a literal backslash.";
+            malformedAuthorityOrPort = true;
+          } else if (region.length !== normalizedRegion.length) {
+            parsed.error = parsed.error || "URI authority introducer must not contain whitespace.";
+            malformedAuthorityOrPort = true;
+          }
+        }
+      }
       const matches = uri.match(URI_PARSE);
       if (matches) {
         parsed.scheme = matches[1];
@@ -85825,13 +86757,37 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
         parsed.path = matches[6] || "";
         parsed.query = matches[7];
         parsed.fragment = matches[8];
+        if (parsed.scheme !== undefined) {
+          const decodedScheme = unescape(parsed.scheme);
+          if (VALID_SCHEME.test(decodedScheme))
+            parsed.scheme = decodedScheme.toLowerCase();
+          else {
+            parsed.error = parsed.error || MALFORMED_SCHEME_ERROR;
+            malformedScheme = true;
+          }
+        }
+        malformedPercentEncoding = hasMalformedComponentPercentEncoding(matches);
+        if (malformedPercentEncoding)
+          parsed.error = parsed.error || "URI contains malformed percent-encoding.";
         if (isNaN(parsed.port))
           parsed.port = matches[5];
+        const parseError = getParseError(parsed, matches);
+        if (parseError !== undefined) {
+          parsed.error = parsed.error || parseError;
+          malformedAuthorityOrPort = true;
+        }
         if (parsed.host)
           if (isIPv4(parsed.host) === false) {
+            const bracketedIPLiteral = isIPLiteral(parsed.host);
+            const hasIPLiteralBracket = parsed.host.indexOf("[") !== -1 || parsed.host.indexOf("]") !== -1;
             const ipv6result = normalizeIPv6(parsed.host);
-            parsed.host = ipv6result.host.toLowerCase();
-            isIP = ipv6result.isIPV6;
+            isIP = ipv6result.isIPV6 || ipv6result.isIPVFuture === true;
+            malformedIPLiteral = hasIPLiteralBracket && (!bracketedIPLiteral || ipv6result.error === true);
+            parsed.host = isIP ? ipv6result.host : ipv6result.host.toLowerCase();
+            if (malformedIPLiteral) {
+              parsed.error = parsed.error || "URI host is malformed.";
+              malformedAuthorityOrPort = true;
+            }
           } else
             isIP = true;
         if (parsed.scheme === undefined && parsed.userinfo === undefined && parsed.host === undefined && parsed.port === undefined && parsed.query === undefined && !parsed.path)
@@ -85845,31 +86801,66 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
         if (options.reference && options.reference !== "suffix" && options.reference !== parsed.reference)
           parsed.error = parsed.error || "URI is not a " + options.reference + " reference.";
         const schemeHandler = getSchemeHandler(options.scheme || parsed.scheme);
-        if (!options.unicodeSupport && (!schemeHandler || !schemeHandler.unicodeSupport)) {
-          if (parsed.host && (options.domainHost || schemeHandler && schemeHandler.domainHost) && isIP === false && nonSimpleDomain(parsed.host))
-            try {
-              parsed.host = URL.domainToASCII(parsed.host.toLowerCase());
-            } catch (e) {
-              parsed.error = parsed.error || "Host's domain name can not be converted to ASCII: " + e;
-            }
+        if (!malformedIPLiteral)
+          malformedHost = canonicalizeHost(parsed, options, schemeHandler, isIP);
+        if (uri.indexOf("%") !== -1 && parsed.host !== undefined && !malformedIPLiteral) {
+          let host = isIP ? parsed.host : normalizePercentEncoding(parsed.host, true);
+          if (!isIP)
+            host = normalizePercentEncoding(host.toLowerCase());
+          parsed.host = reescapeHostDelimiters(host, isIP);
         }
         if (!schemeHandler || schemeHandler && !schemeHandler.skipNormalize) {
-          if (uri.indexOf("%") !== -1) {
-            if (parsed.scheme !== undefined)
-              parsed.scheme = unescape(parsed.scheme);
-            if (parsed.host !== undefined)
-              parsed.host = unescape(parsed.host);
-          }
           if (parsed.path)
-            parsed.path = escape(unescape(parsed.path));
+            parsed.path = normalizePathEncoding(parsed.path);
+          if (parsed.query)
+            parsed.query = normalizeQueryFragmentEncoding(parsed.query);
           if (parsed.fragment)
-            parsed.fragment = encodeURI(decodeURIComponent(parsed.fragment));
+            parsed.fragment = normalizeQueryFragmentEncoding(parsed.fragment);
         }
-        if (schemeHandler && schemeHandler.parse)
+        if (schemeHandler && schemeHandler.parse) {
           schemeHandler.parse(parsed, options);
+          if (schemeHandler === SCHEMES.urn && parsed.nid === undefined)
+            malformedSchemeSpecific = true;
+        }
       } else
         parsed.error = parsed.error || "URI can not be parsed.";
-      return parsed;
+      return {
+        parsed,
+        malformedAuthorityOrPort,
+        malformedPercentEncoding,
+        malformedSchemeSpecific,
+        malformedHost,
+        malformedScheme
+      };
+    }
+    function parse(uri, opts) {
+      return parseWithStatus(uri, opts).parsed;
+    }
+    function normalizeString(uri, opts) {
+      return normalizeStringWithStatus(uri, opts).normalized;
+    }
+    function normalizeStringWithStatus(uri, opts) {
+      const { parsed, malformedAuthorityOrPort, malformedPercentEncoding, malformedSchemeSpecific, malformedHost, malformedScheme } = parseWithStatus(uri, opts);
+      return {
+        normalized: malformedAuthorityOrPort || malformedPercentEncoding || malformedSchemeSpecific || malformedHost || malformedScheme ? uri : serialize(parsed, opts),
+        malformedAuthorityOrPort,
+        malformedPercentEncoding,
+        malformedSchemeSpecific,
+        malformedHost,
+        malformedScheme
+      };
+    }
+    function normalizeComparableURI(uri, opts) {
+      if (typeof uri !== "string" && typeof uri !== "object")
+        return;
+      let value;
+      try {
+        value = typeof uri === "string" ? uri : serialize(uri, opts);
+      } catch {
+        return;
+      }
+      const { normalized, malformedAuthorityOrPort, malformedPercentEncoding, malformedSchemeSpecific, malformedHost, malformedScheme } = normalizeStringWithStatus(value, opts);
+      return malformedAuthorityOrPort || malformedPercentEncoding || malformedSchemeSpecific || malformedHost || malformedScheme ? undefined : normalized;
     }
     const fastUri = {
       SCHEMES,
@@ -89822,71 +90813,28 @@ var init_ajvProvider_CEoC__sr = __esm(() => {
 // node_modules/@modelcontextprotocol/server/dist/shimsNode.mjs
 import process4 from "process";
 var init_shimsNode = __esm(() => {
-  init_ajvProvider_CEoC__sr();
+  init_ajvProvider_DyjnscPj();
 });
 
-// node_modules/@modelcontextprotocol/server/dist/mcp-DXXb3Vv3.mjs
+// node_modules/@modelcontextprotocol/server/dist/mcp-oHn3ureC.mjs
 function isCompletable(schema) {
   return !!schema && typeof schema === "object" && COMPLETABLE_SYMBOL in schema;
 }
 function getCompleter(schema) {
   return schema[COMPLETABLE_SYMBOL]?.complete;
 }
-function listenFilterAccepts(filter, event) {
-  switch (event.kind) {
-    case "tools_list_changed":
-      return filter.toolsListChanged === true;
-    case "prompts_list_changed":
-      return filter.promptsListChanged === true;
-    case "resources_list_changed":
-      return filter.resourcesListChanged === true;
-    case "resource_updated":
-      return filter.resourceSubscriptions !== undefined && filter.resourceSubscriptions.includes(event.uri);
-  }
+function armSseKeepAlive(intervalMs, onTick) {
+  if (!Number.isFinite(intervalMs) || intervalMs < 1)
+    return;
+  const timer = setInterval(onTick, Math.min(intervalMs, MAX_TIMER_DELAY_MS));
+  timer.unref?.();
+  return timer;
 }
-function honoredSubset(requested, capabilities) {
-  const honored = {};
-  const allow = (bit) => capabilities === undefined || bit === true;
-  if (requested.toolsListChanged === true && allow(capabilities?.tools?.listChanged))
-    honored.toolsListChanged = true;
-  if (requested.promptsListChanged === true && allow(capabilities?.prompts?.listChanged))
-    honored.promptsListChanged = true;
-  if (requested.resourcesListChanged === true && allow(capabilities?.resources?.listChanged))
-    honored.resourcesListChanged = true;
-  if (requested.resourceSubscriptions !== undefined && requested.resourceSubscriptions.length > 0 && allow(capabilities?.resources?.subscribe))
-    honored.resourceSubscriptions = [...requested.resourceSubscriptions];
-  return honored;
+function perRequestClassificationOf(transport) {
+  return transport instanceof PerRequestHTTPServerTransport ? readClassification(transport) : undefined;
 }
-function stampSubscriptionId(notification, subscriptionId) {
-  return {
-    method: notification.method,
-    params: {
-      ...notification.params,
-      _meta: {
-        ...notification.params?._meta,
-        [SUBSCRIPTION_ID_META_KEY]: subscriptionId
-      }
-    }
-  };
-}
-function parseListenFilter(message) {
-  const outcome = codecForVersion(MODERN_WIRE_REVISION).validateRequest("subscriptions/listen", message);
-  return outcome.ok ? outcome.value.params?.notifications : undefined;
-}
-function notificationToServerEvent(method, uri) {
-  switch (method) {
-    case "notifications/tools/list_changed":
-      return { kind: "tools_list_changed" };
-    case "notifications/prompts/list_changed":
-      return { kind: "prompts_list_changed" };
-    case "notifications/resources/list_changed":
-      return { kind: "resources_list_changed" };
-    default:
-      return {
-        kind: "resource_updated",
-        uri: uri ?? ""
-      };
-  }
+function supportsScopeChallengeResolver(transport) {
+  return typeof transport === "object" && transport !== null && "setScopeChallengeResolver" in transport && typeof transport.setScopeChallengeResolver === "function";
 }
 function resolveLegacyShimOptions(options) {
   if (options?.maxRounds !== undefined && (!Number.isInteger(options.maxRounds) || options.maxRounds < 1))
@@ -89942,6 +90890,40 @@ function serverIdentityOf(server) {
 function discoverAdvertisedCapabilities(capabilities) {
   return { ...capabilities };
 }
+function toolInputElementCount(value, max) {
+  let count = 0;
+  const stack = [value];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (node === null || typeof node !== "object")
+      continue;
+    if (Array.isArray(node))
+      for (const child of node) {
+        if (++count > max)
+          return count;
+        if (child !== null && typeof child === "object")
+          stack.push(child);
+      }
+    else
+      for (const key in node) {
+        if (!Object.prototype.hasOwnProperty.call(node, key))
+          continue;
+        if (++count > max)
+          return count;
+        const child = node[key];
+        if (child !== null && typeof child === "object")
+          stack.push(child);
+      }
+  }
+  return count;
+}
+function resolveMaxToolInputElements(value) {
+  if (value === undefined || value === Infinity)
+    return;
+  if (typeof value !== "number" || Number.isNaN(value) || value < 1)
+    throw new RangeError(`maxToolInputElements must be a number of at least 1, or Infinity, got ${String(value)}`);
+  return value;
+}
 function createToolExecutor(inputSchema, handler) {
   if (inputSchema) {
     const callback$1 = handler;
@@ -89949,6 +90931,13 @@ function createToolExecutor(inputSchema, handler) {
   }
   const callback = handler;
   return async (_args, ctx) => callback(ctx);
+}
+function convertListedInputSchema(name, inputSchema) {
+  const json = standardSchemaToJsonSchema(inputSchema, "input");
+  const scan = scanXMcpHeaderDeclarations(json);
+  if (!scan.valid)
+    console.warn(`[mcp-sdk] tool '${name}' carries an invalid x-mcp-header declaration and will be excluded by conforming Streamable HTTP clients: ${scan.reason}`);
+  return json;
 }
 function convertOutputSchemaJson(outputSchema) {
   if (outputSchema === undefined)
@@ -89963,7 +90952,7 @@ function createPromptHandler(name, argsSchema, callback) {
   if (argsSchema) {
     const typedCallback = callback;
     return async (args, ctx) => {
-      const parseResult = await validateStandardSchema(argsSchema, args);
+      const parseResult = await validateStandardSchema(argsSchema, args ?? {});
       if (!parseResult.success)
         throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Invalid arguments for prompt ${name}: ${parseResult.error}`);
       return typedCallback(parseResult.data, ctx);
@@ -89995,88 +90984,7 @@ function unwrapOptionalSchema(schema) {
     return schema;
   return schema.def?.innerType ?? schema;
 }
-var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CHANGE_NOTIFICATION_METHODS, StdioListenRouter = class {
-  _subs = /* @__PURE__ */ new Map;
-  _serverCapabilities;
-  _serverInfo;
-  constructor(_maxSubscriptions = DEFAULT_MAX_SUBSCRIPTIONS, serverCapabilities, serverInfo) {
-    this._maxSubscriptions = _maxSubscriptions;
-    this._serverCapabilities = serverCapabilities;
-    this._serverInfo = serverInfo;
-  }
-  setServerCapabilities(capabilities, serverInfo) {
-    this._serverCapabilities = capabilities;
-    if (serverInfo !== undefined)
-      this._serverInfo = serverInfo;
-  }
-  has(id) {
-    return this._subs.has(id);
-  }
-  serve(message) {
-    if (this._serverCapabilities === undefined)
-      throw new Error("StdioListenRouter.serve() called before setServerCapabilities(); refusing to honor a filter without capabilities");
-    if (this._subs.size >= this._maxSubscriptions)
-      return {
-        jsonrpc: "2.0",
-        id: message.id,
-        error: {
-          code: -32603,
-          message: "Subscription limit reached"
-        }
-      };
-    const filter = parseListenFilter(message);
-    if (filter === undefined)
-      return {
-        jsonrpc: "2.0",
-        id: message.id,
-        error: {
-          code: -32602,
-          message: "Invalid params: 'notifications' is required and must be a valid SubscriptionFilter"
-        }
-      };
-    const honored = honoredSubset(filter, this._serverCapabilities);
-    this._subs.set(message.id, honored);
-    return stampSubscriptionId({
-      method: "notifications/subscriptions/acknowledged",
-      params: { notifications: honored }
-    }, message.id);
-  }
-  cancel(id) {
-    return this._subs.delete(id);
-  }
-  routeOutbound(message) {
-    if (!CHANGE_NOTIFICATION_METHODS.has(message.method))
-      return "passthrough";
-    const uriParam = message.params?.["uri"];
-    const uri = typeof uriParam === "string" ? uriParam : undefined;
-    const event = notificationToServerEvent(message.method, uri);
-    const out = [];
-    for (const [subscriptionId, filter] of this._subs)
-      if (listenFilterAccepts(filter, event))
-        out.push(stampSubscriptionId({
-          method: message.method,
-          params: message.params ?? {}
-        }, subscriptionId));
-    return out;
-  }
-  teardownAll() {
-    const out = [];
-    for (const id of this._subs.keys())
-      out.push({
-        jsonrpc: "2.0",
-        id,
-        result: {
-          resultType: "complete",
-          _meta: {
-            [SUBSCRIPTION_ID_META_KEY]: id,
-            ...this._serverInfo !== undefined && { [SERVER_INFO_META_KEY]: this._serverInfo }
-          }
-        }
-      });
-    this._subs.clear();
-    return out;
-  }
-}, DEFAULT_LEGACY_SHIM_MAX_ROUNDS = 8, DEFAULT_LEGACY_SHIM_ROUND_TIMEOUT_MS = 600000, LegacyInputRequiredShim = class {
+var COMPLETABLE_SYMBOL, DEFAULT_SSE_KEEP_ALIVE_MS = 15000, MAX_TIMER_DELAY_MS, readClassification, PerRequestHTTPServerTransport, DEFAULT_LEGACY_SHIM_MAX_ROUNDS = 8, DEFAULT_LEGACY_SHIM_ROUND_TIMEOUT_MS = 600000, LegacyInputRequiredShim = class {
   constructor(_host) {
     this._host = _host;
   }
@@ -90172,6 +91080,7 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
   }
 }, INPUT_REQUIRED_CAPABLE_METHODS, writeClientIdentity, installDiscoverHandler, readServerIdentity, Server, McpServer = class {
   server;
+  _maxToolInputElements;
   _registeredResources = {};
   _registeredResourceTemplates = {};
   _registeredTools = {};
@@ -90195,6 +91104,7 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
   }
   constructor(serverInfo, options) {
     this.server = new Server(serverInfo, options);
+    this._maxToolInputElements = resolveMaxToolInputElements(options?.maxToolInputElements);
     if (options?.capabilities?.tools)
       this.setToolRequestHandlers();
     if (options?.capabilities?.resources)
@@ -90203,11 +91113,55 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
       this.setPromptRequestHandlers();
   }
   async connect(transport) {
+    if (supportsScopeChallengeResolver(transport))
+      transport.setScopeChallengeResolver((context) => this.resolveScopeChallenge(context));
     return await this.server.connect(transport);
   }
   async close() {
     await this.server.close();
   }
+  resolveScopeChallenge = (context) => {
+    switch (context.request.method) {
+      case "tools/call": {
+        const toolName = context.request.params?.name;
+        if (typeof toolName !== "string")
+          return;
+        const tool = this._registeredTools[toolName];
+        if (tool === undefined || !tool.enabled)
+          return;
+        return tool.scopeChallenge?.(context);
+      }
+      case "resources/read": {
+        const resourceUri = context.request.params?.uri;
+        if (typeof resourceUri !== "string")
+          return;
+        let uri;
+        try {
+          uri = new URL(resourceUri);
+        } catch {
+          return;
+        }
+        const resource = this._registeredResources[uri.toString()];
+        if (resource !== undefined)
+          return resource.enabled ? resource.scopeChallenge?.(context) : undefined;
+        for (const template of Object.values(this._registeredResourceTemplates))
+          if (template.resourceTemplate.uriTemplate.match(uri.toString()))
+            return template.enabled ? template.scopeChallenge?.(context) : undefined;
+        return;
+      }
+      case "prompts/get": {
+        const promptName = context.request.params?.name;
+        if (typeof promptName !== "string")
+          return;
+        const prompt = this._registeredPrompts[promptName];
+        if (prompt === undefined || !prompt.enabled)
+          return;
+        return prompt.scopeChallenge?.(context);
+      }
+      default:
+        return;
+    }
+  };
   _toolHandlersInitialized = false;
   setToolRequestHandlers() {
     if (this._toolHandlersInitialized)
@@ -90220,7 +91174,7 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
         name,
         title: tool.title,
         description: tool.description,
-        inputSchema: tool.inputSchema ? standardSchemaToJsonSchema(tool.inputSchema, "input") : EMPTY_OBJECT_JSON_SCHEMA,
+        inputSchema: tool.inputSchema ? convertListedInputSchema(name, tool.inputSchema) : EMPTY_OBJECT_JSON_SCHEMA,
         annotations: tool.annotations,
         icons: tool.icons,
         execution: tool.execution,
@@ -90261,6 +91215,8 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
     };
   }
   async validateToolInput(tool, args, toolName) {
+    if (this._maxToolInputElements !== undefined && toolInputElementCount(args, this._maxToolInputElements) > this._maxToolInputElements)
+      throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Invalid arguments for tool ${toolName}: arguments contain more than the maximum of ${this._maxToolInputElements} elements`);
     if (!tool.inputSchema)
       return;
     const parseResult = await validateStandardSchema(tool.inputSchema, args ?? {});
@@ -90384,8 +91340,11 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
       }
       for (const template of Object.values(this._registeredResourceTemplates)) {
         const variables = template.resourceTemplate.uriTemplate.match(uri.toString());
-        if (variables)
+        if (variables) {
+          if (!template.enabled)
+            throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Resource template ${template.resourceTemplate.uriTemplate} disabled`);
           return attachCacheHintFallback(await template.readCallback(uri, variables, ctx), template.cacheHint);
+        }
       }
       throw new ResourceNotFoundError(request.params.uri);
     });
@@ -90419,18 +91378,14 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
     this._promptHandlersInitialized = true;
   }
   registerResource(name, uriOrTemplate, config, readCallback) {
-    const cacheHint = config.cacheHint;
-    let metadata = config;
-    if (cacheHint !== undefined) {
+    const { cacheHint, scopeChallenge, ...resourceMetadata } = config;
+    const metadata = resourceMetadata;
+    if (cacheHint !== undefined)
       assertValidCacheHint(cacheHint, `resource ${name}`);
-      const rest = { ...config };
-      delete rest.cacheHint;
-      metadata = rest;
-    }
     if (typeof uriOrTemplate === "string") {
       if (this._registeredResources[uriOrTemplate])
         throw new Error(`Resource ${uriOrTemplate} is already registered`);
-      const registeredResource = this._createRegisteredResource(name, config.title, uriOrTemplate, metadata, readCallback);
+      const registeredResource = this._createRegisteredResource(name, config.title, uriOrTemplate, metadata, scopeChallenge, readCallback);
       if (cacheHint !== undefined)
         registeredResource.cacheHint = cacheHint;
       this.setResourceRequestHandlers();
@@ -90439,7 +91394,7 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
     } else {
       if (this._registeredResourceTemplates[name])
         throw new Error(`Resource template ${name} is already registered`);
-      const registeredResourceTemplate = this._createRegisteredResourceTemplate(name, config.title, uriOrTemplate, metadata, readCallback);
+      const registeredResourceTemplate = this._createRegisteredResourceTemplate(name, config.title, uriOrTemplate, metadata, scopeChallenge, readCallback);
       if (cacheHint !== undefined)
         registeredResourceTemplate.cacheHint = cacheHint;
       this.setResourceRequestHandlers();
@@ -90447,12 +91402,13 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
       return registeredResourceTemplate;
     }
   }
-  _createRegisteredResource(name, title, uri, metadata, readCallback) {
+  _createRegisteredResource(name, title, uri, metadata, scopeChallenge, readCallback) {
     const registeredResource = {
       name,
       title,
       metadata,
       readCallback,
+      scopeChallenge,
       enabled: true,
       disable: () => registeredResource.update({ enabled: false }),
       enable: () => registeredResource.update({ enabled: true }),
@@ -90465,12 +91421,19 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
         }
         if (updates.name !== undefined)
           registeredResource.name = updates.name;
-        if (updates.title !== undefined)
-          registeredResource.title = updates.title;
         if (updates.metadata !== undefined)
           registeredResource.metadata = updates.metadata;
+        if (updates.title !== undefined) {
+          registeredResource.title = updates.title;
+          registeredResource.metadata = {
+            ...registeredResource.metadata,
+            title: updates.title
+          };
+        }
         if (updates.callback !== undefined)
           registeredResource.readCallback = updates.callback;
+        if (updates.scopeChallenge !== undefined)
+          registeredResource.scopeChallenge = updates.scopeChallenge === null ? undefined : updates.scopeChallenge;
         if (updates.enabled !== undefined)
           registeredResource.enabled = updates.enabled;
         this.sendResourceListChanged();
@@ -90479,12 +91442,13 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
     this._registeredResources[uri] = registeredResource;
     return registeredResource;
   }
-  _createRegisteredResourceTemplate(name, title, template, metadata, readCallback) {
+  _createRegisteredResourceTemplate(name, title, template, metadata, scopeChallenge, readCallback) {
     const registeredResourceTemplate = {
       resourceTemplate: template,
       title,
       metadata,
       readCallback,
+      scopeChallenge,
       enabled: true,
       disable: () => registeredResourceTemplate.update({ enabled: false }),
       enable: () => registeredResourceTemplate.update({ enabled: true }),
@@ -90495,14 +91459,21 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
           if (updates.name)
             this._registeredResourceTemplates[updates.name] = registeredResourceTemplate;
         }
-        if (updates.title !== undefined)
-          registeredResourceTemplate.title = updates.title;
         if (updates.template !== undefined)
           registeredResourceTemplate.resourceTemplate = updates.template;
         if (updates.metadata !== undefined)
           registeredResourceTemplate.metadata = updates.metadata;
+        if (updates.title !== undefined) {
+          registeredResourceTemplate.title = updates.title;
+          registeredResourceTemplate.metadata = {
+            ...registeredResourceTemplate.metadata,
+            title: updates.title
+          };
+        }
         if (updates.callback !== undefined)
           registeredResourceTemplate.readCallback = updates.callback;
+        if (updates.scopeChallenge !== undefined)
+          registeredResourceTemplate.scopeChallenge = updates.scopeChallenge === null ? undefined : updates.scopeChallenge;
         if (updates.enabled !== undefined)
           registeredResourceTemplate.enabled = updates.enabled;
         this.sendResourceListChanged();
@@ -90514,7 +91485,7 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
       this.setCompletionRequestHandler();
     return registeredResourceTemplate;
   }
-  _createRegisteredPrompt(name, title, description, argsSchema, callback, icons, _meta) {
+  _createRegisteredPrompt(name, title, description, argsSchema, callback, icons, scopeChallenge, _meta) {
     let currentArgsSchema = argsSchema;
     let currentCallback = callback;
     const registeredPrompt = {
@@ -90522,6 +91493,7 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
       description,
       argsSchema,
       icons,
+      scopeChallenge,
       _meta,
       handler: createPromptHandler(name, argsSchema, callback),
       enabled: true,
@@ -90540,6 +91512,8 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
           registeredPrompt.description = updates.description;
         if (updates.icons !== undefined)
           registeredPrompt.icons = updates.icons;
+        if (updates.scopeChallenge !== undefined)
+          registeredPrompt.scopeChallenge = updates.scopeChallenge === null ? undefined : updates.scopeChallenge;
         if (updates._meta !== undefined)
           registeredPrompt._meta = updates._meta;
         let needsHandlerRegen = false;
@@ -90571,26 +91545,25 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
     }
     return registeredPrompt;
   }
-  _createRegisteredTool(name, title, description, inputSchema, outputSchema, annotations, icons, execution, _meta, handler) {
+  _createRegisteredTool(name, title, description, inputSchema, outputSchema, annotations, icons, execution, scopeChallenge, _meta, handler) {
     validateAndWarnToolName(name);
-    if (inputSchema !== undefined)
-      try {
-        const json = standardSchemaToJsonSchema(inputSchema, "input");
-        this._toolInputSchemaJson[name] = json;
-        const scan = scanXMcpHeaderDeclarations(json);
-        if (!scan.valid)
-          console.warn(`[mcp-sdk] tool '${name}' carries an invalid x-mcp-header declaration and will be excluded by conforming Streamable HTTP clients: ${scan.reason}`);
-      } catch {}
     let currentHandler = handler;
+    let outputSchemaJson;
     const registeredTool = {
       title,
       description,
       inputSchema,
       outputSchema,
-      outputSchemaJson: convertOutputSchemaJson(outputSchema),
+      get outputSchemaJson() {
+        return outputSchemaJson ??= convertOutputSchemaJson(registeredTool.outputSchema);
+      },
+      set outputSchemaJson(value) {
+        outputSchemaJson = value;
+      },
       annotations,
       icons,
       execution,
+      scopeChallenge,
       _meta,
       handler,
       executor: createToolExecutor(inputSchema, handler),
@@ -90635,6 +91608,8 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
           registeredTool.annotations = updates.annotations;
         if (updates.icons !== undefined)
           registeredTool.icons = updates.icons;
+        if (updates.scopeChallenge !== undefined)
+          registeredTool.scopeChallenge = updates.scopeChallenge === null ? undefined : updates.scopeChallenge;
         if (updates._meta !== undefined)
           registeredTool._meta = updates._meta;
         if (updates.enabled !== undefined)
@@ -90650,14 +91625,14 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
   registerTool(name, config, cb) {
     if (this._registeredTools[name])
       throw new Error(`Tool ${name} is already registered`);
-    const { title, description, inputSchema, outputSchema, annotations, icons, _meta } = config;
-    return this._createRegisteredTool(name, title, description, normalizeRawShapeSchema(inputSchema), normalizeRawShapeSchema(outputSchema), annotations, icons, undefined, _meta, cb);
+    const { title, description, inputSchema, outputSchema, annotations, icons, scopeChallenge, _meta } = config;
+    return this._createRegisteredTool(name, title, description, normalizeRawShapeSchema(inputSchema), normalizeRawShapeSchema(outputSchema), annotations, icons, undefined, scopeChallenge, _meta, cb);
   }
   registerPrompt(name, config, cb) {
     if (this._registeredPrompts[name])
       throw new Error(`Prompt ${name} is already registered`);
-    const { title, description, argsSchema, icons, _meta } = config;
-    const registeredPrompt = this._createRegisteredPrompt(name, title, description, normalizeRawShapeSchema(argsSchema), cb, icons, _meta);
+    const { title, description, argsSchema, icons, scopeChallenge, _meta } = config;
+    const registeredPrompt = this._createRegisteredPrompt(name, title, description, normalizeRawShapeSchema(argsSchema), cb, icons, scopeChallenge, _meta);
     this.setPromptRequestHandlers();
     this.sendPromptListChanged();
     return registeredPrompt;
@@ -90681,17 +91656,223 @@ var COMPLETABLE_SYMBOL, MAX_TIMER_DELAY_MS, DEFAULT_MAX_SUBSCRIPTIONS = 1024, CH
       this.server.sendPromptListChanged();
   }
 }, EMPTY_OBJECT_JSON_SCHEMA, EMPTY_COMPLETION_RESULT;
-var init_mcp_DXXb3Vv3 = __esm(() => {
-  init_src_CX2iR2pK();
+var init_mcp_oHn3ureC = __esm(() => {
+  init_src_DdvbAHrR();
   init_shimsNode();
   COMPLETABLE_SYMBOL = Symbol.for("mcp.completable");
   MAX_TIMER_DELAY_MS = 2 ** 31 - 1;
-  CHANGE_NOTIFICATION_METHODS = new Set([
-    "notifications/tools/list_changed",
-    "notifications/prompts/list_changed",
-    "notifications/resources/list_changed",
-    "notifications/resources/updated"
-  ]);
+  PerRequestHTTPServerTransport = class {
+    static {
+      readClassification = (transport) => transport._classification;
+    }
+    onclose;
+    onerror;
+    onmessage;
+    _classification;
+    _responseMode;
+    _started = false;
+    _used = false;
+    _closed = false;
+    _terminalDelivered = false;
+    _dispatchWindowOpen = false;
+    _requestId;
+    _deferredResponse;
+    _sse;
+    _abortCleanup;
+    _keepAliveMs;
+    constructor(options) {
+      this._classification = options.classification;
+      this._responseMode = options.responseMode ?? "auto";
+      this._keepAliveMs = options.keepAliveMs ?? DEFAULT_SSE_KEEP_ALIVE_MS;
+    }
+    async start() {
+      if (this._started)
+        throw new Error("PerRequestHTTPServerTransport is already started");
+      this._started = true;
+    }
+    async handleMessage(message, extra) {
+      if (this._used)
+        throw new Error("PerRequestHTTPServerTransport serves exactly one exchange; construct a new transport per request");
+      if (!this._started || this.onmessage === undefined)
+        throw new Error("PerRequestHTTPServerTransport is not connected: connect a server to this transport before handling a message");
+      if (this._closed)
+        throw new Error("PerRequestHTTPServerTransport is closed");
+      this._used = true;
+      const signal = extra?.request?.signal;
+      if (signal?.aborted) {
+        await this.close();
+        throw new SdkError(SdkErrorCode.ConnectionClosed, "The request was aborted before it could be handled");
+      }
+      const messageExtra = {
+        classification: this._classification,
+        ...extra?.request !== undefined && { request: extra.request },
+        ...extra?.authInfo !== undefined && { authInfo: extra.authInfo }
+      };
+      if (isJSONRPCRequest(message)) {
+        this._requestId = message.id;
+        let resolve;
+        let reject;
+        const promise = new Promise((promiseResolve, promiseReject) => {
+          resolve = promiseResolve;
+          reject = promiseReject;
+        });
+        this._deferredResponse = {
+          promise,
+          resolve,
+          reject,
+          settled: false
+        };
+        if (signal !== undefined) {
+          const onAbort = () => void this.close();
+          signal.addEventListener("abort", onAbort, { once: true });
+          this._abortCleanup = () => signal.removeEventListener("abort", onAbort);
+        }
+        this._dispatchWindowOpen = true;
+        try {
+          this.onmessage(message, messageExtra);
+        } finally {
+          this._dispatchWindowOpen = false;
+        }
+        if (this._responseMode === "sse" && !this._closed && !this._deferredResponse.settled)
+          this.upgradeToSse();
+        return promise;
+      }
+      this.onmessage(message, messageExtra);
+      return new Response(null, { status: 202 });
+    }
+    async send(message, options) {
+      if (this._closed)
+        return;
+      const isResponse = isJSONRPCResultResponse(message) || isJSONRPCErrorResponse(message);
+      const relatedId = isResponse ? message.id : options?.relatedRequestId;
+      if (this._requestId === undefined || relatedId === undefined || relatedId !== this._requestId) {
+        if (isResponse)
+          this.onerror?.(/* @__PURE__ */ new Error(`Received a response for an unknown request id: ${String(message.id)}`));
+        return;
+      }
+      if (isResponse) {
+        if (this._terminalDelivered)
+          return;
+        this._terminalDelivered = true;
+        const errorCode = isJSONRPCErrorResponse(message) ? message.error.code : undefined;
+        const ladderStatus = errorCode !== undefined && (this._dispatchWindowOpen || errorCode === ProtocolErrorCode.MissingRequiredClientCapability) ? LADDER_ERROR_HTTP_STATUS[errorCode] : undefined;
+        if (ladderStatus !== undefined && this._sse === undefined) {
+          this.settleResponse(Response.json(message, {
+            status: ladderStatus,
+            headers: { "Content-Type": "application/json" }
+          }));
+          queueMicrotask(() => void this.close());
+          return;
+        }
+        if (this._sse !== undefined || this._responseMode === "sse") {
+          if (this._sse === undefined)
+            this.upgradeToSse();
+          this.writeMessageFrame(message);
+          this.finalizeStream();
+          return;
+        }
+        this.settleResponse(Response.json(message, {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        }));
+        queueMicrotask(() => void this.close());
+        return;
+      }
+      if (this._responseMode === "json")
+        return;
+      if (this._sse === undefined)
+        this.upgradeToSse();
+      this.writeMessageFrame(message);
+    }
+    writeCommentFrame(comment) {
+      if (this._closed || this._sse === undefined || this._sse.closed)
+        return;
+      const frame = comment.split(`
+`).map((line) => `: ${line}`).join(`
+`);
+      this.writeFrame(`${frame}
+
+`);
+    }
+    async close() {
+      if (this._closed)
+        return;
+      this._closed = true;
+      this._abortCleanup?.();
+      this._abortCleanup = undefined;
+      if (this._sse?.keepAliveTimer !== undefined)
+        clearInterval(this._sse.keepAliveTimer);
+      if (this._sse !== undefined && !this._sse.closed) {
+        this._sse.closed = true;
+        try {
+          this._sse.controller.close();
+        } catch {}
+      }
+      if (this._deferredResponse !== undefined && !this._deferredResponse.settled) {
+        this._deferredResponse.settled = true;
+        this._deferredResponse.reject(new SdkError(SdkErrorCode.ConnectionClosed, "Connection closed before a response was produced"));
+      }
+      this.onclose?.();
+    }
+    settleResponse(response) {
+      if (this._deferredResponse === undefined || this._deferredResponse.settled)
+        return;
+      this._deferredResponse.settled = true;
+      this._deferredResponse.resolve(response);
+    }
+    upgradeToSse() {
+      let controller;
+      const readable = new ReadableStream({
+        start: (streamController) => {
+          controller = streamController;
+        },
+        cancel: () => {
+          this.close();
+        }
+      });
+      this._sse = {
+        controller,
+        encoder: new TextEncoder,
+        closed: false
+      };
+      this._sse.keepAliveTimer = armSseKeepAlive(this._keepAliveMs, () => this.writeCommentFrame("keepalive"));
+      this.settleResponse(new Response(readable, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no"
+        }
+      }));
+    }
+    finalizeStream() {
+      if (this._sse?.keepAliveTimer !== undefined)
+        clearInterval(this._sse.keepAliveTimer);
+      if (this._sse !== undefined && !this._sse.closed) {
+        this._sse.closed = true;
+        try {
+          this._sse.controller.close();
+        } catch {}
+      }
+      queueMicrotask(() => void this.close());
+    }
+    writeMessageFrame(message) {
+      this.writeFrame(`event: message
+data: ${JSON.stringify(message)}
+
+`);
+    }
+    writeFrame(frame) {
+      if (this._sse === undefined || this._sse.closed)
+        return;
+      try {
+        this._sse.controller.enqueue(this._sse.encoder.encode(frame));
+      } catch (error) {
+        this.onerror?.(/* @__PURE__ */ new Error(`Failed to write to the response stream: ${error}`));
+      }
+    }
+  };
   INPUT_REQUIRED_CAPABLE_METHODS = new Set([
     "tools/call",
     "prompts/get",
@@ -90722,6 +91903,7 @@ var init_mcp_DXXb3Vv3 = __esm(() => {
     _requestStateVerify;
     _inputRequiredServing;
     _legacyShim;
+    _boundFromTransport = false;
     _legacyInputRequiredShim() {
       return this._legacyShim ??= new LegacyInputRequiredShim({
         maxRounds: this._inputRequiredServing.maxRounds,
@@ -90754,6 +91936,20 @@ var init_mcp_DXXb3Vv3 = __esm(() => {
         this.setRequestHandler("server/discover", () => this._ondiscover());
       if (this._capabilities.logging)
         this._registerLoggingHandler();
+    }
+    async connect(transport) {
+      if (this.transport !== undefined)
+        throw new SdkError(SdkErrorCode.AlreadyConnected, "Use a separate Server instance per connection: this instance is already connected to a transport. To connect it to a new transport, call close() first.");
+      if (this._boundFromTransport) {
+        this._boundFromTransport = false;
+        this._negotiatedProtocolVersion = undefined;
+      }
+      const revision = perRequestClassificationOf(transport)?.revision;
+      if (revision !== undefined && !this._servedModernEra() && SUPPORTED_MODERN_PROTOCOL_VERSIONS.includes(revision) && modernProtocolVersions(this._supportedProtocolVersions).includes(revision)) {
+        this._negotiatedProtocolVersion = revision;
+        this._boundFromTransport = true;
+      }
+      await super.connect(transport);
     }
     _registerLoggingHandler() {
       this.setRequestHandler("logging/setLevel", async (request, ctx) => {
@@ -91173,15 +92369,167 @@ var init_mcp_DXXb3Vv3 = __esm(() => {
   } };
 });
 
+// node_modules/@modelcontextprotocol/server/dist/listenRouter-Bartj63y.mjs
+function listenFilterAccepts(filter, event) {
+  switch (event.kind) {
+    case "tools_list_changed":
+      return filter.toolsListChanged === true;
+    case "prompts_list_changed":
+      return filter.promptsListChanged === true;
+    case "resources_list_changed":
+      return filter.resourcesListChanged === true;
+    case "resource_updated":
+      return filter.resourceSubscriptions !== undefined && filter.resourceSubscriptions.includes(event.uri);
+  }
+}
+function honoredSubset(requested, capabilities) {
+  const honored = {};
+  const allow = (bit) => capabilities === undefined || bit === true;
+  if (requested.toolsListChanged === true && allow(capabilities?.tools?.listChanged))
+    honored.toolsListChanged = true;
+  if (requested.promptsListChanged === true && allow(capabilities?.prompts?.listChanged))
+    honored.promptsListChanged = true;
+  if (requested.resourcesListChanged === true && allow(capabilities?.resources?.listChanged))
+    honored.resourcesListChanged = true;
+  if (requested.resourceSubscriptions !== undefined && requested.resourceSubscriptions.length > 0 && allow(capabilities?.resources?.subscribe))
+    honored.resourceSubscriptions = [...requested.resourceSubscriptions];
+  return honored;
+}
+function stampSubscriptionId(notification, subscriptionId) {
+  return {
+    method: notification.method,
+    params: {
+      ...notification.params,
+      _meta: {
+        ...notification.params?._meta,
+        [SUBSCRIPTION_ID_META_KEY]: subscriptionId
+      }
+    }
+  };
+}
+function parseListenFilter(message) {
+  const outcome = codecForVersion(MODERN_WIRE_REVISION).validateRequest("subscriptions/listen", message);
+  return outcome.ok ? outcome.value.params?.notifications : undefined;
+}
+function notificationToServerEvent(method, uri) {
+  switch (method) {
+    case "notifications/tools/list_changed":
+      return { kind: "tools_list_changed" };
+    case "notifications/prompts/list_changed":
+      return { kind: "prompts_list_changed" };
+    case "notifications/resources/list_changed":
+      return { kind: "resources_list_changed" };
+    default:
+      return {
+        kind: "resource_updated",
+        uri: uri ?? ""
+      };
+  }
+}
+var DEFAULT_MAX_SUBSCRIPTIONS = 1024, CHANGE_NOTIFICATION_METHODS, StdioListenRouter = class {
+  _subs = /* @__PURE__ */ new Map;
+  _serverCapabilities;
+  _serverInfo;
+  constructor(_maxSubscriptions = DEFAULT_MAX_SUBSCRIPTIONS, serverCapabilities, serverInfo) {
+    this._maxSubscriptions = _maxSubscriptions;
+    this._serverCapabilities = serverCapabilities;
+    this._serverInfo = serverInfo;
+  }
+  setServerCapabilities(capabilities, serverInfo) {
+    this._serverCapabilities = capabilities;
+    if (serverInfo !== undefined)
+      this._serverInfo = serverInfo;
+  }
+  has(id) {
+    return this._subs.has(id);
+  }
+  serve(message) {
+    if (this._serverCapabilities === undefined)
+      throw new Error("StdioListenRouter.serve() called before setServerCapabilities(); refusing to honor a filter without capabilities");
+    if (this._subs.size >= this._maxSubscriptions)
+      return {
+        jsonrpc: "2.0",
+        id: message.id,
+        error: {
+          code: -32603,
+          message: "Subscription limit reached"
+        }
+      };
+    const filter = parseListenFilter(message);
+    if (filter === undefined)
+      return {
+        jsonrpc: "2.0",
+        id: message.id,
+        error: {
+          code: -32602,
+          message: "Invalid params: 'notifications' is required and must be a valid SubscriptionFilter"
+        }
+      };
+    const honored = honoredSubset(filter, this._serverCapabilities);
+    this._subs.set(message.id, honored);
+    return stampSubscriptionId({
+      method: "notifications/subscriptions/acknowledged",
+      params: { notifications: honored }
+    }, message.id);
+  }
+  cancel(id) {
+    return this._subs.delete(id);
+  }
+  routeOutbound(message) {
+    if (!CHANGE_NOTIFICATION_METHODS.has(message.method))
+      return "passthrough";
+    const uriParam = message.params?.["uri"];
+    const uri = typeof uriParam === "string" ? uriParam : undefined;
+    const event = notificationToServerEvent(message.method, uri);
+    const out = [];
+    for (const [subscriptionId, filter] of this._subs)
+      if (listenFilterAccepts(filter, event))
+        out.push(stampSubscriptionId({
+          method: message.method,
+          params: message.params ?? {}
+        }, subscriptionId));
+    return out;
+  }
+  teardownAll() {
+    const out = [];
+    for (const id of this._subs.keys())
+      out.push({
+        jsonrpc: "2.0",
+        id,
+        result: {
+          resultType: "complete",
+          _meta: {
+            [SUBSCRIPTION_ID_META_KEY]: id,
+            ...this._serverInfo !== undefined && { [SERVER_INFO_META_KEY]: this._serverInfo }
+          }
+        }
+      });
+    this._subs.clear();
+    return out;
+  }
+};
+var init_listenRouter_Bartj63y = __esm(() => {
+  init_mcp_oHn3ureC();
+  init_src_DdvbAHrR();
+  CHANGE_NOTIFICATION_METHODS = new Set([
+    "notifications/tools/list_changed",
+    "notifications/prompts/list_changed",
+    "notifications/resources/list_changed",
+    "notifications/resources/updated"
+  ]);
+});
+
 // node_modules/@modelcontextprotocol/server/dist/index.mjs
 function fromJsonSchema2(schema, validator) {
   return fromJsonSchema(schema, validator ?? (_defaultValidator ??= new AjvJsonSchemaValidator));
 }
-var _defaultValidator;
+var DEFAULT_MAX_REQUEST_BODY_SIZE, _defaultValidator;
 var init_dist4 = __esm(() => {
-  init_mcp_DXXb3Vv3();
-  init_src_CX2iR2pK();
+  init_mcp_oHn3ureC();
+  init_src_DdvbAHrR();
+  init_listenRouter_Bartj63y();
   init_shimsNode();
+  DEFAULT_MAX_REQUEST_BODY_SIZE = 4 * 1024 * 1024;
 });
 
 // node_modules/@modelcontextprotocol/server/dist/stdio.mjs
@@ -91359,6 +92707,8 @@ function serveStdio(factory, options = {}) {
       }
       if (state.era === "modern" && await tryServeListen(message))
         return;
+      if (isTornDown())
+        return;
       state.instance.channel.deliver(message);
       return;
     }
@@ -91428,6 +92778,8 @@ function serveStdio(factory, options = {}) {
           };
         }
         if (await tryServeListen(message))
+          return;
+        if (isTornDown())
           return;
         state.instance.channel.deliver(message, { classification: opening.classification });
         return;
@@ -91522,7 +92874,7 @@ function serveStdio(factory, options = {}) {
 function toError(value) {
   return value instanceof Error ? value : new Error(String(value));
 }
-var StdioServerTransport = class {
+var swallowsErrorsAfterClose, StdioServerTransport = class {
   _readBuffer;
   _started = false;
   _closed = false;
@@ -91547,15 +92899,27 @@ var StdioServerTransport = class {
     this.onerror?.(error);
   };
   _onstdouterror = (error) => {
+    if (this._closed)
+      return;
     this.onerror?.(error);
+    this.close().catch(() => {});
+  };
+  _onstdinclose = () => {
     this.close().catch(() => {});
   };
   async start() {
     if (this._started)
       throw new Error("StdioServerTransport already started! If using Server class, note that connect() calls start() automatically.");
     this._started = true;
+    for (const listener of this._stdout.listeners("error"))
+      if (listener[swallowsErrorsAfterClose])
+        this._stdout.off("error", listener);
+    if (this._stdin.readableEnded || this._stdin.destroyed)
+      setImmediate(this._onstdinclose);
     this._stdin.on("data", this._ondata);
     this._stdin.on("error", this._onerror);
+    this._stdin.on("end", this._onstdinclose);
+    this._stdin.on("close", this._onstdinclose);
     this._stdout.on("error", this._onstdouterror);
   }
   processReadBuffer() {
@@ -91575,7 +92939,9 @@ var StdioServerTransport = class {
     this._closed = true;
     this._stdin.off("data", this._ondata);
     this._stdin.off("error", this._onerror);
-    this._stdout.off("error", this._onstdouterror);
+    this._stdin.off("end", this._onstdinclose);
+    this._stdin.off("close", this._onstdinclose);
+    this._onstdouterror[swallowsErrorsAfterClose] = true;
     if (this._stdin.listenerCount("data") === 0)
       this._stdin.pause();
     this._readBuffer.clear();
@@ -91694,9 +93060,11 @@ var StdioServerTransport = class {
   }
 };
 var init_stdio = __esm(() => {
-  init_mcp_DXXb3Vv3();
-  init_src_CX2iR2pK();
+  init_mcp_oHn3ureC();
+  init_src_DdvbAHrR();
+  init_listenRouter_Bartj63y();
   init_shimsNode();
+  swallowsErrorsAfterClose = Symbol("swallowsErrorsAfterClose");
 });
 
 // src/mcp/channel.ts
@@ -91945,6 +93313,7 @@ var init_rejection = __esm(() => {
     "no_model_configured",
     "model_unavailable",
     "claude_bridge_unavailable",
+    "claude_bridge_route_model_mismatch",
     "extension_tool_shadowed",
     "extension_discovery_failed",
     "context_unresolvable",
@@ -91953,6 +93322,7 @@ var init_rejection = __esm(() => {
     "unguardable_mutating_tools",
     "permission_guard_unavailable",
     "tool_contract_unsatisfied",
+    "system_prompt_not_applied",
     "issue_binding_failed",
     "context_changed",
     "workspace_isolation_unavailable",
@@ -91966,6 +93336,7 @@ var init_rejection = __esm(() => {
   FIX_BY_REASON = {
     unknown_specialist: "Check specialist_list for the exact Specialist name and re-dispatch with a known name.",
     claude_bridge_unavailable: "The definition enables the Claude Code route but the pi-claude-bridge extension was not found. Install it with `pi install npm:pi-claude-bridge@0.12.0` (pi writes it to <agentDir>/npm, e.g. ~/.pi/agent/npm), or set SPECIALISTS_CLAUDE_BRIDGE_PATH to an absolute entry, or clear execution.claude_bridge and re-dispatch. The operator must also enable the route in ~/.config/specialists/user.json. The refusal note lists every path searched.",
+    claude_bridge_route_model_mismatch: "The Specialist is named in the operator allow list (claude_bridge.specialists in ~/.config/specialists/user.json) but that block resolves no claude-bridge/... model for it. Fix claude_bridge.models.<name> or claude_bridge.default_model, or remove the name from the list, then re-dispatch. The run is refused rather than admitted and billed to another provider.",
     work_item_store_unavailable: "The Substrate work boundary could not be opened. Install or upgrade the Substrate package, or set SUBSTRATE_DB (fallback XTRM_STATE_DB) to a writable state file, then re-dispatch.",
     parent_ref_and_ref: "Provide exactly one work locator. parent_ref only parents an Issue created from an inline contract: re-dispatch with contract plus parent_ref, or with issue_ref alone.",
     kind_and_ref: "Provide exactly one work locator. kind only flavours an Issue created from an inline contract: re-dispatch with contract plus kind, or with issue_ref alone.",
@@ -91993,6 +93364,7 @@ var init_rejection = __esm(() => {
     unguardable_mutating_tools: "Some mutating tools cannot be fenced by the workspace lease on this runtime. Remove them from the contract or run on a runtime that can guard them.",
     permission_guard_unavailable: "READ_ONLY bash was granted without the permission guard in the loaded set. Load the guard extension or remove bash from the READ_ONLY contract and re-dispatch.",
     tool_contract_unsatisfied: "The live session did not expose every promised tool. Fix the extension and resource-loader setup so the session exposes the full contract, then re-dispatch.",
+    system_prompt_not_applied: "The live session system prompt did not contain the role prompt. Check the pi SDK resource-loader wiring (systemPrompt / appendSystemPrompt), then re-dispatch.",
     issue_binding_failed: "Binding the Issue to this activation failed. Re-read the Issue and re-dispatch.",
     context_changed: "contextRefs changed between prompt render and binding. Re-dispatch to render the current contextRefs.",
     workspace_isolation_unavailable: "A write-capable activation needs its own git worktree and none could be created. Fix the git worktree setup and re-dispatch.",
@@ -92131,7 +93503,7 @@ var init_descriptions = __esm(() => {
 });
 
 // src/tools/specialist/activation.tool.ts
-import { existsSync as existsSync55 } from "fs";
+import { existsSync as existsSync56 } from "fs";
 import { fileURLToPath as fileURLToPath11 } from "url";
 function toActivationView(snapshot, nowMs = Date.now()) {
   return {
@@ -92471,7 +93843,7 @@ var init_activation_tool = __esm(() => {
   DIST_LIB_PATH = (() => {
     for (const candidate of ["./lib.js", "../../../dist/lib.js"]) {
       const path = fileURLToPath11(new URL(candidate, import.meta.url));
-      if (existsSync55(path))
+      if (existsSync56(path))
         return path;
     }
     return fileURLToPath11(new URL("../../../dist/lib.js", import.meta.url));
@@ -92811,7 +94183,7 @@ var init_specialist_lease_reconcile_tool = __esm(() => {
 });
 
 // src/activation/transport/pending-store.ts
-import { existsSync as existsSync56, mkdirSync as mkdirSync24, readdirSync as readdirSync25, readFileSync as readFileSync47, renameSync as renameSync8, unlinkSync as unlinkSync4, writeFileSync as writeFileSync25 } from "fs";
+import { existsSync as existsSync57, mkdirSync as mkdirSync24, readdirSync as readdirSync25, readFileSync as readFileSync47, renameSync as renameSync8, unlinkSync as unlinkSync4, writeFileSync as writeFileSync25 } from "fs";
 import { join as join60 } from "path";
 function projectDeliveryState(state) {
   if (state === "delivered")
@@ -92833,7 +94205,7 @@ function replyPath(repoRoot, activationId, messageId) {
   return join60(interactionsRoot(repoRoot), activationId, `${messageId}.reply.json`);
 }
 function writeAtomic(path, value, exclusive = false) {
-  if (exclusive && existsSync56(path)) {
+  if (exclusive && existsSync57(path)) {
     throw new Error(`interaction record already exists: ${path}`);
   }
   const tmp = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
@@ -92849,7 +94221,7 @@ function writeAtomic(path, value, exclusive = false) {
   }
 }
 function readJson3(path) {
-  if (!existsSync56(path))
+  if (!existsSync57(path))
     return;
   try {
     return JSON.parse(readFileSync47(path, "utf-8"));
@@ -92924,7 +94296,7 @@ function comparePendingViews(a, b) {
 }
 function listForActivation(repoRoot, activationId) {
   const dir = join60(interactionsRoot(repoRoot), activationId);
-  if (!existsSync56(dir))
+  if (!existsSync57(dir))
     return [];
   const views = [];
   for (const entry of readdirSync25(dir)) {
@@ -92939,7 +94311,7 @@ function listForActivation(repoRoot, activationId) {
 }
 function listAll(repoRoot) {
   const root = interactionsRoot(repoRoot);
-  if (!existsSync56(root))
+  if (!existsSync57(root))
     return [];
   return readdirSync25(root).flatMap((activationId) => listForActivation(repoRoot, activationId)).sort(comparePendingViews);
 }
@@ -93268,6 +94640,29 @@ var init_specialist_status_tool = __esm(() => {
   });
 });
 
+// src/activation/activation-bash-env.ts
+import { delimiter as platformPathDelimiter } from "path";
+function composeActivationPath(shimDir, inherited, pathDelimiter) {
+  const entries = (inherited ?? "").split(pathDelimiter).filter((entry) => entry.length > 0 && entry !== shimDir);
+  return [shimDir, ...entries].join(pathDelimiter);
+}
+function bashSpawnHookWith(overlay, options = {}) {
+  const { shimDir, pathDelimiter = platformPathDelimiter } = options;
+  const identity = { ...overlay };
+  delete identity.PATH;
+  return (context) => {
+    const env = { ...context.env, ...identity };
+    if (shimDir) {
+      env.PATH = composeActivationPath(shimDir, context.env.PATH, pathDelimiter);
+    }
+    return { ...context, env };
+  };
+}
+function hasActivationEnv(overlay, shimDir) {
+  return Object.keys(overlay).length > 0 || Boolean(shimDir);
+}
+var init_activation_bash_env = () => {};
+
 // src/activation/step-contract.ts
 function asStructured(contract) {
   const empty = { problem: "", success: "", scope: [], nonGoals: [], constraints: [], validation: [], output: [] };
@@ -93516,7 +94911,7 @@ var init_peer_bridge = __esm(() => {
 });
 
 // src/activation/transport/roster.ts
-import { existsSync as existsSync57, readdirSync as readdirSync26, readFileSync as readFileSync48 } from "fs";
+import { existsSync as existsSync58, readdirSync as readdirSync26, readFileSync as readFileSync48 } from "fs";
 import { homedir as homedir17 } from "os";
 import { join as join61 } from "path";
 function defaultRosterDir() {
@@ -93591,7 +94986,7 @@ function scanRoster(options = {}) {
   const probe = options.probe ?? procProbe();
   const live = [];
   const rejected = [];
-  if (!existsSync57(dir))
+  if (!existsSync58(dir))
     return { live, rejected };
   for (const file of readdirSync26(dir)) {
     if (!file.endsWith(".json"))
@@ -93825,7 +95220,7 @@ function createGuardedTools(sdk, input) {
       unguardable.push(name);
       continue;
     }
-    const original = factory(input.cwd);
+    const original = SHELL_FACTORIES.has(factoryName) && hasActivationEnv(input.env ?? {}, input.shimDir) ? factory(input.cwd, { spawnHook: bashSpawnHookWith(input.env ?? {}, { shimDir: input.shimDir }) }) : factory(input.cwd);
     const originalExecute = original.execute.bind(original);
     tools.push({
       ...original,
@@ -93847,14 +95242,16 @@ function createGuardedTools(sdk, input) {
   }
   return { tools, guarded, unguardable };
 }
-var FACTORY_NAMES, GUARDED_TOOL_NAMES;
+var FACTORY_NAMES, SHELL_FACTORIES, GUARDED_TOOL_NAMES;
 var init_guarded_tools = __esm(() => {
+  init_activation_bash_env();
   FACTORY_NAMES = {
     edit: "createEditTool",
     write: "createWriteTool",
     bash: "createBashTool",
     powershell: "createPowerShellTool"
   };
+  SHELL_FACTORIES = new Set(["createBashTool", "createPowerShellTool"]);
   GUARDED_TOOL_NAMES = Object.keys(FACTORY_NAMES);
 });
 
@@ -93909,11 +95306,11 @@ var ASK_TOOL = "ask_coordinator", ESCALATE_TOOL = "escalate_to_coordinator", too
 });
 
 // src/activation/pi-sdk.ts
-import { existsSync as existsSync58 } from "fs";
+import { existsSync as existsSync59 } from "fs";
 import { join as join62 } from "path";
 import { pathToFileURL as pathToFileURL2 } from "url";
 function piSdkCandidates(deps = {}) {
-  const exists = deps.exists ?? existsSync58;
+  const exists = deps.exists ?? existsSync59;
   const candidates = [PI_SDK_PACKAGE];
   for (const root of resolveGlobalNodeModulesDirs(deps)) {
     const entry = join62(root, PI_SDK_PACKAGE, "dist", "index.js");
@@ -95145,8 +96542,11 @@ var init_settlement_store = () => {};
 
 // src/activation/native-host.ts
 import { randomUUID as randomUUID9 } from "crypto";
-import { existsSync as existsSync59 } from "fs";
+import { existsSync as existsSync60 } from "fs";
 import { join as join64 } from "path";
+function uncoveredHostEnvSpawns(toolsList) {
+  return HOST_ENV_SPAWNING_TOOLS.filter((tool) => toolsList.includes(tool));
+}
 function extractTokenUsage(event) {
   const nested = nativeEventTokenUsage(event);
   if (nested) {
@@ -95340,6 +96740,16 @@ async function discoverDynamicExtensionTools(input) {
 function resolveWorkspace(cwd) {
   return workspaceIdentityFor(cwd);
 }
+async function bindActivationSession(session) {
+  if (typeof session.bindExtensions !== "function")
+    return { bound: false };
+  try {
+    await session.bindExtensions({});
+    return { bound: true };
+  } catch (error) {
+    return { bound: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
 function processAlive(pid) {
   try {
     process.kill(pid, 0);
@@ -95349,6 +96759,8 @@ function processAlive(pid) {
   }
 }
 function createActivationResourceLoader(sdk, options) {
+  const rolePromptText = options.rolePrompt?.text ?? "";
+  const rolePromptOptions = rolePromptText.length === 0 ? {} : options.rolePrompt?.mode === "replace" ? { systemPrompt: rolePromptText } : { appendSystemPrompt: [rolePromptText] };
   const wantsCodemode = (options.extensionPaths ?? []).includes(BUILTIN_CODEMODE_EXTENSION);
   const codemodeFactory = wantsCodemode && typeof sdk.createCodemodeExtension === "function" ? sdk.createCodemodeExtension() : undefined;
   const codemodeName = BUILTIN_CODEMODE_EXTENSION.replace("builtin:", "");
@@ -95362,7 +96774,8 @@ function createActivationResourceLoader(sdk, options) {
     ...codemodeFactory !== undefined ? { extensionFactories: [{ name: codemodeName, factory: codemodeFactory, replaceable: true, builtin: true }] } : {},
     noContextFiles: true,
     noPromptTemplates: true,
-    noThemes: true
+    noThemes: true,
+    ...rolePromptOptions
   });
 }
 function createNativeToolAdmission(input) {
@@ -95416,8 +96829,6 @@ class NativeActivationHost {
   settlements;
   admission;
   republished = false;
-  liveIdentityEnv = [];
-  identityEnvBaseline = null;
   env;
   registry = new FleetRegistry;
   fleetEpoch = 0;
@@ -95450,84 +96861,6 @@ class NativeActivationHost {
     this.toolDurationWarnMs = normalizeToolDurationWarnMs(deps.stallDetection?.tool_duration_warn_ms) ?? STALL_DETECTION_DEFAULTS.tool_duration_warn_ms;
     this.toolDurationWarnMsByDep = normalizeToolDurationWarnMs(deps.stallDetection?.tool_duration_warn_ms);
     this.env = deps.env ?? process.env;
-  }
-  applyActivationIdentityEnv(activationId, specialistName, workspacePath) {
-    const launchEnv = resolveAgentLaunchEnv({
-      holder: specialistHolderName(specialistName, activationId),
-      roleName: specialistName,
-      cwd: workspacePath,
-      env: process.env,
-      run: this.identityEnvRun
-    });
-    const existing = this.liveIdentityEnv.findIndex((entry) => entry.activationId === activationId);
-    if (existing >= 0)
-      this.liveIdentityEnv.splice(existing, 1);
-    if (this.liveIdentityEnv.length === 0)
-      this.identityEnvBaseline = snapshotIdentityEnv(process.env);
-    this.liveIdentityEnv.push({ activationId, env: launchEnv });
-    this.writeIdentityEnv(launchEnv);
-  }
-  writeIdentityEnv(env) {
-    clearIdentityEnv(process.env);
-    Object.assign(process.env, env);
-  }
-  identityEnvMatches(env) {
-    const current = snapshotIdentityEnv(process.env);
-    for (const key of new Set([...Object.keys(env), ...Object.keys(current)])) {
-      if (!isIdentityManagedKey(key))
-        continue;
-      if ((current[key] ?? "") !== (env[key] ?? ""))
-        return false;
-    }
-    return true;
-  }
-  assertActivationIdentityEnv(snapshot) {
-    const previousTop = this.liveIdentityEnv[this.liveIdentityEnv.length - 1]?.activationId;
-    const index = this.liveIdentityEnv.findIndex((entry) => entry.activationId === snapshot.activationId);
-    if (index < 0) {
-      this.applyActivationIdentityEnv(snapshot.activationId, snapshot.specialist, snapshot.workspace?.worktreePath ?? this.cwd);
-      this.warnIdentityTakeover(snapshot.activationId, previousTop);
-      return;
-    }
-    const entry = this.liveIdentityEnv[index];
-    const isTop = index === this.liveIdentityEnv.length - 1;
-    if (isTop && this.identityEnvMatches(entry.env))
-      return;
-    this.liveIdentityEnv.splice(index, 1);
-    this.liveIdentityEnv.push(entry);
-    this.writeIdentityEnv(entry.env);
-    this.warnIdentityTakeover(snapshot.activationId, previousTop);
-  }
-  warnIdentityTakeover(activationId, previousTop) {
-    if (!previousTop || previousTop === activationId || this.liveIdentityEnv.length < 2)
-      return;
-    warnIdentityEnv(`activation ${activationId} started a leg and took process env from ${previousTop}; ${this.liveIdentityEnv.length} activations are live`);
-  }
-  shutdown() {
-    this.liveIdentityEnv.length = 0;
-    const baseline = this.identityEnvBaseline;
-    this.identityEnvBaseline = null;
-    if (baseline)
-      restoreIdentityEnv(baseline, process.env);
-  }
-  settleActivationIdentityEnv(activationId) {
-    const index = this.liveIdentityEnv.findIndex((entry) => entry.activationId === activationId);
-    if (index < 0)
-      return;
-    const wasTop = index === this.liveIdentityEnv.length - 1;
-    this.liveIdentityEnv.splice(index, 1);
-    if (!wasTop)
-      return;
-    const top = this.liveIdentityEnv[this.liveIdentityEnv.length - 1];
-    if (!top) {
-      const baseline = this.identityEnvBaseline;
-      this.identityEnvBaseline = null;
-      if (baseline)
-        restoreIdentityEnv(baseline, process.env);
-      return;
-    }
-    this.writeIdentityEnv(top.env);
-    warnIdentityEnv(`activation ${activationId} settled while ${this.liveIdentityEnv.length} others are live; process env now carries ${top.activationId}`);
   }
   async start(request) {
     const activationId = `act:${randomUUID9().slice(0, 12)}`;
@@ -95572,7 +96905,6 @@ class NativeActivationHost {
       release();
     };
     const reject = (reason, detail = {}) => {
-      this.settleActivationIdentityEnv(activationId);
       releaseLeaseOnRefusal();
       releaseClaimForRefusal();
       removeWorkspaceOnRefusal();
@@ -95586,6 +96918,12 @@ class NativeActivationHost {
     };
     await this.republishOncePerProcess();
     const specialist = await this.loader.get(request.specialist).catch((error) => {
+      if (error instanceof ClaudeBridgeRouteModelMismatchError) {
+        return reject("claude_bridge_route_model_mismatch", {
+          requestedModel: error.model ?? undefined,
+          note: error.message
+        });
+      }
       return reject("unknown_specialist", {
         note: error instanceof Error ? error.message : String(error)
       });
@@ -95802,7 +97140,7 @@ class NativeActivationHost {
     if (!modelCheck.ok && !claudeBridge && modelChain[0]?.startsWith(`${CLAUDE_BRIDGE_PROVIDER}/`)) {
       return reject("model_unavailable", {
         requestedModel: modelChain[0],
-        note: `${modelCheck.reason ?? "No models match"} (the Claude Code route is off: ${claudeBridgeOffSwitches(execution).join(" and ")} is not enabled; not falling back to another provider)`
+        note: `${modelCheck.reason ?? "No models match"} (the Claude Code route is off: ${claudeBridgeOffSwitches(execution, operatorClaudeBridgeEnabled, request.specialist).join(" and ")} is not enabled; not falling back to another provider)`
       });
     }
     while ((!modelCheck.ok || !modelCheck.model) && modelIndex < modelChain.length - 1) {
@@ -95835,12 +97173,11 @@ class NativeActivationHost {
       piAgentDir: () => sdk.getAgentDir()
     });
     for (const source of skippedDeclaredSources) {
-      process.stderr.write(formatSkippedExtensionSourceMessage(source));
+      runtimeWarn("extension-discovery", formatSkippedExtensionSourceMessage(source).trim());
     }
     const { kept: dynamicExtensions, dropped: droppedExtensions } = deduplicateExtensionSources(curatedExtensions.dedupeAgainstDynamic, declaredLocalExtensions);
     for (const { dropped, keptAs } of droppedExtensions) {
-      process.stderr.write(`[python-kernel] DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').
-`);
+      runtimeWarn("python-kernel", `DEDUP: skipping duplicate extension source '${dropped}' (same as '${keptAs}'; kept '${keptAs}').`);
     }
     const emitDiscoverySessionsSignal = () => {
       emit("extension_discovery_sessions", {
@@ -95973,8 +97310,7 @@ class NativeActivationHost {
         resolved_tool_contract: formatResolvedToolContract(effectiveToolContract, "discover-then-pin")
       },
       ...isReviewer ? {
-        appendExecutionContext: createReviewerDiffAppendHook((message) => process.stderr.write(`${message}
-`))
+        appendExecutionContext: createReviewerDiffAppendHook((message) => runtimeWarn("reviewer-diff", message))
       } : {}
     });
     if (rendered.mandatoryRulesError) {
@@ -96061,9 +97397,24 @@ class NativeActivationHost {
         emit(kind === "escalation" ? "escalation_resolved" : "clarification_answered");
       }
     });
+    const activationLaunchEnv = resolveAgentLaunchEnv({
+      holder: specialistHolderName(specialist.specialist.metadata.name, activationId),
+      roleName: specialist.specialist.metadata.name,
+      cwd: workspace.worktreePath,
+      env: process.env,
+      run: this.identityEnvRun
+    });
+    const { PATH: _launchPath, ...activationEnv } = activationLaunchEnv;
+    const activationShimDir = shimBinDir(process.env);
+    const uncoveredSpawns = uncoveredHostEnvSpawns(effectiveToolContract.toolsList);
+    if (uncoveredSpawns.length > 0 && hasActivationEnv(activationEnv, activationShimDir)) {
+      warnIdentityEnv(`activation ${activationId} grants ${uncoveredSpawns.join(", ")}, whose child processes ` + `inherit the dispatching session's identity rather than the activation's ` + `(SPECIALISTS-4487); its bash and powershell calls carry the activation's`);
+    }
     const guardedTools = createGuardedTools(sdk, {
       toolNames: effectiveToolContract.toolsList,
       cwd: workspace.worktreePath,
+      env: activationEnv,
+      shimDir: activationShimDir,
       admit: createNativeToolAdmission({
         guardLoaded: curatedExtensions.all.includes(getPermissionGuardExtensionPath() ?? ""),
         workspace,
@@ -96084,18 +97435,21 @@ class NativeActivationHost {
         note: "the resolved contract grants READ_ONLY bash but the permission guard is not in the " + "loaded extension set; refusing rather than running unsandboxed"
       });
     }
-    const nativeGuard = resolvePermissionGuardForSpawn(tier);
-    if (nativeGuard && curatedExtensions.all.includes(nativeGuard.path)) {
-      Object.assign(process.env, nativeGuard.tierEnv);
-    }
-    this.applyActivationIdentityEnv(activationId, specialist.specialist.metadata.name, workspace.worktreePath);
     try {
       const resourceLoader = createActivationResourceLoader(sdk, {
         cwd: workspace.worktreePath,
         skillPaths: specialist.specialist.skills?.paths ?? [],
-        extensionPaths: [...curatedExtensions.all, ...dynamicExtensions]
+        extensionPaths: [...curatedExtensions.all, ...dynamicExtensions],
+        rolePrompt: { text: systemPrompt.text, mode: specialist.specialist.prompt.system_prompt_mode }
       });
       await resourceLoader.reload();
+      const loaderPrompts = [resourceLoader.getSystemPrompt?.() ?? "", ...resourceLoader.getAppendSystemPrompt?.() ?? []];
+      if (systemPrompt.text.length > 0 && !loaderPrompts.some((text) => text.includes(systemPrompt.text))) {
+        return reject("system_prompt_not_applied", {
+          ...autoCreatedRef ? { created_ref: autoCreatedRef } : {},
+          note: "the resource loader does not carry the built role prompt; a native activation never runs without its role prompt"
+        });
+      }
       const baseSessionOptions = {
         customTools: [...askTools, ...guardedTools.tools],
         cwd: workspace.worktreePath,
@@ -96104,8 +97458,7 @@ class NativeActivationHost {
         model: modelCheck.model,
         ...thinkingLevel ? { thinkingLevel } : {},
         noTools: "builtin",
-        tools: [...effectiveToolContract.toolsList, ASK_TOOL, ESCALATE_TOOL],
-        systemPrompt: systemPrompt.text
+        tools: [...effectiveToolContract.toolsList, ASK_TOOL, ESCALATE_TOOL]
       };
       const PROMISED_TOOLS = [...effectiveToolContract.toolsList];
       const missingPromisedTools = (candidate) => {
@@ -96114,6 +97467,12 @@ class NativeActivationHost {
       };
       const createVerifiedSession = async (model, options = {}) => {
         const created = await sdk.createAgentSession({ ...baseSessionOptions, model });
+        const sessionBinding = await bindActivationSession(created.session);
+        if (claudeBridge) {
+          try {
+            await modelRuntime.refresh?.({ allowNetwork: false });
+          } catch {}
+        }
         const missing = missingPromisedTools(created.session);
         if (missing.length > 0) {
           created.session.dispose();
@@ -96143,9 +97502,10 @@ class NativeActivationHost {
           }
           if (!resolvedModel) {
             created.session.dispose();
+            const registered = typeof modelRuntime.getProvider === "function" ? modelRuntime.getProvider(CLAUDE_BRIDGE_PROVIDER)?.id ?? null : null;
             const detail = {
               requestedModel: provisionalPattern,
-              note: `the "${CLAUDE_BRIDGE_PROVIDER}" provider did not register on the session runtime, so ` + `"${provisionalPattern}" does not exist; the extension is installed but did not load its provider`
+              note: `the "${CLAUDE_BRIDGE_PROVIDER}" provider did not register on the session runtime, so ` + `"${provisionalPattern}" does not exist; the extension is installed but did not load its provider` + ` (extension ${claudeBridgePath ?? "<unresolved>"}: ` + `${sessionBinding.bound ? "session_start emitted" : "session_start not emitted"}` + `${sessionBinding.error ? `, bind failed: ${sessionBinding.error}` : ""}` + `; provider "${CLAUDE_BRIDGE_PROVIDER}" is ${registered ? "registered" : "absent"} on the runtime)`
             };
             if (options.viaFallback) {
               throw new DispatchRejectedError("model_unavailable", {
@@ -96216,6 +97576,22 @@ class NativeActivationHost {
               }
             }
           }
+        }
+        const livePrompt = created.session.systemPrompt;
+        if (systemPrompt.text.length > 0 && typeof livePrompt === "string" && !livePrompt.includes(systemPrompt.text)) {
+          created.session.dispose();
+          const detail = {
+            ...autoCreatedRef ? { created_ref: autoCreatedRef } : {},
+            note: "the session system prompt does not contain the built role prompt; a native activation never runs without its role prompt"
+          };
+          if (options.viaFallback) {
+            throw new DispatchRejectedError("system_prompt_not_applied", {
+              specialist: request.specialist,
+              issueRef: request.issueRef,
+              ...detail
+            });
+          }
+          return reject("system_prompt_not_applied", detail);
         }
         return created.session;
       };
@@ -96326,7 +97702,6 @@ class NativeActivationHost {
         result
       };
     } catch (error) {
-      this.settleActivationIdentityEnv(activationId);
       throw error;
     }
   }
@@ -96336,7 +97711,7 @@ class NativeActivationHost {
     if (this.workItemsDefault)
       return this.workItemsDefault;
     const selection = await selectWorkItemStore();
-    if (selection.kind === "local" && !existsSync59(selection.dbPath)) {
+    if (selection.kind === "local" && !existsSync60(selection.dbPath)) {
       throw new Error(`no Substrate work store at ${selection.dbPath} (set SUBSTRATE_DB (or the legacy XTRM_STATE_DB) or initialize it via xt init / sb)`);
     }
     this.workItemsDefault = await openWorkItemBoundary(selection.kind === "local" ? { dbPath: selection.dbPath } : {});
@@ -96368,12 +97743,10 @@ class NativeActivationHost {
       });
       const unresolved = outcomes.filter((outcome) => outcome.outcome !== "published");
       if (unresolved.length > 0) {
-        process.stderr.write(`[specialists] ${unresolved.length} settlement(s) still unpublished after republish: ` + `${unresolved.map((o) => `${o.activationId}/${o.attemptId}=${o.outcome}`).join(", ")}
-`);
+        runtimeWarn("settlement-republish", `[specialists] ${unresolved.length} settlement(s) still unpublished after republish: ` + `${unresolved.map((o) => `${o.activationId}/${o.attemptId}=${o.outcome}`).join(", ")}`);
       }
     } catch (error) {
-      process.stderr.write(`[specialists] settlement republish pass failed: ${error instanceof Error ? error.message : String(error)}
-`);
+      runtimeWarn("settlement-republish", `[specialists] settlement republish pass failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   onSessionEvent(snapshot, event, emit) {
@@ -96400,7 +97773,6 @@ class NativeActivationHost {
         break;
       case "agent_start":
         this.noteWakeTurnStart(snapshot);
-        this.assertActivationIdentityEnv(snapshot);
         snapshot.state = "running";
         this.save(snapshot);
         emit("turn_started");
@@ -96424,8 +97796,6 @@ class NativeActivationHost {
             this.finalizeWakeTurn(snapshot, record, emit).finally(() => {
               this.wakeFinalising.delete(snapshot.activationId);
             });
-          } else {
-            this.settleActivationIdentityEnv(snapshot.activationId);
           }
         }
         break;
@@ -96636,7 +98006,6 @@ class NativeActivationHost {
     } catch (error) {
       snapshot.state = "failed";
       this.save(snapshot);
-      this.settleActivationIdentityEnv(snapshot.activationId);
       const message = error instanceof Error ? error.message : String(error);
       await recordSettlementOnce();
       emit("activation_failed", { error: message });
@@ -96673,7 +98042,6 @@ class NativeActivationHost {
       const detail = last.errorMessage ?? `turn ended with stopReason "${last.stopReason}"`;
       snapshot.state = "failed";
       this.save(snapshot);
-      this.settleActivationIdentityEnv(snapshot.activationId);
       emit("activation_failed", { error: detail, stop_reason: last.stopReason });
       const failedResult = {
         activationId: snapshot.activationId,
@@ -96752,9 +98120,7 @@ class NativeActivationHost {
       const session = record.session;
       await this.captureSessionStats(session, emit);
       this.settleTurnTail(snapshot, session, emit, record, { notifyWake: true });
-    } catch {} finally {
-      this.settleActivationIdentityEnv(snapshot.activationId);
-    }
+    } catch {}
   }
   notifyWakeSettlement(result) {
     const notify = this.wakeSettlement;
@@ -96825,7 +98191,6 @@ class NativeActivationHost {
       return await this.walkFallbackChain(record, ctx, legEmit, flushFailure, index, fallbackUsed);
     } finally {
       flushFailure(false);
-      this.settleActivationIdentityEnv(record.snapshot.activationId);
     }
   }
   async walkFallbackChain(record, ctx, legEmit, flushFailure, index, fallbackUsed) {
@@ -96954,7 +98319,14 @@ class NativeActivationHost {
     if (overrideName) {
       const sdk = await this.loadSdk();
       const retryRuntime = await createGateModelRuntime(sdk);
-      const retrySpecialist = await this.loader.get(record.snapshot.specialist).catch(() => {
+      const retrySpecialist = await this.loader.get(record.snapshot.specialist).catch((error) => {
+        if (error instanceof ClaudeBridgeRouteModelMismatchError) {
+          throw new DispatchRejectedError("claude_bridge_route_model_mismatch", {
+            activationId,
+            requestedModel: error.model ?? undefined,
+            note: error.message
+          });
+        }
         return;
       });
       const retryBridge = retrySpecialist ? claudeBridgeRouteEnabled(retrySpecialist.specialist.execution) : false;
@@ -97039,7 +98411,7 @@ class NativeActivationHost {
       model_override: record.snapshot.modelOverride,
       reused_session: reusedSession
     });
-    const result = this.runToSettled(record.snapshot, record.session, opts?.prompt ?? record.initialPrompt, emit, record).finally(() => this.settleActivationIdentityEnv(activationId));
+    const result = this.runToSettled(record.snapshot, record.session, opts?.prompt ?? record.initialPrompt, emit, record);
     record.result = result;
     return {
       activationId,
@@ -97205,7 +98577,6 @@ class NativeActivationHost {
     } finally {
       this.stopToolDurationWatch(activationId);
       this.toolDurationWarnMsByActivation.delete(activationId);
-      this.settleActivationIdentityEnv(activationId);
       this.forgetBackgroundTasks(activationId);
       this.wakeDirty.delete(activationId);
       this.wakeFinalising.delete(activationId);
@@ -97316,7 +98687,7 @@ class NativeActivationHost {
     });
     record.unsubscribe();
     record.unsubscribe = record.session.subscribe((event) => this.onSessionEvent(record.snapshot, event, emit));
-    const result = this.runToSettled(record.snapshot, record.session, prompt, emit, record).finally(() => this.settleActivationIdentityEnv(activationId));
+    const result = this.runToSettled(record.snapshot, record.session, prompt, emit, record);
     record.result = result;
     return {
       activationId,
@@ -97390,7 +98761,7 @@ function legacyOnlyConfigNotes(spec) {
   }
   return notes;
 }
-var TOKEN_USAGE_KEYS, WRITE_TIERS, TOOL_DURATION_CHECK_INTERVAL_MS = 1e4, LIVE_BACKGROUND_STATUSES, TERMINAL_BACKGROUND_STATUSES, BACKGROUND_TASK_MAX_HOLD_MS, NON_LOCAL_EXTENSION_PREFIXES, defaultExtensionSourceResolutionEnv, EXTENSION_CLASS_SOURCES, BUILTIN_TOOL_SOURCES, EMPTY_DISCOVERY, FALLBACK_RETRYABLE_CLASSES, NULL_FORENSIC_SINK, gateExtensionProviders, provisionalModelPatterns;
+var HOST_ENV_SPAWNING_TOOLS, TOKEN_USAGE_KEYS, WRITE_TIERS, TOOL_DURATION_CHECK_INTERVAL_MS = 1e4, LIVE_BACKGROUND_STATUSES, TERMINAL_BACKGROUND_STATUSES, BACKGROUND_TASK_MAX_HOLD_MS, NON_LOCAL_EXTENSION_PREFIXES, defaultExtensionSourceResolutionEnv, EXTENSION_CLASS_SOURCES, BUILTIN_TOOL_SOURCES, EMPTY_DISCOVERY, FALLBACK_RETRYABLE_CLASSES, NULL_FORENSIC_SINK, gateExtensionProviders, provisionalModelPatterns;
 var init_native_host = __esm(() => {
   init_loader();
   init_system_prompt();
@@ -97400,6 +98771,7 @@ var init_native_host = __esm(() => {
   init_claude_bridge();
   init_permission_guard_extension();
   init_identity_env();
+  init_activation_bash_env();
   init_resolved_tool_contract();
   init_model_chain();
   init_contract_sections();
@@ -97420,6 +98792,7 @@ var init_native_host = __esm(() => {
   init_runtime_diagnostics();
   init_authority_store();
   init_types3();
+  HOST_ENV_SPAWNING_TOOLS = ["python"];
   TOKEN_USAGE_KEYS = [
     "input_tokens",
     "output_tokens",
@@ -97436,7 +98809,7 @@ var init_native_host = __esm(() => {
   NON_LOCAL_EXTENSION_PREFIXES = ["npm:", "git:", "github:", "http:", "https:", "ssh:"];
   defaultExtensionSourceResolutionEnv = {
     globalNodeModulesDirs: resolveGlobalNodeModulesDirs,
-    manifestExists: (packagePath) => existsSync59(join64(packagePath, "package.json")),
+    manifestExists: (packagePath) => existsSync60(join64(packagePath, "package.json")),
     piAgentDir: () => {
       return;
     }
@@ -97777,6 +99150,7 @@ var init_lib = __esm(() => {
   init_observability_sqlite();
   init_specialist_feed_tool();
   init_observability_db();
+  init_observability_read_model();
   init_bead_gate();
   init_build_identity();
   init_beads();
@@ -97918,7 +99292,7 @@ var init_specialist_list_tool = __esm(() => {
 });
 
 // src/mcp/resume-tool.ts
-import { existsSync as existsSync60 } from "fs";
+import { existsSync as existsSync61 } from "fs";
 import { fileURLToPath as fileURLToPath12 } from "url";
 function createSpecialistResumeTool(getHost, getPusher) {
   return {
@@ -97972,7 +99346,7 @@ var init_resume_tool = __esm(() => {
   DIST_LIB_PATH2 = (() => {
     for (const candidate of ["./lib.js", "../../dist/lib.js"]) {
       const path = fileURLToPath12(new URL(candidate, import.meta.url));
-      if (existsSync60(path))
+      if (existsSync61(path))
         return path;
     }
     return fileURLToPath12(new URL("../../dist/lib.js", import.meta.url));

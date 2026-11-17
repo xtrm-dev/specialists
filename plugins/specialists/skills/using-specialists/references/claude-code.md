@@ -61,21 +61,28 @@ Before ending a session, read `specialist_status` and stop what you own with
 ## The Claude Code route for a Specialist's model
 
 An opt-in route serves a Specialist's Claude models through the Claude Code CLI and the
-Claude Agent SDK on the operator's subscription login, not an API key. Two independent
-switches must both be on: the operator grants the machine, the definition layer selects the
-route. The definition flag alone is never enough, because a repository can write the
-definition layer but not the operator switch.
+Claude Agent SDK on the operator's subscription login, not an API key. Consent lives in the
+operator's own config file, which no repository layer can write, and the allow list in it names
+each Specialist that may use the route: the loader derives the per-Specialist flag and the
+model from the list, so there is no per-Specialist file to keep and no wildcard. The list
+becomes authoritative only once it exists — see the legacy note below.
 
 ```text
 # operator, once per machine: ~/.config/specialists/user.json
-{ "claude_bridge": { "enabled": true } }
-# definition layer, never a shipped definition
-{ "specialist": { "execution": { "claude_bridge": true, "model": "claude-bridge/<model>" } } }
+{ "claude_bridge": { "enabled": true, "default_model": "claude-bridge/<model>",
+                     "specialists": ["reviewer"], "models": { "reviewer": "claude-bridge/<model>" } } }
 ```
 
-Pi resolves the bridge from its own package store (`pi install npm:pi-claude-bridge@0.12.0`),
-then the npm/bun global prefixes; project scope is never searched. Both switches on with the
-package missing refuses the dispatch (`claude_bridge_unavailable`) instead of running another
-provider, and a `claude-bridge/...` primary that fails mid-run ends `failed` without walking
-`fallback_models`. Use a `claude-bridge/...` model, not `anthropic/...` (that is Pi's own
-API-key provider). Full detail: `docs/claude-bridge.md`.
+Set it with `sp edit --global claude_bridge.<field>`, not by hand. `enabled: true` is required:
+without it the route is off for every Specialist, list or no list. Without a `specialists` list
+the older rule still applies — the merged definition flag `execution.claude_bridge` decides, and
+`sp doctor` reports that shape as legacy — so add the list; once it is present, a name it omits
+does not get the route even when a repository's definition asks for it. Pi resolves the bridge
+from its own package store (`pi install npm:pi-claude-bridge@0.12.0`), then the npm/bun global
+prefixes; project scope is never searched. A listed Specialist whose list gives it no
+`claude-bridge/...` model is refused (`claude_bridge_route_model_mismatch`); with the route on
+for a listed Specialist, a missing package refuses the dispatch (`claude_bridge_unavailable`)
+instead of running another provider, and a `claude-bridge/...` primary that fails mid-run ends
+`failed` without walking `fallback_models`. Use a `claude-bridge/...` model, not `anthropic/...`
+(that is Pi's own API-key provider). The schema lives in `src/specialist/global-config.ts`; full
+detail: `docs/claude-bridge.md`.

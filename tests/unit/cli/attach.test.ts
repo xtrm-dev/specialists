@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempDir } from '../../utils/temp-dir.js';
 
 let statuses: Array<Record<string, unknown>> = [];
 
@@ -21,7 +21,7 @@ describe('attach CLI', () => {
   const originalArgv = process.argv;
 
   beforeEach(() => {
-    tempRoot = mkdtempSync(join(tmpdir(), 'sp-attach-test-'));
+    tempRoot = tempDir('sp-attach-test-');
     vi.spyOn(process, 'cwd').mockReturnValue(tempRoot);
     setTty(true, true);
     statuses = [];

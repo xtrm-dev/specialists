@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { countArg, getExtensionArgs, readLoggedPiArgv, writeFakePiBinary } from './helpers/fake-pi';
+import { tempDir } from '../utils/temp-dir.js';
 
 const repoRoot = resolve(import.meta.dirname, '../..');
 const ENABLED = process.env.PACKED_SMOKE === '1';
@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 function makeTemp(prefix: string): string {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
+  const dir = tempDir(prefix);
   tempDirs.push(dir);
   return dir;
 }

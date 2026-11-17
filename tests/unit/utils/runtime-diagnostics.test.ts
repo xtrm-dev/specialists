@@ -7,9 +7,9 @@ import {
   runtimeWarn,
   setRuntimeDiagnosticsSink,
 } from '../../../src/utils/runtime-diagnostics.js';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempDir } from '../../utils/temp-dir.js';
 
 describe('runtime diagnostics sink', () => {
   afterEach(() => {
@@ -59,7 +59,7 @@ describe('runtime diagnostics sink', () => {
   });
 
   it('appends to the canonical file sink, creating the directory', () => {
-    const root = mkdtempSync(join(tmpdir(), 'runtime-diagnostics-'));
+    const root = tempDir('runtime-diagnostics-');
     try {
       const path = runtimeDiagnosticsSinkPath(root);
       const sink = createFileDiagnosticsSink(path);
@@ -77,7 +77,7 @@ describe('runtime diagnostics sink', () => {
   });
 
   it('never throws when the sink path is unwritable', () => {
-    const root = mkdtempSync(join(tmpdir(), 'runtime-diagnostics-bad-'));
+    const root = tempDir('runtime-diagnostics-bad-');
     try {
       const file = join(root, 'not-a-directory');
       writeFileSync(file, 'x');

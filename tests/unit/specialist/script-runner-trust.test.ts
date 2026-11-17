@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SpecialistLoader } from '../../../src/specialist/loader.js';
 import { compatGuard, computeSkillSources, runScriptSpecialist, type TrustOptions } from '../../../src/specialist/script-runner.js';
 import type { Specialist } from '../../../src/specialist/schema.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 function makeSpec(overrides: {
   paths?: string[];
@@ -45,7 +46,7 @@ function makeSpec(overrides: {
 
 describe('compatGuard trust options', () => {
   let tempRoot: string;
-  beforeEach(() => { tempRoot = mkdtempSync(join(tmpdir(), 'skill-trust-')); });
+  beforeEach(() => { tempRoot = tempDir('skill-trust-'); });
   afterEach(() => { rmSync(tempRoot, { recursive: true, force: true }); });
 
   it('rejects skills.scripts by default', () => {
@@ -281,7 +282,7 @@ describe('compatGuard trust options', () => {
 
 describe('computeSkillSources', () => {
   let tempRoot: string;
-  beforeEach(() => { tempRoot = mkdtempSync(join(tmpdir(), 'skill-sources-')); mkdirSync(tempRoot, { recursive: true }); });
+  beforeEach(() => { tempRoot = tempDir('skill-sources-'); mkdirSync(tempRoot, { recursive: true }); });
   afterEach(() => { rmSync(tempRoot, { recursive: true, force: true }); });
 
   it('returns empty array when no skill paths', () => {

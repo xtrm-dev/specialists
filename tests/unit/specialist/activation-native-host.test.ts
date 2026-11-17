@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -55,8 +54,9 @@ import { acquire as acquireLease, leasePath, release as releaseLease, workspaceI
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
 import { createSpecialistStatusTool } from '../../../src/tools/specialist/specialist_status.tool.js';
 import { CircuitBreaker } from '../../../src/utils/circuitBreaker.js';
-import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
+import { FAKE_AGENT_DIR, FakeResourceLoader, PI_DEFAULT_PREAMBLE, piSessionSystemPrompt } from '../../utils/pi-resource-loader-double.js';
 import type { ResolvedContextView, SpecialistWorkItemBoundary, WorkItemView } from '../../../src/activation/workitem-store.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * Phase 1 acceptance. The load-bearing assertions here are:
@@ -159,6 +159,8 @@ function makeSdk(record: { createArgs?: Record<string, unknown> }, session: PiAg
         };
       }
       record.createArgs = options;
+      // Model pi's prompt source faithfully: the loader, never a `systemPrompt` option (HIRYUEN-774).
+      (session as { systemPrompt?: string }).systemPrompt = piSessionSystemPrompt(options?.resourceLoader);
       // Model pi's HARD FILTER faithfully: the session exposes exactly the tools it was
       // named, no more. Without this the fake reports a fixed list and every activation
       // passes the post-load verification for the wrong reason (SPECIALISTS-42).
@@ -281,7 +283,7 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 3000): Promise<vo
 
 const hostWorkspaces: string[] = [];
 function hostWorkspace(): string {
-  const root = mkdtempSync(join(tmpdir(), 'native-host-ws-'));
+  const root = tempDir('native-host-ws-');
   hostWorkspaces.push(root);
   return root;
 }
@@ -1592,6 +1594,8 @@ describe('NativeActivationHost — fallback walk + retry (unitAI-3emr7)', () => 
         if (Array.isArray((options as { tools?: unknown } | undefined)?.tools)) {
           session.setActiveToolsByName((options as { tools: string[] }).tools);
         }
+        // Faithful to pi: the prompt comes from the loader (HIRYUEN-774).
+        (session as { systemPrompt?: string }).systemPrompt = piSessionSystemPrompt(options?.resourceLoader);
         return { session };
       },
       DefaultResourceLoader: FakeResourceLoader,
@@ -1628,7 +1632,7 @@ function expectNoFallbackHop(sink: { names: string[] }, created: unknown[]): voi
  * the definition flag; only this file can grant the route on the machine.
  */
 function withOperatorSwitch(enabled: boolean): () => void {
-  const dir = mkdtempSync(join(tmpdir(), 'operator-config-'));
+  const dir = tempDir('operator-config-');
   mkdirSync(join(dir, 'specialists'), { recursive: true });
   if (enabled) {
     writeFileSync(join(dir, 'specialists', 'user.json'), JSON.stringify({ claude_bridge: { enabled: true } }));
@@ -1644,7 +1648,7 @@ function withOperatorSwitch(enabled: boolean): () => void {
 
 /** A real extension entry, so "not loaded" can never be explained by the file being absent. */
 function withBridgeEntry(): { entry: string; restore: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), 'bridge-fixture-'));
+  const dir = tempDir('bridge-fixture-');
   const entry = join(dir, 'index.js');
   writeFileSync(entry, 'export default () => {};\n');
   const previous = process.env.SPECIALISTS_CLAUDE_BRIDGE_PATH;
@@ -1708,6 +1712,8 @@ function chainHost(opts: {
     sessions: PiAgentSessionLike[];
     unavailable?: string[];
     permission?: string;
+    /** Replaces the single-spec fake loader: used to make a RETRY read a different answer. */
+    loader?: unknown;
   }) {
     const created: unknown[] = [];
     const sink = collectingSink();
@@ -1715,7 +1721,7 @@ function chainHost(opts: {
     if (opts.permission) (spec.specialist.execution as Record<string, unknown>).permission_required = opts.permission;
     const host = new NativeActivationHost({
             provisionWriterWorkspace: workspaceIdentityFor,
-            loader: loaderFor(spec),
+            loader: (opts.loader ?? loaderFor(spec)) as never,
       workItems: fakeWorkItems(),
       forensics: sink,
       loadSdk: async () => chainSdk(created, opts.sessions, opts.unavailable),
@@ -1732,6 +1738,23 @@ function chainHost(opts: {
 
   const start = (host: NativeActivationHost) => host.start({
     specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+  });
+
+  it('gives every fallback session the role prompt, not only the first (HIRYUEN-774)', async () => {
+    const first = scriptSession([{ throw: quotaError() }]);
+    const fallback = scriptSession([{ text: 'recovered' }]);
+    const { host, created } = chainHost({
+      executionExtra: { fallback_models: ['fallbackprov/fallback-model'] },
+      sessions: [first, fallback],
+    });
+
+    const result = await (await start(host)).result;
+
+    expect(result.status).toBe('completed');
+    expect(created).toHaveLength(2);
+    for (const session of [first, fallback]) {
+      expect(session.systemPrompt).toContain('You are the researcher.');
+    }
   });
 
   it('walks fallback_models after a thrown FreeUsageLimitError and records the winner', async () => {
@@ -2328,6 +2351,39 @@ function chainHost(opts: {
     expect(session.prompts).toHaveLength(1);
   });
 
+  it('refuses a RETRY of a listed Specialist whose block resolves no bridged model, with the dedicated code (SPECIALISTS-4442)', async () => {
+    // Dispatch reads the merged spec; the retry re-reads the SAME loader entry, so a refused
+    // Specialist stays refused instead of being retried onto whatever model the repo wrote.
+    const { ClaudeBridgeRouteModelMismatchError } = await import('../../../src/specialist/loader.js');
+    const mismatch = new ClaudeBridgeRouteModelMismatchError(
+      'researcher',
+      'anthropic/claude-sonnet-4-6',
+      '/tmp/user.json',
+      null,
+    );
+    let calls = 0;
+    const loader = {
+      get: async () => {
+        calls += 1;
+        if (calls === 1) return readOnlySpec({ model: 'primaryprov/primary-model' });
+        throw mismatch;
+      },
+    };
+    const { host } = chainHost({
+      loader,
+      sessions: [scriptSession([{ text: '', stopReason: 'error', errorMessage: 'permanent boom' }])],
+    });
+
+    const handle = await start(host);
+    expect((await handle.result).status).toBe('failed');
+
+    const refusal = await host.retry(handle.activationId, { modelOverride: 'otherprov/other-model' })
+      .catch((caught: unknown) => caught) as DispatchRejectedError;
+    expect(refusal.reason).toBe('claude_bridge_route_model_mismatch');
+    expect(String(refusal.detail?.note)).toContain('claude_bridge');
+    expect(calls).toBe(2);
+  });
+
   it("refuses a bridged model with today's message when the definition does not select the route (SPECIALISTS-4405)", async () => {
     const restore = withOperatorSwitch(true);
     try {
@@ -2482,8 +2538,72 @@ function chainHost(opts: {
 
       expect(refusal.reason).toBe('model_unavailable');
       expect(String(refusal.detail?.note)).toContain('did not register on the session runtime');
+      // SPECIALISTS-4441: the note reports the concrete cause, not just the symptom.
+      expect(String(refusal.detail?.note)).toContain('provider "claude-bridge" is absent on the runtime');
       // A refused session must not be left alive holding tools and a lease.
       expect(session.disposed).toBe(true);
+    } finally {
+      restore();
+      bridge.restore();
+    }
+  });
+
+  it('emits session_start before verifying a bridged model, so a provider registered there resolves (SPECIALISTS-4441)', async () => {
+    // The real failure: createAgentSession builds the session but never emits session_start, and
+    // pi-claude-bridge registers its provider from that handler for every module instance after
+    // the first in a process. A double whose provider appears ONLY when bindExtensions runs is a
+    // faithful reproduction: without the binding step this dispatch is refused.
+    const bridge = withBridgeEntry();
+    const restore = withOperatorSwitch(true);
+    try {
+      const record: { createArgs?: Record<string, unknown> } = {};
+      const order: string[] = [];
+      const registered = { value: false };
+      const modelRuntime = {
+        hasConfiguredAuth: () => true,
+        registerProvider: () => undefined,
+        getProvider: (name: string) => (registered.value ? { id: name } : undefined),
+        refresh: async () => { order.push('refresh'); },
+      };
+      const session = Object.assign(fakeSession({ record: {} }), {
+        bindExtensions: async () => {
+          order.push('bind');
+          registered.value = true;
+        },
+      });
+      const sdk = {
+        ...makeSdk(record, session),
+        ModelRuntime: { create: async () => modelRuntime },
+        resolveModelScopeWithDiagnostics: () => {
+          order.push('resolve');
+          if (!registered.value) {
+            return {
+              scopedModels: [],
+              diagnostics: [{ type: 'warning', code: 'no-match', message: 'No models match pattern "claude-bridge/claude-opus-5-5"' }],
+            };
+          }
+          return { scopedModels: [{ model: { id: 'claude-opus-5-5', provider: 'claude-bridge' } }], diagnostics: [] };
+        },
+      } as unknown as PiSdk;
+      const spec = readOnlySpec({ model: 'claude-bridge/claude-opus-5-5', claude_bridge: true });
+      const host = new NativeActivationHost({
+            provisionWriterWorkspace: workspaceIdentityFor,
+            loader: loaderFor(spec),
+        workItems: fakeWorkItems(),
+        forensics: collectingSink(),
+        loadSdk: async () => sdk,
+        cwd: hostWorkspace(),
+      });
+
+      const handle = await start(host);
+      const result = await handle.result;
+
+      expect(result.status).toBe('completed');
+      // The lifecycle was emitted exactly once, before the verify step that needs the provider.
+      expect(order.filter(step => step === 'bind')).toHaveLength(1);
+      expect(order.lastIndexOf('resolve')).toBeGreaterThan(order.indexOf('bind'));
+      // And the session was given the runtime the provider landed on.
+      expect(record.createArgs?.modelRuntime).toBe(modelRuntime);
     } finally {
       restore();
       bridge.restore();
@@ -3055,10 +3175,11 @@ describe('permission-guard native surface', () => {
     expect((record.createArgs!.tools as string[])).not.toContain('bash');
   });
 
-  it('propagates PI_SPECIALIST_PERMISSION_TIER=READ_ONLY into the native activation process', async () => {
-    // SPECIALISTS-4294: the CLI merges the tier env channel per spawn
-    // (src/pi/session.ts); the native in-process guard reads process.env, so the host
-    // must set it — otherwise tierRefusal is dead on the native surface.
+  it('does not write the guard tier into the host process env (SPECIALISTS-4456)', async () => {
+    // SPECIALISTS-4294 put the tier on process.env so the in-process guard could read it.
+    // That was the wrong channel: the guard is loaded only for READ_ONLY sessions and its
+    // sandbox is unconditional, so the value protected nothing, while the write landed on
+    // whoever dispatched the activation. The tier env stays a CLI-spawn channel.
     const TIER_KEY = 'PI_SPECIALIST_PERMISSION_TIER';
     const previousTier = process.env[TIER_KEY];
     delete process.env[TIER_KEY];
@@ -3067,39 +3188,95 @@ describe('permission-guard native surface', () => {
       const record: { createArgs?: Record<string, unknown> } = {};
       const session = fakeSession({ record });
       await dispatchReadOnly(record, session);
-      expect(process.env[TIER_KEY]).toBe('READ_ONLY');
+      expect(process.env[TIER_KEY]).toBeUndefined();
+      // The guard itself is still loaded for the READ_ONLY session; only the env write is gone.
+      const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
+      expect(loader.options.additionalExtensionPaths.some((path: string) => path.includes('permission-guard'))).toBe(true);
     } finally {
       if (previousTier === undefined) delete process.env[TIER_KEY];
       else process.env[TIER_KEY] = previousTier;
     }
   });
 
-  it('leaves the tier channel unset for writer tiers (phase 1 is READ_ONLY only)', async () => {
-    const TIER_KEY = 'PI_SPECIALIST_PERMISSION_TIER';
-    const previousTier = process.env[TIER_KEY];
-    delete process.env[TIER_KEY];
-    try {
-      process.env[GUARD_KEY] = '1';
-      const spec = readOnlySpec();
-      (spec.specialist.execution as Record<string, unknown>).permission_required = 'HIGH';
-      const record: { createArgs?: Record<string, unknown> } = {};
-      const session = fakeSession({ record });
-      const host = new NativeActivationHost({
-        provisionWriterWorkspace: workspaceIdentityFor,
-        loader: loaderFor(spec),
-        workItems: fakeWorkItems(),
-        forensics: collectingSink(),
-        loadSdk: async () => makeSdk(record, session),
-        cwd: hostWorkspace(),
-      });
-      await (await host.start({
-        specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
-      })).result;
-      expect(process.env[TIER_KEY]).toBeUndefined();
-    } finally {
-      if (previousTier === undefined) delete process.env[TIER_KEY];
-      else process.env[TIER_KEY] = previousTier;
-    }
+  it('leaves the host process environment byte-identical across a dispatch (SPECIALISTS-4456)', async () => {
+    // The regression this Issue exists for: a Pi worker dispatched a read-tier activation and
+    // then found XTRM_ROLE=reviewer in its own environment, so `git push` refused with "the
+    // reviewer role does not push; no credential is offered". A full snapshot, because the
+    // leak was several keys (role, holder, GIT_*, tier) and a per-key assertion would pass
+    // while the next key leaked.
+    const spec = readOnlySpec({ permission_required: 'LOW' });
+    const bashOptions: unknown[] = [];
+    const session = fakeSession({});
+    const sdk = {
+      createAgentSession: async (options?: Record<string, unknown>) => {
+        const systemPrompt = String((options as { systemPrompt?: unknown } | undefined)?.systemPrompt ?? '');
+        if (systemPrompt.includes('never prompted')) {
+          return { session: { ...fakeSession({}), getActiveToolNames: () => ['read'], setActiveToolsByName() {} } };
+        }
+        if (Array.isArray(options?.tools)) session.setActiveToolsByName(options.tools as string[]);
+        return { session };
+      },
+      DefaultResourceLoader: FakeResourceLoader,
+      getAgentDir: () => FAKE_AGENT_DIR,
+      ModelRuntime: { create: async () => ({ hasConfiguredAuth: () => true }) },
+      resolveModelScopeWithDiagnostics: () => ({
+        scopedModels: [{ model: { id: 'test-model', provider: 'testprov' } }],
+        diagnostics: [],
+      }),
+      defineTool: (d: Record<string, unknown>) => d,
+      createEditTool: () => ({ name: 'edit', execute: async () => 'edited' }),
+      createWriteTool: () => ({ name: 'write', execute: async () => 'written' }),
+      // Records the options, which is how the identity reaches the child: the tool is
+      // reconstructed here, so this is the ONLY place the overlay can be attached.
+      createBashTool: (...factoryArgs: unknown[]) => {
+        bashOptions.push(factoryArgs[1]);
+        return { name: 'bash', execute: async () => 'ran' };
+      },
+      createPowerShellTool: () => ({ name: 'powershell', execute: async () => 'ran' }),
+    } as unknown as PiSdk;
+    const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
+      loader: loaderFor(spec),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+      // A real identity answer, so the leak would have had something to leak.
+      identityEnvRun: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          env: {
+            XTRM_ROLE: 'reviewer',
+            GIT_AUTHOR_NAME: 'xtrm-reviewer',
+            GIT_AUTHOR_EMAIL: 'reviewer@example.test',
+            GIT_CONFIG_COUNT: '1',
+            GIT_CONFIG_KEY_0: 'credential.helper',
+            GIT_CONFIG_VALUE_0: '',
+          },
+        }),
+      }),
+    });
+
+    const before = { ...process.env };
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+    // Byte-identical: same keys, same values, nothing added, nothing removed.
+    expect({ ...process.env }).toEqual(before);
+
+    // ...and the identity still reaches the activation's own shells.
+    const withHook = bashOptions.filter((options) => options && typeof options === 'object') as Array<{
+      spawnHook: (context: { command: string; cwd: string; env: NodeJS.ProcessEnv }) => {
+        command: string; cwd: string; env: NodeJS.ProcessEnv;
+      };
+    }>;
+    expect(withHook.length).toBeGreaterThan(0);
+    const applied = withHook[0]!.spawnHook({ command: 'git status', cwd: '/tmp', env: { PATH: '/usr/bin' } });
+    expect(applied.env.XTRM_ROLE).toBe('reviewer');
+    expect(applied.env.GIT_AUTHOR_NAME).toBe('xtrm-reviewer');
+    expect(applied.env.GIT_CONFIG_KEY_0).toBe('credential.helper');
+    expect(applied.env.PATH).toContain('/usr/bin');
+    expect(applied.command).toBe('git status');
   });
 });
 
@@ -3206,7 +3383,8 @@ describe('output contract schema parity (SPECIALISTS-5)', () => {
     await (await host.start({
       specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     })).result;
-    return record.createArgs!.systemPrompt as string;
+    // The role prompt as the loader hands it to pi, not the session option pi ignores (HIRYUEN-774).
+    return (record.createArgs!.resourceLoader as FakeResourceLoader).getAppendSystemPrompt().join('\n\n');
   }
 
   it('puts the declared schema in the native system prompt', async () => {
@@ -5218,5 +5396,137 @@ describe('createActivationResourceLoader codemode builtin', () => {
     });
     const options = (loader as unknown as FakeResourceLoader).options as Record<string, unknown>;
     expect(options.extensionFactories).toBeUndefined();
+  });
+});
+
+
+/**
+ * HIRYUEN-774. pi takes a session's system prompt ONLY from its resource loader:
+ * `createAgentSession` seeds the agent with an empty prompt and ignores a `systemPrompt`
+ * option. The native host used to pass the built role prompt as that ignored option, so every
+ * native activation ran on pi's generic coding preamble with no role prompt at all, and the
+ * tests above only ever read the ignored option back. These tests read what the provider sees.
+ */
+describe('the role prompt reaches the model (HIRYUEN-774)', () => {
+  async function run(promptExtra: Record<string, unknown> = {}) {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const spec = readOnlySpec() as { specialist: { prompt: Record<string, unknown> } };
+    Object.assign(spec.specialist.prompt, { system: 'ROLE-MARKER-774: you are the researcher.' }, promptExtra);
+    const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
+      loader: loaderFor(spec as Record<string, unknown>),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => makeSdk(record, session),
+      cwd: hostWorkspace(),
+    });
+    await (await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    })).result;
+    const loader = record.createArgs!.resourceLoader as FakeResourceLoader;
+    return { record, session, loader, livePrompt: (session as { systemPrompt?: string }).systemPrompt ?? '' };
+  }
+
+  it('appends the built role prompt through the loader by default, after pi\'s preamble', async () => {
+    const { loader, livePrompt, record } = await run();
+    const appended = loader.getAppendSystemPrompt();
+    expect(appended).toHaveLength(1);
+    expect(appended[0]).toContain('ROLE-MARKER-774');
+    // The full built prompt, not just the template: the run-context block rides along.
+    expect(appended[0]).toContain('Your task issue is: ISSUE-1');
+    expect(loader.getSystemPrompt()).toBeUndefined();
+    expect(livePrompt).toContain(PI_DEFAULT_PREAMBLE);
+    expect(livePrompt).toContain('ROLE-MARKER-774');
+    // The option pi ignores is no longer where the prompt goes.
+    expect(record.createArgs).not.toHaveProperty('systemPrompt');
+  });
+
+  it('replaces pi\'s preamble with the role prompt when system_prompt_mode is replace', async () => {
+    const { loader, livePrompt } = await run({ system_prompt_mode: 'replace' });
+    expect(loader.getSystemPrompt()).toContain('ROLE-MARKER-774');
+    expect(loader.getAppendSystemPrompt()).toEqual([]);
+    expect(livePrompt).toContain('ROLE-MARKER-774');
+    expect(livePrompt).not.toContain(PI_DEFAULT_PREAMBLE);
+  });
+
+  it('refuses before any model turn when the live session prompt lacks the role prompt', async () => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const sdk = makeSdk(record, session);
+    const create = sdk.createAgentSession;
+    // A runtime that drops the role prompt: the session shows pi's preamble only.
+    sdk.createAgentSession = async (options) => {
+      const created = await create(options);
+      (created.session as { systemPrompt?: string }).systemPrompt = PI_DEFAULT_PREAMBLE;
+      return created;
+    };
+    const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
+      loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+
+    const refusal = await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    }).then(() => null, (thrown: unknown) => thrown);
+
+    expect((refusal as DispatchRejectedError).reason).toBe('system_prompt_not_applied');
+    expect((session as unknown as { disposed: boolean }).disposed).toBe(true);
+    expect((session as unknown as { prompts: string[] }).prompts).toHaveLength(0);
+  });
+
+  it.each([
+    ['drops the prompt options', class extends FakeResourceLoader {
+      override getSystemPrompt(): string | undefined { return undefined; }
+      override getAppendSystemPrompt(): string[] { return []; }
+    }],
+    ['has no prompt getters', class extends FakeResourceLoader {
+      override getSystemPrompt = undefined as unknown as FakeResourceLoader['getSystemPrompt'];
+      override getAppendSystemPrompt = undefined as unknown as FakeResourceLoader['getAppendSystemPrompt'];
+    }],
+  ])('refuses before creating any session when the loader %s', async (_label, Loader) => {
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({ record });
+    const base = makeSdk(record, session);
+    // The previously unguarded case: the live session exposes no string prompt, so only the
+    // loader check can refuse.
+    const sdk = {
+      ...base,
+      DefaultResourceLoader: Loader,
+      createAgentSession: async (options?: Record<string, unknown>) => {
+        const created = await base.createAgentSession(options);
+        delete (created.session as { systemPrompt?: string }).systemPrompt;
+        return created;
+      },
+    } as unknown as PiSdk;
+    const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
+      loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems(),
+      forensics: collectingSink(),
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+
+    const refusal = await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    }).then(() => null, (thrown: unknown) => thrown);
+
+    expect((refusal as DispatchRejectedError).reason).toBe('system_prompt_not_applied');
+    expect(record.createArgs).toBeUndefined();
+    expect((session as unknown as { prompts: string[] }).prompts).toHaveLength(0);
+  });
+
+  it('createActivationResourceLoader passes no prompt option for an empty role prompt', () => {
+    const sdk = { DefaultResourceLoader: FakeResourceLoader, getAgentDir: () => FAKE_AGENT_DIR } as unknown as PiSdk;
+    const options = (createActivationResourceLoader(sdk, {
+      cwd: '/tmp/x', skillPaths: [], rolePrompt: { text: '' },
+    }) as unknown as FakeResourceLoader).options;
+    expect(options).not.toHaveProperty('systemPrompt');
+    expect(options).not.toHaveProperty('appendSystemPrompt');
   });
 });

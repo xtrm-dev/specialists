@@ -1,9 +1,10 @@
 // ISSUE: xtrm-wiy5n.4.11 — static skip remains tracked.
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+
 import { spawnSync } from 'node:child_process';
+import { tempDir } from '../../utils/temp-dir.js';
 
 // Source bug: `config show <spec> --resolved` reports package canonical manifest,
 // not globally overlaid manifest, for Phase 1 user.json fields.
@@ -68,7 +69,7 @@ describe.skip('integration: config show --resolved global Phase 1 overlay', () =
   }
 
   it('shows execution.extensions.serena override in effective manifest', async () => {
-    tempHome = await mkdtemp(join(tmpdir(), 'specialists-config-show-'));
+    tempHome = tempDir('specialists-config-show-');
     originalHome = process.env.HOME;
     originalXdg = process.env.XDG_CONFIG_HOME;
     process.env.HOME = tempHome;
@@ -92,7 +93,7 @@ describe.skip('integration: config show --resolved global Phase 1 overlay', () =
   });
 
   it('shows notes_mode override in effective manifest', async () => {
-    tempHome = await mkdtemp(join(tmpdir(), 'specialists-config-show-'));
+    tempHome = tempDir('specialists-config-show-');
     originalHome = process.env.HOME;
     originalXdg = process.env.XDG_CONFIG_HOME;
     process.env.HOME = tempHome;

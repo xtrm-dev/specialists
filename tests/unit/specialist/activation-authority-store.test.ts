@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { tmpdir, homedir } from 'node:os';
+import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Database } from 'bun:sqlite';
@@ -16,6 +16,7 @@ import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import type { PiSdk, PiAgentSessionLike } from '../../../src/activation/pi-sdk.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import type { SpecialistWorkItemBoundary, WorkItemView } from '../../../src/activation/workitem-store.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 type ReadDb = {
   prepare(sql: string): { all(...p: unknown[]): Array<Record<string, unknown>> };
@@ -39,7 +40,7 @@ const HOOK_COLUMNS = ['activation_id', 'specialist', 'state', 'bead_id', 'last_a
 
 const tmpRoots: string[] = [];
 function tmpRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), 'authority-store-'));
+  const root = tempDir('authority-store-');
   tmpRoots.push(root);
   return root;
 }

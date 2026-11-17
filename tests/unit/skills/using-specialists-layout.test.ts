@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpSync, existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
+import { tempDir } from '../../utils/temp-dir.js';
 
 const REPO = resolve(__dirname, '../../..');
 const SKILL_DIR = join(REPO, 'config/skills/using-specialists');
@@ -108,7 +108,7 @@ describe('install parity: every shipped resource is in the asset contract', () =
   });
 
   it('a fresh recursive install carries every reference and deterministic helper', () => {
-    const dest = mkdtempSync(join(tmpdir(), 'skill-install-'));
+    const dest = tempDir('skill-install-');
     const installed = join(dest, 'using-specialists');
     cpSync(SKILL_DIR, installed, { recursive: true });
 

@@ -1,9 +1,11 @@
 # Claude Code as a Specialists backend — pi-claude-bridge spike (SPECIALISTS-4403)
 
 > **Historical record.** This is the spike as it was written on 2026-11-08, before the operator's
-> ruling and before the integration landed. The current enablement is **two switches** (the
-> definition selector plus the operator switch in `~/.config/specialists/user.json`), not the
-> definition flag alone — see [claude-bridge.md](./claude-bridge.md). The probe scripts named below
+> ruling and before the integration landed. Enablement has since moved twice: first to two switches
+> (the definition selector plus the operator switch in `~/.config/specialists/user.json`), then, with
+> SPECIALISTS-4442, to an operator **allow list** that names each Specialist and from which the
+> loader derives the definition flag — see [claude-bridge.md](./claude-bridge.md), which is
+> normative. The probe scripts named below
 > are not shipped in this repository; they were scratch files on the spike branch `xt/o9c0`.
 > Kept verbatim otherwise, because the measurements are the evidence for the integration.
 

@@ -11,6 +11,7 @@ import {
 } from '../specialist/observability-db.js';
 import { createObservabilitySqliteClientAtPath } from '../specialist/observability-sqlite.js';
 import { resolveCanonicalAssetDir } from '../specialist/canonical-asset-resolver.js';
+import { runtimeIgnorePatterns } from '../utils/runtime-ignore.js';
 import { SpecialistLoader } from '../specialist/loader.js';
 import { registerNativeSpecialists } from '../pi/native-specialists-registration.js';
 import {
@@ -107,15 +108,11 @@ Rules:
 
 
 const AGENTS_MARKER = '## Specialists';
-const GITIGNORE_ENTRIES = [
-  '.specialists/jobs/',
-  '.specialists/ready/',
-  // S1 runtime result storage holds full raw model output; never commit it.
-  '.specialists/settlements/',
-  '.specialists/db/*.db',
-  '.specialists/db/*.db-wal',
-  '.specialists/db/*.db-shm',
-];
+// One inventory, shared with `provisionWriterWorkspace`'s info/exclude writer: a repository
+// that only ever runs read-tier activations gets its runtime paths ignored here, and a
+// repository that runs writers gets the same set in info/exclude. Two hand-maintained lists
+// is how the coverage drifted.
+const GITIGNORE_ENTRIES = runtimeIgnorePatterns();
 const MCP_FILE = '.mcp.json';
 const MCP_SERVER_NAME = 'specialists';
 const MCP_SERVER_CONFIG = { command: 'specialists', args: [] };
@@ -837,8 +834,10 @@ export async function runGlobal(): Promise<void> {
     if (result.extended.length > 0) {
       ok(`preserved ${result.extended.length} existing specialist${result.extended.length === 1 ? '' : 's'} (user values kept)`);
     }
-    for (const removedName of result.removed) {
-      warn(`${removedName} is no longer shipped but kept in file (remove manually if unwanted)`);
+    for (const missingName of result.notInstalledHere) {
+      // Kept and backfilled, never removed: deleting it would drop this machine's setting for a
+      // specialist another machine installs (SPECIALISTS-4448).
+      warn(`${missingName} is not installed on this machine; its entry is kept in the full template shape`);
     }
   } else {
     writeGlobalUserConfig(location, template);

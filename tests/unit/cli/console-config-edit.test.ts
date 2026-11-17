@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+
 import { join } from 'node:path';
 import {
   applyFieldEdit,
@@ -15,6 +15,7 @@ import {
   reduceConsoleState,
 } from '../../../src/cli/console/view-model.js';
 import { buildSpecialistOverrideTemplate } from '../../../src/specialist/global-config.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 function completeTemplate() {
   return buildSpecialistOverrideTemplate();
@@ -139,7 +140,7 @@ describe('writeGlobalConfigSafe — round-trip + mtime check', () => {
   const originalHome = process.env.HOME;
 
   beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), 'sp-console-cfg-edit-'));
+    tmp = tempDir('sp-console-cfg-edit-');
     process.env.XDG_CONFIG_HOME = tmp;
     process.env.HOME = tmp;
     mkdirSync(join(tmp, 'specialists'), { recursive: true });

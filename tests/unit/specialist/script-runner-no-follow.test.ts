@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { computeSkillSources } from '../../../src/specialist/script-runner.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
@@ -19,7 +19,7 @@ afterEach(() => {
 
 describe('computeSkillSources secure open support', () => {
   it('fails closed when O_NOFOLLOW is unavailable', () => {
-    tempRoot = mkdtempSync(join(tmpdir(), 'skill-no-follow-'));
+    tempRoot = tempDir('skill-no-follow-');
     const skillFile = join(tempRoot, 'SKILL.md');
     writeFileSync(skillFile, '# skill');
     const spec = {

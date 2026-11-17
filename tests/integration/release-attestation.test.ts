@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { cp, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { cp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { tempDir } from '../utils/temp-dir.js';
 
 const run = promisify(execFile);
 const script = path.resolve('scripts/generate-release-attestation.mjs');
@@ -60,7 +61,7 @@ afterEach(async () => {
 });
 
 async function makeFixture(opts: { version?: string } = {}) {
-  const dir = await mkdtemp(path.join(tmpdir(), 'release-attestation-'));
+  const dir = tempDir('release-attestation-');
   dirs.push(dir);
   const repo = path.join(dir, 'repo');
   const version = opts.version ?? '4.2.0';
@@ -304,13 +305,39 @@ describe('package-payload release contract', () => {
   it('builds reproducibly and validates a detached receipt before pinned upload', async () => {
     const workflow = await readFile('.github/workflows/package-payload.yml', 'utf8');
     const validation = workflow.indexOf('EXPECTED_SOURCE_COMMIT=');
-    const upload = workflow.indexOf('uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02');
+    // Match the upload step by action, not by its pinned SHA: the pin moves with dependency
+    // updates, and hard-coding it turned a routine action bump into a test failure.
+    const uploadMatch = /uses: actions\/upload-artifact@[0-9a-f]{40}/.exec(workflow);
 
     expect(validation).toBeGreaterThan(-1);
-    expect(upload).toBeGreaterThan(validation);
-    expect(workflow).toContain('NODE_ENV=test bun run build');
-    expect(workflow).toContain('git diff --exit-code -- dist/');
-    expect(workflow).toContain('git status --porcelain --untracked-files=all -- dist/');
+    expect(uploadMatch).not.toBeNull();
+    expect(uploadMatch?.index ?? -1).toBeGreaterThan(validation);
+    // The raw build + diff pair moved into one guard (SPECIALISTS-4445); this pins the property the
+    // lines existed for — BOTH payload jobs check dist/ reproducibility, and drift fails the job —
+    // rather than the literal commands that implemented it.
+    //
+    // Asserted per job, not per file: a whole-file `toContain` is satisfied by whichever job still
+    // has the invocation, so replacing it in the other job mutated this test green (review round 4,
+    // mutations A and B), and the same weakness let `--json --write` and `|| true` through.
+    const jobSlice = (start: string, end?: string): string => {
+      const from = workflow.indexOf(`\n  ${start}:`);
+      expect(from).toBeGreaterThan(-1);
+      const to = end ? workflow.indexOf(`\n  ${end}:`) : workflow.length;
+      expect(to).toBeGreaterThan(from);
+      return workflow.slice(from, end ? to : workflow.length);
+    };
+
+    for (const job of ['payload-contract', 'packed-smoke']) {
+      const slice = jobSlice(job, job === 'payload-contract' ? 'packed-smoke' : undefined);
+      expect(slice, `${job} must invoke the reproducibility guard`).toContain(
+        'node scripts/check-dist-reproducible.mjs',
+      );
+      // `--write` returns 0 after a mismatch, so a job that passes it packs a bundle nobody
+      // committed. `|| true` and `continue-on-error` would have the same effect.
+      expect(slice, `${job} must not pass --write`).not.toMatch(/-dist-reproducible\.mjs[^\n]*--write/);
+      expect(slice, `${job} must not swallow the guard failure`).not.toMatch(/-dist-reproducible\.mjs[^\n]*\|\|/);
+      expect(slice, `${job} must not ignore the step failure`).not.toContain('continue-on-error: true');
+    }
     expect(workflow).toContain("tarball_name=$(npm pack --pack-destination /tmp --json | jq -r '.[0].filename')");
     expect(workflow).toContain('tarball="/tmp/$tarball_name"');
     expect(workflow).not.toContain('cp "$tarball" /tmp/sp-test.tgz');
@@ -356,7 +383,7 @@ describe('package-payload release contract', () => {
 
   it('fails closed on symlinked declarations without mutating outside files', async () => {
     const { postprocessBuild } = await loadPostprocessor();
-    const dir = await mkdtemp(path.join(tmpdir(), 'postprocess-build-'));
+    const dir = tempDir('postprocess-build-');
     dirs.push(dir);
     const repo = path.join(dir, 'repo');
     const distTypes = path.join(repo, 'dist', 'types');
@@ -376,7 +403,7 @@ describe('package-payload release contract', () => {
 
   it('fails closed on symlinked dist root without mutating outside files', async () => {
     const { postprocessBuild } = await loadPostprocessor();
-    const dir = await mkdtemp(path.join(tmpdir(), 'postprocess-build-'));
+    const dir = tempDir('postprocess-build-');
     dirs.push(dir);
     const repo = path.join(dir, 'repo');
     const outsideDir = path.join(dir, 'outside-dist');
@@ -398,7 +425,7 @@ describe('package-payload release contract', () => {
 
   it('fails closed on symlinked dist/types root without mutating outside files and without partially rewriting the cli', async () => {
     const { postprocessBuild } = await loadPostprocessor();
-    const dir = await mkdtemp(path.join(tmpdir(), 'postprocess-build-'));
+    const dir = tempDir('postprocess-build-');
     dirs.push(dir);
     const repo = path.join(dir, 'repo');
     const distPath = path.join(repo, 'dist');

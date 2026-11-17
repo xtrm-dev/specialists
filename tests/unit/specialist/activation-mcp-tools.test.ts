@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -44,6 +43,7 @@ import { CircuitBreaker } from '../../../src/utils/circuitBreaker.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import { testWorkItems } from '../../utils/test-work-items.js';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /**
  * PRD Phase 13 — the MCP frontend over NativeActivationHost.
@@ -149,7 +149,7 @@ function fakeSession(failFirst?: { stopReason: string; errorMessage: string }, h
  * the developer's live state.
  */
 function tempWorkspace() {
-  const root = mkdtempSync(join(tmpdir(), 'mcp-tools-ws-'));
+  const root = tempDir('mcp-tools-ws-');
   workspaces.push(root);
   return { repositoryRoot: root, worktreePath: root };
 }

@@ -6,6 +6,8 @@
 /** The 7-section task contract, in the order an operator writes them. */
 export declare const REQUIRED_SECTIONS: readonly ["PROBLEM", "SUCCESS", "SCOPE", "NON_GOALS", "CONSTRAINTS", "VALIDATION", "OUTPUT"];
 export declare const SCRUTINY_LEVELS: readonly ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+/** How far past the SCRUTINY heading its level may appear on the same line. */
+export declare const SCRUTINY_LEVEL_WINDOW = 200;
 /**
  * Split work-contract text into its sections, keyed by canonical heading name.
  *
