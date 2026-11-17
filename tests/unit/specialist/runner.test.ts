@@ -198,6 +198,9 @@ describe('SpecialistRunner', () => {
       SUBSTRATE_HOLDER: 'sp-test-spec-abc12345',
       XTRM_ROLE: 'reviewer',
       GIT_AUTHOR_NAME: 'sp-reviewer',
+      // CORE-2722: the child is the specialist, not the lead that launched it.
+      XTMUX_AGENT_ROLE: 'test-spec',
+      XTRM_AGENT_NAME: 'sp-test-spec-abc12345',
     });
     expect(identityEnvRun).toHaveBeenCalledWith(
       'xt',
