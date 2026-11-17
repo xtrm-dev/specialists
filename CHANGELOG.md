@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Select the Claude Code route with an operator allow list (SPECIALISTS-4442) (#554) ([36b89e2](https://github.com/xtrm-dev/specialists/commit/36b89e2464ab48a21486fb85d320b5ac7615f9ed))
+- Guard dist/ reproducibility so a wrong bun cannot ship (SPECIALISTS-4445) (#556) ([0bae6e1](https://github.com/xtrm-dev/specialists/commit/0bae6e14cbe63684620d097911470a79f7af719c))
+- Reconcile XTRM-96 with N3 telemetry and bounded readers (#403) ([82ef77a](https://github.com/xtrm-dev/specialists/commit/82ef77a55ae4e4240ec661d1d450fb3bae9e4109))
+
 ### Fixed
 - Harden the release pre-flight (SPECIALISTS-4429) (#541) ([387e9fc](https://github.com/xtrm-dev/specialists/commit/387e9fc55f067c877844ecf950a61c3e96273337))
 - Anchor the PI_VERSION override and always clean in warning mode (SPECIALISTS-4429) (#542) ([09a7624](https://github.com/xtrm-dev/specialists/commit/09a7624d18b492526a8c7ea34706320f440a3a71))
@@ -16,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Refuse prototype-walking edit paths and scrub stacks from the serve wire (SPECIALISTS-4432) (#546) ([982c132](https://github.com/xtrm-dev/specialists/commit/982c132b0ca72ea7ba1cc4920301747903b13630))
 - Break same-millisecond ties by id (SPECIALISTS-4436) (#548) ([34d4dd0](https://github.com/xtrm-dev/specialists/commit/34d4dd059e934eea32e3811bb8f84d4bcecbb3a2))
 - A lead-launched specialist exports its own role, not the lead's (CORE-2722) ([ea2dc3c](https://github.com/xtrm-dev/specialists/commit/ea2dc3c2fdf200553608e6eb64a1273be9315dee))
+- Emit session_start so extension provider registrations land (SPECIALISTS-4441) (#553) ([5be0349](https://github.com/xtrm-dev/specialists/commit/5be0349af688784b1434d746b609432701a5dce3))
+- Specialists master fully green (SPECIALISTS-4444) (#555) ([1933773](https://github.com/xtrm-dev/specialists/commit/19337736f34de89333db4e7e3d81c9dc0aec8b58))
+- Backfill the full override template into every user.json entry (SPECIALISTS-4448) (#560) ([7789e21](https://github.com/xtrm-dev/specialists/commit/7789e2192514d19fb6789d540f365cfb6c918f4e))
+- Declare the bun ecosystem so Dependabot can update bun.lock (SPECIALISTS-4449) (#562) ([d6fe370](https://github.com/xtrm-dev/specialists/commit/d6fe37062f47db80bd1f97b17c35615ec81aa479))
+- Route unmanaged warning/alert output through managed UI (SPECIALISTS-4460) (#571) ([34f0810](https://github.com/xtrm-dev/specialists/commit/34f08103d29c06b7d84ba82eea994cf3fdc41052))
+- Pin pi runtime; surface provider api_error on empty assistant text (DARTHFEEDOR-1207) (#416) ([c9071aa](https://github.com/xtrm-dev/specialists/commit/c9071aa7aa36ec32c274435d4c8349d51ddd7373))
+- Pass the role prompt to pi through the resource loader (HIRYUEN-774) (#575) ([df4e932](https://github.com/xtrm-dev/specialists/commit/df4e9322e0cdd1824a914cc869f33e686a72da09))
+- Give an activation its identity on the bash spawn hook, not on process.env (SPECIALISTS-4456) (#574) ([a10c2ce](https://github.com/xtrm-dev/specialists/commit/a10c2ce2f842964279f849f6b0aad72fab64b427))
+- Clear the open js/* alerts on master (SPECIALISTS-4495) (#578) ([b4c4a72](https://github.com/xtrm-dev/specialists/commit/b4c4a72c4cbc18afc864d036884c92a095f63f04))
 
 ### Project maintenance
 - Make the NODE_ENV assertion prove the override (SPECIALISTS-4429) (#543) ([21be15b](https://github.com/xtrm-dev/specialists/commit/21be15b78a1e6eda9640dea37c350832012b1781))
@@ -25,6 +39,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pin the image's pi instead of tracking latest (SPECIALISTS-4437) (#550) ([31c6303](https://github.com/xtrm-dev/specialists/commit/31c6303df4dbb9775852b3433873d9c7158acfda))
 - Validate the dispatch version, add a pinned row, check the pin (SPECIALISTS-4438) (#551) ([c3bfaac](https://github.com/xtrm-dev/specialists/commit/c3bfaac09d9cd9910967aae6e67be3743b0dc857))
 - Identity env, formal review, Claude Code route (CORE-2623) (#552) ([865c4d5](https://github.com/xtrm-dev/specialists/commit/865c4d52ec74e785c54abd6b3c87014d2a4751ad))
+- Update idna requirement from >=3.15 to >=3.19 (#272) ([7b9bd0c](https://github.com/xtrm-dev/specialists/commit/7b9bd0cec408dbc842fd107caacee6bfb831dba8))
+- State the legacy trigger, the routing surface and the doc's status correctly (SPECIALISTS-4442) (#557) ([cdea77b](https://github.com/xtrm-dev/specialists/commit/cdea77b2875b30beba2df9045d2a1596f227750f))
+- Update zipp requirement from >=3.23.1 to >=4.1.2 (#97) ([814c255](https://github.com/xtrm-dev/specialists/commit/814c255be59789eebe3b4eadcf121fd75e49a71e))
+- Refresh action pins to checkout v7.0.1, setup-node v6, upload-artifact v7, github-script v9 (#559) ([588c683](https://github.com/xtrm-dev/specialists/commit/588c683c719a39e2d0693ad361ad873b14a26419))
+- Bump the npm-minor-and-patch group with 8 updates (#565) ([b76b0c4](https://github.com/xtrm-dev/specialists/commit/b76b0c4a61d34d5f3315dc6a105ac8a0e3310a87))
+- Move vitest and @vitest/coverage-v8 to 5.1.0 together (SPECIALISTS-4459) (#570) ([4805fd6](https://github.com/xtrm-dev/specialists/commit/4805fd69d2ea6f6b5e36ccda68cd8c3d97a46337))
+- Ignore the coverage/ report bundle written by test:coverage (SPECIALISTS-4467) (#572) ([1218426](https://github.com/xtrm-dev/specialists/commit/1218426a1ed3744daa909b75dc4ba168aae97963))
+- Register the bridge-route scratch directory with the CORE-2612 registry (SPECIALISTS-4470) (#573) ([a31c3dc](https://github.com/xtrm-dev/specialists/commit/a31c3dcfc43aad4a1122740af6b2be140538a7a6))
+- Create every scratch directory through tempDir so the CORE-2612 sweep can see it (SPECIALISTS-4474) (#576) ([7a95f4b](https://github.com/xtrm-dev/specialists/commit/7a95f4b18a5f1e8f18b6a01772825e496ef15b09))
+- Teach the operator allow list, not the removed two-switch route (SPECIALISTS-4447) (#577) ([346eea1](https://github.com/xtrm-dev/specialists/commit/346eea1d6a758e3386fe53b8384d8d83aeb41b01))
+- Bump the actions-all group across 1 directory with 3 updates (#561) ([4eb1e50](https://github.com/xtrm-dev/specialists/commit/4eb1e50cd3b9a5d67b590004e7c24ba84749b132))
 
 ## [4.2.0] - 2026-11-11
 
