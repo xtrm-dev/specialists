@@ -224,6 +224,14 @@ export interface PiModelRuntimeLike {
     refresh?: (options?: {
         allowNetwork?: boolean;
     }) => Promise<unknown>;
+    /**
+     * Request auth for a provider or model (pi 1.5.2 `ModelRuntime.getAuth`). Its `env` becomes the
+     * request's provider env, which is how a bridged activation's Claude Code child gets its
+     * identity (SPECIALISTS-4498). Optional: old test doubles lack it.
+     */
+    getAuth?: (providerOrModel: string | {
+        provider?: string;
+    }, overrides?: Record<string, unknown>) => Promise<unknown>;
 }
 export interface PiModelScopeResult {
     scopedModels: Array<{

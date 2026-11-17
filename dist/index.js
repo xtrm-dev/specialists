@@ -94666,6 +94666,42 @@ function hasActivationEnv(overlay, shimDir) {
 }
 var init_activation_bash_env = () => {};
 
+// src/activation/bridge-child-env.ts
+function bridgedChildEnv(overlay) {
+  const isGitConfig = (key) => GIT_CONFIG_PREFIXES2.some((prefix) => key.startsWith(prefix));
+  const gitBlockRepresentable = Object.entries(overlay).every(([key, value]) => !isGitConfig(key) || value !== "");
+  const env = {};
+  for (const [key, value] of Object.entries(overlay)) {
+    if (key === "PATH" || BRIDGE_FORBIDDEN_KEYS.includes(key.toUpperCase()))
+      continue;
+    if (isGitConfig(key) && !gitBlockRepresentable)
+      continue;
+    env[key] = value;
+  }
+  return env;
+}
+function scopeBridgedChildEnv(runtime, overlay, providerId = CLAUDE_BRIDGE_PROVIDER) {
+  const env = bridgedChildEnv(overlay);
+  const original = runtime.getAuth;
+  if (Object.keys(env).length === 0 || typeof original !== "function")
+    return false;
+  runtime.getAuth = async (providerOrModel, overrides) => {
+    const resolution = await original.call(runtime, providerOrModel, overrides);
+    const provider = typeof providerOrModel === "string" ? providerOrModel : providerOrModel?.provider;
+    if (provider !== providerId || !resolution || typeof resolution !== "object")
+      return resolution;
+    const existing = resolution.env;
+    return { ...resolution, env: { ...existing ?? {}, ...env } };
+  };
+  return true;
+}
+var BRIDGE_FORBIDDEN_KEYS, GIT_CONFIG_PREFIXES2;
+var init_bridge_child_env = __esm(() => {
+  init_claude_bridge();
+  BRIDGE_FORBIDDEN_KEYS = ["HOME", "USERPROFILE", "CLAUDE_CONFIG_DIR"];
+  GIT_CONFIG_PREFIXES2 = ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"];
+});
+
 // src/activation/step-contract.ts
 function asStructured(contract) {
   const empty = { problem: "", success: "", scope: [], nonGoals: [], constraints: [], validation: [], output: [] };
@@ -97413,6 +97449,9 @@ class NativeActivationHost {
     if (uncoveredSpawns.length > 0 && hasActivationEnv(activationEnv, activationShimDir)) {
       warnIdentityEnv(`activation ${activationId} grants ${uncoveredSpawns.join(", ")}, whose child processes ` + `inherit the dispatching session's identity rather than the activation's ` + `(SPECIALISTS-4487); its bash and powershell calls carry the activation's`);
     }
+    if (claudeBridge && !scopeBridgedChildEnv(modelRuntime, activationEnv) && Object.keys(activationEnv).length > 0) {
+      warnIdentityEnv(`activation ${activationId}: the model runtime cannot carry a provider env, so its Claude Code ` + `child inherits the dispatching session's identity rather than the activation's (SPECIALISTS-4498)`);
+    }
     const guardedTools = createGuardedTools(sdk, {
       toolNames: effectiveToolContract.toolsList,
       cwd: workspace.worktreePath,
@@ -98775,6 +98814,7 @@ var init_native_host = __esm(() => {
   init_permission_guard_extension();
   init_identity_env();
   init_activation_bash_env();
+  init_bridge_child_env();
   init_resolved_tool_contract();
   init_model_chain();
   init_contract_sections();
