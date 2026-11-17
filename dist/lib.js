@@ -18064,8 +18064,11 @@ function resolveAgentIdentityEnv(input = {}) {
     return {};
   const roleName = (input.roleName ?? "").trim();
   const base = { SUBSTRATE_HOLDER: holder };
-  if (roleName)
+  base.XTRM_AGENT_NAME = holder;
+  if (roleName) {
     base.XTRM_ROLE = roleName;
+    base.XTMUX_AGENT_ROLE = roleName;
+  }
   const run = input.run ?? ((cmd, args, opts) => {
     const result = spawnSync3(cmd, args, {
       encoding: "utf8",
