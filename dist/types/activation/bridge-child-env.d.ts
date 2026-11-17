@@ -29,6 +29,12 @@ import type { PiModelRuntimeLike } from './pi-sdk.js';
  */
 export declare function bridgedChildEnv(overlay: Record<string, string>): Record<string, string>;
 /**
+ * True when `overlay` carries a `GIT_CONFIG_*` block that `bridgedChildEnv` leaves out: one holding
+ * the deliberate empty `GIT_CONFIG_VALUE_*` credential-helper reset. The child then keeps the
+ * dispatching session's git configuration, so the caller says so instead of dropping it silently.
+ */
+export declare function bridgeGitBlockOmitted(overlay: Record<string, string>): boolean;
+/**
  * Lay `overlay` over the provider env `runtime` resolves for `providerId` requests.
  *
  * Instance-scoped on purpose: the runtime is the one this dispatch created, so the dispatcher's

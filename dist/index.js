@@ -94668,17 +94668,19 @@ var init_activation_bash_env = () => {};
 
 // src/activation/bridge-child-env.ts
 function bridgedChildEnv(overlay) {
-  const isGitConfig = (key) => GIT_CONFIG_PREFIXES2.some((prefix) => key.startsWith(prefix));
-  const gitBlockRepresentable = Object.entries(overlay).every(([key, value]) => !isGitConfig(key) || value !== "");
+  const gitBlockRepresentable = !bridgeGitBlockOmitted(overlay);
   const env = {};
   for (const [key, value] of Object.entries(overlay)) {
-    if (key === "PATH" || BRIDGE_FORBIDDEN_KEYS.includes(key.toUpperCase()))
+    if (key.toUpperCase() === "PATH" || BRIDGE_FORBIDDEN_KEYS.includes(key.toUpperCase()))
       continue;
-    if (isGitConfig(key) && !gitBlockRepresentable)
+    if (isGitConfigKey(key) && !gitBlockRepresentable)
       continue;
     env[key] = value;
   }
   return env;
+}
+function bridgeGitBlockOmitted(overlay) {
+  return Object.entries(overlay).some(([key, value]) => isGitConfigKey(key) && value === "");
 }
 function scopeBridgedChildEnv(runtime, overlay, providerId = CLAUDE_BRIDGE_PROVIDER) {
   const env = bridgedChildEnv(overlay);
@@ -94695,7 +94697,7 @@ function scopeBridgedChildEnv(runtime, overlay, providerId = CLAUDE_BRIDGE_PROVI
   };
   return true;
 }
-var BRIDGE_FORBIDDEN_KEYS, GIT_CONFIG_PREFIXES2;
+var BRIDGE_FORBIDDEN_KEYS, GIT_CONFIG_PREFIXES2, isGitConfigKey = (key) => GIT_CONFIG_PREFIXES2.some((prefix) => key.startsWith(prefix));
 var init_bridge_child_env = __esm(() => {
   init_claude_bridge();
   BRIDGE_FORBIDDEN_KEYS = ["HOME", "USERPROFILE", "CLAUDE_CONFIG_DIR"];
@@ -97451,6 +97453,9 @@ class NativeActivationHost {
     }
     if (claudeBridge && !scopeBridgedChildEnv(modelRuntime, activationEnv) && Object.keys(activationEnv).length > 0) {
       warnIdentityEnv(`activation ${activationId}: the model runtime cannot carry a provider env, so its Claude Code ` + `child inherits the dispatching session's identity rather than the activation's (SPECIALISTS-4498)`);
+    }
+    if (claudeBridge && bridgeGitBlockOmitted(activationEnv)) {
+      warnIdentityEnv(`activation ${activationId}: its git credential-helper reset cannot ride the Claude Code route's ` + `provider env, so its Claude Code child's git uses the dispatching session's git configuration (SPECIALISTS-4498)`);
     }
     const guardedTools = createGuardedTools(sdk, {
       toolNames: effectiveToolContract.toolsList,
