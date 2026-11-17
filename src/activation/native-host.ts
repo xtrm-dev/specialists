@@ -91,6 +91,7 @@ import {
   type IdentityEnvRun,
 } from '../pi/identity-env.js';
 import { hasActivationEnv } from './activation-bash-env.js';
+import { bridgeGitBlockOmitted, scopeBridgedChildEnv } from './bridge-child-env.js';
 import { formatResolvedToolContract, withDiscoveredExtensionTools, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 
 /**
@@ -2232,6 +2233,23 @@ export class NativeActivationHost {
         `activation ${activationId} grants ${uncoveredSpawns.join(', ')}, whose child processes ` +
         `inherit the dispatching session's identity rather than the activation's ` +
         `(SPECIALISTS-4487); its bash and powershell calls carry the activation's`,
+      );
+    }
+    // SPECIALISTS-4498: on the Claude Code route the model is a child pi-claude-bridge spawns from
+    // the HOST env plus the request's provider env, so the identity rides that provider env on
+    // this dispatch's own runtime — never `process.env`.
+    if (claudeBridge && !scopeBridgedChildEnv(modelRuntime, activationEnv) && Object.keys(activationEnv).length > 0) {
+      warnIdentityEnv(
+        `activation ${activationId}: the model runtime cannot carry a provider env, so its Claude Code ` +
+        `child inherits the dispatching session's identity rather than the activation's (SPECIALISTS-4498)`,
+      );
+    }
+    // The git credential-helper reset cannot ride the provider env (the bridge turns an empty value
+    // into a delete), so the child keeps the dispatching session's git configuration.
+    if (claudeBridge && bridgeGitBlockOmitted(activationEnv)) {
+      warnIdentityEnv(
+        `activation ${activationId}: its git credential-helper reset cannot ride the Claude Code route's ` +
+        `provider env, so its Claude Code child's git uses the dispatching session's git configuration (SPECIALISTS-4498)`,
       );
     }
     // The tier channel stays on the CLI-spawn path only. In process the guard is loaded

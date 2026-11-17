@@ -20,7 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bound the retained receipts by count and age (SPECIALISTS-4434) (#547) ([61e403e](https://github.com/xtrm-dev/specialists/commit/61e403e5d7c3235c05be047643d180b9ec9e8685))
 - Refuse prototype-walking edit paths and scrub stacks from the serve wire (SPECIALISTS-4432) (#546) ([982c132](https://github.com/xtrm-dev/specialists/commit/982c132b0ca72ea7ba1cc4920301747903b13630))
 - Break same-millisecond ties by id (SPECIALISTS-4436) (#548) ([34d4dd0](https://github.com/xtrm-dev/specialists/commit/34d4dd059e934eea32e3811bb8f84d4bcecbb3a2))
-- A lead-launched specialist exports its own role, not the lead's (CORE-2722) ([ea2dc3c](https://github.com/xtrm-dev/specialists/commit/ea2dc3c2fdf200553608e6eb64a1273be9315dee))
 - Emit session_start so extension provider registrations land (SPECIALISTS-4441) (#553) ([5be0349](https://github.com/xtrm-dev/specialists/commit/5be0349af688784b1434d746b609432701a5dce3))
 - Specialists master fully green (SPECIALISTS-4444) (#555) ([1933773](https://github.com/xtrm-dev/specialists/commit/19337736f34de89333db4e7e3d81c9dc0aec8b58))
 - Backfill the full override template into every user.json entry (SPECIALISTS-4448) (#560) ([7789e21](https://github.com/xtrm-dev/specialists/commit/7789e2192514d19fb6789d540f365cfb6c918f4e))
@@ -30,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pass the role prompt to pi through the resource loader (HIRYUEN-774) (#575) ([df4e932](https://github.com/xtrm-dev/specialists/commit/df4e9322e0cdd1824a914cc869f33e686a72da09))
 - Give an activation its identity on the bash spawn hook, not on process.env (SPECIALISTS-4456) (#574) ([a10c2ce](https://github.com/xtrm-dev/specialists/commit/a10c2ce2f842964279f849f6b0aad72fab64b427))
 - Clear the open js/* alerts on master (SPECIALISTS-4495) (#578) ([b4c4a72](https://github.com/xtrm-dev/specialists/commit/b4c4a72c4cbc18afc864d036884c92a095f63f04))
+- A lead-launched specialist exports its own role (CORE-2722) (#582) ([e6fa1c7](https://github.com/xtrm-dev/specialists/commit/e6fa1c7628d9d7b7753acf2349da70ab7b581e63))
+- A bridged activation's Claude Code child gets the activation identity (SPECIALISTS-4498) ([ed89f3a](https://github.com/xtrm-dev/specialists/commit/ed89f3a5d968650f5de861023cc9f27dff7e7963))
+- Say when a bridged child cannot get the git credential reset, match PATH in any case (SPECIALISTS-4498) ([f4c09ab](https://github.com/xtrm-dev/specialists/commit/f4c09abf69a83dac7041bc3e7376cfc0e3106da6))
 
 ### Project maintenance
 - Make the NODE_ENV assertion prove the override (SPECIALISTS-4429) (#543) ([21be15b](https://github.com/xtrm-dev/specialists/commit/21be15b78a1e6eda9640dea37c350832012b1781))
@@ -50,8 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Create every scratch directory through tempDir so the CORE-2612 sweep can see it (SPECIALISTS-4474) (#576) ([7a95f4b](https://github.com/xtrm-dev/specialists/commit/7a95f4b18a5f1e8f18b6a01772825e496ef15b09))
 - Teach the operator allow list, not the removed two-switch route (SPECIALISTS-4447) (#577) ([346eea1](https://github.com/xtrm-dev/specialists/commit/346eea1d6a758e3386fe53b8384d8d83aeb41b01))
 - Bump the actions-all group across 1 directory with 3 updates (#561) ([4eb1e50](https://github.com/xtrm-dev/specialists/commit/4eb1e50cd3b9a5d67b590004e7c24ba84749b132))
-- The legacy child carries its own XTMUX_AGENT_ROLE and agent name (CORE-2722) ([0cc93e3](https://github.com/xtrm-dev/specialists/commit/0cc93e383a6934a0ac668f8ef509f0d0bd236c46))
-- Rebuild the committed bundle with the pinned bun 1.4.2 (CORE-2722) ([4acca75](https://github.com/xtrm-dev/specialists/commit/4acca75f3458d04dadc13eec81f2c14f56c6ad30))
+- Rebuild the committed bundle with the pinned bun 1.4.2 (SPECIALISTS-4498) ([271b536](https://github.com/xtrm-dev/specialists/commit/271b53696df16005e7db0cec62f8235b3025eec0))
+- Rebuild the committed bundle with the pinned bun 1.4.2 (SPECIALISTS-4498) ([be007a5](https://github.com/xtrm-dev/specialists/commit/be007a56e21a50a942eba9ee213ea6f7e33768c6))
 
 ## [4.2.0] - 2026-11-11
 
