@@ -13,6 +13,7 @@ import {
 import { resolveAgentLaunchEnv, specialistHolderName,
   type IdentityEnvRun,
 } from '../pi/identity-env.js';
+import { dispatcherEnvOverlay, dispatcherFromHostEnv } from '../activation/dispatcher-identity.js';
 import type { SessionMetricEvent, SessionRunMetrics } from './session-metrics-contract.js';
 import type { SpecialistLoader } from './loader.js';
 import type { HookEmitter } from './hooks.js';
@@ -1470,6 +1471,11 @@ export class SpecialistRunner {
         env: process.env,
         run: options.identityEnvRun,
       }));
+      // SPECIALISTS-4503: the child's dispatcher is THIS process, one hop. Its own holder
+      // names it; inherited XTRM_DISPATCHER_* (the launcher's dispatcher, i.e. the
+      // grandparent) is replaced or deleted, and the full chain is read from Substrate.
+      const dispatcherEnv = dispatcherEnvOverlay(dispatcherFromHostEnv(process.env));
+      Object.assign(envVars, dispatcherEnv.env);
 
       for (let modelIndex = 0; modelIndex < modelChain.length; modelIndex++) {
         currentModel = modelChain[modelIndex];
@@ -1511,6 +1517,7 @@ export class SpecialistRunner {
           ...claudeBridgeSessionOption(execution),
           ...(extensionSelection.offline === false ? { offline: false } : {}),
           ...(Object.keys(envVars).length > 0 ? { env: envVars } : {}),
+          ...(dispatcherEnv.unset.length > 0 ? { envUnset: dispatcherEnv.unset } : {}),
           onToken:     (delta) => onProgress?.(delta),
           onThinking:  (delta) => onProgress?.(`💭 ${delta}`),
           onToolStart: (tool, args, toolCallId) => { onProgress?.(`\n⚙ ${tool}…`); onToolStartCallback?.(tool, args, toolCallId); },

@@ -21,6 +21,7 @@ import { testWorkItems } from '../../utils/test-work-items.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
 import type { IdentityEnvRun } from '../../../src/pi/identity-env.js';
+import type { DispatcherIdentity } from '../../../src/activation/dispatcher-identity.js';
 
 /**
  * CORE-2524.4 and SPECIALISTS-4456 on the NATIVE launch path.
@@ -140,6 +141,10 @@ interface DispatchOptions {
   onPrompt?: () => void;
   /** Grants bash to the contract; without it there is no shell to carry an identity. */
   grantBash?: boolean;
+  /** The one dispatcher value this dispatch carries to both sinks (SPECIALISTS-4503). */
+  dispatcher?: DispatcherIdentity;
+  /** `null` omits the legacy requested_by field, so the dispatcher is the only value. */
+  requestedBy?: string | null;
 }
 
 async function dispatchOnce(options: DispatchOptions = {}): Promise<{ bashOptions: unknown[] }> {
@@ -174,8 +179,11 @@ async function dispatchOnce(options: DispatchOptions = {}): Promise<{ bashOption
     })),
     cwd: process.cwd(),
   });
+  const requestedBy = options.requestedBy === undefined ? 'coordinator' : options.requestedBy;
   const handle = await host.start({
-    specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    specialist: 'researcher', issueRef: 'ISSUE-1',
+    ...(requestedBy ? { requestedByParticipantId: requestedBy } : {}),
+    ...(options.dispatcher ? { dispatcher: options.dispatcher } : {}),
   });
   await handle.result;
   return { bashOptions };
@@ -489,7 +497,7 @@ describe('a contract that grants a host-env-spawning tool says so (SPECIALISTS-4
 });
 
 describe('native launch path — a lead-launched Specialist exports its own role (CORE-2722)', () => {
-  it('puts its own role and name on the shell env over the lead values, and leaves XTRM_DISPATCHER_* alone', async () => {
+  it('puts its own role and name on the shell env and drops the host dispatcher when none is known', async () => {
     const { bashOptions } = await dispatchOnce({ grantBash: true });
     const [hook] = hooks(bashOptions);
 
@@ -500,6 +508,7 @@ describe('native launch path — a lead-launched Specialist exports its own role
         XTMUX_AGENT_ROLE: 'lead',
         SUBSTRATE_HOLDER: 'MMD-4418-serving-lead-2',
         XTRM_AGENT_NAME: 'market-data-xt-claude-MMD-4418-serving-lead',
+        // The host's own dispatcher — the GRANDPARENT. It must never reach this child.
         XTRM_DISPATCHER_NAME: 'market-data-xt-claude-MMD-4418-serving-lead',
       },
     });
@@ -508,7 +517,38 @@ describe('native launch path — a lead-launched Specialist exports its own role
     expect(applied.env.SUBSTRATE_HOLDER).toMatch(/^sp-researcher-[A-Za-z0-9]+$/);
     // The holder names the activation in attribution; the lead's agent name must not outrank it.
     expect(applied.env.XTRM_AGENT_NAME).toBe(applied.env.SUBSTRATE_HOLDER);
-    expect(applied.env.XTRM_DISPATCHER_NAME).toBe('market-data-xt-claude-MMD-4418-serving-lead');
+    expect(applied.env).not.toHaveProperty('XTRM_DISPATCHER_NAME');
+  });
+});
+
+describe('native launch path — one dispatcher value per dispatch (SPECIALISTS-4503)', () => {
+  const HOST = {
+    XTRM_DISPATCHER_PARTICIPANT: 'sp-grandparent',
+    XTRM_DISPATCHER_NAME: 'grandparent',
+    XTRM_DISPATCHER_ADDRESS: 'uds:/grandparent.sock',
+  };
+
+  it('puts the dispatch’s invoker on the shell env over the host’s own dispatcher', async () => {
+    const { bashOptions } = await dispatchOnce({
+      grantBash: true,
+      dispatcher: { participant: 'sp-lead-1', name: 'serving-lead', address: 'uds:/lead.sock' },
+    });
+    const [hook] = hooks(bashOptions);
+
+    const applied = hook!.spawnHook({ command: 'echo', cwd: '/w', env: HOST });
+
+    expect(applied.env.XTRM_DISPATCHER_PARTICIPANT).toBe('sp-lead-1');
+    expect(applied.env.XTRM_DISPATCHER_NAME).toBe('serving-lead');
+    expect(applied.env.XTRM_DISPATCHER_ADDRESS).toBe('uds:/lead.sock');
+  });
+
+  it('deletes every inherited dispatcher key when the value is unknown', async () => {
+    const { bashOptions } = await dispatchOnce({ grantBash: true, requestedBy: null });
+    const [hook] = hooks(bashOptions);
+
+    const applied = hook!.spawnHook({ command: 'echo', cwd: '/w', env: HOST });
+
+    for (const key of Object.keys(HOST)) expect(applied.env).not.toHaveProperty(key);
   });
 });
 
@@ -611,6 +651,11 @@ describe('native launch path — a lead-dispatched bridged activation\'s Claude 
     expect(child.SUBSTRATE_HOLDER).toMatch(/^sp-researcher-[A-Za-z0-9]+$/);
     expect(child.XTRM_AGENT_NAME).toBe(child.SUBSTRATE_HOLDER);
     expect(child.XTRM_ROLE).toBe('researcher');
+    // SPECIALISTS-4503: the same dispatcher value reaches the bridged child. The empty
+    // name/address are DELETES for ccChildEnv, so the host's inherited values cannot survive.
+    expect(resolution.env.XTRM_DISPATCHER_PARTICIPANT).toBe('coordinator');
+    expect(resolution.env.XTRM_DISPATCHER_NAME).toBe('');
+    expect(resolution.env.XTRM_DISPATCHER_ADDRESS).toBe('');
     // The operator's credential env survives under the identity.
     expect(child.ANTHROPIC_BASE_URL).toBe('https://proxy.example.invalid/claude-bridge');
     // pi-claude-bridge throws on these, so they must never ride the provider env.

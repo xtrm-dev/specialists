@@ -83,6 +83,7 @@ import {
   toPendingAskView,
   buildFleetDisplay,
   validateBeforeRun,
+  dispatcherFromHostEnv,
 } from '../../../dist/lib.js';
 
 
@@ -128,9 +129,6 @@ export function installCoordinatorFence(pi, deps = {}) {
     }
   });
 }
-
-/** Default coordinator ParticipantId: <participant_kind>::<participant_role>, matching MCP. */
-export const DEFAULT_REQUESTED_BY = 'adapter::pi-extension';
 
 /**
  * Specialist ENTRIES rendered before the overflow line — entries, not lines.
@@ -2030,8 +2028,9 @@ function humanCallOf(describe) {
 
 /**
  * @param {import('@earendil-works/pi-coding-agent').ExtensionAPI} pi
- * @param {{ createHost?: () => NativeActivationHost, openObservability?: () => import('../../../dist/lib.js').ObservabilitySqliteClient | null }} [options] — test seams;
- *   when omitted, one process-lifetime host is created on first tool use.
+ * @param {{ createHost?: () => NativeActivationHost, openObservability?: () => import('../../../dist/lib.js').ObservabilitySqliteClient | null, env?: NodeJS.ProcessEnv }} [options] — test seams;
+ *   when omitted, one process-lifetime host is created on first tool use. `env` defaults to
+ *   `process.env`; it is the source of this process's own dispatcher identity (SPECIALISTS-4503).
  */
 export default function nativeSpecialistsExtension(pi, options = {}) {
   // Detail-refresh refs, assigned where the fleet state lives below. The wake
@@ -2512,6 +2511,18 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
           }
         }
 
+        // SPECIALISTS-4503: this extension runs INSIDE the dispatching lead, so its env
+        // already names the dispatcher (own SUBSTRATE_HOLDER + agent name) and the live Pi
+        // session supplies the coordinator session id. One value, used by both sinks.
+        const hostEnv = options.env ?? process.env;
+        const held = liveContext();
+        const resolvedDispatcher = dispatcherFromHostEnv(hostEnv, held?.sessionManager.getSessionId());
+        const explicitParticipant = String(params.requested_by ?? '').trim();
+        const dispatcher = explicitParticipant
+          ? { ...resolvedDispatcher, participant: explicitParticipant }
+          : resolvedDispatcher;
+        const coordinatorSessionId = params.coordinator_session_id ?? dispatcher.sessionId;
+
         const handle = await h.start({
           specialist: params.specialist,
           ...(workRef ? { issueRef: workRef } : {}),
@@ -2531,8 +2542,9 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
           surface: 'pi-extension',
           ...(params.model_override ? { modelOverride: params.model_override } : {}),
           ...(params.thinking_override ? { thinkingOverride: params.thinking_override } : {}),
-          requestedByParticipantId: params.requested_by ?? DEFAULT_REQUESTED_BY,
-          ...(params.coordinator_session_id ? { coordinatorSessionId: params.coordinator_session_id } : {}),
+          ...(dispatcher.participant ? { requestedByParticipantId: dispatcher.participant } : {}),
+          ...(coordinatorSessionId ? { coordinatorSessionId } : {}),
+          dispatcher,
         });
 
         // Deliberately NOT awaited (a tool that blocked until completion would make

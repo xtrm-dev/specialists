@@ -92,6 +92,7 @@ import {
 } from '../pi/identity-env.js';
 import { hasActivationEnv } from './activation-bash-env.js';
 import { bridgeGitBlockOmitted, scopeBridgedChildEnv } from './bridge-child-env.js';
+import { bridgedDispatcherEnv, dispatcherEnvOverlay, type DispatcherIdentity } from './dispatcher-identity.js';
 import { formatResolvedToolContract, withDiscoveredExtensionTools, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 
 /**
@@ -1323,6 +1324,20 @@ export class NativeActivationHost {
     // lineage query joins against.
     const participantId = `specialist::${request.specialist}`;
 
+    // SPECIALISTS-4503: one dispatcher value, worked out by the frontend where the
+    // information exists, feeds BOTH sinks — the Substrate lineage below and the activation
+    // env. Direct host callers may pass only `requestedByParticipantId`; the participant then
+    // falls back to it so the two sinks still cannot disagree.
+    const dispatcher: DispatcherIdentity = {
+      ...request.dispatcher,
+      ...(request.dispatcher?.participant ?? request.requestedByParticipantId
+        ? { participant: request.dispatcher?.participant ?? request.requestedByParticipantId }
+        : {}),
+    };
+    const dispatcherEnv = dispatcherEnvOverlay(dispatcher);
+    const requestedByParticipantId = request.requestedByParticipantId ?? dispatcher.participant;
+    const coordinatorSessionId = request.coordinatorSessionId ?? dispatcher.sessionId;
+
     // The forensic event field keeps its storage name (bead_id column in
     // observability.db) but carries the ISSUE ref post-A7; storage-column
     // renames are fleet-sweep territory, not runtime-boundary territory.
@@ -1337,7 +1352,7 @@ export class NativeActivationHost {
       });
 
     emit('activation_requested', {
-      requested_by: request.requestedByParticipantId,
+      requested_by: requestedByParticipantId ?? null,
       model_override: request.modelOverride ?? null,
       thinking_override: request.thinkingOverride ?? null,
     });
@@ -1598,7 +1613,7 @@ export class NativeActivationHost {
               'ad-hoc dispatch evidence: '
               + `surface=${request.surface ?? 'unknown'} `
               + `specialist=${request.specialist} `
-              + `requested_by=${request.requestedByParticipantId} `
+              + `requested_by=${requestedByParticipantId ?? 'unknown'} `
               + `parent_ref=${parentRef || 'none'} `
               + `issue_kind=${kind} title=${titleSource}`,
           });
@@ -2180,7 +2195,7 @@ export class NativeActivationHost {
       activationId,
       currentAttemptId: () => this.registry.get(activationId)?.snapshot.attemptId ?? attemptId,
       self: participantId,
-      parent: request.requestedByParticipantId,
+      parent: requestedByParticipantId ?? 'unknown',
       onAsk: (kind, body) => {
         const record = this.registry.get(activationId);
         if (record) record.snapshot.state = kind === 'escalation' ? 'escalated' : 'needs_reply';
@@ -2224,11 +2239,16 @@ export class NativeActivationHost {
     // spawn, or it would drop pi's managed bin directory (fd, rg). The launcher's PATH is
     // therefore stripped and only the shim directory is passed on.
     const { PATH: _launchPath, ...activationEnv } = activationLaunchEnv;
+    // SPECIALISTS-4503: the ONE dispatcher value of this dispatch, resolved at the top of
+    // start(). Its known keys ride the activation env; every key it cannot supply is DELETED,
+    // never inherited, because the host env's `XTRM_DISPATCHER_*` is the host's own
+    // dispatcher — the grandparent.
+    Object.assign(activationEnv, dispatcherEnv.env);
     const activationShimDir = shimBinDir(process.env);
     // Visibility for the one limit the hook cannot cover: a tool whose child inherits the
     // host env runs as the dispatcher, not as this activation (SPECIALISTS-4487).
     const uncoveredSpawns = uncoveredHostEnvSpawns(effectiveToolContract.toolsList);
-    if (uncoveredSpawns.length > 0 && hasActivationEnv(activationEnv, activationShimDir)) {
+    if (uncoveredSpawns.length > 0 && hasActivationEnv(activationEnv, activationShimDir, dispatcherEnv.unset)) {
       warnIdentityEnv(
         `activation ${activationId} grants ${uncoveredSpawns.join(', ')}, whose child processes ` +
         `inherit the dispatching session's identity rather than the activation's ` +
@@ -2238,7 +2258,9 @@ export class NativeActivationHost {
     // SPECIALISTS-4498: on the Claude Code route the model is a child pi-claude-bridge spawns from
     // the HOST env plus the request's provider env, so the identity rides that provider env on
     // this dispatch's own runtime — never `process.env`.
-    if (claudeBridge && !scopeBridgedChildEnv(modelRuntime, activationEnv) && Object.keys(activationEnv).length > 0) {
+    // A bridge provider env turns an empty value into a DELETE, so the dispatcher keys the
+    // activation cannot supply clear the host's inherited value on this channel too.
+    if (claudeBridge && !scopeBridgedChildEnv(modelRuntime, { ...activationEnv, ...bridgedDispatcherEnv(dispatcherEnv) }) && Object.keys(activationEnv).length > 0) {
       warnIdentityEnv(
         `activation ${activationId}: the model runtime cannot carry a provider env, so its Claude Code ` +
         `child inherits the dispatching session's identity rather than the activation's (SPECIALISTS-4498)`,
@@ -2265,6 +2287,7 @@ export class NativeActivationHost {
       toolNames: effectiveToolContract.toolsList,
       cwd: workspace.worktreePath,
       env: activationEnv,
+      unset: dispatcherEnv.unset,
       shimDir: activationShimDir,
       // Lease admission with the phase-1 guard carve-out: sandboxed bash in a
       // guard-loaded session is not a mutation, so the lease does not refuse it.
@@ -2694,8 +2717,8 @@ export class NativeActivationHost {
       // under its own attempt id. Carried on the record so retry/resume legs
       // publish coherently without re-resolving anything.
       lineage: {
-        ...(request.requestedByParticipantId ? { coordinatorParticipantId: request.requestedByParticipantId } : {}),
-        ...(request.coordinatorSessionId ? { coordinatorSessionId: request.coordinatorSessionId } : {}),
+        ...(requestedByParticipantId ? { coordinatorParticipantId: requestedByParticipantId } : {}),
+        ...(coordinatorSessionId ? { coordinatorSessionId } : {}),
       },
       workItems,
       ...(typeof (binding as { baseCommit?: unknown }).baseCommit === 'string' && ((binding as { baseCommit?: string }).baseCommit as string).trim() !== ''

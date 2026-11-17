@@ -223,6 +223,81 @@ function hostWith(fixture: HostFixture = {}) {
 }
 
 describe('specialist_dispatch — the MCP dispatch path is the same admission path', () => {
+  it('defaults the Substrate coordinator to the dispatcher value, never an adapter literal (SPECIALISTS-4503)', async () => {
+    const started: Array<Record<string, unknown>> = [];
+    const host = {
+      start: vi.fn(async (req: Record<string, unknown>) => {
+        started.push(req);
+        return {
+          activationId: 'act:dispatcher',
+          result: new Promise(() => {}),
+          stepContract: { rootWorkRef: 'ISSUE-1', inputs: [], outputs: [] },
+        };
+      }),
+      inspect: () => undefined,
+    } as never;
+    const tool = createSpecialistDispatchTool(() => host, undefined, {
+      env: { SUBSTRATE_HOLDER: 'sp-lead-1' },
+      pid: 4242,
+      run: () => ({
+        status: 0,
+        stdout: JSON.stringify({ name: 'serving-lead', address: 'uds:/lead.sock', sessionId: 'lead-sess-1' }),
+      }),
+    });
+
+    await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' });
+
+    expect(started[0]).toMatchObject({
+      requestedByParticipantId: 'sp-lead-1',
+      coordinatorSessionId: 'lead-sess-1',
+      dispatcher: {
+        participant: 'sp-lead-1',
+        name: 'serving-lead',
+        address: 'uds:/lead.sock',
+        sessionId: 'lead-sess-1',
+      },
+    });
+    expect(String(started[0]?.requestedByParticipantId)).not.toContain('adapter::');
+  });
+
+  describe('completion routing follows the dispatcher, not only its holder (SPECIALISTS-4503)', () => {
+    function trackedDispatch(env: NodeJS.ProcessEnv, xtAnswer: { status: number; stdout: string }) {
+      const track = vi.fn();
+      const host = {
+        start: vi.fn(async () => ({
+          activationId: 'act:route',
+          result: new Promise(() => {}),
+          stepContract: { rootWorkRef: 'ISSUE-1', inputs: [], outputs: [] },
+        })),
+        inspect: () => undefined,
+      } as never;
+      const tool = createSpecialistDispatchTool(() => host, () => ({ track }) as never, {
+        env,
+        pid: 4242,
+        run: () => xtAnswer,
+      });
+      return { track, run: () => tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' }) };
+    }
+
+    it('tracks the route by session id when the lead has no SUBSTRATE_HOLDER', async () => {
+      const { track, run } = trackedDispatch({}, { status: 0, stdout: JSON.stringify({ sessionId: 'lead-sess-2', name: 'lead' }) });
+      await run();
+      expect(track).toHaveBeenCalledWith('act:route', { coordinatorSessionId: 'lead-sess-2', coordinatorParticipantId: 'unknown' });
+    });
+
+    it('tracks participant and session together when both are known', async () => {
+      const { track, run } = trackedDispatch({ SUBSTRATE_HOLDER: 'sp-lead-1' }, { status: 0, stdout: JSON.stringify({ sessionId: 'lead-sess-3' }) });
+      await run();
+      expect(track).toHaveBeenCalledWith('act:route', { coordinatorSessionId: 'lead-sess-3', coordinatorParticipantId: 'sp-lead-1' });
+    });
+
+    it('leaves the dispatch untracked only when neither a participant nor a session is known', async () => {
+      const { track, run } = trackedDispatch({}, { status: 127, stdout: '' });
+      await run();
+      expect(track).not.toHaveBeenCalled();
+    });
+  });
+
   it('dispatches a Specialist and returns the activation, not a result', async () => {
     const { host, sessionsCreated } = hostWith();
     const tool = createSpecialistDispatchTool(() => host);

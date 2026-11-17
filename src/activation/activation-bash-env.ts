@@ -32,8 +32,11 @@
  *    `process.env` with an allowlist that never included the identity keys. Inside the
  *    sandbox the identity was already absent before this change; what changed is PATH:
  *    the shim-first PATH used to arrive through `process.env.PATH` and no longer does.
- *    The sandbox is `--unshare-net` and masks `~/.config/gh`, so the practical exposure is
- *    small — but the limit is real and is pinned by a test.
+ *    `XTRM_DISPATCHER_*` is absent there for the same reason (the sandbox has no identity
+ *    at all, including the dispatcher's), and the allowlist is deliberately NOT widened
+ *    for it: a READ_ONLY shell must not learn who dispatched it. The sandbox is
+ *    `--unshare-net` and masks `~/.config/gh`, so the practical exposure is small — but
+ *    the limit is real and is pinned by a test.
  */
 
 import { delimiter as platformPathDelimiter } from 'node:path';
@@ -82,16 +85,20 @@ export function composeActivationPath(
  */
 export function bashSpawnHookWith(
   overlay: Record<string, string>,
-  options: { shimDir?: string; pathDelimiter?: string } = {},
+  options: { shimDir?: string; pathDelimiter?: string; unset?: readonly string[] } = {},
 ): (context: BashSpawnContext) => BashSpawnContext {
   // `path.delimiter` is the default, not a literal ':': the hook is wired to the powershell
   // tool too, and a `:`-joined PATH on a `;` host drops System32 and unreaches the shim
   // (review round 2, finding 2 — probed with a Windows-shaped PATH).
-  const { shimDir, pathDelimiter = platformPathDelimiter } = options;
+  const { shimDir, pathDelimiter = platformPathDelimiter, unset = [] } = options;
   const identity = { ...overlay };
   delete identity.PATH;
   return (context) => {
     const env: NodeJS.ProcessEnv = { ...context.env, ...identity };
+    // A key the child's identity cannot supply is DELETED, not inherited: the inherited
+    // value belongs to the host's own dispatcher and is exactly the grandparent bug
+    // SPECIALISTS-4503 removes. `overlay` and `unset` are disjoint by construction.
+    for (const key of unset) delete env[key];
     if (shimDir) {
       env.PATH = composeActivationPath(shimDir, context.env.PATH, pathDelimiter);
     }
@@ -106,6 +113,10 @@ export function bashSpawnHookWith(
  * shim-first PATH is still the difference between posting a review as the App and posting
  * it as the operator.
  */
-export function hasActivationEnv(overlay: Record<string, string>, shimDir?: string): boolean {
-  return Object.keys(overlay).length > 0 || Boolean(shimDir);
+export function hasActivationEnv(
+  overlay: Record<string, string>,
+  shimDir?: string,
+  unset: readonly string[] = [],
+): boolean {
+  return Object.keys(overlay).length > 0 || unset.length > 0 || Boolean(shimDir);
 }

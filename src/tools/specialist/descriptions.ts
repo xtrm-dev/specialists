@@ -286,13 +286,13 @@ export const SPECIALIST_DISPATCH_PARAMS = {
 export const SPECIALIST_DISPATCH_RUNTIME_PARAMS = {
   mcp: {
     requested_by:
-      'ParticipantId of the requesting coordinator. Defaults to the MCP gateway participant.',
-    coordinator_session_id: 'MCP session id, for lineage.',
+      'ParticipantId of the requesting coordinator. Defaults to the dispatcher that launched this MCP server.',
+    coordinator_session_id: "Coordinator session id, for lineage. Defaults to the dispatcher's session.",
   },
   pi: {
     requested_by:
-      'ParticipantId of the requesting coordinator. Defaults to the Pi extension adapter participant.',
-    coordinator_session_id: 'Pi session id, for lineage.',
+      'ParticipantId of the requesting coordinator. Defaults to the dispatcher this Pi session belongs to.',
+    coordinator_session_id: "Coordinator session id, for lineage. Defaults to the dispatcher's session.",
   },
 } as const;
 

@@ -69,6 +69,30 @@ describe('activation shell env (SPECIALISTS-4456)', () => {
 
     expect(inherited).toEqual({ XTRM_ROLE: 'worker', PATH: '/usr/bin' });
   });
+
+  it('deletes inherited keys the child identity cannot supply (SPECIALISTS-4503)', () => {
+    const hook = bashSpawnHookWith(
+      { XTRM_DISPATCHER_PARTICIPANT: 'sp-lead-1' },
+      { unset: ['XTRM_DISPATCHER_NAME', 'XTRM_DISPATCHER_ADDRESS'] },
+    );
+    const applied = hook({
+      command: 'true',
+      cwd: '/w',
+      env: {
+        XTRM_DISPATCHER_PARTICIPANT: 'sp-grandparent',
+        XTRM_DISPATCHER_NAME: 'grandparent',
+        XTRM_DISPATCHER_ADDRESS: 'uds:/grand.sock',
+      },
+    });
+
+    expect(applied.env.XTRM_DISPATCHER_PARTICIPANT).toBe('sp-lead-1');
+    expect(applied.env).not.toHaveProperty('XTRM_DISPATCHER_NAME');
+    expect(applied.env).not.toHaveProperty('XTRM_DISPATCHER_ADDRESS');
+  });
+
+  it('counts a pure deletion as an activation env worth installing', () => {
+    expect(hasActivationEnv({}, undefined, ['XTRM_DISPATCHER_NAME'])).toBe(true);
+  });
 });
 
 describe('composeActivationPath', () => {
