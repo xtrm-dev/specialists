@@ -51,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Teach the operator allow list, not the removed two-switch route (SPECIALISTS-4447) (#577) ([346eea1](https://github.com/xtrm-dev/specialists/commit/346eea1d6a758e3386fe53b8384d8d83aeb41b01))
 - Bump the actions-all group across 1 directory with 3 updates (#561) ([4eb1e50](https://github.com/xtrm-dev/specialists/commit/4eb1e50cd3b9a5d67b590004e7c24ba84749b132))
 - The legacy child carries its own XTMUX_AGENT_ROLE and agent name (CORE-2722) ([0cc93e3](https://github.com/xtrm-dev/specialists/commit/0cc93e383a6934a0ac668f8ef509f0d0bd236c46))
+- Rebuild the committed bundle with the pinned bun 1.4.2 (CORE-2722) ([4acca75](https://github.com/xtrm-dev/specialists/commit/4acca75f3458d04dadc13eec81f2c14f56c6ad30))
 
 ## [4.2.0] - 2026-11-11
 
