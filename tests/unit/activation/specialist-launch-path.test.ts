@@ -1,7 +1,9 @@
 import { describe, it, expect, afterAll, afterEach, beforeAll, beforeEach } from 'vitest';
 import { setRuntimeDiagnosticsSink, resetRuntimeDiagnosticsSink } from '../../../src/utils/runtime-diagnostics.js';
 import { homedir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
+import { tempDir } from '../../utils/temp-dir.js';
 
 /** The same guard the other activation suites use: the native path must never spawn. */
 vi.mock('node:child_process', async (importOriginal) => {
@@ -507,5 +509,117 @@ describe('native launch path — a lead-launched Specialist exports its own role
     // The holder names the activation in attribution; the lead's agent name must not outrank it.
     expect(applied.env.XTRM_AGENT_NAME).toBe(applied.env.SUBSTRATE_HOLDER);
     expect(applied.env.XTRM_DISPATCHER_NAME).toBe('market-data-xt-claude-MMD-4418-serving-lead');
+  });
+});
+
+describe('native launch path — a lead-dispatched bridged activation\'s Claude Code child (SPECIALISTS-4498)', () => {
+  // pi-claude-bridge spawns the child with `ccChildEnv(options.env)`: the HOST env with the
+  // request's provider env laid over it. pi resolves that provider env from the session's
+  // ModelRuntime (`prepareRequest` → `getAuth(model).env`), so the runtime the host gave the
+  // session is the assertion surface: what it resolves for a claude-bridge request is what the
+  // child carries over the lead's process env.
+  const LEAD = {
+    XTMUX_AGENT_ROLE: 'lead',
+    SUBSTRATE_HOLDER: 'MMD-4418-serving-lead-2',
+    XTRM_AGENT_NAME: 'market-data-xt-claude-MMD-4418-serving-lead',
+  };
+  const touched = [...Object.keys(LEAD), 'XDG_CONFIG_HOME', 'SPECIALISTS_CLAUDE_BRIDGE_PATH'];
+  let saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    saved = Object.fromEntries(touched.map((key) => [key, process.env[key]]));
+    Object.assign(process.env, LEAD);
+    // Both halves of the route: the operator switch and an installed extension entry.
+    const dir = tempDir('bridge-child-env-');
+    mkdirSync(join(dir, 'specialists'), { recursive: true });
+    writeFileSync(join(dir, 'specialists', 'user.json'), JSON.stringify({ claude_bridge: { enabled: true } }));
+    writeFileSync(join(dir, 'bridge.js'), 'export default () => {};\n');
+    process.env.XDG_CONFIG_HOME = dir;
+    process.env.SPECIALISTS_CLAUDE_BRIDGE_PATH = join(dir, 'bridge.js');
+  });
+  afterEach(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  async function dispatchBridged() {
+    const runtime = {
+      hasConfiguredAuth: () => true,
+      // A stored credential's env, which the activation identity must sit on top of.
+      getAuth: async (providerOrModel: string | { provider?: string }) => ({
+        auth: { apiKey: 'not-used' },
+        env: { ANTHROPIC_BASE_URL: `https://proxy.example.invalid/${typeof providerOrModel === 'string' ? providerOrModel : providerOrModel.provider}` },
+      }),
+    };
+    const created: Array<Record<string, unknown> | undefined> = [];
+    const base = makeSdk(fakeSession());
+    const sdk: PiSdk = {
+      ...base,
+      createAgentSession: async (options) => { created.push(options); return base.createAgentSession(options); },
+      ModelRuntime: { create: async () => runtime },
+      resolveModelScopeWithDiagnostics: () => ({
+        scopedModels: [{ model: { id: 'claude-opus-5-5', provider: 'claude-bridge', api: 'claude-bridge' } }],
+        diagnostics: [],
+      }),
+    };
+    const host = new NativeActivationHost({
+      workItems: testWorkItems({ description: BEAD.description }),
+      loader: { get: async () => ({
+        specialist: {
+          metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },
+          execution: {
+            model: 'claude-bridge/claude-opus-5-5',
+            claude_bridge: true,
+            permission_required: 'READ_ONLY',
+            response_format: 'text',
+            output_type: 'research',
+            bare: false,
+          },
+          prompt: { system: 'You are the researcher.', task_template: 'Do: $bead_id' },
+        },
+      }) } as never,
+      loadSdk: async () => sdk,
+      identityEnvRun: () => ({
+        status: 0,
+        stdout: JSON.stringify({ env: { XTRM_ROLE: 'researcher', SUBSTRATE_HOLDER: 'from-lookup' } }),
+      }),
+      cwd: process.cwd(),
+    });
+    const handle = await host.start({
+      specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
+    });
+    const result = await handle.result;
+    return { runtime, created, result };
+  }
+
+  it('puts the activation identity on the child env over the lead values, and leaves the host env alone', async () => {
+    const before = { ...process.env };
+    const { runtime, created, result } = await dispatchBridged();
+
+    expect(result.status).toBe('completed');
+    // The session runs on the runtime the host scoped, not on one pi builds for itself.
+    expect(created.at(-1)?.modelRuntime).toBe(runtime);
+    const resolution = await runtime.getAuth({ provider: 'claude-bridge' }) as { env: Record<string, string> };
+    // ccChildEnv: provider env over the host env.
+    const child = { ...process.env, ...resolution.env };
+    expect(child.XTMUX_AGENT_ROLE).toBe('researcher');
+    expect(child.SUBSTRATE_HOLDER).toMatch(/^sp-researcher-[A-Za-z0-9]+$/);
+    expect(child.XTRM_AGENT_NAME).toBe(child.SUBSTRATE_HOLDER);
+    expect(child.XTRM_ROLE).toBe('researcher');
+    // The operator's credential env survives under the identity.
+    expect(child.ANTHROPIC_BASE_URL).toBe('https://proxy.example.invalid/claude-bridge');
+    // pi-claude-bridge throws on these, so they must never ride the provider env.
+    expect(Object.keys(resolution.env).filter((key) => ['HOME', 'USERPROFILE', 'CLAUDE_CONFIG_DIR', 'PATH'].includes(key)))
+      .toEqual([]);
+    // Byte-identical host env: the lead keeps its own identity.
+    expect({ ...process.env }).toEqual(before);
+    expect(process.env.XTMUX_AGENT_ROLE).toBe('lead');
+  });
+
+  it('scopes only claude-bridge requests on that runtime', async () => {
+    const { runtime } = await dispatchBridged();
+    const other = await runtime.getAuth({ provider: 'anthropic' }) as { env: Record<string, string> };
+    expect(other.env).toEqual({ ANTHROPIC_BASE_URL: 'https://proxy.example.invalid/anthropic' });
   });
 });
