@@ -543,7 +543,7 @@ describe('native launch path — a lead-dispatched bridged activation\'s Claude 
     }
   });
 
-  async function dispatchBridged() {
+  async function dispatchBridged(opts: { getAuth?: boolean; identityEnv?: Record<string, string>; onWarn?: (line: string) => void } = {}) {
     const runtime = {
       hasConfiguredAuth: () => true,
       // A stored credential's env, which the activation identity must sit on top of.
@@ -552,6 +552,8 @@ describe('native launch path — a lead-dispatched bridged activation\'s Claude 
         env: { ANTHROPIC_BASE_URL: `https://proxy.example.invalid/${typeof providerOrModel === 'string' ? providerOrModel : providerOrModel.provider}` },
       }),
     };
+    // A runtime without `getAuth`, as an old test double or an older pi has.
+    if (opts.getAuth === false) delete (runtime as { getAuth?: unknown }).getAuth;
     const created: Array<Record<string, unknown> | undefined> = [];
     const base = makeSdk(fakeSession());
     const sdk: PiSdk = {
@@ -582,10 +584,12 @@ describe('native launch path — a lead-dispatched bridged activation\'s Claude 
       loadSdk: async () => sdk,
       identityEnvRun: () => ({
         status: 0,
-        stdout: JSON.stringify({ env: { XTRM_ROLE: 'researcher', SUBSTRATE_HOLDER: 'from-lookup' } }),
+        stdout: JSON.stringify({ env: { XTRM_ROLE: 'researcher', SUBSTRATE_HOLDER: 'from-lookup', ...(opts.identityEnv ?? {}) } }),
       }),
       cwd: process.cwd(),
     });
+    // The host installs its own file-backed sink when it is built; capture after that.
+    if (opts.onWarn) setRuntimeDiagnosticsSink(opts.onWarn);
     const handle = await host.start({
       specialist: 'researcher', issueRef: 'ISSUE-1', requestedByParticipantId: 'coordinator',
     });
@@ -615,6 +619,38 @@ describe('native launch path — a lead-dispatched bridged activation\'s Claude 
     // Byte-identical host env: the lead keeps its own identity.
     expect({ ...process.env }).toEqual(before);
     expect(process.env.XTMUX_AGENT_ROLE).toBe('lead');
+  });
+
+  describe('what the dispatch says when the identity cannot reach the child', () => {
+    const lines: string[] = [];
+    const onWarn = (line: string) => { lines.push(line); };
+    beforeEach(() => { lines.length = 0; });
+    afterEach(() => { resetRuntimeDiagnosticsSink(); });
+
+    it('warns once when the model runtime has no getAuth to scope', async () => {
+      const { result } = await dispatchBridged({ getAuth: false, onWarn });
+      expect(result.status).toBe('completed');
+      const warned = lines.filter((line) => line.includes('cannot carry a provider env'));
+      expect(warned).toHaveLength(1);
+      expect(warned[0]).toContain('SPECIALISTS-4498');
+    });
+
+    it('warns when the git credential-helper reset cannot ride the provider env, and still scopes the rest', async () => {
+      const { runtime } = await dispatchBridged({
+        identityEnv: { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'credential.helper', GIT_CONFIG_VALUE_0: '' },
+        onWarn,
+      });
+      const warned = lines.filter((line) => line.includes('git credential-helper reset'));
+      expect(warned).toHaveLength(1);
+      const resolution = await runtime.getAuth({ provider: 'claude-bridge' }) as { env: Record<string, string> };
+      expect(resolution.env.XTMUX_AGENT_ROLE).toBe('researcher');
+      expect(Object.keys(resolution.env).filter((key) => key.startsWith('GIT_CONFIG_'))).toEqual([]);
+    });
+
+    it('says nothing when the identity travels whole', async () => {
+      await dispatchBridged({ onWarn });
+      expect(lines.filter((line) => line.includes('SPECIALISTS-4498'))).toEqual([]);
+    });
   });
 
   it('scopes only claude-bridge requests on that runtime', async () => {

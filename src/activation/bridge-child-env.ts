@@ -38,15 +38,26 @@ const GIT_CONFIG_PREFIXES = ['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_', 'GIT_CONFIG_
  *   is not representable on this channel and is left out whole.
  */
 export function bridgedChildEnv(overlay: Record<string, string>): Record<string, string> {
-  const isGitConfig = (key: string) => GIT_CONFIG_PREFIXES.some((prefix) => key.startsWith(prefix));
-  const gitBlockRepresentable = Object.entries(overlay).every(([key, value]) => !isGitConfig(key) || value !== '');
+  const gitBlockRepresentable = !bridgeGitBlockOmitted(overlay);
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(overlay)) {
-    if (key === 'PATH' || BRIDGE_FORBIDDEN_KEYS.includes(key.toUpperCase())) continue;
-    if (isGitConfig(key) && !gitBlockRepresentable) continue;
+    // PATH in any letter case (a Windows host spells it `Path`), like the forbidden storage keys.
+    if (key.toUpperCase() === 'PATH' || BRIDGE_FORBIDDEN_KEYS.includes(key.toUpperCase())) continue;
+    if (isGitConfigKey(key) && !gitBlockRepresentable) continue;
     env[key] = value;
   }
   return env;
+}
+
+const isGitConfigKey = (key: string) => GIT_CONFIG_PREFIXES.some((prefix) => key.startsWith(prefix));
+
+/**
+ * True when `overlay` carries a `GIT_CONFIG_*` block that `bridgedChildEnv` leaves out: one holding
+ * the deliberate empty `GIT_CONFIG_VALUE_*` credential-helper reset. The child then keeps the
+ * dispatching session's git configuration, so the caller says so instead of dropping it silently.
+ */
+export function bridgeGitBlockOmitted(overlay: Record<string, string>): boolean {
+  return Object.entries(overlay).some(([key, value]) => isGitConfigKey(key) && value === '');
 }
 
 /**

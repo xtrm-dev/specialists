@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bridgedChildEnv, scopeBridgedChildEnv } from '../../../src/activation/bridge-child-env.js';
+import { bridgeGitBlockOmitted, bridgedChildEnv, scopeBridgedChildEnv } from '../../../src/activation/bridge-child-env.js';
 import type { PiModelRuntimeLike } from '../../../src/activation/pi-sdk.js';
 
 /**
@@ -39,6 +39,19 @@ describe('bridgedChildEnv', () => {
       GIT_CONFIG_KEY_1: 'credential.helper',
       GIT_CONFIG_VALUE_1: '!xt identity credential',
     })).toEqual({ SUBSTRATE_HOLDER: 'h' });
+  });
+});
+
+describe('bridgedChildEnv PATH and the omitted git block', () => {
+  it('drops PATH in any letter case', () => {
+    expect(bridgedChildEnv({ SUBSTRATE_HOLDER: 'h', Path: 'C:\\shim', path: '/p', PATH: '/q' })).toEqual({ SUBSTRATE_HOLDER: 'h' });
+  });
+
+  it('says when a GIT_CONFIG_* block is left out, so the caller can warn', () => {
+    const reset = { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'credential.helper', GIT_CONFIG_VALUE_0: '' };
+    expect(bridgeGitBlockOmitted({ SUBSTRATE_HOLDER: 'h', ...reset })).toBe(true);
+    expect(bridgeGitBlockOmitted({ SUBSTRATE_HOLDER: 'h', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'a', GIT_CONFIG_VALUE_0: 'b' })).toBe(false);
+    expect(bridgeGitBlockOmitted({ SUBSTRATE_HOLDER: 'h' })).toBe(false);
   });
 });
 
