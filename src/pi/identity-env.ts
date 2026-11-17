@@ -17,6 +17,12 @@
  *   `GIT_CONFIG_*` block: core writes an empty `GIT_CONFIG_VALUE_*` on purpose
  *   to reset a global credential helper, and git refuses every command when
  *   `GIT_CONFIG_COUNT` names an index whose pair is absent.
+ * - CORE-2722: a launched Specialist is its own agent, never the lead that
+ *   dispatched it. `XTMUX_AGENT_ROLE` (the role the agent host reports and the
+ *   project-management hooks resolve) is the specialist name, and `XTRM_AGENT_NAME`
+ *   (which outranks the holder for review attribution) is the holder, so neither
+ *   inherits the launcher's value. The launcher stays reachable through the
+ *   inherited `XTRM_DISPATCHER_*`, which this module never touches.
  * - PATH is never taken from the CLI. `resolveAgentLaunchEnv` appends it locally
  *   with the gh shim directory first (CORE-2524.4), because an identity the shim
  *   cannot intercept is not an identity.
@@ -141,7 +147,13 @@ export function resolveAgentIdentityEnv(input: IdentityEnvInput = {}): Record<st
   if (!holder) return {};
   const roleName = (input.roleName ?? '').trim();
   const base: Record<string, string> = { SUBSTRATE_HOLDER: holder };
-  if (roleName) base.XTRM_ROLE = roleName;
+  // CORE-2722: the launcher's own name must not survive into the launched agent.
+  base.XTRM_AGENT_NAME = holder;
+  if (roleName) {
+    base.XTRM_ROLE = roleName;
+    // The role the agent host reports. Never taken from the xt answer.
+    base.XTMUX_AGENT_ROLE = roleName;
+  }
 
   const run = input.run ?? ((cmd, args, opts) => {
     const result = spawnSync(cmd, args, {

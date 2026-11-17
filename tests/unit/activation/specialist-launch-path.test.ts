@@ -485,3 +485,27 @@ describe('a contract that grants a host-env-spawning tool says so (SPECIALISTS-4
     expect(granted).toEqual(['python']);
   });
 });
+
+describe('native launch path — a lead-launched Specialist exports its own role (CORE-2722)', () => {
+  it('puts its own role and name on the shell env over the lead values, and leaves XTRM_DISPATCHER_* alone', async () => {
+    const { bashOptions } = await dispatchOnce({ grantBash: true });
+    const [hook] = hooks(bashOptions);
+
+    const applied = hook!.spawnHook({
+      command: 'echo',
+      cwd: '/w',
+      env: {
+        XTMUX_AGENT_ROLE: 'lead',
+        SUBSTRATE_HOLDER: 'MMD-4418-serving-lead-2',
+        XTRM_AGENT_NAME: 'market-data-xt-claude-MMD-4418-serving-lead',
+        XTRM_DISPATCHER_NAME: 'market-data-xt-claude-MMD-4418-serving-lead',
+      },
+    });
+
+    expect(applied.env.XTMUX_AGENT_ROLE).toBe('researcher');
+    expect(applied.env.SUBSTRATE_HOLDER).toMatch(/^sp-researcher-[A-Za-z0-9]+$/);
+    // The holder names the activation in attribution; the lead's agent name must not outrank it.
+    expect(applied.env.XTRM_AGENT_NAME).toBe(applied.env.SUBSTRATE_HOLDER);
+    expect(applied.env.XTRM_DISPATCHER_NAME).toBe('market-data-xt-claude-MMD-4418-serving-lead');
+  });
+});
