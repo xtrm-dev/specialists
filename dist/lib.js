@@ -12933,6 +12933,8 @@ class PiAgentSession {
       CAVEMAN_LEVEL: "full",
       PI_KERNEL_AUDIT_POLICY: "1"
     };
+    for (const key of this.options.envUnset ?? [])
+      delete hookEnv[key];
     this._piVersion = this._piVersionValue();
     if (this._piVersion) {
       this._metrics.pi_version = this._piVersion;
@@ -18148,6 +18150,51 @@ function specialistHolderName(specialistName, jobId, pid = process.pid) {
   return job ? `sp-${name}-${job.slice(0, 8)}` : `sp-${name}-${pid}`;
 }
 
+// src/activation/dispatcher-identity.ts
+var DISPATCHER_ENV_KEYS = [
+  "XTRM_DISPATCHER_PARTICIPANT",
+  "XTRM_DISPATCHER_NAME",
+  "XTRM_DISPATCHER_ADDRESS"
+];
+var clean = (value) => {
+  if (typeof value !== "string")
+    return;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+function dispatcherFromHostEnv(env = process.env, sessionId) {
+  const participant = clean(env.SUBSTRATE_HOLDER);
+  const name = clean(env.XTRM_AGENT_NAME);
+  const session = clean(sessionId);
+  return {
+    ...participant ? { participant } : {},
+    ...name ? { name } : {},
+    ...session ? { sessionId: session } : {}
+  };
+}
+function dispatcherEnvOverlay(identity) {
+  const known = [
+    ["XTRM_DISPATCHER_PARTICIPANT", clean(identity?.participant)],
+    ["XTRM_DISPATCHER_NAME", clean(identity?.name)],
+    ["XTRM_DISPATCHER_ADDRESS", clean(identity?.address)]
+  ];
+  const env = {};
+  const unset = [];
+  for (const [key, value] of known) {
+    if (value === undefined)
+      unset.push(key);
+    else
+      env[key] = value;
+  }
+  return { env, unset };
+}
+function bridgedDispatcherEnv(overlay) {
+  return {
+    ...overlay.env,
+    ...Object.fromEntries(overlay.unset.map((key) => [key, ""]))
+  };
+}
+
 // src/utils/circuitBreaker.ts
 var TRANSIENT_ERROR_PATTERNS = [
   /\b5\d{2}\b/,
@@ -21650,19 +21697,21 @@ function composeActivationPath(shimDir, inherited, pathDelimiter) {
   return [shimDir, ...entries].join(pathDelimiter);
 }
 function bashSpawnHookWith(overlay, options = {}) {
-  const { shimDir, pathDelimiter = platformPathDelimiter } = options;
+  const { shimDir, pathDelimiter = platformPathDelimiter, unset = [] } = options;
   const identity = { ...overlay };
   delete identity.PATH;
   return (context) => {
     const env = { ...context.env, ...identity };
+    for (const key of unset)
+      delete env[key];
     if (shimDir) {
       env.PATH = composeActivationPath(shimDir, context.env.PATH, pathDelimiter);
     }
     return { ...context, env };
   };
 }
-function hasActivationEnv(overlay, shimDir) {
-  return Object.keys(overlay).length > 0 || Boolean(shimDir);
+function hasActivationEnv(overlay, shimDir, unset = []) {
+  return Object.keys(overlay).length > 0 || unset.length > 0 || Boolean(shimDir);
 }
 
 // src/activation/bridge-child-env.ts
@@ -23644,7 +23693,9 @@ function createGuardedTools(sdk, input) {
       unguardable.push(name);
       continue;
     }
-    const original = SHELL_FACTORIES.has(factoryName) && hasActivationEnv(input.env ?? {}, input.shimDir) ? factory(input.cwd, { spawnHook: bashSpawnHookWith(input.env ?? {}, { shimDir: input.shimDir }) }) : factory(input.cwd);
+    const original = SHELL_FACTORIES.has(factoryName) && hasActivationEnv(input.env ?? {}, input.shimDir, input.unset) ? factory(input.cwd, {
+      spawnHook: bashSpawnHookWith(input.env ?? {}, { shimDir: input.shimDir, unset: input.unset })
+    }) : factory(input.cwd);
     const originalExecute = original.execute.bind(original);
     tools.push({
       ...original,
@@ -25301,6 +25352,13 @@ class NativeActivationHost {
     const activationId = `act:${randomUUID4().slice(0, 12)}`;
     const attemptId = `att:${activationId.slice(4)}:1`;
     const participantId = `specialist::${request.specialist}`;
+    const dispatcher = {
+      ...request.dispatcher,
+      ...request.dispatcher?.participant ?? request.requestedByParticipantId ? { participant: request.dispatcher?.participant ?? request.requestedByParticipantId } : {}
+    };
+    const dispatcherEnv = dispatcherEnvOverlay(dispatcher);
+    const requestedByParticipantId = request.requestedByParticipantId ?? dispatcher.participant;
+    const coordinatorSessionId = request.coordinatorSessionId ?? dispatcher.sessionId;
     let eventIssueRef = request.issueRef;
     const emit = (name, payload) => this.forensics.emit({
       activationId,
@@ -25312,7 +25370,7 @@ class NativeActivationHost {
       payload
     });
     emit("activation_requested", {
-      requested_by: request.requestedByParticipantId,
+      requested_by: requestedByParticipantId ?? null,
       model_override: request.modelOverride ?? null,
       thinking_override: request.thinkingOverride ?? null
     });
@@ -25455,7 +25513,7 @@ class NativeActivationHost {
           await workItems.journal(created.ref, "note", {
             participantId,
             activationId,
-            summary: "ad-hoc dispatch evidence: " + `surface=${request.surface ?? "unknown"} ` + `specialist=${request.specialist} ` + `requested_by=${request.requestedByParticipantId} ` + `parent_ref=${parentRef || "none"} ` + `issue_kind=${kind} title=${titleSource}`
+            summary: "ad-hoc dispatch evidence: " + `surface=${request.surface ?? "unknown"} ` + `specialist=${request.specialist} ` + `requested_by=${requestedByParticipantId ?? "unknown"} ` + `parent_ref=${parentRef || "none"} ` + `issue_kind=${kind} title=${titleSource}`
           });
         } catch {}
       } catch (error) {
@@ -25814,7 +25872,7 @@ class NativeActivationHost {
       activationId,
       currentAttemptId: () => this.registry.get(activationId)?.snapshot.attemptId ?? attemptId,
       self: participantId,
-      parent: request.requestedByParticipantId,
+      parent: requestedByParticipantId ?? "unknown",
       onAsk: (kind, body) => {
         const record = this.registry.get(activationId);
         if (record)
@@ -25840,12 +25898,13 @@ class NativeActivationHost {
       run: this.identityEnvRun
     });
     const { PATH: _launchPath, ...activationEnv } = activationLaunchEnv;
+    Object.assign(activationEnv, dispatcherEnv.env);
     const activationShimDir = shimBinDir(process.env);
     const uncoveredSpawns = uncoveredHostEnvSpawns(effectiveToolContract.toolsList);
-    if (uncoveredSpawns.length > 0 && hasActivationEnv(activationEnv, activationShimDir)) {
+    if (uncoveredSpawns.length > 0 && hasActivationEnv(activationEnv, activationShimDir, dispatcherEnv.unset)) {
       warnIdentityEnv(`activation ${activationId} grants ${uncoveredSpawns.join(", ")}, whose child processes ` + `inherit the dispatching session's identity rather than the activation's ` + `(SPECIALISTS-4487); its bash and powershell calls carry the activation's`);
     }
-    if (claudeBridge && !scopeBridgedChildEnv(modelRuntime, activationEnv) && Object.keys(activationEnv).length > 0) {
+    if (claudeBridge && !scopeBridgedChildEnv(modelRuntime, { ...activationEnv, ...bridgedDispatcherEnv(dispatcherEnv) }) && Object.keys(activationEnv).length > 0) {
       warnIdentityEnv(`activation ${activationId}: the model runtime cannot carry a provider env, so its Claude Code ` + `child inherits the dispatching session's identity rather than the activation's (SPECIALISTS-4498)`);
     }
     if (claudeBridge && bridgeGitBlockOmitted(activationEnv)) {
@@ -25855,6 +25914,7 @@ class NativeActivationHost {
       toolNames: effectiveToolContract.toolsList,
       cwd: workspace.worktreePath,
       env: activationEnv,
+      unset: dispatcherEnv.unset,
       shimDir: activationShimDir,
       admit: createNativeToolAdmission({
         guardLoaded: curatedExtensions.all.includes(getPermissionGuardExtensionPath() ?? ""),
@@ -26111,8 +26171,8 @@ class NativeActivationHost {
         initialPrompt: rendered.initial_prompt,
         createSession: createSessionForModel,
         lineage: {
-          ...request.requestedByParticipantId ? { coordinatorParticipantId: request.requestedByParticipantId } : {},
-          ...request.coordinatorSessionId ? { coordinatorSessionId: request.coordinatorSessionId } : {}
+          ...requestedByParticipantId ? { coordinatorParticipantId: requestedByParticipantId } : {},
+          ...coordinatorSessionId ? { coordinatorSessionId } : {}
         },
         workItems,
         ...typeof binding.baseCommit === "string" && binding.baseCommit.trim() !== "" ? { bindingBaseCommit: binding.baseCommit } : {}
@@ -27463,12 +27523,12 @@ var SPECIALIST_DISPATCH_PARAMS = {
 };
 var SPECIALIST_DISPATCH_RUNTIME_PARAMS = {
   mcp: {
-    requested_by: "ParticipantId of the requesting coordinator. Defaults to the MCP gateway participant.",
-    coordinator_session_id: "MCP session id, for lineage."
+    requested_by: "ParticipantId of the requesting coordinator. Defaults to the dispatcher that launched this MCP server.",
+    coordinator_session_id: "Coordinator session id, for lineage. Defaults to the dispatcher's session."
   },
   pi: {
-    requested_by: "ParticipantId of the requesting coordinator. Defaults to the Pi extension adapter participant.",
-    coordinator_session_id: "Pi session id, for lineage."
+    requested_by: "ParticipantId of the requesting coordinator. Defaults to the dispatcher this Pi session belongs to.",
+    coordinator_session_id: "Coordinator session id, for lineage. Defaults to the dispatcher's session."
   }
 };
 var SPECIALIST_STATUS_PARAMS = {
@@ -29304,6 +29364,7 @@ function createSpecialistLeaseReconcileTool(probe) {
 }
 export {
   BUILD_ID_BYTES,
+  DISPATCHER_ENV_KEYS,
   DISPATCH_REFUSAL_REASONS,
   DISPLAY_IDLE_AFTER_S,
   DISPLAY_SPINNER_FRAMES,
@@ -29362,6 +29423,7 @@ export {
   createSpecialistLeaseReconcileTool,
   createWorkItemBoundary,
   describeBuildIdentity,
+  dispatcherFromHostEnv,
   evaluateBeadReadiness,
   extractSections,
   feedLine,

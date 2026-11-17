@@ -52,12 +52,12 @@ export declare const SPECIALIST_DISPATCH_PARAMS: {
  */
 export declare const SPECIALIST_DISPATCH_RUNTIME_PARAMS: {
     readonly mcp: {
-        readonly requested_by: "ParticipantId of the requesting coordinator. Defaults to the MCP gateway participant.";
-        readonly coordinator_session_id: "MCP session id, for lineage.";
+        readonly requested_by: "ParticipantId of the requesting coordinator. Defaults to the dispatcher that launched this MCP server.";
+        readonly coordinator_session_id: "Coordinator session id, for lineage. Defaults to the dispatcher's session.";
     };
     readonly pi: {
-        readonly requested_by: "ParticipantId of the requesting coordinator. Defaults to the Pi extension adapter participant.";
-        readonly coordinator_session_id: "Pi session id, for lineage.";
+        readonly requested_by: "ParticipantId of the requesting coordinator. Defaults to the dispatcher this Pi session belongs to.";
+        readonly coordinator_session_id: "Coordinator session id, for lineage. Defaults to the dispatcher's session.";
     };
 };
 export declare const SPECIALIST_STATUS_PARAMS: {

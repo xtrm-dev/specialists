@@ -1,6 +1,7 @@
 import * as z from 'zod';
 import type { NativeActivationHost } from '../../activation/native-host.js';
 import type { ActivationSnapshot, ActivationTokenUsage } from '../../activation/types.js';
+import { type DispatcherRun } from '../../activation/dispatcher-identity.js';
 import type { PendingAsk } from '../../activation/interaction.js';
 import type { RuntimeEventPusher } from '../../activation/async-events.js';
 import type { ActivationResult } from '../../activation/types.js';
@@ -208,7 +209,12 @@ export declare const specialistDispatchSchema: z.ZodObject<{
 }>;
 /** Test seam: the next dispatch states the wake behaviour again. */
 export declare function resetWakeNotice(): void;
-export declare function createSpecialistDispatchTool(getHost: () => NativeActivationHost, getPusher?: () => RuntimeEventPusher | undefined): {
+export declare function createSpecialistDispatchTool(getHost: () => NativeActivationHost, getPusher?: () => RuntimeEventPusher | undefined, dispatcherLookup?: {
+    env?: NodeJS.ProcessEnv;
+    pid?: number;
+    run?: DispatcherRun;
+    warn?: (message: string) => void;
+}): {
     name: "specialist_dispatch";
     description: string;
     inputSchema: z.ZodObject<{

@@ -70,6 +70,12 @@ export declare function createGuardedTools(sdk: PiSdk, input: {
      */
     env?: Record<string, string>;
     /**
+     * Keys deleted from the inherited shell env because the activation's identity cannot
+     * supply them (SPECIALISTS-4503: an inherited `XTRM_DISPATCHER_*` names the host's
+     * dispatcher — the grandparent — and must not reach the child).
+     */
+    unset?: readonly string[];
+    /**
      * Directory holding the gh/xt identity shim, put first on each shell's PATH. Separate
      * from `env` because PATH must be composed per spawn, not precomputed from the host.
      */
