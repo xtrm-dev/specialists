@@ -212,17 +212,54 @@ export class InteractionTransport {
 
     const message = this.compose(input);
     this.log.push(message);
-
-    this.pending.delete(target);
-    const waiter = this.waiters.get(target);
-    if (waiter) {
-      this.waiters.delete(target);
-      waiter(message);
-    }
-    this.answered.set(target, message);
+    this.settleAsk(target, message);
 
     await this.attemptDelivery(message);
     return message;
+  }
+
+  /**
+   * Resolve every outstanding ask for one activation as UNANSWERED.
+   *
+   * Needed because a blocked ask suspends the child INSIDE its tool call, and pi's
+   * `AgentSession.abort()` waits for the session to go idle — idle never arrives while a
+   * tool call is outstanding. That is a stop hanging in `stopping` for hours behind an
+   * escalation nobody answered. Resolving each waiter with the cancellation lets the
+   * abort finish.
+   *
+   * This is not a silent drop: the cancellation is a real message in the log (so the
+   * history shows how each ask ended) and the cancelled ids are returned to the caller,
+   * which records them durably. `pendingAsks()` is the only projection that forgets the ask.
+   */
+  cancelAsks(activationId: ActivationId, reason: string): MessageId[] {
+    const cancelled: MessageId[] = [];
+    for (const ask of this.pendingAsks()) {
+      if (ask.message.activationId !== activationId) continue;
+      const notice = this.compose({
+        kind: 'reply',
+        from: ask.message.to,
+        to: ask.message.from,
+        activationId: ask.message.activationId,
+        attemptId: ask.message.attemptId,
+        body: `Cancelled: the activation was stopped (${reason}) before this ${ask.message.kind} was answered. No reply is possible.`,
+        inReplyTo: ask.message.messageId,
+      });
+      this.log.push(notice);
+      this.settleAsk(ask.message.messageId, notice);
+      cancelled.push(ask.message.messageId);
+    }
+    return cancelled;
+  }
+
+  /** Unblock the asker and close the ask. Shared by an answer and a cancellation. */
+  private settleAsk(messageId: MessageId, reply: InteractionMessage): void {
+    this.pending.delete(messageId);
+    const waiter = this.waiters.get(messageId);
+    if (waiter) {
+      this.waiters.delete(messageId);
+      waiter(reply);
+    }
+    this.answered.set(messageId, reply);
   }
 
   /** Every ask still awaiting an answer, oldest first. */

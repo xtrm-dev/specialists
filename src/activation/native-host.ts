@@ -107,6 +107,7 @@ const HOST_ENV_SPAWNING_TOOLS = ['python'] as const;
 export function uncoveredHostEnvSpawns(toolsList: readonly string[]): string[] {
   return HOST_ENV_SPAWNING_TOOLS.filter((tool) => toolsList.includes(tool));
 }
+
 import { resolveModelChain } from '../specialist/model-chain.js';
 import { extractPurposeExcerpt, extractSections } from './contract-sections.js';
 import {
@@ -166,6 +167,24 @@ import {
   type WorkspaceAccess,
   type WorkspaceIdentity,
 } from './types.js';
+
+/**
+ * How long a stop waits for `abort()` before disposing anyway.
+ *
+ * `abort()` resolves when the session reaches idle, and any in-flight work that never
+ * returns holds it open. The pending ask — a tool call awaiting an answer that may never
+ * come — is the case that happened (a stop sat in `stopping` for ~3h). Cancelling the asks
+ * removes that cause; this bound is the guarantee that no other one can hold a stop open.
+ */
+export const STOP_ABORT_TIMEOUT_MS = 10_000;
+
+/** What a stop did on the way to disposal. */
+export interface ActivationStopOutcome {
+  /** Asks cancelled so the blocked child could be aborted; empty when none were pending. */
+  cancelledAskIds: string[];
+  /** `abort()` exceeded the stop bound; disposal proceeded without it. */
+  abortTimedOut: boolean;
+}
 
 const TOKEN_USAGE_KEYS = [
   'input_tokens',
@@ -1084,6 +1103,12 @@ export interface NativeActivationHostDeps {
    * tests inject a short bound to prove the failure path without waiting one out.
    */
   sessionStatsTimeoutMs?: number;
+  /**
+   * Bound on the `abort()` a stop performs before disposal. Defaults to
+   * {@link STOP_ABORT_TIMEOUT_MS}; tests inject a short bound to prove a stop cannot be
+   * held open by an abort that never returns.
+   */
+  stopAbortTimeoutMs?: number;
   /** Injected for tests; defaults to probing the `pi` binary on PATH. */
   piVersion?: string;
   /**
@@ -1205,6 +1230,7 @@ export class NativeActivationHost {
   private readonly backgroundPollMs: number;
   private readonly now: () => number;
   private readonly sessionStatsTimeoutMs?: number;
+  private readonly stopAbortTimeoutMs?: number;
   private readonly piVersion?: string;
   private readonly authority: AuthorityWriter;
   private readonly settlements: SettlementStore;
@@ -1299,6 +1325,7 @@ export class NativeActivationHost {
     this.now = deps.now ?? (() => Date.now());
     this.wakeSettlement = deps.onWakeSettlement;
     this.sessionStatsTimeoutMs = deps.sessionStatsTimeoutMs;
+    this.stopAbortTimeoutMs = deps.stopAbortTimeoutMs;
     this.piVersion = deps.piVersion;
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
     this.settlements = deps.settlements ?? createFileSettlementStore(join(this.cwd, '.specialists', 'settlements'));
@@ -2197,6 +2224,10 @@ export class NativeActivationHost {
       },
       onAnswered: (kind) => {
         const record = this.registry.get(activationId);
+        // A stop cancels pending asks to unblock the child's tool call. That resolution is
+        // a cancellation, not an answer, and disposal already owns the state — saying
+        // 'answered' here would record a resolution that never happened.
+        if (record?.snapshot.state === 'stopping') return;
         if (record) record.snapshot.state = 'running';
         if (record) this.save(record.snapshot);
         emit(kind === 'escalation' ? 'escalation_resolved' : 'clarification_answered');
@@ -4100,14 +4131,22 @@ export class NativeActivationHost {
    * Explicitly stop and dispose an activation.
    *
    * This is the only ordinary path to disposal — settling is not one.
+   *
+   * Outstanding asks are CANCELLED first, never waited on: the child is suspended inside
+   * the ask tool call, and `abort()` only returns once the session is idle, so a stop that
+   * aborted first waited for an answer nobody was going to give and sat in `stopping` for
+   * hours (SPECIALISTS-4505). Cancelling unblocks the child, the abort completes, and each
+   * cancellation is recorded as `activation_ask_cancelled` rather than dropped.
    */
-  async stop(activationId: string, reason = 'operator request'): Promise<void> {
+  async stop(activationId: string, reason = 'operator request'): Promise<ActivationStopOutcome> {
     const record = this.registry.get(activationId);
-    if (!record) return;
+    if (!record) return { cancelledAskIds: [], abortTimedOut: false };
 
     record.snapshot.state = 'stopping';
+    const cancelledAskIds = this.cancelPendingAsks(record.snapshot, reason);
+    let abortTimedOut = false;
     try {
-      await record.session.abort();
+      abortTimedOut = await this.abortWithin(record.session, record.snapshot);
     } finally {
       // Explicit disposal ends duration watching: no timer survives activation end.
       // The per-activation threshold dies with the registry entry (same lifetime).
@@ -4135,6 +4174,66 @@ export class NativeActivationHost {
       });
       this.registry.remove(activationId);
     }
+    return { cancelledAskIds, abortTimedOut };
+  }
+
+  /**
+   * Cancel this activation's outstanding asks so a blocked child can be aborted.
+   *
+   * The emission is what keeps the ask in the durable record: `pendingAsks()` stops
+   * projecting it the moment it is cancelled, so without a forensic row the only trace of
+   * the question would be the transport log inside this process.
+   */
+  private cancelPendingAsks(snapshot: ActivationSnapshot, reason: string): string[] {
+    const cancelled = this.interactions.cancelAsks(snapshot.activationId, reason);
+    if (cancelled.length === 0) return [];
+    for (const messageId of cancelled) {
+      this.forensics.emit({
+        activationId: snapshot.activationId,
+        attemptId: snapshot.attemptId,
+        participantId: snapshot.participantId,
+        specialist: snapshot.specialist,
+        beadId: snapshot.issueRef,
+        name: 'activation_ask_cancelled',
+        payload: { message_id: messageId, reason },
+      });
+    }
+    this.wakeFleetWaiters();
+    return cancelled;
+  }
+
+  /**
+   * Await `abort()`, but never past the stop bound.
+   *
+   * Returns whether the bound was hit. A timed-out abort keeps running; disposal has
+   * already taken the activation out of the fleet, so its late outcome is irrelevant — its
+   * rejection is observed here so it cannot surface as an unhandled rejection.
+   */
+  private async abortWithin(session: PiAgentSessionLike, snapshot: ActivationSnapshot): Promise<boolean> {
+    const abort = session.abort();
+    const timeoutMs = this.stopAbortTimeoutMs ?? STOP_ABORT_TIMEOUT_MS;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(true), timeoutMs);
+    });
+    const hitBound = await Promise
+      .race([abort.then(() => false), timedOut])
+      .finally(() => {
+        clearTimeout(timer);
+        abort.catch(() => { /* a stale abort cannot change a disposed activation */ });
+      });
+    if (hitBound) {
+      this.forensics.emit({
+        activationId: snapshot.activationId,
+        attemptId: snapshot.attemptId,
+        participantId: snapshot.participantId,
+        specialist: snapshot.specialist,
+        beadId: snapshot.issueRef,
+        name: 'activation_abort_timeout',
+        payload: { timeout_ms: timeoutMs },
+      });
+    }
+    return hitBound;
   }
 
   /**
