@@ -18172,6 +18172,19 @@ function dispatcherFromHostEnv(env = process.env, sessionId) {
     ...session ? { sessionId: session } : {}
   };
 }
+function resolveRequestDispatcher(request) {
+  const participant = clean(request.dispatcher?.participant) ?? clean(request.requestedByParticipantId);
+  const dispatcher = {
+    ...request.dispatcher,
+    ...participant ? { participant } : {}
+  };
+  const coordinatorSessionId = clean(request.coordinatorSessionId) ?? clean(dispatcher.sessionId);
+  return {
+    dispatcher,
+    ...participant ? { requestedByParticipantId: participant } : {},
+    ...coordinatorSessionId ? { coordinatorSessionId } : {}
+  };
+}
 function dispatcherEnvOverlay(identity) {
   const known = [
     ["XTRM_DISPATCHER_PARTICIPANT", clean(identity?.participant)],
@@ -25352,13 +25365,8 @@ class NativeActivationHost {
     const activationId = `act:${randomUUID4().slice(0, 12)}`;
     const attemptId = `att:${activationId.slice(4)}:1`;
     const participantId = `specialist::${request.specialist}`;
-    const dispatcher = {
-      ...request.dispatcher,
-      ...request.dispatcher?.participant ?? request.requestedByParticipantId ? { participant: request.dispatcher?.participant ?? request.requestedByParticipantId } : {}
-    };
+    const { dispatcher, requestedByParticipantId, coordinatorSessionId } = resolveRequestDispatcher(request);
     const dispatcherEnv = dispatcherEnvOverlay(dispatcher);
-    const requestedByParticipantId = request.requestedByParticipantId ?? dispatcher.participant;
-    const coordinatorSessionId = request.coordinatorSessionId ?? dispatcher.sessionId;
     let eventIssueRef = request.issueRef;
     const emit = (name, payload) => this.forensics.emit({
       activationId,
