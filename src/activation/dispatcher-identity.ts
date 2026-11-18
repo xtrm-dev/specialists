@@ -47,6 +47,35 @@ export const DISPATCHER_ENV_KEYS = [
 export const DISPATCHER_LOOKUP_TIMEOUT_MS = 3000;
 
 /**
+ * Substrate's dispatcher label grammar (XTRM-839): a shell-safe identifier of at most
+ * 128 characters, mirroring its `IDENTITY_LABEL_PATTERN` / `IDENTITY_LABEL_MAX_LENGTH`.
+ * Mirrored here so the host drops a value sb would refuse instead of letting a malformed
+ * label fail the whole dispatch — sb writes NO binding on a bad value.
+ */
+export const DISPATCHER_LABEL_MAX_LENGTH = 128;
+const DISPATCHER_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/+-]*$/;
+
+/**
+ * Substrate's session grammar (execution-context.ts SESSION_ID_PATTERN): a canonical UUID or a
+ * tmux session id (`$3`). sb lowercases a UUID before it validates, so either case is accepted
+ * there; this host accepts exactly what sb accepts, so a value sb would record is never dropped
+ * here (found by the seconder on #586: a stricter local grammar turned known values into absence).
+ */
+const DISPATCHER_SESSION_PATTERN = /^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|\$[0-9]+)$/;
+
+/** True when `value` is a label sb will accept as a dispatcher participant. */
+export function isDispatcherLabel(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const label = value.trim();
+  return label.length > 0 && label.length <= DISPATCHER_LABEL_MAX_LENGTH && DISPATCHER_LABEL_PATTERN.test(label);
+}
+
+/** True when `value` is a UUID or tmux session id sb will accept as a dispatcher session. */
+export function isDispatcherSessionId(value: unknown): value is string {
+  return typeof value === 'string' && DISPATCHER_SESSION_PATTERN.test(value.trim());
+}
+
+/**
  * After a failed lookup (missing or old xt, timeout, junk) the next lookups are skipped for
  * this long, so a wedged install costs one bounded stall instead of one per dispatch. A
  * success clears it. Found by the seconder on #584: the warning is process-wide-once, so the
@@ -131,11 +160,13 @@ export function warnDispatcherIdentity(message: string): void {
 }
 
 let warningGiven = false;
+const warnedBindingReasons = new Set<string>();
 
 /** Test seam: the next lookup may warn again and is no longer in the failure cool-down. */
 export function resetDispatcherWarning(): void {
   warningGiven = false;
   lookupFailedAt = undefined;
+  warnedBindingReasons.clear();
 }
 
 /** A spawn error's class and code, e.g. `Error ENOENT`; never a value. */
@@ -261,6 +292,42 @@ export function resolveRequestDispatcher(request: {
     ...(participant ? { requestedByParticipantId: participant } : {}),
     ...(coordinatorSessionId ? { coordinatorSessionId } : {}),
   };
+}
+
+/** The ExecutionBinding half of one dispatcher value (XTRM-839). */
+export interface DispatcherBindingFields {
+  dispatcherParticipantId?: string;
+  dispatcherSessionId?: string;
+}
+
+/**
+ * The binding half of the one dispatcher value: what `sb provenance dispatch` can record
+ * without refusing the dispatch. sb validates both at its write seam and writes NO binding
+ * on a malformed value, so an invalid half is DROPPED here (one warning per reason) and the
+ * dispatch proceeds. Absent stays absent — never a placeholder, never an env default.
+ */
+export function dispatcherBindingFields(
+  identity: { participant?: string; sessionId?: string } | undefined,
+  warn: (message: string) => void = warnDispatcherIdentity,
+): DispatcherBindingFields {
+  const fields: DispatcherBindingFields = {};
+  const participant = clean(identity?.participant);
+  if (participant !== undefined) {
+    if (isDispatcherLabel(participant)) fields.dispatcherParticipantId = participant;
+    else warnBindingOnce(warn, 'the dispatcher participant is not a Substrate-safe label (at most 128 shell-safe characters)');
+  }
+  const sessionId = clean(identity?.sessionId);
+  if (sessionId !== undefined) {
+    if (isDispatcherSessionId(sessionId)) fields.dispatcherSessionId = sessionId;
+    else warnBindingOnce(warn, 'the dispatcher session is not a UUID or a tmux session id');
+  }
+  return fields;
+}
+
+function warnBindingOnce(warn: (message: string) => void, reason: string): void {
+  if (warnedBindingReasons.has(reason)) return;
+  warnedBindingReasons.add(reason);
+  warn(`${reason}; the invalid value is dropped and the dispatch proceeds (a Substrate that cannot record a dispatcher records none)`);
 }
 
 /**

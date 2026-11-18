@@ -43,14 +43,8 @@ export interface RemoteProjectTarget {
     /** Server checkout root verified for that repository, or null when setup recorded none. */
     serverRoot: string | null;
 }
-/**
- * Build the work-item ports over a live service connection to the store-owning
- * machine.
- *
- * `remote` is the configured label (`ssh:<host>`), used only to say where the
- * failure happened; the connection itself is already open and is not this
- * function's to close.
- */
+/** Test seam: the next remote dispatch may warn again. */
+export declare function resetRemoteDispatcherWarning(): void;
 export declare function createRemoteWorkItemPorts(service: RemoteWorkItemService, opts: {
     remote: string;
     project?: RemoteProjectTarget;

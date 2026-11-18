@@ -28,6 +28,7 @@
 //   * The journal/result and provenance writers are async here because a wire
 //     call is async; the local services stay sync and are wrapped by the caller.
 
+import { runtimeWarn } from '../utils/runtime-diagnostics.js';
 import type {
   ActiveClaimView,
   DispatchRequest,
@@ -175,6 +176,32 @@ export interface RemoteProjectTarget {
  * failure happened; the connection itself is already open and is not this
  * function's to close.
  */
+let remoteDispatcherWarned = false;
+
+/** Test seam: the next remote dispatch may warn again. */
+export function resetRemoteDispatcherWarning(): void {
+  remoteDispatcherWarned = false;
+}
+
+/**
+ * The remote gate forwards the whole request, but Substrate's specialist gate builds the
+ * provenance.dispatch input itself and never forwards the dispatcher fields, so a remote
+ * binding records no dispatcher. The dispatch proceeds; this says so once instead of letting a
+ * known value vanish silently (found by the seconder on #586).
+ */
+function warnRemoteDispatcherGap(req: DispatchRequest): void {
+  if (remoteDispatcherWarned) return;
+  const known = (typeof req.dispatcherParticipantId === 'string' && req.dispatcherParticipantId !== '')
+    || (typeof req.dispatcherSessionId === 'string' && req.dispatcherSessionId !== '');
+  if (!known) return;
+  remoteDispatcherWarned = true;
+  runtimeWarn(
+    'work-item-remote',
+    '[specialists] the remote Substrate path cannot record the dispatcher on the ExecutionBinding yet '
+      + '(the remote gate drops the fields); the dispatch proceeds and the binding records no dispatcher',
+  );
+}
+
 export function createRemoteWorkItemPorts(
   service: RemoteWorkItemService,
   opts: { remote: string; project?: RemoteProjectTarget },
@@ -261,8 +288,10 @@ export function createRemoteWorkItemPorts(
       call<{ issueId: string; revision: number; contractHash: string; report: unknown }>('gate.check', {
         request: req,
       }),
-    dispatch: (_issues: unknown, _provenance: unknown, req: DispatchRequest) =>
-      call<{ binding: ExecutionBindingView }>('gate.dispatch', { request: req }),
+    dispatch: (_issues: unknown, _provenance: unknown, req: DispatchRequest) => {
+      warnRemoteDispatcherGap(req);
+      return call<{ binding: ExecutionBindingView }>('gate.dispatch', { request: req });
+    },
   };
 
   const journalService: JournalServicePort = {

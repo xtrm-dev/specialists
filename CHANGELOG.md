@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Select the Claude Code route with an operator allow list (SPECIALISTS-4442) (#554) ([36b89e2](https://github.com/xtrm-dev/specialists/commit/36b89e2464ab48a21486fb85d320b5ac7615f9ed))
 - Guard dist/ reproducibility so a wrong bun cannot ship (SPECIALISTS-4445) (#556) ([0bae6e1](https://github.com/xtrm-dev/specialists/commit/0bae6e14cbe63684620d097911470a79f7af719c))
 - Reconcile XTRM-96 with N3 telemetry and bounded readers (#403) ([82ef77a](https://github.com/xtrm-dev/specialists/commit/82ef77a55ae4e4240ec661d1d450fb3bae9e4109))
+- Offer service-knowledge from xtrm-dev/xtrm (CORE-2714) (#579) ([25e10a4](https://github.com/xtrm-dev/specialists/commit/25e10a43505822af64921d314b1160158dd423d0))
 
 ### Fixed
 - Harden the release pre-flight (SPECIALISTS-4429) (#541) ([387e9fc](https://github.com/xtrm-dev/specialists/commit/387e9fc55f067c877844ecf950a61c3e96273337))
@@ -31,9 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Clear the open js/* alerts on master (SPECIALISTS-4495) (#578) ([b4c4a72](https://github.com/xtrm-dev/specialists/commit/b4c4a72c4cbc18afc864d036884c92a095f63f04))
 - A lead-launched specialist exports its own role (CORE-2722) (#582) ([e6fa1c7](https://github.com/xtrm-dev/specialists/commit/e6fa1c7628d9d7b7753acf2349da70ab7b581e63))
 - A bridged activation's Claude Code child gets the activation identity (SPECIALISTS-4498) (#583) ([8d8fd3d](https://github.com/xtrm-dev/specialists/commit/8d8fd3d0a3dee0e1cd4f9095e53b18fb6044f3f7))
-- One dispatcher value per dispatch, written to env and Substrate (SPECIALISTS-4503) ([54ee58e](https://github.com/xtrm-dev/specialists/commit/54ee58edecc6c9c160897aebd1a6d10381c7e68d))
-- One resolver feeds both dispatcher sinks, and the tests that pin it (SPECIALISTS-4503) ([3a86577](https://github.com/xtrm-dev/specialists/commit/3a865779e68e154d8c77da7ff042a895684a0ab3))
-- A failed xt lookup is not repeated, a dropped wake warns, and the docs say where the address exists (SPECIALISTS-4503) ([e3394a6](https://github.com/xtrm-dev/specialists/commit/e3394a6ded94dd10fe4c6720246c02301b7ab169))
+- One dispatcher value per dispatch, written to env and Substrate (SPECIALISTS-4503) (#584) ([82a5c22](https://github.com/xtrm-dev/specialists/commit/82a5c22d34d1385b5a5d97d631fa6ede9685ed18))
+- Record the dispatcher on the ExecutionBinding (SPECIALISTS-4506) ([600af9a](https://github.com/xtrm-dev/specialists/commit/600af9a54b36d7e613f9de4e946e9572d5571265))
+- The dispatcher wrapper hands the gate the whole provenance service (SPECIALISTS-4506) ([ed48e23](https://github.com/xtrm-dev/specialists/commit/ed48e23241984b80dfde5b198ae93caeae7f267d))
+- Accept the session ids Substrate accepts, and say when the remote path drops the dispatcher (SPECIALISTS-4506) ([fed5508](https://github.com/xtrm-dev/specialists/commit/fed55084ac83c646f87a85384aa0677ff0717612))
+- Pin the migration-017 detection, the gate wiring and the once-only warning (SPECIALISTS-4506) ([25ba6ae](https://github.com/xtrm-dev/specialists/commit/25ba6aeb380fb67a2616da3c2151f24be2ee845a))
 
 ### Project maintenance
 - Make the NODE_ENV assertion prove the override (SPECIALISTS-4429) (#543) ([21be15b](https://github.com/xtrm-dev/specialists/commit/21be15b78a1e6eda9640dea37c350832012b1781))
@@ -54,9 +57,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Create every scratch directory through tempDir so the CORE-2612 sweep can see it (SPECIALISTS-4474) (#576) ([7a95f4b](https://github.com/xtrm-dev/specialists/commit/7a95f4b18a5f1e8f18b6a01772825e496ef15b09))
 - Teach the operator allow list, not the removed two-switch route (SPECIALISTS-4447) (#577) ([346eea1](https://github.com/xtrm-dev/specialists/commit/346eea1d6a758e3386fe53b8384d8d83aeb41b01))
 - Bump the actions-all group across 1 directory with 3 updates (#561) ([4eb1e50](https://github.com/xtrm-dev/specialists/commit/4eb1e50cd3b9a5d67b590004e7c24ba84749b132))
-- Rebuild the committed bundle with the pinned bun 1.4.2 (SPECIALISTS-4503) ([12cf6e4](https://github.com/xtrm-dev/specialists/commit/12cf6e4ff018c2adf9b346af9172a16a4fbeb579))
-- Rebuild the committed bundle with the pinned bun 1.4.2 (SPECIALISTS-4503) ([a619467](https://github.com/xtrm-dev/specialists/commit/a619467b05019b3e67ee364936e878dadd058ac5))
-- Rebuild the committed bundle with the pinned bun 1.4.2 (SPECIALISTS-4503) ([0fe44a4](https://github.com/xtrm-dev/specialists/commit/0fe44a44fd7fa69f40ddb07cef9d02f27ecfd481))
+- Read the activation env from the bash spawn hook in the three-sink test ([a213b1b](https://github.com/xtrm-dev/specialists/commit/a213b1b96620a1076b9f45d7d9e1e89c006f7c5c))
+- Rebuild the committed bundle with the pinned bun 1.4.2 (SPECIALISTS-4506) ([3c402db](https://github.com/xtrm-dev/specialists/commit/3c402db1fb75f78323b0dbfb54696a20f2ecf407))
+- Rebuild the committed bundle with the pinned bun 1.4.2 (SPECIALISTS-4506) ([441be0a](https://github.com/xtrm-dev/specialists/commit/441be0a24faffe1aee8931b89150c883fee58b7f))
+- Rebuild the committed bundle with the pinned bun 1.4.2 (SPECIALISTS-4506) ([bfe1004](https://github.com/xtrm-dev/specialists/commit/bfe1004976fb4af5200bc7b5be984cbecbb4fef6))
 
 ## [4.2.0] - 2026-11-11
 
