@@ -22418,9 +22418,15 @@ function provenanceRecordingDispatcher(provenance, req, canRecord) {
     }
     return provenance;
   }
-  return {
-    dispatch: (issueId, input, opts) => service.dispatch(issueId, { ...input, ...fields }, opts)
-  };
+  const dispatch = (issueId, input, opts) => service.dispatch.call(service, issueId, { ...input, ...fields }, opts);
+  return new Proxy(service, {
+    get(target, property) {
+      if (property === "dispatch")
+        return dispatch;
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+  });
 }
 function bindsDispatcherIdentity(db) {
   try {
