@@ -5,7 +5,7 @@ import {
   dispatcherFromHostEnv,
   resetDispatcherWarning,
   resolveProcessDispatcher,
-  DISPATCHER_ENV_KEYS, resolveRequestDispatcher } from '../../../src/activation/dispatcher-identity.js';
+  DISPATCHER_ENV_KEYS, resolveRequestDispatcher, LOOKUP_FAILURE_COOLDOWN_MS } from '../../../src/activation/dispatcher-identity.js';
 
 const ENV = { SUBSTRATE_HOLDER: 'sp-lead-1', XTRM_AGENT_NAME: 'serving-lead' };
 
@@ -155,5 +155,54 @@ describe('resolveRequestDispatcher: one value for both sinks (SPECIALISTS-4503)'
     expect(resolveRequestDispatcher({ coordinatorSessionId: 's-req', dispatcher: { sessionId: 's-disp' } }).coordinatorSessionId).toBe('s-req');
     expect(resolveRequestDispatcher({ dispatcher: { sessionId: 's-disp' } }).coordinatorSessionId).toBe('s-disp');
     expect(resolveRequestDispatcher({}).coordinatorSessionId).toBeUndefined();
+  });
+});
+
+// Found by the seconder on #584: a wedged or missing xt cost a 3 s synchronous stall on EVERY
+// dispatch while the warning fired once per process, so the repeated stall was invisible.
+describe('a failed xt lookup is not repeated for every dispatch (SPECIALISTS-4503)', () => {
+  beforeEach(() => { resetDispatcherWarning(); });
+  const broken = () => ({ status: 127, stdout: '', stderr: "error: unknown command 'dispatcher'" });
+  const good = () => ({ status: 0, stdout: JSON.stringify({ sessionId: 'sess-1', name: 'lead' }) });
+
+  it('spawns xt once after a failure and skips it inside the cool-down', () => {
+    const run = vi.fn(broken);
+    let clock = 1_000_000;
+    const lookup = () => resolveProcessDispatcher({ env: { SUBSTRATE_HOLDER: 'sp-lead-1' }, pid: 7, run, warn: () => undefined, now: () => clock });
+
+    const first = lookup();
+    clock += 1_000;
+    const second = lookup();
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(first.participant).toBe('sp-lead-1');
+    expect(second.participant).toBe('sp-lead-1');  // the env participant survives the skip
+  });
+
+  it('tries again once the cool-down has passed', () => {
+    const run = vi.fn(broken);
+    let clock = 1_000_000;
+    const lookup = () => resolveProcessDispatcher({ env: {}, pid: 7, run, warn: () => undefined, now: () => clock });
+
+    lookup();
+    clock += LOOKUP_FAILURE_COOLDOWN_MS + 1;
+    lookup();
+
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it('a success clears the cool-down and is never itself cached', () => {
+    const calls: string[] = [];
+    let healthy = false;
+    const run = vi.fn(() => { calls.push(healthy ? 'ok' : 'bad'); return healthy ? good() : broken(); });
+    let clock = 1_000_000;
+    const lookup = () => resolveProcessDispatcher({ env: {}, pid: 7, run, warn: () => undefined, now: () => clock });
+
+    lookup();                                  // fails, starts the cool-down
+    clock += LOOKUP_FAILURE_COOLDOWN_MS + 1;
+    healthy = true;
+    expect(lookup().sessionId).toBe('sess-1');  // cool-down over, succeeds
+    lookup();                                  // success is not cached: xt is asked again
+    expect(calls).toEqual(['bad', 'ok', 'ok']);
   });
 });

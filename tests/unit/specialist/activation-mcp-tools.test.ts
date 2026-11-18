@@ -298,6 +298,24 @@ describe('specialist_dispatch — the MCP dispatch path is the same admission pa
       await run();
       expect(track).not.toHaveBeenCalled();
     });
+
+    it('says so once when the completion wake cannot be routed, instead of dropping it silently', async () => {
+      resetWakeNotice();
+      const warn = vi.fn();
+      const track = vi.fn();
+      const host = {
+        start: vi.fn(async () => ({ activationId: 'act:drop', result: new Promise(() => {}), stepContract: { rootWorkRef: 'ISSUE-1', inputs: [], outputs: [] } })),
+        inspect: () => undefined,
+      } as never;
+      const tool = createSpecialistDispatchTool(() => host, () => ({ track }) as never, { env: {}, pid: 1, run: () => ({ status: 127, stdout: '' }), warn });
+
+      await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' });
+      await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' });
+
+      expect(track).not.toHaveBeenCalled();
+      const wake = warn.mock.calls.map((c) => String(c[0])).filter((line) => line.includes('completion wake'));
+      expect(wake).toHaveLength(1);
+    });
   });
 
   describe('the one xt lookup per dispatch (SPECIALISTS-4503)', () => {

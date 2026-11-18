@@ -99,7 +99,7 @@ export type {
 
 // The dispatcher of one dispatch (SPECIALISTS-4503): the Pi extension resolves it from the
 // host env it already runs in, and hands the SAME value to the request/env sinks.
-export { dispatcherFromHostEnv, DISPATCHER_ENV_KEYS } from './activation/dispatcher-identity.js';
+export { dispatcherFromHostEnv } from './activation/dispatcher-identity.js';
 export type { DispatcherIdentity, DispatcherEnvOverlay } from './activation/dispatcher-identity.js';
 
 // Shared frontend projections (unitAI-rrdnt.33): the SAME snapshot→wire mapping both

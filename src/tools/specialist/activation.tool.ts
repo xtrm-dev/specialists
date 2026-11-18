@@ -399,6 +399,18 @@ let wakeNoticeGiven = false;
 /** Test seam: the next dispatch states the wake behaviour again. */
 export function resetWakeNotice(): void {
   wakeNoticeGiven = false;
+  routeDropWarningGiven = false;
+}
+
+/** One warning per process when a dispatch knows neither a participant nor a session. */
+let routeDropWarningGiven = false;
+function warnRouteDropped(warn: (message: string) => void): void {
+  if (routeDropWarningGiven) return;
+  routeDropWarningGiven = true;
+  warn(
+    'the completion wake cannot be routed: neither a dispatcher participant nor a coordinator ' +
+    'session id is known for this dispatch; the result stays readable through specialist_status',
+  );
 }
 
 /**
@@ -411,6 +423,7 @@ function resolveDispatcherOnce(
     pid?: number;
     run?: DispatcherRun;
     warn?: (message: string) => void;
+    now?: () => number;
   },
   explicitParticipant: string | undefined,
 ): DispatcherIdentity {
@@ -418,6 +431,7 @@ function resolveDispatcherOnce(
     env: lookup.env ?? process.env,
     pid: lookup.pid ?? process.ppid,
     ...(lookup.run ? { run: lookup.run } : {}),
+    ...(lookup.now ? { now: lookup.now } : {}),
     warn: lookup.warn ?? warnDispatcherIdentity,
   });
   const explicit = (explicitParticipant ?? '').trim();
@@ -432,6 +446,7 @@ export function createSpecialistDispatchTool(
     pid?: number;
     run?: DispatcherRun;
     warn?: (message: string) => void;
+    now?: () => number;
   } = {},
 ) {
   return {
@@ -577,8 +592,13 @@ export function createSpecialistDispatchTool(
         if (dispatcher.participant || coordinatorSessionId) {
           pusher?.track(handle.activationId, {
             ...(coordinatorSessionId ? { coordinatorSessionId } : {}),
+            // 'unknown' is the contract's allowed "absent or unknown" label on this in-memory push
+            // route; it is never written to Substrate lineage (requestedByParticipantId is omitted
+            // above when no participant is known).
             coordinatorParticipantId: dispatcher.participant ?? 'unknown',
           });
+        } else if (pusher) {
+          warnRouteDropped(dispatcherLookup.warn ?? warnDispatcherIdentity);
         }
         handle.result.then(
           async (result) => {

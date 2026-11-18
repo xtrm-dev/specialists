@@ -13,7 +13,11 @@
  *
  * - env: `XTRM_DISPATCHER_PARTICIPANT` (the dispatcher's own holder — a NEW key; `NAME`
  *   stays display-only and `ADDRESS` stays the reply address), written to the activation's
- *   spawn-hook overlay, the legacy `sp run` child env and the bridged child provider env;
+ *   spawn-hook overlay, the legacy `sp run` child env and the bridged child provider env.
+ *   `ADDRESS` is known only on the MCP path, where core's `xt identity dispatcher` supplies
+ *   it. The Pi extension and the legacy runner read their own env, which holds no own reply
+ *   address, so there it is DELETED rather than inherited: on those paths the child carries a
+ *   participant and a name but no reply address;
  * - Substrate: `requested_by` and `coordinatorSessionId`.
  *
  * Env is ONE HOP by design: a nested dispatch replaces the inherited value with the
@@ -41,6 +45,15 @@ export const DISPATCHER_ENV_KEYS = [
 
 /** Bound on the one CLI lookup per dispatch. */
 export const DISPATCHER_LOOKUP_TIMEOUT_MS = 3000;
+
+/**
+ * After a failed lookup (missing or old xt, timeout, junk) the next lookups are skipped for
+ * this long, so a wedged install costs one bounded stall instead of one per dispatch. A
+ * success clears it. Found by the seconder on #584: the warning is process-wide-once, so the
+ * repeated stall would otherwise be invisible.
+ */
+export const LOOKUP_FAILURE_COOLDOWN_MS = 60_000;
+let lookupFailedAt: number | undefined;
 
 /**
  * The dispatcher of one dispatch.
@@ -76,6 +89,8 @@ export interface DispatcherLookupInput {
   run?: DispatcherRun;
   /** Lookup timeout. Default {@link DISPATCHER_LOOKUP_TIMEOUT_MS}. */
   timeoutMs?: number;
+  /** Clock for the failure cool-down. Injected in tests. */
+  now?: () => number;
   /** Warning sink, one reason line. Injected in tests. */
   warn?: (message: string) => void;
 }
@@ -117,9 +132,10 @@ export function warnDispatcherIdentity(message: string): void {
 
 let warningGiven = false;
 
-/** Test seam: the next lookup may warn again. */
+/** Test seam: the next lookup may warn again and is no longer in the failure cool-down. */
 export function resetDispatcherWarning(): void {
   warningGiven = false;
+  lookupFailedAt = undefined;
 }
 
 /** A spawn error's class and code, e.g. `Error ENOENT`; never a value. */
@@ -156,6 +172,14 @@ export function resolveProcessDispatcher(input: DispatcherLookupInput = {}): Dis
   const warn = input.warn ?? warnDispatcherIdentity;
   const run = input.run ?? DEFAULT_RUN;
   const pid = input.pid ?? process.ppid;
+  const now = (input.now ?? Date.now)();
+  // In the cool-down after a failed lookup: do not spawn xt again, say nothing more.
+  if (lookupFailedAt !== undefined && now - lookupFailedAt < LOOKUP_FAILURE_COOLDOWN_MS) return identity;
+  const failed = (reason: string): DispatcherIdentity => {
+    lookupFailedAt = now;
+    warnOnce(warn, reason);
+    return identity;
+  };
 
   let result: ReturnType<DispatcherRun>;
   try {
@@ -165,21 +189,17 @@ export function resolveProcessDispatcher(input: DispatcherLookupInput = {}): Dis
       { cwd: input.cwd, env, timeoutMs: input.timeoutMs ?? DISPATCHER_LOOKUP_TIMEOUT_MS },
     );
   } catch (error) {
-    warnOnce(warn, `lookup threw ${describeErrorClass(error)}`);
-    return identity;
+    return failed(`lookup threw ${describeErrorClass(error)}`);
   }
-  if (result.error || result.status !== 0) {
-    warnOnce(warn, failureReason(result));
-    return identity;
-  }
+  if (result.error || result.status !== 0) return failed(failureReason(result));
 
   let answer: unknown;
   try {
     answer = JSON.parse(result.stdout);
   } catch {
-    warnOnce(warn, 'returned unparseable JSON');
-    return identity;
+    return failed('returned unparseable JSON');
   }
+  lookupFailedAt = undefined;
   const parsed = (answer ?? {}) as { name?: unknown; address?: unknown; sessionId?: unknown };
   return {
     ...identity,
