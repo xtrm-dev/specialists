@@ -53,6 +53,22 @@ import { type SettlementStore } from './settlement-store.js';
 import { type AuthorityWriter } from './authority-store.js';
 import { type ActivationHandle, type ActivationRequest, type ActivationResult, type ActivationSnapshot, type LiveActivationStats, type WorkspaceIdentity } from './types.js';
 /**
+ * How long a stop waits for `abort()` before disposing anyway.
+ *
+ * `abort()` resolves when the session reaches idle, and any in-flight work that never
+ * returns holds it open. The pending ask — a tool call awaiting an answer that may never
+ * come — is the case that happened (a stop sat in `stopping` for ~3h). Cancelling the asks
+ * removes that cause; this bound is the guarantee that no other one can hold a stop open.
+ */
+export declare const STOP_ABORT_TIMEOUT_MS = 10000;
+/** What a stop did on the way to disposal. */
+export interface ActivationStopOutcome {
+    /** Asks cancelled so the blocked child could be aborted; empty when none were pending. */
+    cancelledAskIds: string[];
+    /** `abort()` exceeded the stop bound; disposal proceeded without it. */
+    abortTimedOut: boolean;
+}
+/**
  * True when an extension source cannot be handed to pi's in-process resource loader as a
  * path, and must instead be resolved by the pi CLI itself.
  *
@@ -481,6 +497,12 @@ export interface NativeActivationHostDeps {
      * tests inject a short bound to prove the failure path without waiting one out.
      */
     sessionStatsTimeoutMs?: number;
+    /**
+     * Bound on the `abort()` a stop performs before disposal. Defaults to
+     * {@link STOP_ABORT_TIMEOUT_MS}; tests inject a short bound to prove a stop cannot be
+     * held open by an abort that never returns.
+     */
+    stopAbortTimeoutMs?: number;
     /** Injected for tests; defaults to probing the `pi` binary on PATH. */
     piVersion?: string;
     /**
@@ -563,6 +585,7 @@ export declare class NativeActivationHost {
     private readonly backgroundPollMs;
     private readonly now;
     private readonly sessionStatsTimeoutMs?;
+    private readonly stopAbortTimeoutMs?;
     private readonly piVersion?;
     private readonly authority;
     private readonly settlements;
@@ -916,8 +939,30 @@ export declare class NativeActivationHost {
      * Explicitly stop and dispose an activation.
      *
      * This is the only ordinary path to disposal — settling is not one.
+     *
+     * Outstanding asks are CANCELLED first, never waited on: the child is suspended inside
+     * the ask tool call, and `abort()` only returns once the session is idle, so a stop that
+     * aborted first waited for an answer nobody was going to give and sat in `stopping` for
+     * hours (SPECIALISTS-4505). Cancelling unblocks the child, the abort completes, and each
+     * cancellation is recorded as `activation_ask_cancelled` rather than dropped.
      */
-    stop(activationId: string, reason?: string): Promise<void>;
+    stop(activationId: string, reason?: string): Promise<ActivationStopOutcome>;
+    /**
+     * Cancel this activation's outstanding asks so a blocked child can be aborted.
+     *
+     * The emission is what keeps the ask in the durable record: `pendingAsks()` stops
+     * projecting it the moment it is cancelled, so without a forensic row the only trace of
+     * the question would be the transport log inside this process.
+     */
+    private cancelPendingAsks;
+    /**
+     * Await `abort()`, but never past the stop bound.
+     *
+     * Returns whether the bound was hit. A timed-out abort keeps running; disposal has
+     * already taken the activation out of the fleet, so its late outcome is irrelevant — its
+     * rejection is observed here so it cannot surface as an unhandled rejection.
+     */
+    private abortWithin;
     /**
      * Steer a RUNNING activation mid-run with a new instruction, keeping its
      * session and context intact (SPECIALISTS-141).
