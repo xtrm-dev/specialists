@@ -18151,12 +18151,28 @@ function specialistHolderName(specialistName, jobId, pid = process.pid) {
 }
 
 // src/activation/dispatcher-identity.ts
+var DISPATCHER_LABEL_MAX_LENGTH = 128;
+var DISPATCHER_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/+-]*$/;
+var DISPATCHER_SESSION_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+function isDispatcherLabel(value) {
+  if (typeof value !== "string")
+    return false;
+  const label = value.trim();
+  return label.length > 0 && label.length <= DISPATCHER_LABEL_MAX_LENGTH && DISPATCHER_LABEL_PATTERN.test(label);
+}
+function isDispatcherSessionId(value) {
+  return typeof value === "string" && DISPATCHER_SESSION_PATTERN.test(value.trim());
+}
 var clean = (value) => {
   if (typeof value !== "string")
     return;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 };
+function warnDispatcherIdentity(message) {
+  runtimeWarn("dispatcher-identity", `[specialists] dispatcher-identity: ${message}`);
+}
+var warnedBindingReasons = new Set;
 function dispatcherFromHostEnv(env = process.env, sessionId) {
   const participant = clean(env.SUBSTRATE_HOLDER);
   const name = clean(env.XTRM_AGENT_NAME);
@@ -18179,6 +18195,30 @@ function resolveRequestDispatcher(request) {
     ...participant ? { requestedByParticipantId: participant } : {},
     ...coordinatorSessionId ? { coordinatorSessionId } : {}
   };
+}
+function dispatcherBindingFields(identity, warn = warnDispatcherIdentity) {
+  const fields = {};
+  const participant = clean(identity?.participant);
+  if (participant !== undefined) {
+    if (isDispatcherLabel(participant))
+      fields.dispatcherParticipantId = participant;
+    else
+      warnBindingOnce(warn, "the dispatcher participant is not a Substrate-safe label (at most 128 shell-safe characters)");
+  }
+  const sessionId = clean(identity?.sessionId);
+  if (sessionId !== undefined) {
+    if (isDispatcherSessionId(sessionId))
+      fields.dispatcherSessionId = sessionId;
+    else
+      warnBindingOnce(warn, "the dispatcher session is not a canonical lowercase UUID");
+  }
+  return fields;
+}
+function warnBindingOnce(warn, reason) {
+  if (warnedBindingReasons.has(reason))
+    return;
+  warnedBindingReasons.add(reason);
+  warn(`${reason}; the binding records only the dispatcher value Substrate accepts`);
 }
 function dispatcherEnvOverlay(identity) {
   const known = [
@@ -22125,7 +22165,16 @@ function createWorkItemBoundary(ports) {
         }
       }
       const claimId = active?.id ?? req.claimId ?? undefined;
-      const out = await gate.dispatch(issues, provenance, { ...req, claimId });
+      const dispatcher = dispatcherBindingFields({
+        participant: req.dispatcherParticipantId ?? undefined,
+        sessionId: req.dispatcherSessionId ?? undefined
+      });
+      const out = await gate.dispatch(issues, provenance, {
+        ...req,
+        claimId,
+        dispatcherParticipantId: dispatcher.dispatcherParticipantId ?? null,
+        dispatcherSessionId: dispatcher.dispatcherSessionId ?? null
+      });
       return out.binding;
     },
     async inlineCreate(contract, opts = {}) {
@@ -22348,6 +22397,39 @@ async function selectWorkItemStore(env = process.env, opts = {}) {
   const selection = client.localOrRemote(env);
   return selection.kind === "remote" ? { kind: "remote", remote: selection.remote } : local;
 }
+var dispatcherUnsupportedWarned = false;
+function provenanceRecordingDispatcher(provenance, req, canRecord) {
+  const service = provenance;
+  if (!service || typeof service.dispatch !== "function")
+    return provenance;
+  const fields = {};
+  if (typeof req.dispatcherParticipantId === "string" && req.dispatcherParticipantId !== "") {
+    fields["dispatcherParticipantId"] = req.dispatcherParticipantId;
+  }
+  if (typeof req.dispatcherSessionId === "string" && req.dispatcherSessionId !== "") {
+    fields["dispatcherSessionId"] = req.dispatcherSessionId;
+  }
+  if (Object.keys(fields).length === 0)
+    return provenance;
+  if (!canRecord) {
+    if (!dispatcherUnsupportedWarned) {
+      dispatcherUnsupportedWarned = true;
+      runtimeWarn("work-item-store", "[specialists] the Substrate in use predates the dispatcher columns (migration 017); the dispatch proceeds and the binding records no dispatcher");
+    }
+    return provenance;
+  }
+  return {
+    dispatch: (issueId, input, opts) => service.dispatch(issueId, { ...input, ...fields }, opts)
+  };
+}
+function bindsDispatcherIdentity(db) {
+  try {
+    const columns = db.prepare("PRAGMA table_info(execution_bindings)").all();
+    return columns.some((column) => column.name === "dispatcher_participant_id");
+  } catch {
+    return false;
+  }
+}
 async function openWorkItemBoundary(opts = {}) {
   const env = opts.env ?? process.env;
   const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "", opts.resolveInstalled);
@@ -22456,13 +22538,14 @@ async function openWorkItemBoundary(opts = {}) {
     };
   });
   const issues = issueService;
+  const canRecordDispatcher = bindsDispatcherIdentity(db);
   return createWorkItemBoundary({
     issues,
     provenance,
     store,
     gate: {
       check: async (i, r) => gateMod.checkDispatch(i, r),
-      dispatch: async (i, p, r) => gateMod.dispatchToSpecialist(i, p, r)
+      dispatch: async (i, p, r) => gateMod.dispatchToSpecialist(i, provenanceRecordingDispatcher(p, r, canRecordDispatcher), r)
     },
     journalService: {
       appendEntry: async (issueId, input) => journalSvc.appendEntry(issueId, input),
@@ -26109,7 +26192,9 @@ class NativeActivationHost {
           activationId,
           attemptId,
           sessionId: session.sessionId,
-          workspace: workspace.worktreePath
+          workspace: workspace.worktreePath,
+          ...requestedByParticipantId ? { dispatcherParticipantId: requestedByParticipantId } : {},
+          ...coordinatorSessionId ? { dispatcherSessionId: coordinatorSessionId } : {}
         });
       } catch (error) {
         try {

@@ -1,15 +1,18 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { resolveGlobalNodeModulesDirs } from '../../../src/pi/session.js';
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { tempDir } from '../../utils/temp-dir.js';
+import { resetDispatcherWarning } from '../../../src/activation/dispatcher-identity.js';
+import { resetRuntimeDiagnosticsSink, setRuntimeDiagnosticsSink } from '../../../src/utils/runtime-diagnostics.js';
 import {
   createWorkItemBoundary,
   findMissingSubstrateIssueMethods,
   missingSubstrateIssueMethodsIn,
   openSubstrateDb,
   openWorkItemBoundary,
+  provenanceRecordingDispatcher,
   resolveSubstrateFromGlobalPrefix,
   resolveSubstrateModule,
   SUBSTRATE_REQUIRED_ISSUE_METHODS,
@@ -626,5 +629,126 @@ describe('required IssueService methods', () => {
     expect(await findMissingSubstrateIssueMethods(withReader)).toEqual([]);
     // An absent module is the module list's finding, not this check's, so it states nothing twice.
     expect(await findMissingSubstrateIssueMethods(tempDir('substrate-empty-'))).toEqual([]);
+  });
+});
+
+describe('bind records the dispatcher on the binding (SPECIALISTS-4506)', () => {
+  const UUID = '3f7c1a1e-9b2d-4c5e-8f60-1a2b3c4d5e6f';
+
+  beforeEach(() => {
+    resetDispatcherWarning();
+    resetRuntimeDiagnosticsSink();
+  });
+  afterEach(() => { resetRuntimeDiagnosticsSink(); });
+
+  function capturingPorts(seen: DispatchRequest[]): WorkItemPorts {
+    const ports = stubPorts(null);
+    ports.gate.dispatch = (_issues, _provenance, request) => {
+      seen.push(request);
+      return { binding: { id: 'exb_1', issueId: 'iss_X', issueRevision: 1, contractHash: 'h', claimId: request.claimId ?? null } };
+    };
+    return ports;
+  }
+
+  it('passes the value the env and lineage already carry to the gate', async () => {
+    const seen: DispatchRequest[] = [];
+    const boundary = createWorkItemBoundary(capturingPorts(seen));
+
+    await boundary.bind(req({ dispatcherParticipantId: 'sp-lead-1', dispatcherSessionId: UUID }));
+
+    expect(seen[0]?.dispatcherParticipantId).toBe('sp-lead-1');
+    expect(seen[0]?.dispatcherSessionId).toBe(UUID);
+  });
+
+  it('keeps an unknown dispatcher absent, never a placeholder', async () => {
+    const seen: DispatchRequest[] = [];
+    const boundary = createWorkItemBoundary(capturingPorts(seen));
+
+    await boundary.bind(req());
+
+    expect(seen[0]?.dispatcherParticipantId).toBeNull();
+    expect(seen[0]?.dispatcherSessionId).toBeNull();
+  });
+
+  it('drops a malformed label or session with one warning and still binds', async () => {
+    const lines: string[] = [];
+    setRuntimeDiagnosticsSink((line) => lines.push(line));
+    const seen: DispatchRequest[] = [];
+    const boundary = createWorkItemBoundary(capturingPorts(seen));
+
+    // sb would refuse this binding outright; the dispatch must not lose to a provenance label.
+    await expect(boundary.bind(req({
+      dispatcherParticipantId: 'lead 1',
+      dispatcherSessionId: 'not-a-uuid',
+    }))).resolves.toBeTruthy();
+
+    expect(seen[0]?.dispatcherParticipantId).toBeNull();
+    expect(seen[0]?.dispatcherSessionId).toBeNull();
+    expect(lines.filter((line) => line.includes('not a Substrate-safe label'))).toHaveLength(1);
+    expect(lines.filter((line) => line.includes('canonical lowercase UUID'))).toHaveLength(1);
+  });
+});
+
+describe('provenanceRecordingDispatcher — a substrate without the dispatcher input (SPECIALISTS-4506)', () => {
+  const UUID = '3f7c1a1e-9b2d-4c5e-8f60-1a2b3c4d5e6f';
+  const request = (): DispatchRequest => ({
+    ref: 'X', holder: 'specialist::researcher', dispatcherParticipantId: 'sp-lead-1', dispatcherSessionId: UUID,
+  });
+  const service = (calls: Array<Record<string, unknown>>) => ({
+    dispatch: (_issueId: string, input: Record<string, unknown>) => {
+      calls.push(input);
+      return { id: 'exb_1' };
+    },
+  });
+
+  beforeEach(() => {
+    resetDispatcherWarning();
+    resetRuntimeDiagnosticsSink();
+  });
+  afterEach(() => { resetRuntimeDiagnosticsSink(); });
+
+  it('merges the dispatcher into the producer input once the store can record it', () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const wrapped = provenanceRecordingDispatcher(service(calls), request(), true) as {
+      dispatch: (issueId: string, input: Record<string, unknown>) => unknown;
+    };
+
+    wrapped.dispatch('iss_X', { participantId: 'specialist::researcher' });
+
+    expect(calls[0]).toMatchObject({
+      participantId: 'specialist::researcher',
+      dispatcherParticipantId: 'sp-lead-1',
+      dispatcherSessionId: UUID,
+    });
+  });
+
+  it('leaves an unknown dispatcher out of the producer input', () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const wrapped = provenanceRecordingDispatcher(
+      service(calls),
+      { ref: 'X', holder: 'specialist::researcher' },
+      true,
+    ) as { dispatch: (issueId: string, input: Record<string, unknown>) => unknown };
+
+    wrapped.dispatch('iss_X', { participantId: 'specialist::researcher' });
+
+    expect(calls[0]).not.toHaveProperty('dispatcherParticipantId');
+    expect(calls[0]).not.toHaveProperty('dispatcherSessionId');
+  });
+
+  it('skips the fields and warns once when the store predates migration 017', () => {
+    const lines: string[] = [];
+    setRuntimeDiagnosticsSink((line) => lines.push(line));
+    const calls: Array<Record<string, unknown>> = [];
+    const wrapped = provenanceRecordingDispatcher(service(calls), request(), false) as {
+      dispatch: (issueId: string, input: Record<string, unknown>) => unknown;
+    };
+
+    wrapped.dispatch('iss_X', { participantId: 'specialist::researcher' });
+    wrapped.dispatch('iss_X', { participantId: 'specialist::researcher' });
+
+    expect(calls[0]).not.toHaveProperty('dispatcherParticipantId');
+    expect(calls[1]).not.toHaveProperty('dispatcherParticipantId');
+    expect(lines.filter((line) => line.includes('migration 017'))).toHaveLength(1);
   });
 });

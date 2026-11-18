@@ -41,7 +41,9 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { DatabaseSync } from 'node:sqlite';
 import { resolveGlobalNodeModulesDirs } from '../pi/session.js';
+import { runtimeWarn } from '../utils/runtime-diagnostics.js';
 import { extractSections, scrutinyLevel, validateContractText } from './contract-sections.js';
+import { dispatcherBindingFields } from './dispatcher-identity.js';
 import { resolveAuthorityDbPath } from './authority-store.js';
 import {
   createRemoteWorkItemPorts,
@@ -329,6 +331,14 @@ export interface DispatchRequest {
   activationId?: string | null;
   attemptId?: string | null;
   sessionId?: string | null;
+  /**
+   * Who dispatched this execution, for the ExecutionBinding's durable record (XTRM-839).
+   * Both carry the SAME value the activation env and lineage do — resolved once by the
+   * frontend — and are validated at this boundary against sb's label rules: an invalid
+   * half is dropped (one warning) so a bad label can never refuse the dispatch.
+   */
+  dispatcherParticipantId?: string | null;
+  dispatcherSessionId?: string | null;
   workspace?: unknown;
   baseCommit?: string | null;
   [key: string]: unknown;
@@ -773,7 +783,19 @@ export function createWorkItemBoundary(ports: WorkItemPorts): SpecialistWorkItem
       // revision/hash regardless, and a concurrent edit between check and bind
       // is refused by the gate's divergence check, never re-derived here.
       const claimId = active?.id ?? req.claimId ?? undefined;
-      const out = await gate.dispatch(issues, provenance, { ...req, claimId });
+      // sb validates the dispatcher at its write seam and writes NO binding on a malformed
+      // value, which would make a bad label refuse the dispatch. Validated and dropped here
+      // instead: the binding records what sb accepts, never a placeholder.
+      const dispatcher = dispatcherBindingFields({
+        participant: req.dispatcherParticipantId ?? undefined,
+        sessionId: req.dispatcherSessionId ?? undefined,
+      });
+      const out = await gate.dispatch(issues, provenance, {
+        ...req,
+        claimId,
+        dispatcherParticipantId: dispatcher.dispatcherParticipantId ?? null,
+        dispatcherSessionId: dispatcher.dispatcherSessionId ?? null,
+      });
       return out.binding;
     },
 
@@ -1163,6 +1185,68 @@ export async function selectWorkItemStore(
   return selection.kind === 'remote' ? { kind: 'remote', remote: selection.remote } : local;
 }
 
+/** The one call the producer's dispatch gate makes on the provenance service for a binding. */
+type DispatcherRecordingProvenance = {
+  dispatch(issueId: string, input: Record<string, unknown>, opts?: unknown): unknown;
+};
+
+let dispatcherUnsupportedWarned = false;
+
+/**
+ * The dispatcher fields merged into the binding write.
+ *
+ * Substrate's specialist gate (src/workitems/dispatch-gate.ts) builds the provenance.dispatch
+ * input itself and therefore never forwards the dispatcher fields (XTRM-839), so they are
+ * merged into that one call here. Everything else the gate does — the fail-closed check, the
+ * revision/claim pins, the execution envelope, the divergence assertions — stays the producer's.
+ *
+ * A substrate older than migration 017 has no columns for the value: the dispatch proceeds
+ * unchanged and one warning says why the binding records no dispatcher. It is never allowed to
+ * throw, because a dispatch must not fail over a provenance label.
+ */
+export function provenanceRecordingDispatcher(
+  provenance: unknown,
+  req: DispatchRequest,
+  canRecord: boolean,
+): unknown {
+  const service = provenance as Partial<DispatcherRecordingProvenance> | null | undefined;
+  if (!service || typeof service.dispatch !== 'function') return provenance;
+  const fields: Record<string, string> = {};
+  if (typeof req.dispatcherParticipantId === 'string' && req.dispatcherParticipantId !== '') {
+    fields['dispatcherParticipantId'] = req.dispatcherParticipantId;
+  }
+  if (typeof req.dispatcherSessionId === 'string' && req.dispatcherSessionId !== '') {
+    fields['dispatcherSessionId'] = req.dispatcherSessionId;
+  }
+  if (Object.keys(fields).length === 0) return provenance;
+  if (!canRecord) {
+    if (!dispatcherUnsupportedWarned) {
+      dispatcherUnsupportedWarned = true;
+      runtimeWarn(
+        'work-item-store',
+        '[specialists] the Substrate in use predates the dispatcher columns (migration 017); '
+          + 'the dispatch proceeds and the binding records no dispatcher',
+      );
+    }
+    return provenance;
+  }
+  return {
+    dispatch: (issueId: string, input: Record<string, unknown>, opts?: unknown) =>
+      (service.dispatch as DispatcherRecordingProvenance['dispatch'])(issueId, { ...input, ...fields }, opts),
+  };
+}
+
+/** Whether the migrated store can record a dispatcher identity (migration 017). */
+function bindsDispatcherIdentity(db: DatabaseSync): boolean {
+  try {
+    const columns = db.prepare('PRAGMA table_info(execution_bindings)').all() as Array<{ name?: unknown }>;
+    return columns.some((column) => column.name === 'dispatcher_participant_id');
+  } catch {
+    // An unreadable table is reported by the migration/open path, not here.
+    return false;
+  }
+}
+
 /**
  * Open the canonical work store and build the boundary over the REAL producer
  * services, dynamic-imported at runtime from an explicit checkout.
@@ -1353,6 +1437,7 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
         };
       });
   const issues = issueService;
+  const canRecordDispatcher = bindsDispatcherIdentity(db);
   return createWorkItemBoundary({
     issues,
     provenance,
@@ -1361,7 +1446,8 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
     // producer is synchronous and is wrapped here rather than forking the boundary.
     gate: {
       check: async (i, r) => gateMod.checkDispatch(i, r),
-      dispatch: async (i, p, r) => gateMod.dispatchToSpecialist(i, p, r),
+      dispatch: async (i, p, r) =>
+        gateMod.dispatchToSpecialist(i, provenanceRecordingDispatcher(p, r, canRecordDispatcher), r),
     },
     // S1 settlement surface over the same live services: the Journal result
     // publication and WorkReceipt allocation the host performs automatically

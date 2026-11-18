@@ -2620,6 +2620,12 @@ export class NativeActivationHost {
         attemptId,
         sessionId: session.sessionId,
         workspace: workspace.worktreePath,
+        // SPECIALISTS-4506: the SAME dispatcher value the env and lineage carry reaches the
+        // ExecutionBinding, from this one resolution — never a second lookup. Absent when
+        // unknown, and the boundary drops a value sb would refuse rather than refusing the
+        // dispatch.
+        ...(requestedByParticipantId ? { dispatcherParticipantId: requestedByParticipantId } : {}),
+        ...(coordinatorSessionId ? { dispatcherSessionId: coordinatorSessionId } : {}),
       });
     } catch (error) {
       try { session.dispose(); } catch { /* best effort before refusing */ }

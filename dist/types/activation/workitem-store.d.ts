@@ -161,6 +161,14 @@ export interface DispatchRequest {
     activationId?: string | null;
     attemptId?: string | null;
     sessionId?: string | null;
+    /**
+     * Who dispatched this execution, for the ExecutionBinding's durable record (XTRM-839).
+     * Both carry the SAME value the activation env and lineage do — resolved once by the
+     * frontend — and are validated at this boundary against sb's label rules: an invalid
+     * half is dropped (one warning) so a bad label can never refuse the dispatch.
+     */
+    dispatcherParticipantId?: string | null;
+    dispatcherSessionId?: string | null;
     workspace?: unknown;
     baseCommit?: string | null;
     [key: string]: unknown;
@@ -621,6 +629,19 @@ export declare function selectWorkItemStore(env?: NodeJS.ProcessEnv, opts?: {
     substrateDir?: string;
     resolveInstalled?: () => string | null;
 }): Promise<WorkItemStoreSelection>;
+/**
+ * The dispatcher fields merged into the binding write.
+ *
+ * Substrate's specialist gate (src/workitems/dispatch-gate.ts) builds the provenance.dispatch
+ * input itself and therefore never forwards the dispatcher fields (XTRM-839), so they are
+ * merged into that one call here. Everything else the gate does — the fail-closed check, the
+ * revision/claim pins, the execution envelope, the divergence assertions — stays the producer's.
+ *
+ * A substrate older than migration 017 has no columns for the value: the dispatch proceeds
+ * unchanged and one warning says why the binding records no dispatcher. It is never allowed to
+ * throw, because a dispatch must not fail over a provenance label.
+ */
+export declare function provenanceRecordingDispatcher(provenance: unknown, req: DispatchRequest, canRecord: boolean): unknown;
 /**
  * Open the canonical work store and build the boundary over the REAL producer
  * services, dynamic-imported at runtime from an explicit checkout.

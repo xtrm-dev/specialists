@@ -24015,6 +24015,178 @@ var init_session = __esm(() => {
   WRITE_BOUNDARY_TOOL_NAMES = new Set(["edit", "write", "multiEdit", "notebookEdit"]);
 });
 
+// src/activation/dispatcher-identity.ts
+import { spawnSync as spawnSync10 } from "child_process";
+function isDispatcherLabel(value) {
+  if (typeof value !== "string")
+    return false;
+  const label = value.trim();
+  return label.length > 0 && label.length <= DISPATCHER_LABEL_MAX_LENGTH && DISPATCHER_LABEL_PATTERN.test(label);
+}
+function isDispatcherSessionId(value) {
+  return typeof value === "string" && DISPATCHER_SESSION_PATTERN.test(value.trim());
+}
+function warnDispatcherIdentity(message) {
+  runtimeWarn("dispatcher-identity", `[specialists] dispatcher-identity: ${message}`);
+}
+function describeErrorClass(error) {
+  if (!(error instanceof Error))
+    return "non-Error";
+  const code = error.code;
+  return typeof code === "string" && code ? `${error.name} ${code}` : error.name || "Error";
+}
+function failureReason(result) {
+  if (result.error)
+    return `lookup did not run (${describeErrorClass(result.error)})`;
+  if (result.status === null)
+    return "xt exited on a signal";
+  const stderr = result.stderr ?? "";
+  if (/unknown command ['"]?dispatcher/i.test(stderr))
+    return "the installed xt predates this command";
+  return `xt exited ${result.status}`;
+}
+function resolveProcessDispatcher(input = {}) {
+  const env = input.env ?? process.env;
+  const identity = {
+    ...clean(env.SUBSTRATE_HOLDER) ? { participant: clean(env.SUBSTRATE_HOLDER) } : {},
+    ...clean(env.XTRM_AGENT_NAME) ? { name: clean(env.XTRM_AGENT_NAME) } : {}
+  };
+  const warn = input.warn ?? warnDispatcherIdentity;
+  const run = input.run ?? DEFAULT_RUN;
+  const pid = input.pid ?? process.ppid;
+  const now = (input.now ?? Date.now)();
+  if (lookupFailedAt !== undefined && now - lookupFailedAt < LOOKUP_FAILURE_COOLDOWN_MS)
+    return identity;
+  const failed = (reason) => {
+    lookupFailedAt = now;
+    warnOnce2(warn, reason);
+    return identity;
+  };
+  let result;
+  try {
+    result = run("xt", ["identity", "dispatcher", "--pid", String(pid), "--no-inherit", "--json"], { cwd: input.cwd, env, timeoutMs: input.timeoutMs ?? DISPATCHER_LOOKUP_TIMEOUT_MS });
+  } catch (error) {
+    return failed(`lookup threw ${describeErrorClass(error)}`);
+  }
+  if (result.error || result.status !== 0)
+    return failed(failureReason(result));
+  let answer;
+  try {
+    answer = JSON.parse(result.stdout);
+  } catch {
+    return failed("returned unparseable JSON");
+  }
+  lookupFailedAt = undefined;
+  const parsed = answer ?? {};
+  return {
+    ...identity,
+    ...clean(parsed.name) ? { name: clean(parsed.name) } : {},
+    ...clean(parsed.address) ? { address: clean(parsed.address) } : {},
+    ...clean(parsed.sessionId) ? { sessionId: clean(parsed.sessionId) } : {}
+  };
+}
+function warnOnce2(warn, reason) {
+  if (warningGiven)
+    return;
+  warningGiven = true;
+  warn(`${reason}; the dispatch records only the identity it can read, never a made-up one`);
+}
+function dispatcherFromHostEnv(env = process.env, sessionId) {
+  const participant = clean(env.SUBSTRATE_HOLDER);
+  const name = clean(env.XTRM_AGENT_NAME);
+  const session = clean(sessionId);
+  return {
+    ...participant ? { participant } : {},
+    ...name ? { name } : {},
+    ...session ? { sessionId: session } : {}
+  };
+}
+function resolveRequestDispatcher(request) {
+  const participant = clean(request.dispatcher?.participant) ?? clean(request.requestedByParticipantId);
+  const dispatcher = {
+    ...request.dispatcher,
+    ...participant ? { participant } : {}
+  };
+  const coordinatorSessionId = clean(request.coordinatorSessionId) ?? clean(dispatcher.sessionId);
+  return {
+    dispatcher,
+    ...participant ? { requestedByParticipantId: participant } : {},
+    ...coordinatorSessionId ? { coordinatorSessionId } : {}
+  };
+}
+function dispatcherBindingFields(identity, warn = warnDispatcherIdentity) {
+  const fields = {};
+  const participant = clean(identity?.participant);
+  if (participant !== undefined) {
+    if (isDispatcherLabel(participant))
+      fields.dispatcherParticipantId = participant;
+    else
+      warnBindingOnce(warn, "the dispatcher participant is not a Substrate-safe label (at most 128 shell-safe characters)");
+  }
+  const sessionId = clean(identity?.sessionId);
+  if (sessionId !== undefined) {
+    if (isDispatcherSessionId(sessionId))
+      fields.dispatcherSessionId = sessionId;
+    else
+      warnBindingOnce(warn, "the dispatcher session is not a canonical lowercase UUID");
+  }
+  return fields;
+}
+function warnBindingOnce(warn, reason) {
+  if (warnedBindingReasons.has(reason))
+    return;
+  warnedBindingReasons.add(reason);
+  warn(`${reason}; the binding records only the dispatcher value Substrate accepts`);
+}
+function dispatcherEnvOverlay(identity) {
+  const known = [
+    ["XTRM_DISPATCHER_PARTICIPANT", clean(identity?.participant)],
+    ["XTRM_DISPATCHER_NAME", clean(identity?.name)],
+    ["XTRM_DISPATCHER_ADDRESS", clean(identity?.address)]
+  ];
+  const env = {};
+  const unset = [];
+  for (const [key, value] of known) {
+    if (value === undefined)
+      unset.push(key);
+    else
+      env[key] = value;
+  }
+  return { env, unset };
+}
+function bridgedDispatcherEnv(overlay) {
+  return {
+    ...overlay.env,
+    ...Object.fromEntries(overlay.unset.map((key) => [key, ""]))
+  };
+}
+var DISPATCHER_LOOKUP_TIMEOUT_MS = 3000, DISPATCHER_LABEL_MAX_LENGTH = 128, DISPATCHER_LABEL_PATTERN, DISPATCHER_SESSION_PATTERN, LOOKUP_FAILURE_COOLDOWN_MS = 60000, lookupFailedAt, clean = (value) => {
+  if (typeof value !== "string")
+    return;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}, DEFAULT_RUN = (cmd, args, opts) => {
+  const result = spawnSync10(cmd, args, {
+    encoding: "utf8",
+    cwd: opts.cwd,
+    env: opts.env,
+    timeout: opts.timeoutMs,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  return {
+    status: result.status,
+    stdout: String(result.stdout ?? ""),
+    stderr: String(result.stderr ?? ""),
+    error: result.error
+  };
+}, warningGiven = false, warnedBindingReasons;
+var init_dispatcher_identity = __esm(() => {
+  init_runtime_diagnostics();
+  DISPATCHER_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/+-]*$/;
+  DISPATCHER_SESSION_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  warnedBindingReasons = new Set;
+});
+
 // src/activation/authority-store.ts
 import { mkdirSync as mkdirSync9 } from "fs";
 import { createRequire as createRequire3 } from "module";
@@ -24445,7 +24617,16 @@ function createWorkItemBoundary(ports) {
         }
       }
       const claimId = active?.id ?? req.claimId ?? undefined;
-      const out = await gate.dispatch(issues, provenance, { ...req, claimId });
+      const dispatcher = dispatcherBindingFields({
+        participant: req.dispatcherParticipantId ?? undefined,
+        sessionId: req.dispatcherSessionId ?? undefined
+      });
+      const out = await gate.dispatch(issues, provenance, {
+        ...req,
+        claimId,
+        dispatcherParticipantId: dispatcher.dispatcherParticipantId ?? null,
+        dispatcherSessionId: dispatcher.dispatcherSessionId ?? null
+      });
       return out.binding;
     },
     async inlineCreate(contract, opts = {}) {
@@ -24670,6 +24851,38 @@ async function selectWorkItemStore(env = process.env, opts = {}) {
   const selection = client.localOrRemote(env);
   return selection.kind === "remote" ? { kind: "remote", remote: selection.remote } : local;
 }
+function provenanceRecordingDispatcher(provenance, req, canRecord) {
+  const service = provenance;
+  if (!service || typeof service.dispatch !== "function")
+    return provenance;
+  const fields = {};
+  if (typeof req.dispatcherParticipantId === "string" && req.dispatcherParticipantId !== "") {
+    fields["dispatcherParticipantId"] = req.dispatcherParticipantId;
+  }
+  if (typeof req.dispatcherSessionId === "string" && req.dispatcherSessionId !== "") {
+    fields["dispatcherSessionId"] = req.dispatcherSessionId;
+  }
+  if (Object.keys(fields).length === 0)
+    return provenance;
+  if (!canRecord) {
+    if (!dispatcherUnsupportedWarned) {
+      dispatcherUnsupportedWarned = true;
+      runtimeWarn("work-item-store", "[specialists] the Substrate in use predates the dispatcher columns (migration 017); the dispatch proceeds and the binding records no dispatcher");
+    }
+    return provenance;
+  }
+  return {
+    dispatch: (issueId, input, opts) => service.dispatch(issueId, { ...input, ...fields }, opts)
+  };
+}
+function bindsDispatcherIdentity(db) {
+  try {
+    const columns = db.prepare("PRAGMA table_info(execution_bindings)").all();
+    return columns.some((column) => column.name === "dispatcher_participant_id");
+  } catch {
+    return false;
+  }
+}
 async function openWorkItemBoundary(opts = {}) {
   const env = opts.env ?? process.env;
   const substrateDir = resolveSubstrateDir(opts.substrateDir ?? env.XTRM_SUBSTRATE_DIR ?? "", opts.resolveInstalled);
@@ -24778,13 +24991,14 @@ async function openWorkItemBoundary(opts = {}) {
     };
   });
   const issues = issueService;
+  const canRecordDispatcher = bindsDispatcherIdentity(db);
   return createWorkItemBoundary({
     issues,
     provenance,
     store,
     gate: {
       check: async (i, r) => gateMod.checkDispatch(i, r),
-      dispatch: async (i, p, r) => gateMod.dispatchToSpecialist(i, p, r)
+      dispatch: async (i, p, r) => gateMod.dispatchToSpecialist(i, provenanceRecordingDispatcher(p, r, canRecordDispatcher), r)
     },
     journalService: {
       appendEntry: async (issueId, input) => journalSvc.appendEntry(issueId, input),
@@ -24797,10 +25011,12 @@ async function openWorkItemBoundary(opts = {}) {
     }
   });
 }
-var require4, SUBSTRATE_PACKAGE = "@jaggerxtrm/substrate", SATISFIED_BLOCKER_STATES, INLINE_PARENT_TERMINAL_STATES, INLINE_ISSUE_KINDS, SUBSTRATE_REQUIRED_MODULES, SUBSTRATE_REQUIRED_ISSUE_METHODS;
+var require4, SUBSTRATE_PACKAGE = "@jaggerxtrm/substrate", SATISFIED_BLOCKER_STATES, INLINE_PARENT_TERMINAL_STATES, INLINE_ISSUE_KINDS, SUBSTRATE_REQUIRED_MODULES, SUBSTRATE_REQUIRED_ISSUE_METHODS, dispatcherUnsupportedWarned = false;
 var init_workitem_store = __esm(() => {
   init_session();
+  init_runtime_diagnostics();
   init_contract_sections();
+  init_dispatcher_identity();
   init_authority_store();
   init_workitem_remote();
   require4 = createRequire4(import.meta.url);
@@ -25775,9 +25991,9 @@ var init_view = __esm(() => {
 });
 
 // src/cli/models.ts
-import { spawnSync as spawnSync10 } from "child_process";
+import { spawnSync as spawnSync11 } from "child_process";
 function parsePiModels() {
-  const r = spawnSync10("pi", ["--list-models"], {
+  const r = spawnSync11("pi", ["--list-models"], {
     encoding: "utf8",
     stdio: "pipe",
     timeout: 8000
@@ -25982,7 +26198,7 @@ var init_native_specialists_registration = __esm(() => {
 
 // src/cli/init.ts
 import { copyFileSync, cpSync, existsSync as existsSync20, lstatSync as lstatSync3, mkdirSync as mkdirSync11, readdirSync as readdirSync6, readFileSync as readFileSync15, readlinkSync, renameSync as renameSync3, rmSync as rmSync3, symlinkSync, unlinkSync, writeFileSync as writeFileSync8 } from "fs";
-import { spawnSync as spawnSync11 } from "child_process";
+import { spawnSync as spawnSync12 } from "child_process";
 import { basename as basename4, dirname as dirname16, join as join23, relative as relative2, resolve as resolve11 } from "path";
 function ok(msg) {
   console.log(`  ${green4("\u2713")} ${msg}`);
@@ -25994,7 +26210,7 @@ function warn(msg) {
   console.warn(`  ${yellow5("!")} ${msg}`);
 }
 function isInstalled(bin) {
-  return spawnSync11("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
+  return spawnSync12("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
 function assertXtrmPrerequisites(cwd) {
   const hasXtrmDir = existsSync20(join23(cwd, ".xtrm"));
@@ -27818,7 +28034,7 @@ var init_model_chain = __esm(() => {
 });
 
 // src/pi/identity-env.ts
-import { spawnSync as spawnSync12 } from "child_process";
+import { spawnSync as spawnSync13 } from "child_process";
 import os from "os";
 import path from "path";
 function isAllowed(key) {
@@ -27856,7 +28072,7 @@ function keepConsistentGitConfig(env, warn) {
       return dropped(`${key} is outside GIT_CONFIG_COUNT`);
   }
 }
-function describeErrorClass(error) {
+function describeErrorClass2(error) {
   if (!(error instanceof Error))
     return "non-Error";
   const code = error.code;
@@ -27874,7 +28090,7 @@ function resolveAgentIdentityEnv(input = {}) {
     base.XTMUX_AGENT_ROLE = roleName;
   }
   const run = input.run ?? ((cmd, args, opts) => {
-    const result = spawnSync12(cmd, args, {
+    const result = spawnSync13(cmd, args, {
       encoding: "utf8",
       cwd: opts.cwd,
       env: opts.env,
@@ -27896,10 +28112,10 @@ function resolveAgentIdentityEnv(input = {}) {
       timeoutMs: input.timeoutMs ?? 5000
     });
   } catch (error) {
-    return withoutRole(`lookup threw ${describeErrorClass(error)}`);
+    return withoutRole(`lookup threw ${describeErrorClass2(error)}`);
   }
   if (result.error)
-    return withoutRole(`lookup did not run (${describeErrorClass(result.error)})`);
+    return withoutRole(`lookup did not run (${describeErrorClass2(result.error)})`);
   if (result.status !== 0) {
     return withoutRole(result.status === null ? "xt exited on a signal" : `xt exited ${result.status}`);
   }
@@ -27964,142 +28180,6 @@ var init_identity_env = __esm(() => {
   ];
   GIT_CONFIG_PREFIXES = ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"];
   launcherWarning = warnIdentityEnv;
-});
-
-// src/activation/dispatcher-identity.ts
-import { spawnSync as spawnSync13 } from "child_process";
-function warnDispatcherIdentity(message) {
-  runtimeWarn("dispatcher-identity", `[specialists] dispatcher-identity: ${message}`);
-}
-function describeErrorClass2(error) {
-  if (!(error instanceof Error))
-    return "non-Error";
-  const code = error.code;
-  return typeof code === "string" && code ? `${error.name} ${code}` : error.name || "Error";
-}
-function failureReason(result) {
-  if (result.error)
-    return `lookup did not run (${describeErrorClass2(result.error)})`;
-  if (result.status === null)
-    return "xt exited on a signal";
-  const stderr = result.stderr ?? "";
-  if (/unknown command ['"]?dispatcher/i.test(stderr))
-    return "the installed xt predates this command";
-  return `xt exited ${result.status}`;
-}
-function resolveProcessDispatcher(input = {}) {
-  const env = input.env ?? process.env;
-  const identity = {
-    ...clean(env.SUBSTRATE_HOLDER) ? { participant: clean(env.SUBSTRATE_HOLDER) } : {},
-    ...clean(env.XTRM_AGENT_NAME) ? { name: clean(env.XTRM_AGENT_NAME) } : {}
-  };
-  const warn = input.warn ?? warnDispatcherIdentity;
-  const run = input.run ?? DEFAULT_RUN;
-  const pid = input.pid ?? process.ppid;
-  const now = (input.now ?? Date.now)();
-  if (lookupFailedAt !== undefined && now - lookupFailedAt < LOOKUP_FAILURE_COOLDOWN_MS)
-    return identity;
-  const failed = (reason) => {
-    lookupFailedAt = now;
-    warnOnce2(warn, reason);
-    return identity;
-  };
-  let result;
-  try {
-    result = run("xt", ["identity", "dispatcher", "--pid", String(pid), "--no-inherit", "--json"], { cwd: input.cwd, env, timeoutMs: input.timeoutMs ?? DISPATCHER_LOOKUP_TIMEOUT_MS });
-  } catch (error) {
-    return failed(`lookup threw ${describeErrorClass2(error)}`);
-  }
-  if (result.error || result.status !== 0)
-    return failed(failureReason(result));
-  let answer;
-  try {
-    answer = JSON.parse(result.stdout);
-  } catch {
-    return failed("returned unparseable JSON");
-  }
-  lookupFailedAt = undefined;
-  const parsed = answer ?? {};
-  return {
-    ...identity,
-    ...clean(parsed.name) ? { name: clean(parsed.name) } : {},
-    ...clean(parsed.address) ? { address: clean(parsed.address) } : {},
-    ...clean(parsed.sessionId) ? { sessionId: clean(parsed.sessionId) } : {}
-  };
-}
-function warnOnce2(warn, reason) {
-  if (warningGiven)
-    return;
-  warningGiven = true;
-  warn(`${reason}; the dispatch records only the identity it can read, never a made-up one`);
-}
-function dispatcherFromHostEnv(env = process.env, sessionId) {
-  const participant = clean(env.SUBSTRATE_HOLDER);
-  const name = clean(env.XTRM_AGENT_NAME);
-  const session = clean(sessionId);
-  return {
-    ...participant ? { participant } : {},
-    ...name ? { name } : {},
-    ...session ? { sessionId: session } : {}
-  };
-}
-function resolveRequestDispatcher(request) {
-  const participant = clean(request.dispatcher?.participant) ?? clean(request.requestedByParticipantId);
-  const dispatcher = {
-    ...request.dispatcher,
-    ...participant ? { participant } : {}
-  };
-  const coordinatorSessionId = clean(request.coordinatorSessionId) ?? clean(dispatcher.sessionId);
-  return {
-    dispatcher,
-    ...participant ? { requestedByParticipantId: participant } : {},
-    ...coordinatorSessionId ? { coordinatorSessionId } : {}
-  };
-}
-function dispatcherEnvOverlay(identity) {
-  const known = [
-    ["XTRM_DISPATCHER_PARTICIPANT", clean(identity?.participant)],
-    ["XTRM_DISPATCHER_NAME", clean(identity?.name)],
-    ["XTRM_DISPATCHER_ADDRESS", clean(identity?.address)]
-  ];
-  const env = {};
-  const unset = [];
-  for (const [key, value] of known) {
-    if (value === undefined)
-      unset.push(key);
-    else
-      env[key] = value;
-  }
-  return { env, unset };
-}
-function bridgedDispatcherEnv(overlay) {
-  return {
-    ...overlay.env,
-    ...Object.fromEntries(overlay.unset.map((key) => [key, ""]))
-  };
-}
-var DISPATCHER_LOOKUP_TIMEOUT_MS = 3000, LOOKUP_FAILURE_COOLDOWN_MS = 60000, lookupFailedAt, clean = (value) => {
-  if (typeof value !== "string")
-    return;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}, DEFAULT_RUN = (cmd, args, opts) => {
-  const result = spawnSync13(cmd, args, {
-    encoding: "utf8",
-    cwd: opts.cwd,
-    env: opts.env,
-    timeout: opts.timeoutMs,
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  return {
-    status: result.status,
-    stdout: String(result.stdout ?? ""),
-    stderr: String(result.stderr ?? ""),
-    error: result.error
-  };
-}, warningGiven = false;
-var init_dispatcher_identity = __esm(() => {
-  init_runtime_diagnostics();
 });
 
 // src/utils/circuitBreaker.ts
@@ -97827,7 +97907,9 @@ class NativeActivationHost {
           activationId,
           attemptId,
           sessionId: session.sessionId,
-          workspace: workspace.worktreePath
+          workspace: workspace.worktreePath,
+          ...requestedByParticipantId ? { dispatcherParticipantId: requestedByParticipantId } : {},
+          ...coordinatorSessionId ? { dispatcherSessionId: coordinatorSessionId } : {}
         });
       } catch (error) {
         try {
