@@ -271,6 +271,21 @@ async function startResearch(host: NativeActivationHost) {
   });
 }
 
+describe('the settlement coordinator leg is the dispatching value (SPECIALISTS-4503)', () => {
+  it('a dispatch with no dispatcher params records the dispatching holder and session', async () => {
+    const { host, workItems } = hostWith();
+    const handle = await host.start({
+      specialist: 'researcher',
+      issueRef: 'XTRM-1',
+      dispatcher: { participant: 'sp-lead-1', sessionId: 'lead-sess-1' },
+    });
+    await handle.result;
+
+    const ctx = workItems.journal[0]?.input.executionContext as Record<string, unknown>;
+    expect(ctx['coordinator']).toEqual({ participantId: 'sp-lead-1', sessionId: 'lead-sess-1' });
+  });
+});
+
 describe('S1 §94 live chain — a completed settlement publishes automatically', () => {
   it('stores the runtime result, allocates a WorkReceipt, and appends a bounded Journal result with the full lineage bound', async () => {
     const { host, workItems, store, sink } = hostWith();

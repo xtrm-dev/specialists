@@ -131,6 +131,8 @@ export interface PiSessionOptions {
   cwd?: string;
   /** Extra environment variables injected into the pi process */
   env?: Record<string, string>;
+  /** Keys deleted from the inherited env before spawn (SPECIALISTS-4503 dispatcher hop). */
+  envUnset?: readonly string[];
   /** npm extension package names to skip when assembling pi -e args */
   excludeExtensions?: string[];
   /** Shared resolver-backed runtime contract computed before launch. */
@@ -1597,7 +1599,7 @@ export class PiAgentSession {
     // granted natives + all extension-registered tools under --no-builtin-tools.
     applyExtensionToolPolicyGate(args, resolvedToolContract, policyEnv);
 
-    const hookEnv = {
+    const hookEnv: NodeJS.ProcessEnv = {
       ...process.env,
       ...(this.options.env ?? {}),
       ...policyEnv,
@@ -1607,6 +1609,10 @@ export class PiAgentSession {
       // or write from the kernel leave a visible audit trail.
       PI_KERNEL_AUDIT_POLICY: '1',
     };
+    // A key the launched identity does not supply is DELETED, not inherited from this
+    // process (SPECIALISTS-4503): the inherited value names the launcher's dispatcher, and
+    // leaving it in place flattened the chain one hop too far.
+    for (const key of this.options.envUnset ?? []) delete hookEnv[key];
 
     // Version telemetry (SPECIALISTS-120 criterion 7): resolved once at session start, so a
     // run names the Pi that produced it even when the operator swaps versions mid-day.

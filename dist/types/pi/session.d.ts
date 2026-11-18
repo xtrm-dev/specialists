@@ -45,6 +45,8 @@ export interface PiSessionOptions {
     cwd?: string;
     /** Extra environment variables injected into the pi process */
     env?: Record<string, string>;
+    /** Keys deleted from the inherited env before spawn (SPECIALISTS-4503 dispatcher hop). */
+    envUnset?: readonly string[];
     /** npm extension package names to skip when assembling pi -e args */
     excludeExtensions?: string[];
     /** Shared resolver-backed runtime contract computed before launch. */

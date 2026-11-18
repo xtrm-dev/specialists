@@ -209,6 +209,45 @@ describe('SpecialistRunner', () => {
     );
   });
 
+  it('gives the child the invoker as its dispatcher, one hop (SPECIALISTS-4503)', async () => {
+    const saved = {
+      SUBSTRATE_HOLDER: process.env.SUBSTRATE_HOLDER,
+      XTRM_AGENT_NAME: process.env.XTRM_AGENT_NAME,
+      XTRM_DISPATCHER_PARTICIPANT: process.env.XTRM_DISPATCHER_PARTICIPANT,
+      XTRM_DISPATCHER_NAME: process.env.XTRM_DISPATCHER_NAME,
+      XTRM_DISPATCHER_ADDRESS: process.env.XTRM_DISPATCHER_ADDRESS,
+    };
+    // The invoker is specialist A; "grand" is A's own dispatcher, inherited into its env.
+    process.env.SUBSTRATE_HOLDER = 'sp-a-1';
+    delete process.env.XTRM_AGENT_NAME;
+    process.env.XTRM_DISPATCHER_PARTICIPANT = 'sp-grandparent';
+    process.env.XTRM_DISPATCHER_NAME = 'grand';
+    process.env.XTRM_DISPATCHER_ADDRESS = 'uds:/grandparent.sock';
+    try {
+      const sessionFactory = vi.fn().mockResolvedValue(mockSession);
+      const runner = new SpecialistRunner({
+        loader: makeLoader(),
+        hooks: new HookEmitter({ tracePath: '/tmp/test-hooks-trace.jsonl' }),
+        circuitBreaker: new CircuitBreaker(),
+        sessionFactory,
+      });
+      const fakeIdentity = () => ({ status: 0, stdout: JSON.stringify({ env: { XTRM_ROLE: 'reviewer' } }) });
+      await runner.run({ name: 'test-spec', prompt: 'analyze this', identityEnvRun: fakeIdentity });
+
+      const options = sessionFactory.mock.calls[0]?.[0] ?? {};
+      // The child's dispatcher is the INVOKER (sp-a-1), never the invoker's dispatcher.
+      expect(options.env).toMatchObject({ XTRM_DISPATCHER_PARTICIPANT: 'sp-a-1' });
+      expect(options.env).not.toHaveProperty('XTRM_DISPATCHER_NAME');
+      expect(options.env).not.toHaveProperty('XTRM_DISPATCHER_ADDRESS');
+      expect(options.envUnset).toEqual(['XTRM_DISPATCHER_NAME', 'XTRM_DISPATCHER_ADDRESS']);
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
   it('gives the child a PATH with the gh shim directory first (CORE-2524.4)', async () => {
     const originalPath = process.env.PATH;
     const shim = join(process.env.HOME ?? homedir(), '.local', 'bin');

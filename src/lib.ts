@@ -97,6 +97,11 @@ export type {
   PendingAsk,
 } from './activation/interaction.js';
 
+// The dispatcher of one dispatch (SPECIALISTS-4503): the Pi extension resolves it from the
+// host env it already runs in, and hands the SAME value to the request/env sinks.
+export { dispatcherFromHostEnv } from './activation/dispatcher-identity.js';
+export type { DispatcherIdentity, DispatcherEnvOverlay } from './activation/dispatcher-identity.js';
+
 // Shared frontend projections (unitAI-rrdnt.33): the SAME snapshot→wire mapping both
 // coordinator surfaces use. One vocabulary, imported not re-implemented — two
 // hand-written projections agree until the next field is added, then diverge silently.

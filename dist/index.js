@@ -23372,6 +23372,8 @@ class PiAgentSession {
       CAVEMAN_LEVEL: "full",
       PI_KERNEL_AUDIT_POLICY: "1"
     };
+    for (const key of this.options.envUnset ?? [])
+      delete hookEnv[key];
     this._piVersion = this._piVersionValue();
     if (this._piVersion) {
       this._metrics.pi_version = this._piVersion;
@@ -27964,6 +27966,142 @@ var init_identity_env = __esm(() => {
   launcherWarning = warnIdentityEnv;
 });
 
+// src/activation/dispatcher-identity.ts
+import { spawnSync as spawnSync13 } from "child_process";
+function warnDispatcherIdentity(message) {
+  runtimeWarn("dispatcher-identity", `[specialists] dispatcher-identity: ${message}`);
+}
+function describeErrorClass2(error) {
+  if (!(error instanceof Error))
+    return "non-Error";
+  const code = error.code;
+  return typeof code === "string" && code ? `${error.name} ${code}` : error.name || "Error";
+}
+function failureReason(result) {
+  if (result.error)
+    return `lookup did not run (${describeErrorClass2(result.error)})`;
+  if (result.status === null)
+    return "xt exited on a signal";
+  const stderr = result.stderr ?? "";
+  if (/unknown command ['"]?dispatcher/i.test(stderr))
+    return "the installed xt predates this command";
+  return `xt exited ${result.status}`;
+}
+function resolveProcessDispatcher(input = {}) {
+  const env = input.env ?? process.env;
+  const identity = {
+    ...clean(env.SUBSTRATE_HOLDER) ? { participant: clean(env.SUBSTRATE_HOLDER) } : {},
+    ...clean(env.XTRM_AGENT_NAME) ? { name: clean(env.XTRM_AGENT_NAME) } : {}
+  };
+  const warn = input.warn ?? warnDispatcherIdentity;
+  const run = input.run ?? DEFAULT_RUN;
+  const pid = input.pid ?? process.ppid;
+  const now = (input.now ?? Date.now)();
+  if (lookupFailedAt !== undefined && now - lookupFailedAt < LOOKUP_FAILURE_COOLDOWN_MS)
+    return identity;
+  const failed = (reason) => {
+    lookupFailedAt = now;
+    warnOnce2(warn, reason);
+    return identity;
+  };
+  let result;
+  try {
+    result = run("xt", ["identity", "dispatcher", "--pid", String(pid), "--no-inherit", "--json"], { cwd: input.cwd, env, timeoutMs: input.timeoutMs ?? DISPATCHER_LOOKUP_TIMEOUT_MS });
+  } catch (error) {
+    return failed(`lookup threw ${describeErrorClass2(error)}`);
+  }
+  if (result.error || result.status !== 0)
+    return failed(failureReason(result));
+  let answer;
+  try {
+    answer = JSON.parse(result.stdout);
+  } catch {
+    return failed("returned unparseable JSON");
+  }
+  lookupFailedAt = undefined;
+  const parsed = answer ?? {};
+  return {
+    ...identity,
+    ...clean(parsed.name) ? { name: clean(parsed.name) } : {},
+    ...clean(parsed.address) ? { address: clean(parsed.address) } : {},
+    ...clean(parsed.sessionId) ? { sessionId: clean(parsed.sessionId) } : {}
+  };
+}
+function warnOnce2(warn, reason) {
+  if (warningGiven)
+    return;
+  warningGiven = true;
+  warn(`${reason}; the dispatch records only the identity it can read, never a made-up one`);
+}
+function dispatcherFromHostEnv(env = process.env, sessionId) {
+  const participant = clean(env.SUBSTRATE_HOLDER);
+  const name = clean(env.XTRM_AGENT_NAME);
+  const session = clean(sessionId);
+  return {
+    ...participant ? { participant } : {},
+    ...name ? { name } : {},
+    ...session ? { sessionId: session } : {}
+  };
+}
+function resolveRequestDispatcher(request) {
+  const participant = clean(request.dispatcher?.participant) ?? clean(request.requestedByParticipantId);
+  const dispatcher = {
+    ...request.dispatcher,
+    ...participant ? { participant } : {}
+  };
+  const coordinatorSessionId = clean(request.coordinatorSessionId) ?? clean(dispatcher.sessionId);
+  return {
+    dispatcher,
+    ...participant ? { requestedByParticipantId: participant } : {},
+    ...coordinatorSessionId ? { coordinatorSessionId } : {}
+  };
+}
+function dispatcherEnvOverlay(identity) {
+  const known = [
+    ["XTRM_DISPATCHER_PARTICIPANT", clean(identity?.participant)],
+    ["XTRM_DISPATCHER_NAME", clean(identity?.name)],
+    ["XTRM_DISPATCHER_ADDRESS", clean(identity?.address)]
+  ];
+  const env = {};
+  const unset = [];
+  for (const [key, value] of known) {
+    if (value === undefined)
+      unset.push(key);
+    else
+      env[key] = value;
+  }
+  return { env, unset };
+}
+function bridgedDispatcherEnv(overlay) {
+  return {
+    ...overlay.env,
+    ...Object.fromEntries(overlay.unset.map((key) => [key, ""]))
+  };
+}
+var DISPATCHER_LOOKUP_TIMEOUT_MS = 3000, LOOKUP_FAILURE_COOLDOWN_MS = 60000, lookupFailedAt, clean = (value) => {
+  if (typeof value !== "string")
+    return;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}, DEFAULT_RUN = (cmd, args, opts) => {
+  const result = spawnSync13(cmd, args, {
+    encoding: "utf8",
+    cwd: opts.cwd,
+    env: opts.env,
+    timeout: opts.timeoutMs,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  return {
+    status: result.status,
+    stdout: String(result.stdout ?? ""),
+    stderr: String(result.stderr ?? ""),
+    error: result.error
+  };
+}, warningGiven = false;
+var init_dispatcher_identity = __esm(() => {
+  init_runtime_diagnostics();
+});
+
 // src/utils/circuitBreaker.ts
 function isTransientError(error) {
   if (!error)
@@ -28367,7 +28505,7 @@ __export(exports_runner, {
   validateBeforeRun: () => validateBeforeRun
 });
 import { createHash as createHash4 } from "crypto";
-import { execSync as execSync2, spawnSync as spawnSync13 } from "child_process";
+import { execSync as execSync2, spawnSync as spawnSync14 } from "child_process";
 import { existsSync as existsSync23, readFileSync as readFileSync17 } from "fs";
 import { basename as basename5, resolve as resolve15 } from "path";
 import { homedir as homedir8 } from "os";
@@ -28403,7 +28541,7 @@ function runScript(command, cwd, displayName) {
   }
   const scriptName = sanitizeScriptName(basename5(run.split(" ")[0]));
   const label = typeof displayName === "string" && displayName.trim() ? sanitizeDisplayName(displayName) : undefined;
-  const result = spawnSync13(run, {
+  const result = spawnSync14(run, {
     encoding: "utf8",
     timeout: 30000,
     cwd,
@@ -28540,7 +28678,7 @@ function resolvePath2(p) {
   return p.startsWith("~/") ? resolve15(homedir8(), p.slice(2)) : resolve15(p);
 }
 function commandExists(cmd) {
-  const result = spawnSync13("which", [cmd], { stdio: "ignore" });
+  const result = spawnSync14("which", [cmd], { stdio: "ignore" });
   return result.status === 0;
 }
 function validateShebang(filePath, errors) {
@@ -29259,6 +29397,8 @@ ${preScripts.map((s) => `    \u2022 ${s.run ?? s.path ?? "<missing>"}${s.inject_
         env: process.env,
         run: options.identityEnvRun
       }));
+      const dispatcherEnv = dispatcherEnvOverlay(dispatcherFromHostEnv(process.env));
+      Object.assign(envVars, dispatcherEnv.env);
       for (let modelIndex = 0;modelIndex < modelChain.length; modelIndex++) {
         currentModel = modelChain[modelIndex];
         currentFailureRecorded = false;
@@ -29290,6 +29430,7 @@ ${preScripts.map((s) => `    \u2022 ${s.run ?? s.path ?? "<missing>"}${s.inject_
           ...claudeBridgeSessionOption(execution),
           ...extensionSelection.offline === false ? { offline: false } : {},
           ...Object.keys(envVars).length > 0 ? { env: envVars } : {},
+          ...dispatcherEnv.unset.length > 0 ? { envUnset: dispatcherEnv.unset } : {},
           onToken: (delta) => onProgress?.(delta),
           onThinking: (delta) => onProgress?.(`\uD83D\uDCAD ${delta}`),
           onToolStart: (tool, args, toolCallId) => {
@@ -29462,6 +29603,7 @@ var init_runner = __esm(() => {
   init_mandatory_rules();
   init_session();
   init_identity_env();
+  init_dispatcher_identity();
   init_circuitBreaker();
   init_observability_sqlite();
   init_model_chain();
@@ -30987,7 +31129,7 @@ var init_validate = __esm(() => {
 
 // src/cli/edit.ts
 import { existsSync as existsSync26, mkdirSync as mkdirSync13, readFileSync as readFileSync19, writeFileSync as writeFileSync10 } from "fs";
-import { spawnSync as spawnSync14 } from "child_process";
+import { spawnSync as spawnSync15 } from "child_process";
 import { join as join26 } from "path";
 function usage() {
   const aliasList = Object.keys(LEGACY_FIELD_ALIASES).map((v) => `--${v}`).join(", ");
@@ -31577,7 +31719,7 @@ function openInEditor(filePath) {
 Run ${setCommand} in scripts.`);
   }
   const editor = process.env.EDITOR?.trim() || process.env.VISUAL?.trim() || "vi";
-  const result = spawnSync14(editor, [filePath], { stdio: "inherit" });
+  const result = spawnSync15(editor, [filePath], { stdio: "inherit" });
   if (result.error) {
     fail6(`Error: failed to launch $EDITOR (${editor}): ${result.error.message}`);
   }
@@ -31950,7 +32092,7 @@ var init_resolution_diagnostics = __esm(() => {
 
 // src/cli/config.ts
 import { existsSync as existsSync27, readFileSync as readFileSync20 } from "fs";
-import { spawnSync as spawnSync15 } from "child_process";
+import { spawnSync as spawnSync16 } from "child_process";
 import { dirname as dirname18, join as join28 } from "path";
 import { fileURLToPath as fileURLToPath8 } from "url";
 function usage2() {
@@ -31981,17 +32123,17 @@ function readPackageVersion2(packageJsonPath) {
   }
 }
 function isInsideGitWorktree(projectDir) {
-  const result = spawnSync15("git", ["rev-parse", "--is-inside-work-tree"], { cwd: projectDir, encoding: "utf-8" });
+  const result = spawnSync16("git", ["rev-parse", "--is-inside-work-tree"], { cwd: projectDir, encoding: "utf-8" });
   return result.status === 0 && result.stdout.trim() === "true";
 }
 function getGitCommonDir(projectDir) {
-  const result = spawnSync15("git", ["rev-parse", "--git-common-dir"], { cwd: projectDir, encoding: "utf-8" });
+  const result = spawnSync16("git", ["rev-parse", "--git-common-dir"], { cwd: projectDir, encoding: "utf-8" });
   if (result.status !== 0)
     return;
   return result.stdout.trim() || undefined;
 }
 function getGitTopLevel(projectDir) {
-  const result = spawnSync15("git", ["rev-parse", "--show-toplevel"], { cwd: projectDir, encoding: "utf-8" });
+  const result = spawnSync16("git", ["rev-parse", "--show-toplevel"], { cwd: projectDir, encoding: "utf-8" });
   if (result.status !== 0)
     return;
   return result.stdout.trim() || undefined;
@@ -32101,7 +32243,7 @@ ${usage2()}`);
     console.error(yellow9("\u26A0 hint: use --from-source for worktree-source resolver review"));
   }
   if (flags.has("--from-source") && !import.meta.url.includes("/src/")) {
-    const result = spawnSync15("bunx", ["tsx", "src/index.ts", "config", "show", specialistName, "--resolved"], {
+    const result = spawnSync16("bunx", ["tsx", "src/index.ts", "config", "show", specialistName, "--resolved"], {
       cwd: projectDir,
       encoding: "utf-8",
       stdio: "pipe"
@@ -40563,7 +40705,7 @@ async function appendBeadNote(beadId, text, opts = {}) {
 var init_bead_notes = () => {};
 
 // src/cli/chat.ts
-import { spawnSync as spawnSync16 } from "child_process";
+import { spawnSync as spawnSync17 } from "child_process";
 import { appendFileSync as appendFileSync6, readFileSync as readFileSync22, writeFileSync as writeFileSync14 } from "fs";
 function dbg(msg, extra) {
   if (!DEBUG_LOG_PATH)
@@ -40776,7 +40918,7 @@ function buildPrompt(args) {
 }
 function createEphemeralBead(prompt) {
   const title = buildEphemeralBeadTitle(prompt);
-  const result = spawnSync16("bd", ["create", title, "-t", "task", "-p3", "--json"], {
+  const result = spawnSync17("bd", ["create", title, "-t", "task", "-p3", "--json"], {
     cwd: process.cwd(),
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
@@ -43104,7 +43246,7 @@ var init_config_source = __esm(() => {
 });
 
 // src/cli/console/runtime.ts
-import { spawnSync as spawnSync17 } from "child_process";
+import { spawnSync as spawnSync18 } from "child_process";
 import { existsSync as existsSync33, readdirSync as readdirSync11, readFileSync as readFileSync26, statSync as statSync9 } from "fs";
 import { basename as basename7, dirname as dirname22, join as join38 } from "path";
 function createRuntimeClient(cwd = process.cwd()) {
@@ -43423,7 +43565,7 @@ class LocalRuntimeClient {
     const location = getGlobalUserConfigPath();
     const editor = process.env.EDITOR?.trim() || process.env.VISUAL?.trim() || "vi";
     try {
-      const result = spawnSync17(editor, [location.path], { stdio: "inherit" });
+      const result = spawnSync18(editor, [location.path], { stdio: "inherit" });
       if (result.error) {
         return { ok: false, errorClass: result.error.code ?? "editor_failed" };
       }
@@ -43533,7 +43675,7 @@ function kvRow(key, value) {
 function resolveDiffBase(worktreePath, branch) {
   const candidates = ["origin/HEAD", "origin/main", "origin/master", "main", "master"];
   for (const ref of candidates) {
-    const result = spawnSync17("git", ["-C", worktreePath, "merge-base", "HEAD", ref], {
+    const result = spawnSync18("git", ["-C", worktreePath, "merge-base", "HEAD", ref], {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 1500
@@ -43542,7 +43684,7 @@ function resolveDiffBase(worktreePath, branch) {
       return result.stdout.trim();
   }
   if (branch) {
-    const result = spawnSync17("git", ["-C", worktreePath, "rev-parse", `${branch}@{u}`], {
+    const result = spawnSync18("git", ["-C", worktreePath, "rev-parse", `${branch}@{u}`], {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 1500
@@ -43550,7 +43692,7 @@ function resolveDiffBase(worktreePath, branch) {
     if (result.status === 0 && result.stdout)
       return result.stdout.trim();
   }
-  const fallback = spawnSync17("git", ["-C", worktreePath, "rev-parse", "HEAD^"], {
+  const fallback = spawnSync18("git", ["-C", worktreePath, "rev-parse", "HEAD^"], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "ignore"],
     timeout: 1500
@@ -43581,7 +43723,7 @@ function buildDiffFileResult(file, raw, meta) {
 }
 function runGit(args, cwd, op) {
   const started = Date.now();
-  const result = spawnSync17("git", ["-C", cwd, ...args], {
+  const result = spawnSync18("git", ["-C", cwd, ...args], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"],
     timeout: 1e4,
@@ -43610,7 +43752,7 @@ function fetchBeadDoc(beadId) {
   if (cached && now - cached.at < BEAD_DOC_TTL_MS)
     return cached.doc;
   const started = now;
-  const result = spawnSync17("bd", ["show", beadId, "--json"], {
+  const result = spawnSync18("bd", ["show", beadId, "--json"], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"],
     timeout: 3000
@@ -46203,7 +46345,7 @@ var init_hooks = () => {};
 // src/specialist/worktree.ts
 import { existsSync as existsSync35, symlinkSync as symlinkSync2, mkdirSync as mkdirSync17, rmSync as rmSync5 } from "fs";
 import { join as join39, resolve as resolve17 } from "path";
-import { spawnSync as spawnSync18, execFileSync as execFileSync3 } from "child_process";
+import { spawnSync as spawnSync19, execFileSync as execFileSync3 } from "child_process";
 function deriveBranchName(beadId, specialistName) {
   return `feature/${beadId}-${slugify(specialistName)}`;
 }
@@ -46217,7 +46359,7 @@ function resolveCommonRoot(cwd) {
   return resolveCommonGitRoot(cwd) ?? cwd;
 }
 function listWorktrees(cwd = process.cwd()) {
-  const result = spawnSync18("git", ["worktree", "list", "--porcelain"], {
+  const result = spawnSync19("git", ["worktree", "list", "--porcelain"], {
     cwd,
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "ignore"]
@@ -46238,7 +46380,7 @@ function resolveCoordinatorBase(cwd = process.cwd()) {
 function readPaneAgentBranch() {
   if (!process.env.TMUX)
     return;
-  const result = spawnSync18("tmux", ["show-options", "-p", "-qv", "@agent_branch"], {
+  const result = spawnSync19("tmux", ["show-options", "-p", "-qv", "@agent_branch"], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "ignore"]
   });
@@ -46247,11 +46389,11 @@ function readPaneAgentBranch() {
   return (result.stdout ?? "").trim() || undefined;
 }
 function localBranchExists(branch, cwd) {
-  const result = spawnSync18("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
+  const result = spawnSync19("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
   return result.status === 0 && (result.stdout ?? "").trim().length > 0;
 }
 function rebaseNewBranchOnto(worktreePath, branch, base) {
-  const result = spawnSync18("git", ["checkout", "-B", branch, base], {
+  const result = spawnSync19("git", ["checkout", "-B", branch, base], {
     cwd: worktreePath,
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"]
@@ -46288,7 +46430,7 @@ function provisionWorktree(options) {
 }
 function normalizeParentHooksPath(mainRepoRoot) {
   try {
-    const result = spawnSync18("git", ["-C", mainRepoRoot, "config", "--get", "core.hooksPath"], {
+    const result = spawnSync19("git", ["-C", mainRepoRoot, "config", "--get", "core.hooksPath"], {
       stdio: "pipe",
       encoding: "utf8"
     });
@@ -46302,12 +46444,12 @@ function normalizeParentHooksPath(mainRepoRoot) {
     if (current !== ".beads/hooks" && current !== "./.beads/hooks")
       return;
     const absolute = join39(mainRepoRoot, ".beads", "hooks");
-    spawnSync18("git", ["-C", mainRepoRoot, "config", "core.hooksPath", absolute], { stdio: "pipe" });
+    spawnSync19("git", ["-C", mainRepoRoot, "config", "core.hooksPath", absolute], { stdio: "pipe" });
   } catch {}
 }
 function markBeadsSkipWorktree(worktreePath) {
   try {
-    const trackedResult = spawnSync18("git", ["-C", worktreePath, "ls-files", "--", ".beads"], {
+    const trackedResult = spawnSync19("git", ["-C", worktreePath, "ls-files", "--", ".beads"], {
       cwd: worktreePath,
       stdio: "pipe",
       encoding: "utf8"
@@ -46317,7 +46459,7 @@ function markBeadsSkipWorktree(worktreePath) {
     const trackedPaths = (trackedResult.stdout ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     if (trackedPaths.length === 0)
       return;
-    spawnSync18("git", ["-C", worktreePath, "update-index", "--skip-worktree", "--", ...trackedPaths], {
+    spawnSync19("git", ["-C", worktreePath, "update-index", "--skip-worktree", "--", ...trackedPaths], {
       cwd: worktreePath,
       stdio: "pipe",
       encoding: "utf8"
@@ -46581,7 +46723,7 @@ var init_epic_reconciler = __esm(() => {
 });
 
 // src/cli/merge.ts
-import { spawnSync as spawnSync19 } from "child_process";
+import { spawnSync as spawnSync20 } from "child_process";
 import { existsSync as existsSync36, readFileSync as readFileSync28, readdirSync as readdirSync12 } from "fs";
 import { join as join41 } from "path";
 function parseOptions(argv) {
@@ -46620,7 +46762,7 @@ function parseOptions(argv) {
   return { target, rebuild, targetBranch: targetBranch ? validateTargetBranchRef(targetBranch) : undefined };
 }
 function runCommand(command, args, cwd = process.cwd()) {
-  return spawnSync19(command, args, {
+  return spawnSync20(command, args, {
     cwd,
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"]
@@ -49591,7 +49733,7 @@ var init_node_contract = __esm(() => {
 
 // src/specialist/node-supervisor.ts
 import { createHash as createHash7 } from "crypto";
-import { spawnSync as spawnSync20 } from "child_process";
+import { spawnSync as spawnSync21 } from "child_process";
 function hashOutput(output, salt) {
   if (!output)
     return null;
@@ -49636,7 +49778,7 @@ function parseCreatedBeadId(stdout) {
   return match[1];
 }
 function runCommandOrThrow(command, args, cwd = process.cwd()) {
-  const result = spawnSync20(command, args, {
+  const result = spawnSync21(command, args, {
     cwd,
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"]
@@ -50709,7 +50851,7 @@ class NodeSupervisor {
     if (!this.opts.sourceBeadId)
       return;
     const notes = this.buildCompletionSummary(options);
-    const result = spawnSync20("bd", ["update", this.opts.sourceBeadId, "--append-notes", notes], {
+    const result = spawnSync21("bd", ["update", this.opts.sourceBeadId, "--append-notes", notes], {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -50722,7 +50864,7 @@ class NodeSupervisor {
     }
   }
   runCommand(command, args, cwd) {
-    const result = spawnSync20(command, args, {
+    const result = spawnSync21(command, args, {
       cwd,
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"]
@@ -50926,8 +51068,8 @@ class NodeSupervisor {
     }
   }
   runFinalQualityGates(cwd) {
-    const lintPass = spawnSync20("npm", ["run", "lint"], { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).status === 0;
-    const tscPass = spawnSync20("npx", ["tsc", "--noEmit"], { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).status === 0;
+    const lintPass = spawnSync21("npm", ["run", "lint"], { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).status === 0;
+    const tscPass = spawnSync21("npx", ["tsc", "--noEmit"], { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).status === 0;
     return {
       lint: lintPass ? "pass" : "fail",
       tsc: tscPass ? "pass" : "fail"
@@ -52383,9 +52525,9 @@ var init_node = __esm(() => {
 });
 
 // src/cli/epic.ts
-import { spawnSync as spawnSync21 } from "child_process";
+import { spawnSync as spawnSync22 } from "child_process";
 function runCommand2(command, args, cwd = process.cwd()) {
-  return spawnSync21(command, args, {
+  return spawnSync22(command, args, {
     cwd,
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"]
@@ -53107,7 +53249,7 @@ var init_epic = __esm(() => {
 });
 
 // src/cli/status.ts
-import { spawnSync as spawnSync22 } from "child_process";
+import { spawnSync as spawnSync23 } from "child_process";
 import { existsSync as existsSync40, readFileSync as readFileSync32 } from "fs";
 import { join as join45 } from "path";
 function ok2(msg) {
@@ -53128,7 +53270,7 @@ function section(label) {
 ${bold10(`\u2500\u2500 ${label} ${line}`)}`);
 }
 function cmd(bin, args) {
-  const r = spawnSync22(bin, args, {
+  const r = spawnSync23(bin, args, {
     encoding: "utf8",
     stdio: "pipe",
     timeout: 5000
@@ -53136,7 +53278,7 @@ function cmd(bin, args) {
   return { ok: r.status === 0 && !r.error, stdout: (r.stdout ?? "").trim() };
 }
 function isInstalled2(bin) {
-  return spawnSync22("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
+  return spawnSync23("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
 function formatElapsed2(s) {
   if (s.elapsed_s === undefined)
@@ -53767,11 +53909,11 @@ var init_native_activation_ownership = __esm(() => {
 });
 
 // src/cli/ps.ts
-import { spawnSync as spawnSync23 } from "child_process";
+import { spawnSync as spawnSync24 } from "child_process";
 function loadBeadIdsForCurrentUser() {
   const ids = new Set;
   try {
-    const result = spawnSync23("bd", ["query", "assignee=me", "--json"], {
+    const result = spawnSync24("bd", ["query", "assignee=me", "--json"], {
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 5000
@@ -54153,7 +54295,7 @@ function formatPayloadStats2(payloadJson) {
   }
 }
 function getBeadTitleFromBd(beadId) {
-  const result = spawnSync23("bd", ["show", beadId, "--json"], {
+  const result = spawnSync24("bd", ["show", beadId, "--json"], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "ignore"],
     timeout: 1500
@@ -58077,7 +58219,7 @@ var init_resume = __esm(() => {
 });
 
 // src/cli/retry.ts
-import { spawnSync as spawnSync24 } from "child_process";
+import { spawnSync as spawnSync25 } from "child_process";
 function parseRetryArgs(argv) {
   let jobId;
   let model;
@@ -58142,7 +58284,7 @@ async function run29() {
       console.error(resolved.error);
       process.exit(1);
     }
-    const child = spawnSync24(process.execPath, [process.argv[1], ...resolved.argv], { stdio: "inherit" });
+    const child = spawnSync25(process.execPath, [process.argv[1], ...resolved.argv], { stdio: "inherit" });
     process.exit(child.status ?? 1);
   } finally {
     await supervisor.dispose();
@@ -58165,7 +58307,7 @@ async function run30() {
 // src/specialist/worktree-gc.ts
 import { existsSync as existsSync46, readdirSync as readdirSync18, readFileSync as readFileSync36 } from "fs";
 import { join as join50 } from "path";
-import { spawnSync as spawnSync25 } from "child_process";
+import { spawnSync as spawnSync26 } from "child_process";
 function readJobStatus2(jobDir) {
   const statusPath = join50(jobDir, "status.json");
   if (!existsSync46(statusPath))
@@ -58233,7 +58375,7 @@ function collectWorktreeGcCandidates(jobsDir) {
   return candidates;
 }
 function removeWorktreeDirectory(worktreePath) {
-  const result = spawnSync25("git", ["worktree", "remove", "--force", worktreePath], {
+  const result = spawnSync26("git", ["worktree", "remove", "--force", worktreePath], {
     encoding: "utf-8",
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -58876,7 +59018,7 @@ var init_clean = __esm(() => {
 });
 
 // src/cli/end.ts
-import { spawnSync as spawnSync26 } from "child_process";
+import { spawnSync as spawnSync27 } from "child_process";
 function parseOptions3(argv) {
   let issueRef;
   let beadAlias;
@@ -58925,7 +59067,7 @@ function parseOptions3(argv) {
   return { beadId, epicId, rebuild, pr };
 }
 function runCommand3(command, args) {
-  const result = spawnSync26(command, args, { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+  const result = spawnSync27(command, args, { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
   return {
     status: result.status,
     stdout: result.stdout ?? "",
@@ -59807,7 +59949,7 @@ ${detail.missing.map((m) => `  - ${m}`).join(`
 });
 
 // src/activation/workspace-lease.ts
-import { execFileSync as execFileSync5, spawnSync as spawnSync27 } from "child_process";
+import { execFileSync as execFileSync5, spawnSync as spawnSync28 } from "child_process";
 import { createHash as createHash8 } from "crypto";
 import { appendFileSync as appendFileSync7, existsSync as existsSync49, linkSync, mkdirSync as mkdirSync19, readFileSync as readFileSync39, realpathSync as realpathSync6, renameSync as renameSync6, rmSync as rmSync9, unlinkSync as unlinkSync2, writeFileSync as writeFileSync21 } from "fs";
 import { basename as basename12, dirname as dirname25, join as join53 } from "path";
@@ -59867,13 +60009,13 @@ function provisionWriterWorkspace(cwd, issueRef, role) {
       const excludePath = git("rev-parse", "--path-format=absolute", "--git-path", "info/exclude");
       const existing = existsSync49(excludePath) ? readFileSync39(excludePath, "utf-8").split(`
 `) : [];
-      const additions = runtimeIgnoreExcludePatterns().filter((pattern) => !existing.includes(pattern)).filter((pattern) => pattern.includes("*") || spawnSync27("git", ["check-ignore", "-q", join53(mainRoot, pattern.slice(1), "x")], { cwd: mainRoot }).status !== 0).join(`
+      const additions = runtimeIgnoreExcludePatterns().filter((pattern) => !existing.includes(pattern)).filter((pattern) => pattern.includes("*") || spawnSync28("git", ["check-ignore", "-q", join53(mainRoot, pattern.slice(1), "x")], { cwd: mainRoot }).status !== 0).join(`
 `);
       if (additions)
         appendFileSync7(excludePath, `
 ` + additions + `
 `);
-      const branchExists = spawnSync27("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd }).status === 0;
+      const branchExists = spawnSync28("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd }).status === 0;
       const base = branchExists ? undefined : resolveWorktreeBase(git);
       git("worktree", "add", ...base ? ["-b", branch, worktreePath, base] : [worktreePath, branch]);
       created = !branchExists;
@@ -59889,9 +60031,9 @@ function provisionWriterWorkspace(cwd, issueRef, role) {
   }
 }
 function removeWriterWorkspace(cwd, workspace) {
-  spawnSync27("git", ["worktree", "remove", "--force", workspace.worktreePath], { cwd, stdio: "ignore" });
+  spawnSync28("git", ["worktree", "remove", "--force", workspace.worktreePath], { cwd, stdio: "ignore" });
   if (workspace.branch)
-    spawnSync27("git", ["branch", "-D", workspace.branch], { cwd, stdio: "ignore" });
+    spawnSync28("git", ["branch", "-D", workspace.branch], { cwd, stdio: "ignore" });
 }
 function procLeaseProbe() {
   return {
@@ -60717,7 +60859,7 @@ var init_channel_doctor = () => {};
 
 // src/cli/doctor.ts
 import { createHash as createHash10 } from "crypto";
-import { spawnSync as spawnSync28 } from "child_process";
+import { spawnSync as spawnSync29 } from "child_process";
 import { existsSync as existsSync52, mkdirSync as mkdirSync21, readdirSync as readdirSync22, readFileSync as readFileSync42, writeFileSync as writeFileSync22 } from "fs";
 import { homedir as homedir13 } from "os";
 import { join as join55, relative as relative5, resolve as resolve23 } from "path";
@@ -60743,11 +60885,11 @@ function section3(label) {
 ${bold12(`\u2500\u2500 ${label} ${line}`)}`);
 }
 function sp(bin, args) {
-  const r = spawnSync28(bin, args, { encoding: "utf8", stdio: "pipe", timeout: 5000 });
+  const r = spawnSync29(bin, args, { encoding: "utf8", stdio: "pipe", timeout: 5000 });
   return { ok: r.status === 0 && !r.error, stdout: (r.stdout ?? "").trim() };
 }
 function isInstalled3(bin) {
-  return spawnSync28("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
+  return spawnSync29("which", [bin], { encoding: "utf8", timeout: 2000 }).status === 0;
 }
 function loadJson2(path) {
   if (!existsSync52(path))
@@ -61153,7 +61295,7 @@ function checkClaudeMdFragments() {
     hint("install xtrm-tools to enable: xt claude-sync --check");
     return true;
   }
-  const result = spawnSync28("xt", ["claude-sync", "--check", "--json", "--cwd", projectRoot], {
+  const result = spawnSync29("xt", ["claude-sync", "--check", "--json", "--cwd", projectRoot], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -62180,7 +62322,7 @@ var init_model_probes = __esm(() => {
 });
 
 // src/cli/setup.ts
-import { spawnSync as spawnSync29 } from "child_process";
+import { spawnSync as spawnSync30 } from "child_process";
 import { readFileSync as readFileSync45 } from "fs";
 function usage4() {
   return [
@@ -62348,7 +62490,7 @@ async function collectDiscoveryState() {
   };
 }
 function parsePiModels2() {
-  const result = spawnSync29("pi", ["--list-models"], { encoding: "utf8", stdio: "pipe", timeout: 8000 });
+  const result = spawnSync30("pi", ["--list-models"], { encoding: "utf8", stdio: "pipe", timeout: 8000 });
   if (result.status !== 0 || result.error)
     return [];
   return result.stdout.split(`
@@ -62499,7 +62641,7 @@ function collectPlannedChanges(writes) {
   return changes;
 }
 function readGlobalField(key) {
-  const getResult = spawnSync29("sp", ["edit", "--global", "--get", key], {
+  const getResult = spawnSync30("sp", ["edit", "--global", "--get", key], {
     encoding: "utf8",
     stdio: "pipe"
   });
@@ -62533,7 +62675,7 @@ function rollbackChanges(applied) {
   return failed;
 }
 function setGlobalField(key, value) {
-  return spawnSync29("sp", ["edit", "--global", "--set", key, value], {
+  return spawnSync30("sp", ["edit", "--global", "--set", key, value], {
     encoding: "utf8",
     stdio: "pipe"
   });
@@ -62782,7 +62924,7 @@ var init_serve_hot_reload = () => {};
 import { createServer } from "http";
 import { randomUUID as randomUUID6 } from "crypto";
 import { once } from "events";
-import { spawnSync as spawnSync30 } from "child_process";
+import { spawnSync as spawnSync31 } from "child_process";
 import { access, readdir as readdir2, readFile as readFile4, constants as constants3 } from "fs/promises";
 import { existsSync as existsSync55 } from "fs";
 import { homedir as homedir16 } from "os";
@@ -62922,7 +63064,7 @@ function parseArgs18(argv) {
   return { port, concurrency, queueTimeoutMs, shutdownGraceMs, projectDir, dbPath, fallbackModel, auditFailureThreshold, allowSkills, allowSkillsRoots, reloadPollMs, readinessCanaryMode, readinessRequiredPiFlags, readinessCanarySpecialist, readinessCanaryTimeoutMs, logLevel };
 }
 function checkPiHelpForFlags(flags = DEFAULT_REQUIRED_PI_FLAGS) {
-  const result = spawnSync30("pi", ["--help"], { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+  const result = spawnSync31("pi", ["--help"], { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
   if (result.error || result.status === 127)
     return "pi_binary_missing";
   const help = `${result.stdout ?? ""}
@@ -63235,7 +63377,7 @@ var init_serve = __esm(() => {
 });
 
 // src/cli/script.ts
-import { spawnSync as spawnSync31 } from "child_process";
+import { spawnSync as spawnSync32 } from "child_process";
 function parseVar(entry) {
   const index = entry.indexOf("=");
   if (index <= 0)
@@ -63365,7 +63507,7 @@ function printResult(result, json) {
   console.error(result.error);
 }
 function runUnderLock(lockPath, argv) {
-  const flock = spawnSync31("flock", ["-n", lockPath, "env", "SP_SCRIPT_NO_LOCK=1", process.execPath, process.argv[1], "script", ...argv], {
+  const flock = spawnSync32("flock", ["-n", lockPath, "env", "SP_SCRIPT_NO_LOCK=1", process.execPath, process.argv[1], "script", ...argv], {
     encoding: "utf-8",
     stdio: "inherit"
   });
@@ -93432,12 +93574,12 @@ var init_descriptions = __esm(() => {
   };
   SPECIALIST_DISPATCH_RUNTIME_PARAMS = {
     mcp: {
-      requested_by: "ParticipantId of the requesting coordinator. Defaults to the MCP gateway participant.",
-      coordinator_session_id: "MCP session id, for lineage."
+      requested_by: "ParticipantId of the requesting coordinator. Defaults to the dispatcher that launched this MCP server.",
+      coordinator_session_id: "Coordinator session id, for lineage. Defaults to the dispatcher's session."
     },
     pi: {
-      requested_by: "ParticipantId of the requesting coordinator. Defaults to the Pi extension adapter participant.",
-      coordinator_session_id: "Pi session id, for lineage."
+      requested_by: "ParticipantId of the requesting coordinator. Defaults to the dispatcher this Pi session belongs to.",
+      coordinator_session_id: "Coordinator session id, for lineage. Defaults to the dispatcher's session."
     }
   };
   SPECIALIST_STATUS_PARAMS = {
@@ -93609,7 +93751,24 @@ function renderDispatchRejection(error) {
   const onDiskBuildId = readBuildId(DIST_LIB_PATH);
   return renderRejection({ reason: error.message, detail: error.detail, missing: error.detail.missing }, describeBuildIdentity(LOADED_BUILD_ID, onDiskBuildId), isBuildStale(LOADED_BUILD_ID, onDiskBuildId));
 }
-function createSpecialistDispatchTool(getHost, getPusher) {
+function warnRouteDropped(warn) {
+  if (routeDropWarningGiven)
+    return;
+  routeDropWarningGiven = true;
+  warn("the completion wake cannot be routed: neither a dispatcher participant nor a coordinator " + "session id is known for this dispatch; the result stays readable through specialist_status");
+}
+function resolveDispatcherOnce(lookup, explicitParticipant) {
+  const resolved = resolveProcessDispatcher({
+    env: lookup.env ?? process.env,
+    pid: lookup.pid ?? process.ppid,
+    ...lookup.run ? { run: lookup.run } : {},
+    ...lookup.now ? { now: lookup.now } : {},
+    warn: lookup.warn ?? warnDispatcherIdentity
+  });
+  const explicit = (explicitParticipant ?? "").trim();
+  return explicit ? { ...resolved, participant: explicit } : resolved;
+}
+function createSpecialistDispatchTool(getHost, getPusher, dispatcherLookup = {}) {
   return {
     name: "specialist_dispatch",
     description: specialistToolDescription("specialist_dispatch", "mcp"),
@@ -93678,6 +93837,8 @@ function createSpecialistDispatchTool(getHost, getPusher) {
             return renderRejection({ reason: gate.reason, missing: gate.missing, fix: FIX_BY_REASON.issue_not_dispatchable }, build());
           }
         }
+        const dispatcher = resolveDispatcherOnce(dispatcherLookup, input.requested_by);
+        const coordinatorSessionId = input.coordinator_session_id ?? dispatcher.sessionId;
         const handle = await getHost().start({
           specialist: input.specialist,
           ...issueRefValue ? { issueRef: issueRefValue } : {},
@@ -93691,14 +93852,19 @@ function createSpecialistDispatchTool(getHost, getPusher) {
           surface: "mcp",
           ...input.model_override ? { modelOverride: input.model_override } : {},
           ...input.thinking_override ? { thinkingOverride: input.thinking_override } : {},
-          requestedByParticipantId: input.requested_by ?? "adapter::specialists-mcp",
-          ...input.coordinator_session_id ? { coordinatorSessionId: input.coordinator_session_id } : {}
+          ...dispatcher.participant ? { requestedByParticipantId: dispatcher.participant } : {},
+          ...coordinatorSessionId ? { coordinatorSessionId } : {},
+          dispatcher
         });
         const pusher = getPusher?.();
-        pusher?.track(handle.activationId, {
-          ...input.coordinator_session_id ? { coordinatorSessionId: input.coordinator_session_id } : {},
-          coordinatorParticipantId: input.requested_by ?? "adapter::specialists-mcp"
-        });
+        if (dispatcher.participant || coordinatorSessionId) {
+          pusher?.track(handle.activationId, {
+            ...coordinatorSessionId ? { coordinatorSessionId } : {},
+            coordinatorParticipantId: dispatcher.participant ?? "unknown"
+          });
+        } else if (pusher) {
+          warnRouteDropped(dispatcherLookup.warn ?? warnDispatcherIdentity);
+        }
         handle.result.then(async (result) => {
           if (!pusher)
             return;
@@ -93833,7 +93999,7 @@ function createSpecialistRetryTool(getHost, getPusher) {
     }
   };
 }
-var DIST_LIB_PATH, LOADED_BUILD_ID, fullFlag, specialistDispatchSchema, wakeNoticeGiven = false, specialistSteerSchema, specialistReplySchema, specialistStopSchema, specialistRetrySchema;
+var DIST_LIB_PATH, LOADED_BUILD_ID, fullFlag, specialistDispatchSchema, wakeNoticeGiven = false, routeDropWarningGiven = false, specialistSteerSchema, specialistReplySchema, specialistStopSchema, specialistRetrySchema;
 var init_activation_tool = __esm(() => {
   init_zod();
   init_channel();
@@ -93842,6 +94008,7 @@ var init_activation_tool = __esm(() => {
   init_rejection();
   init_types3();
   init_types3();
+  init_dispatcher_identity();
   init_descriptions();
   DIST_LIB_PATH = (() => {
     for (const candidate of ["./lib.js", "../../../dist/lib.js"]) {
@@ -94650,19 +94817,21 @@ function composeActivationPath(shimDir, inherited, pathDelimiter) {
   return [shimDir, ...entries].join(pathDelimiter);
 }
 function bashSpawnHookWith(overlay, options = {}) {
-  const { shimDir, pathDelimiter = platformPathDelimiter } = options;
+  const { shimDir, pathDelimiter = platformPathDelimiter, unset = [] } = options;
   const identity = { ...overlay };
   delete identity.PATH;
   return (context) => {
     const env = { ...context.env, ...identity };
+    for (const key of unset)
+      delete env[key];
     if (shimDir) {
       env.PATH = composeActivationPath(shimDir, context.env.PATH, pathDelimiter);
     }
     return { ...context, env };
   };
 }
-function hasActivationEnv(overlay, shimDir) {
-  return Object.keys(overlay).length > 0 || Boolean(shimDir);
+function hasActivationEnv(overlay, shimDir, unset = []) {
+  return Object.keys(overlay).length > 0 || unset.length > 0 || Boolean(shimDir);
 }
 var init_activation_bash_env = () => {};
 
@@ -95261,7 +95430,9 @@ function createGuardedTools(sdk, input) {
       unguardable.push(name);
       continue;
     }
-    const original = SHELL_FACTORIES.has(factoryName) && hasActivationEnv(input.env ?? {}, input.shimDir) ? factory(input.cwd, { spawnHook: bashSpawnHookWith(input.env ?? {}, { shimDir: input.shimDir }) }) : factory(input.cwd);
+    const original = SHELL_FACTORIES.has(factoryName) && hasActivationEnv(input.env ?? {}, input.shimDir, input.unset) ? factory(input.cwd, {
+      spawnHook: bashSpawnHookWith(input.env ?? {}, { shimDir: input.shimDir, unset: input.unset })
+    }) : factory(input.cwd);
     const originalExecute = original.execute.bind(original);
     tools.push({
       ...original,
@@ -96907,6 +97078,8 @@ class NativeActivationHost {
     const activationId = `act:${randomUUID9().slice(0, 12)}`;
     const attemptId = `att:${activationId.slice(4)}:1`;
     const participantId = `specialist::${request.specialist}`;
+    const { dispatcher, requestedByParticipantId, coordinatorSessionId } = resolveRequestDispatcher(request);
+    const dispatcherEnv = dispatcherEnvOverlay(dispatcher);
     let eventIssueRef = request.issueRef;
     const emit = (name, payload) => this.forensics.emit({
       activationId,
@@ -96918,7 +97091,7 @@ class NativeActivationHost {
       payload
     });
     emit("activation_requested", {
-      requested_by: request.requestedByParticipantId,
+      requested_by: requestedByParticipantId ?? null,
       model_override: request.modelOverride ?? null,
       thinking_override: request.thinkingOverride ?? null
     });
@@ -97061,7 +97234,7 @@ class NativeActivationHost {
           await workItems.journal(created.ref, "note", {
             participantId,
             activationId,
-            summary: "ad-hoc dispatch evidence: " + `surface=${request.surface ?? "unknown"} ` + `specialist=${request.specialist} ` + `requested_by=${request.requestedByParticipantId} ` + `parent_ref=${parentRef || "none"} ` + `issue_kind=${kind} title=${titleSource}`
+            summary: "ad-hoc dispatch evidence: " + `surface=${request.surface ?? "unknown"} ` + `specialist=${request.specialist} ` + `requested_by=${requestedByParticipantId ?? "unknown"} ` + `parent_ref=${parentRef || "none"} ` + `issue_kind=${kind} title=${titleSource}`
           });
         } catch {}
       } catch (error) {
@@ -97420,7 +97593,7 @@ class NativeActivationHost {
       activationId,
       currentAttemptId: () => this.registry.get(activationId)?.snapshot.attemptId ?? attemptId,
       self: participantId,
-      parent: request.requestedByParticipantId,
+      parent: requestedByParticipantId ?? "unknown",
       onAsk: (kind, body) => {
         const record = this.registry.get(activationId);
         if (record)
@@ -97446,12 +97619,13 @@ class NativeActivationHost {
       run: this.identityEnvRun
     });
     const { PATH: _launchPath, ...activationEnv } = activationLaunchEnv;
+    Object.assign(activationEnv, dispatcherEnv.env);
     const activationShimDir = shimBinDir(process.env);
     const uncoveredSpawns = uncoveredHostEnvSpawns(effectiveToolContract.toolsList);
-    if (uncoveredSpawns.length > 0 && hasActivationEnv(activationEnv, activationShimDir)) {
+    if (uncoveredSpawns.length > 0 && hasActivationEnv(activationEnv, activationShimDir, dispatcherEnv.unset)) {
       warnIdentityEnv(`activation ${activationId} grants ${uncoveredSpawns.join(", ")}, whose child processes ` + `inherit the dispatching session's identity rather than the activation's ` + `(SPECIALISTS-4487); its bash and powershell calls carry the activation's`);
     }
-    if (claudeBridge && !scopeBridgedChildEnv(modelRuntime, activationEnv) && Object.keys(activationEnv).length > 0) {
+    if (claudeBridge && !scopeBridgedChildEnv(modelRuntime, { ...activationEnv, ...bridgedDispatcherEnv(dispatcherEnv) }) && Object.keys(activationEnv).length > 0) {
       warnIdentityEnv(`activation ${activationId}: the model runtime cannot carry a provider env, so its Claude Code ` + `child inherits the dispatching session's identity rather than the activation's (SPECIALISTS-4498)`);
     }
     if (claudeBridge && bridgeGitBlockOmitted(activationEnv)) {
@@ -97461,6 +97635,7 @@ class NativeActivationHost {
       toolNames: effectiveToolContract.toolsList,
       cwd: workspace.worktreePath,
       env: activationEnv,
+      unset: dispatcherEnv.unset,
       shimDir: activationShimDir,
       admit: createNativeToolAdmission({
         guardLoaded: curatedExtensions.all.includes(getPermissionGuardExtensionPath() ?? ""),
@@ -97717,8 +97892,8 @@ class NativeActivationHost {
         initialPrompt: rendered.initial_prompt,
         createSession: createSessionForModel,
         lineage: {
-          ...request.requestedByParticipantId ? { coordinatorParticipantId: request.requestedByParticipantId } : {},
-          ...request.coordinatorSessionId ? { coordinatorSessionId: request.coordinatorSessionId } : {}
+          ...requestedByParticipantId ? { coordinatorParticipantId: requestedByParticipantId } : {},
+          ...coordinatorSessionId ? { coordinatorSessionId } : {}
         },
         workItems,
         ...typeof binding.baseCommit === "string" && binding.baseCommit.trim() !== "" ? { bindingBaseCommit: binding.baseCommit } : {}
@@ -98820,6 +98995,7 @@ var init_native_host = __esm(() => {
   init_identity_env();
   init_activation_bash_env();
   init_bridge_child_env();
+  init_dispatcher_identity();
   init_resolved_tool_contract();
   init_model_chain();
   init_contract_sections();
@@ -99191,6 +99367,7 @@ var init_lib = __esm(() => {
   init_workitem_remote();
   init_contract_sections();
   init_types3();
+  init_dispatcher_identity();
   init_activation_tool();
   init_specialist_display();
   init_async_events();
@@ -100071,7 +100248,7 @@ var init_v2_server = __esm(() => {
 
 // src/index.ts
 init_logger();
-import { spawnSync as spawnSync32 } from "child_process";
+import { spawnSync as spawnSync33 } from "child_process";
 process.on("uncaughtException", (err) => {
   if (err.code === "EBADF" && err.syscall === "close")
     return;
@@ -101505,7 +101682,7 @@ ${LEASE_USAGE}
   }
   if (sub === "release") {
     console.error("Deprecated. Use `xt release prepare/publish`. This alias will be removed in v4.0.");
-    const result = spawnSync32("xt", ["release", ...process.argv.slice(3)], { stdio: "inherit" });
+    const result = spawnSync33("xt", ["release", ...process.argv.slice(3)], { stdio: "inherit" });
     if (result.error) {
       console.error(`Failed to run xt release: ${result.error.message}`);
       process.exit(1);

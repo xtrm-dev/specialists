@@ -304,17 +304,46 @@ describe('native-specialists extension (Pi coordinator surface)', () => {
     const mod = await loadExtension();
     const pi = makeFakePi();
     const { host, calls } = makeFakeHost();
-    mod.default(pi, { createHost: () => host });
+    mod.default(pi, {
+      createHost: () => host,
+      // The live lead process, not an adapter literal (SPECIALISTS-4503).
+      env: { SUBSTRATE_HOLDER: 'sp-lead-1', XTRM_AGENT_NAME: 'serving-lead' },
+    });
     const dispatch = toolNamed(pi, 'specialist_dispatch');
     const out = resultText(await dispatch.execute('tc1', { specialist: 'explorer', issue_ref: 'XTRM-93' }));
     expect(calls.start[0]).toMatchObject({
       specialist: 'explorer',
       issueRef: 'XTRM-93',
-      requestedByParticipantId: 'adapter::pi-extension',
+      requestedByParticipantId: 'sp-lead-1',
+      dispatcher: { participant: 'sp-lead-1', name: 'serving-lead' },
     });
+    expect(calls.start[0]).not.toHaveProperty('coordinatorSessionId');
     expect(out.status).toBe('dispatched');
     expect(out.activation_id).toBe('act:aaaa');
     expect(out.step_contract).toMatchObject({ root_work_ref: 'XTRM-93', inputs: 1, outputs: 1 });
+  });
+
+  it('defaults requested_by AND coordinator_session_id to the dispatching session (SPECIALISTS-4503)', async () => {
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    const { host, calls } = makeFakeHost();
+    mod.default(pi, {
+      createHost: () => host,
+      env: { SUBSTRATE_HOLDER: 'sp-lead-1', XTRM_AGENT_NAME: 'serving-lead' },
+    });
+    const ctx = makeFakeCtx({ sessionId: 'lead-pi-session' });
+    await pi.fire('session_start', { type: 'session_start' }, ctx);
+    await toolNamed(pi, 'specialist_dispatch').execute('tc1', { specialist: 'explorer', issue_ref: 'XTRM-93' });
+
+    expect(calls.start[0]).toMatchObject({
+      requestedByParticipantId: 'sp-lead-1',
+      coordinatorSessionId: 'lead-pi-session',
+      dispatcher: {
+        participant: 'sp-lead-1',
+        name: 'serving-lead',
+        sessionId: 'lead-pi-session',
+      },
+    });
   });
 
   it('retains bead_id as a compatibility alias for the same Substrate work locator', async () => {

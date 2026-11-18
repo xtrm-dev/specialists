@@ -13,6 +13,7 @@
 
 import type { PiUsageVerbatim, SessionUsageCost } from '../specialist/session-metrics-contract.js';
 import type { StepContract } from './step-contract.js';
+import type { DispatcherIdentity } from './dispatcher-identity.js';
 
 /** Stable logical participant identity — the role, across activations. */
 export type ParticipantId = string;
@@ -94,7 +95,15 @@ export interface ActivationRequest {
    */
   thinkingOverride?: ThinkingLevel;
 
-  requestedByParticipantId: ParticipantId;
+  /**
+   * The dispatcher of THIS dispatch (SPECIALISTS-4503). One value, resolved once by the
+   * frontend where the information exists; `requestedByParticipantId` and
+   * `coordinatorSessionId` default from it, and its `participant`/`name`/`address` reach the
+   * activation's env from the same object. Absent means the dispatcher is unknown: nothing is
+   * inherited and no literal is fabricated.
+   */
+  dispatcher?: DispatcherIdentity;
+  requestedByParticipantId?: ParticipantId;
   coordinatorSessionId?: string;
 
   /**

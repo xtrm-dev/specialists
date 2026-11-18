@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -11,6 +11,8 @@ import { join } from 'node:path';
  * tests/integration/activation/mcp-activation.live.test.ts, because a mock cannot prove
  * the absence of a child this process never asked for.
  */
+import { resetDispatcherWarning } from '../../../src/activation/dispatcher-identity.js';
+
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return {
@@ -223,6 +225,171 @@ function hostWith(fixture: HostFixture = {}) {
 }
 
 describe('specialist_dispatch — the MCP dispatch path is the same admission path', () => {
+  it('defaults the Substrate coordinator to the dispatcher value, never an adapter literal (SPECIALISTS-4503)', async () => {
+    const started: Array<Record<string, unknown>> = [];
+    const host = {
+      start: vi.fn(async (req: Record<string, unknown>) => {
+        started.push(req);
+        return {
+          activationId: 'act:dispatcher',
+          result: new Promise(() => {}),
+          stepContract: { rootWorkRef: 'ISSUE-1', inputs: [], outputs: [] },
+        };
+      }),
+      inspect: () => undefined,
+    } as never;
+    const tool = createSpecialistDispatchTool(() => host, undefined, {
+      env: { SUBSTRATE_HOLDER: 'sp-lead-1' },
+      pid: 4242,
+      run: () => ({
+        status: 0,
+        stdout: JSON.stringify({ name: 'serving-lead', address: 'uds:/lead.sock', sessionId: 'lead-sess-1' }),
+      }),
+    });
+
+    await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' });
+
+    expect(started[0]).toMatchObject({
+      requestedByParticipantId: 'sp-lead-1',
+      coordinatorSessionId: 'lead-sess-1',
+      dispatcher: {
+        participant: 'sp-lead-1',
+        name: 'serving-lead',
+        address: 'uds:/lead.sock',
+        sessionId: 'lead-sess-1',
+      },
+    });
+    expect(String(started[0]?.requestedByParticipantId)).not.toContain('adapter::');
+  });
+
+  describe('completion routing follows the dispatcher, not only its holder (SPECIALISTS-4503)', () => {
+    function trackedDispatch(env: NodeJS.ProcessEnv, xtAnswer: { status: number; stdout: string }) {
+      const track = vi.fn();
+      const host = {
+        start: vi.fn(async () => ({
+          activationId: 'act:route',
+          result: new Promise(() => {}),
+          stepContract: { rootWorkRef: 'ISSUE-1', inputs: [], outputs: [] },
+        })),
+        inspect: () => undefined,
+      } as never;
+      const tool = createSpecialistDispatchTool(() => host, () => ({ track }) as never, {
+        env,
+        pid: 4242,
+        run: () => xtAnswer,
+      });
+      return { track, run: () => tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' }) };
+    }
+
+    it('tracks the route by session id when the lead has no SUBSTRATE_HOLDER', async () => {
+      const { track, run } = trackedDispatch({}, { status: 0, stdout: JSON.stringify({ sessionId: 'lead-sess-2', name: 'lead' }) });
+      await run();
+      expect(track).toHaveBeenCalledWith('act:route', { coordinatorSessionId: 'lead-sess-2', coordinatorParticipantId: 'unknown' });
+    });
+
+    it('tracks participant and session together when both are known', async () => {
+      const { track, run } = trackedDispatch({ SUBSTRATE_HOLDER: 'sp-lead-1' }, { status: 0, stdout: JSON.stringify({ sessionId: 'lead-sess-3' }) });
+      await run();
+      expect(track).toHaveBeenCalledWith('act:route', { coordinatorSessionId: 'lead-sess-3', coordinatorParticipantId: 'sp-lead-1' });
+    });
+
+    it('leaves the dispatch untracked only when neither a participant nor a session is known', async () => {
+      const { track, run } = trackedDispatch({}, { status: 127, stdout: '' });
+      await run();
+      expect(track).not.toHaveBeenCalled();
+    });
+
+    it('says so once when the completion wake cannot be routed, instead of dropping it silently', async () => {
+      resetWakeNotice();
+      const warn = vi.fn();
+      const track = vi.fn();
+      const host = {
+        start: vi.fn(async () => ({ activationId: 'act:drop', result: new Promise(() => {}), stepContract: { rootWorkRef: 'ISSUE-1', inputs: [], outputs: [] } })),
+        inspect: () => undefined,
+      } as never;
+      const tool = createSpecialistDispatchTool(() => host, () => ({ track }) as never, { env: {}, pid: 1, run: () => ({ status: 127, stdout: '' }), warn });
+
+      await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' });
+      await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' });
+
+      expect(track).not.toHaveBeenCalled();
+      const wake = warn.mock.calls.map((c) => String(c[0])).filter((line) => line.includes('completion wake'));
+      expect(wake).toHaveLength(1);
+    });
+  });
+
+  describe('the one xt lookup per dispatch (SPECIALISTS-4503)', () => {
+    beforeEach(() => { resetDispatcherWarning(); });
+
+    const stubHost = () => ({
+      start: vi.fn(async () => ({
+        activationId: 'act:once',
+        result: new Promise(() => {}),
+        stepContract: { rootWorkRef: 'ISSUE-1', inputs: [], outputs: [] },
+      })),
+      inspect: () => undefined,
+    });
+
+    it('spawns xt exactly once per dispatch, for this process parent, without inheriting, and bounded', async () => {
+      const run = vi.fn(() => ({ status: 0, stdout: JSON.stringify({ sessionId: 's1' }) }));
+      const host = stubHost();
+      const tool = createSpecialistDispatchTool(() => host as never, undefined, { env: { SUBSTRATE_HOLDER: 'sp-lead-1' }, pid: 4242, run });
+
+      await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' });
+
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(run).toHaveBeenCalledWith(
+        'xt',
+        ['identity', 'dispatcher', '--pid', '4242', '--no-inherit', '--json'],
+        expect.objectContaining({ timeoutMs: 3000 }),
+      );
+      await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' });
+      expect(run).toHaveBeenCalledTimes(2); // once per dispatch, never cached across dispatches
+    });
+
+    it('never spawns xt for a dispatch this tool refuses before the host starts', async () => {
+      const run = vi.fn(() => ({ status: 0, stdout: '{}' }));
+      const host = stubHost();
+      const tool = createSpecialistDispatchTool(() => host as never, undefined, { env: { SUBSTRATE_HOLDER: 'sp-lead-1' }, run });
+
+      const noRef = await tool.execute({ specialist: 'researcher' }) as Record<string, unknown>;
+      const both = await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1', contract: 'PROBLEM\nx' }) as Record<string, unknown>;
+      const thin = await tool.execute({ specialist: 'researcher', contract: 'PROBLEM\nx' }) as Record<string, unknown>;
+
+      for (const out of [noRef, both, thin]) expect(out.status).toBe('rejected');
+      expect(host.start).not.toHaveBeenCalled();
+      expect(run).not.toHaveBeenCalled();
+    });
+
+    it('does spawn xt once for a dispatch the HOST refuses at admission (documented cost, bounded at 3 s)', async () => {
+      const run = vi.fn(() => ({ status: 0, stdout: '{}' }));
+      const { host, sessionsCreated } = hostWith({ readContractState: () => 'draft' });
+      const tool = createSpecialistDispatchTool(() => host, undefined, { env: { SUBSTRATE_HOLDER: 'sp-lead-1' }, run });
+
+      const out = await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' }) as Record<string, unknown>;
+
+      expect(out.status).toBe('rejected');
+      expect(sessionsCreated.count).toBe(0);
+      expect(run).toHaveBeenCalledTimes(1);
+    });
+
+    it('survives a lookup that times out: warns once, keeps the env participant, and still dispatches', async () => {
+      const warn = vi.fn();
+      const timedOut = Object.assign(new Error('spawnSync xt ETIMEDOUT'), { code: 'ETIMEDOUT' });
+      const run = vi.fn(() => ({ status: null, stdout: '', error: timedOut }));
+      const host = stubHost();
+      const tool = createSpecialistDispatchTool(() => host as never, undefined, { env: { SUBSTRATE_HOLDER: 'sp-lead-9' }, pid: 1, run, warn });
+
+      await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' });
+      await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' });
+
+      expect(host.start).toHaveBeenCalledTimes(2);
+      expect(host.start).toHaveBeenLastCalledWith(expect.objectContaining({ requestedByParticipantId: 'sp-lead-9' }));
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('ETIMEDOUT');
+    });
+  });
+
   it('dispatches a Specialist and returns the activation, not a result', async () => {
     const { host, sessionsCreated } = hostWith();
     const tool = createSpecialistDispatchTool(() => host);

@@ -45,6 +45,12 @@ import { FIX_BY_REASON, renderRejection } from '../../activation/rejection.js';
 import { THINKING_LEVELS } from '../../activation/types.js';
 import type { ActivationSnapshot, ActivationTokenUsage } from '../../activation/types.js';
 import { DispatchRejectedError } from '../../activation/types.js';
+import {
+  resolveProcessDispatcher,
+  warnDispatcherIdentity,
+  type DispatcherIdentity,
+  type DispatcherRun,
+} from '../../activation/dispatcher-identity.js';
 import type { PendingAsk } from '../../activation/interaction.js';
 import type { RuntimeEventPusher } from '../../activation/async-events.js';
 import type { ActivationResult } from '../../activation/types.js';
@@ -393,11 +399,55 @@ let wakeNoticeGiven = false;
 /** Test seam: the next dispatch states the wake behaviour again. */
 export function resetWakeNotice(): void {
   wakeNoticeGiven = false;
+  routeDropWarningGiven = false;
+}
+
+/** One warning per process when a dispatch knows neither a participant nor a session. */
+let routeDropWarningGiven = false;
+function warnRouteDropped(warn: (message: string) => void): void {
+  if (routeDropWarningGiven) return;
+  routeDropWarningGiven = true;
+  warn(
+    'the completion wake cannot be routed: neither a dispatcher participant nor a coordinator ' +
+    'session id is known for this dispatch; the result stays readable through specialist_status',
+  );
+}
+
+/**
+ * Resolve this process's dispatcher once per dispatch, honouring an explicit
+ * `requested_by` override for the participant while keeping the process's name/address.
+ */
+function resolveDispatcherOnce(
+  lookup: {
+    env?: NodeJS.ProcessEnv;
+    pid?: number;
+    run?: DispatcherRun;
+    warn?: (message: string) => void;
+    now?: () => number;
+  },
+  explicitParticipant: string | undefined,
+): DispatcherIdentity {
+  const resolved = resolveProcessDispatcher({
+    env: lookup.env ?? process.env,
+    pid: lookup.pid ?? process.ppid,
+    ...(lookup.run ? { run: lookup.run } : {}),
+    ...(lookup.now ? { now: lookup.now } : {}),
+    warn: lookup.warn ?? warnDispatcherIdentity,
+  });
+  const explicit = (explicitParticipant ?? '').trim();
+  return explicit ? { ...resolved, participant: explicit } : resolved;
 }
 
 export function createSpecialistDispatchTool(
   getHost: () => NativeActivationHost,
   getPusher?: () => RuntimeEventPusher | undefined,
+  dispatcherLookup: {
+    env?: NodeJS.ProcessEnv;
+    pid?: number;
+    run?: DispatcherRun;
+    warn?: (message: string) => void;
+    now?: () => number;
+  } = {},
 ) {
   return {
     name: 'specialist_dispatch' as const,
@@ -492,6 +542,15 @@ export function createSpecialistDispatchTool(
           }
         }
 
+        // SPECIALISTS-4503: one dispatcher value per dispatch, resolved AFTER this tool's own
+        // gates (a dispatch refused by them never spawns `xt`) and used by BOTH sinks — the
+        // request's Substrate fields and the activation env overlay. A dispatch that
+        // `host.start` itself refuses (admission, lease, model) happens after this one bounded
+        // lookup: it costs 0.15-0.2 s when `xt` is healthy and is capped at 3 s otherwise. An
+        // explicit `requested_by` overrides the participant; the name/address still describe
+        // this process.
+        const dispatcher = resolveDispatcherOnce(dispatcherLookup, input.requested_by);
+        const coordinatorSessionId = input.coordinator_session_id ?? dispatcher.sessionId;
         const handle = await getHost().start({
           specialist: input.specialist,
           ...(issueRefValue ? { issueRef: issueRefValue } : {}),
@@ -511,8 +570,9 @@ export function createSpecialistDispatchTool(
           surface: 'mcp',
           ...(input.model_override ? { modelOverride: input.model_override } : {}),
           ...(input.thinking_override ? { thinkingOverride: input.thinking_override } : {}),
-          requestedByParticipantId: input.requested_by ?? 'adapter::specialists-mcp',
-          ...(input.coordinator_session_id ? { coordinatorSessionId: input.coordinator_session_id } : {}),
+          ...(dispatcher.participant ? { requestedByParticipantId: dispatcher.participant } : {}),
+          ...(coordinatorSessionId ? { coordinatorSessionId } : {}),
+          dispatcher,
         });
 
         // The handle's `result` promise is deliberately NOT awaited and deliberately not
@@ -525,10 +585,21 @@ export function createSpecialistDispatchTool(
         // contract — `pushCompletion` refuses an activation that has not settled, so a push
         // can never describe a result that does not exist.
         const pusher = getPusher?.();
-        pusher?.track(handle.activationId, {
-          ...(input.coordinator_session_id ? { coordinatorSessionId: input.coordinator_session_id } : {}),
-          coordinatorParticipantId: input.requested_by ?? 'adapter::specialists-mcp',
-        });
+        // The coordinator SESSION is the only stable address on the push channel
+        // (EventRoute.coordinatorSessionId), so a dispatcher with a session id but no holder
+        // (a lead started without xt) must still be tracked, or its completion wake is lost.
+        // Only a dispatch that knows neither is left untracked: it has nowhere to push.
+        if (dispatcher.participant || coordinatorSessionId) {
+          pusher?.track(handle.activationId, {
+            ...(coordinatorSessionId ? { coordinatorSessionId } : {}),
+            // 'unknown' is the contract's allowed "absent or unknown" label on this in-memory push
+            // route; it is never written to Substrate lineage (requestedByParticipantId is omitted
+            // above when no participant is known).
+            coordinatorParticipantId: dispatcher.participant ?? 'unknown',
+          });
+        } else if (pusher) {
+          warnRouteDropped(dispatcherLookup.warn ?? warnDispatcherIdentity);
+        }
         handle.result.then(
           async (result) => {
             if (!pusher) return;

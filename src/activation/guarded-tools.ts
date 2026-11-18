@@ -119,6 +119,12 @@ export function createGuardedTools(
      */
     env?: Record<string, string>;
     /**
+     * Keys deleted from the inherited shell env because the activation's identity cannot
+     * supply them (SPECIALISTS-4503: an inherited `XTRM_DISPATCHER_*` names the host's
+     * dispatcher — the grandparent — and must not reach the child).
+     */
+    unset?: readonly string[];
+    /**
      * Directory holding the gh/xt identity shim, put first on each shell's PATH. Separate
      * from `env` because PATH must be composed per spawn, not precomputed from the host.
      */
@@ -138,8 +144,10 @@ export function createGuardedTools(
     const factory = sdkAny[factoryName];
     if (!factory) { unguardable.push(name); continue; }
 
-    const original = SHELL_FACTORIES.has(factoryName) && hasActivationEnv(input.env ?? {}, input.shimDir)
-      ? factory(input.cwd, { spawnHook: bashSpawnHookWith(input.env ?? {}, { shimDir: input.shimDir }) })
+    const original = SHELL_FACTORIES.has(factoryName) && hasActivationEnv(input.env ?? {}, input.shimDir, input.unset)
+      ? factory(input.cwd, {
+        spawnHook: bashSpawnHookWith(input.env ?? {}, { shimDir: input.shimDir, unset: input.unset }),
+      })
       : factory(input.cwd);
     const originalExecute = original.execute.bind(original);
 

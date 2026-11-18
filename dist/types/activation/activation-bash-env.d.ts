@@ -32,8 +32,11 @@
  *    `process.env` with an allowlist that never included the identity keys. Inside the
  *    sandbox the identity was already absent before this change; what changed is PATH:
  *    the shim-first PATH used to arrive through `process.env.PATH` and no longer does.
- *    The sandbox is `--unshare-net` and masks `~/.config/gh`, so the practical exposure is
- *    small — but the limit is real and is pinned by a test.
+ *    `XTRM_DISPATCHER_*` is absent there for the same reason (the sandbox has no identity
+ *    at all, including the dispatcher's), and the allowlist is deliberately NOT widened
+ *    for it: a READ_ONLY shell must not learn who dispatched it. The sandbox is
+ *    `--unshare-net` and masks `~/.config/gh`, so the practical exposure is small — but
+ *    the limit is real and is pinned by a test.
  */
 /** The shape pi passes to a shell spawn hook, and expects back. */
 export interface BashSpawnContext {
@@ -69,6 +72,7 @@ export declare function composeActivationPath(shimDir: string, inherited: string
 export declare function bashSpawnHookWith(overlay: Record<string, string>, options?: {
     shimDir?: string;
     pathDelimiter?: string;
+    unset?: readonly string[];
 }): (context: BashSpawnContext) => BashSpawnContext;
 /**
  * True when a spawn hook is worth installing for this activation.
@@ -77,5 +81,5 @@ export declare function bashSpawnHookWith(overlay: Record<string, string>, optio
  * shim-first PATH is still the difference between posting a review as the App and posting
  * it as the operator.
  */
-export declare function hasActivationEnv(overlay: Record<string, string>, shimDir?: string): boolean;
+export declare function hasActivationEnv(overlay: Record<string, string>, shimDir?: string, unset?: readonly string[]): boolean;
 //# sourceMappingURL=activation-bash-env.d.ts.map

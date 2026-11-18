@@ -526,6 +526,35 @@ describe('PiAgentSession', () => {
   });
 
 
+  it('deletes inherited dispatcher keys the launched identity does not supply (SPECIALISTS-4503)', async () => {
+    const saved = {
+      XTRM_DISPATCHER_PARTICIPANT: process.env.XTRM_DISPATCHER_PARTICIPANT,
+      XTRM_DISPATCHER_NAME: process.env.XTRM_DISPATCHER_NAME,
+      XTRM_DISPATCHER_ADDRESS: process.env.XTRM_DISPATCHER_ADDRESS,
+    };
+    process.env.XTRM_DISPATCHER_PARTICIPANT = 'sp-grandparent';
+    process.env.XTRM_DISPATCHER_NAME = 'grand';
+    process.env.XTRM_DISPATCHER_ADDRESS = 'uds:/grandparent.sock';
+    try {
+      const session = await PiAgentSession.create({
+        model: 'gemini',
+        env: { XTRM_DISPATCHER_PARTICIPANT: 'sp-a-1' },
+        envUnset: ['XTRM_DISPATCHER_NAME', 'XTRM_DISPATCHER_ADDRESS'],
+      });
+      await session.start();
+
+      const spawnOptions = mockSpawn.mock.calls[0][2] as { env?: NodeJS.ProcessEnv };
+      expect(spawnOptions.env?.XTRM_DISPATCHER_PARTICIPANT).toBe('sp-a-1');
+      expect(spawnOptions.env).not.toHaveProperty('XTRM_DISPATCHER_NAME');
+      expect(spawnOptions.env).not.toHaveProperty('XTRM_DISPATCHER_ADDRESS');
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
   it('never spawns serena-pool or injects SERENA_MCP_PORT, even when the pool module is installed', async () => {
     const npmGlobalDir = tempDir('pi-npm-global-');
     const serenaPoolPath = join(npmGlobalDir, '@jaggerxtrm', 'pi-extensions', 'extensions', 'serena-pool', 'index.ts');

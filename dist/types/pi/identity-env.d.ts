@@ -21,8 +21,9 @@
  *   dispatched it. `XTMUX_AGENT_ROLE` (the role the agent host reports and the
  *   project-management hooks resolve) is the specialist name, and `XTRM_AGENT_NAME`
  *   (which outranks the holder for review attribution) is the holder, so neither
- *   inherits the launcher's value. The launcher stays reachable through the
- *   inherited `XTRM_DISPATCHER_*`, which this module never touches.
+ *   inherits the launcher's value. The IMMEDIATE launcher stays reachable through
+ *   `XTRM_DISPATCHER_*`, which the launch paths overlay with the invoking process and
+ *   this module never touches (SPECIALISTS-4503: one hop; the chain is in Substrate).
  * - PATH is never taken from the CLI. `resolveAgentLaunchEnv` appends it locally
  *   with the gh shim directory first (CORE-2524.4), because an identity the shim
  *   cannot intercept is not an identity.
