@@ -24128,7 +24128,7 @@ function dispatcherBindingFields(identity, warn = warnDispatcherIdentity) {
     if (isDispatcherSessionId(sessionId))
       fields.dispatcherSessionId = sessionId;
     else
-      warnBindingOnce(warn, "the dispatcher session is not a canonical lowercase UUID");
+      warnBindingOnce(warn, "the dispatcher session is not a UUID or a tmux session id");
   }
   return fields;
 }
@@ -24183,7 +24183,7 @@ var DISPATCHER_LOOKUP_TIMEOUT_MS = 3000, DISPATCHER_LABEL_MAX_LENGTH = 128, DISP
 var init_dispatcher_identity = __esm(() => {
   init_runtime_diagnostics();
   DISPATCHER_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/+-]*$/;
-  DISPATCHER_SESSION_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  DISPATCHER_SESSION_PATTERN = /^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|\$[0-9]+)$/;
   warnedBindingReasons = new Set;
 });
 
@@ -24323,6 +24323,15 @@ function createReopeningService(first, reopen) {
     }
   };
 }
+function warnRemoteDispatcherGap(req) {
+  if (remoteDispatcherWarned)
+    return;
+  const known = typeof req.dispatcherParticipantId === "string" && req.dispatcherParticipantId !== "" || typeof req.dispatcherSessionId === "string" && req.dispatcherSessionId !== "";
+  if (!known)
+    return;
+  remoteDispatcherWarned = true;
+  runtimeWarn("work-item-remote", "[specialists] the remote Substrate path cannot record the dispatcher on the ExecutionBinding yet " + "(the remote gate drops the fields); the dispatch proceeds and the binding records no dispatcher");
+}
 function createRemoteWorkItemPorts(service, opts) {
   const remote = opts.remote;
   const call = async (op, args) => {
@@ -24377,7 +24386,10 @@ function createRemoteWorkItemPorts(service, opts) {
     check: (_issues, req) => call("gate.check", {
       request: req
     }),
-    dispatch: (_issues, _provenance, req) => call("gate.dispatch", { request: req })
+    dispatch: (_issues, _provenance, req) => {
+      warnRemoteDispatcherGap(req);
+      return call("gate.dispatch", { request: req });
+    }
   };
   const journalService = {
     appendEntry: (issueId, input) => call("journal.appendEntry", { issueId, input }),
@@ -24405,8 +24417,9 @@ function createRemoteWorkItemPorts(service, opts) {
     provenanceService
   };
 }
-var DROPPED_LINK_CODES;
+var DROPPED_LINK_CODES, remoteDispatcherWarned = false;
 var init_workitem_remote = __esm(() => {
+  init_runtime_diagnostics();
   DROPPED_LINK_CODES = new Set(["connection_lost", "timeout"]);
 });
 

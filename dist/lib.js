@@ -18153,7 +18153,7 @@ function specialistHolderName(specialistName, jobId, pid = process.pid) {
 // src/activation/dispatcher-identity.ts
 var DISPATCHER_LABEL_MAX_LENGTH = 128;
 var DISPATCHER_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/+-]*$/;
-var DISPATCHER_SESSION_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+var DISPATCHER_SESSION_PATTERN = /^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|\$[0-9]+)$/;
 function isDispatcherLabel(value) {
   if (typeof value !== "string")
     return false;
@@ -18210,7 +18210,7 @@ function dispatcherBindingFields(identity, warn = warnDispatcherIdentity) {
     if (isDispatcherSessionId(sessionId))
       fields.dispatcherSessionId = sessionId;
     else
-      warnBindingOnce(warn, "the dispatcher session is not a canonical lowercase UUID");
+      warnBindingOnce(warn, "the dispatcher session is not a UUID or a tmux session id");
   }
   return fields;
 }
@@ -21875,6 +21875,16 @@ function createReopeningService(first, reopen) {
     }
   };
 }
+var remoteDispatcherWarned = false;
+function warnRemoteDispatcherGap(req) {
+  if (remoteDispatcherWarned)
+    return;
+  const known = typeof req.dispatcherParticipantId === "string" && req.dispatcherParticipantId !== "" || typeof req.dispatcherSessionId === "string" && req.dispatcherSessionId !== "";
+  if (!known)
+    return;
+  remoteDispatcherWarned = true;
+  runtimeWarn("work-item-remote", "[specialists] the remote Substrate path cannot record the dispatcher on the ExecutionBinding yet " + "(the remote gate drops the fields); the dispatch proceeds and the binding records no dispatcher");
+}
 function createRemoteWorkItemPorts(service, opts) {
   const remote = opts.remote;
   const call = async (op, args) => {
@@ -21929,7 +21939,10 @@ function createRemoteWorkItemPorts(service, opts) {
     check: (_issues, req) => call("gate.check", {
       request: req
     }),
-    dispatch: (_issues, _provenance, req) => call("gate.dispatch", { request: req })
+    dispatch: (_issues, _provenance, req) => {
+      warnRemoteDispatcherGap(req);
+      return call("gate.dispatch", { request: req });
+    }
   };
   const journalService = {
     appendEntry: (issueId, input) => call("journal.appendEntry", { issueId, input }),

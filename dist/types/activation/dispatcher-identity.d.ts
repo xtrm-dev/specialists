@@ -45,7 +45,7 @@ export declare const DISPATCHER_LOOKUP_TIMEOUT_MS = 3000;
 export declare const DISPATCHER_LABEL_MAX_LENGTH = 128;
 /** True when `value` is a label sb will accept as a dispatcher participant. */
 export declare function isDispatcherLabel(value: unknown): value is string;
-/** True when `value` is a canonical lowercase UUID sb will accept as a dispatcher session. */
+/** True when `value` is a UUID or tmux session id sb will accept as a dispatcher session. */
 export declare function isDispatcherSessionId(value: unknown): value is string;
 /**
  * After a failed lookup (missing or old xt, timeout, junk) the next lookups are skipped for
