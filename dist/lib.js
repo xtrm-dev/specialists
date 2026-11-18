@@ -18218,7 +18218,7 @@ function warnBindingOnce(warn, reason) {
   if (warnedBindingReasons.has(reason))
     return;
   warnedBindingReasons.add(reason);
-  warn(`${reason}; the binding records only the dispatcher value Substrate accepts`);
+  warn(`${reason}; the invalid value is dropped and the dispatch proceeds (a Substrate that cannot record a dispatcher records none)`);
 }
 function dispatcherEnvOverlay(identity) {
   const known = [
@@ -22441,6 +22441,9 @@ function provenanceRecordingDispatcher(provenance, req, canRecord) {
     }
   });
 }
+function dispatchRecordingDispatcher(gateDispatch, issues, provenance, req, canRecord) {
+  return gateDispatch(issues, provenanceRecordingDispatcher(provenance, req, canRecord), req);
+}
 function bindsDispatcherIdentity(db) {
   try {
     const columns = db.prepare("PRAGMA table_info(execution_bindings)").all();
@@ -22564,7 +22567,7 @@ async function openWorkItemBoundary(opts = {}) {
     store,
     gate: {
       check: async (i, r) => gateMod.checkDispatch(i, r),
-      dispatch: async (i, p, r) => gateMod.dispatchToSpecialist(i, provenanceRecordingDispatcher(p, r, canRecordDispatcher), r)
+      dispatch: async (i, p, r) => dispatchRecordingDispatcher((a, b, c) => gateMod.dispatchToSpecialist(a, b, c), i, p, r, canRecordDispatcher)
     },
     journalService: {
       appendEntry: async (issueId, input) => journalSvc.appendEntry(issueId, input),

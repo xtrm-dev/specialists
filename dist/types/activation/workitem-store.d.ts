@@ -629,6 +629,8 @@ export declare function selectWorkItemStore(env?: NodeJS.ProcessEnv, opts?: {
     substrateDir?: string;
     resolveInstalled?: () => string | null;
 }): Promise<WorkItemStoreSelection>;
+/** Test seam: the next dispatch against a pre-017 store may warn again. */
+export declare function resetDispatcherUnsupportedWarning(): void;
 /**
  * The dispatcher fields merged into the binding write.
  *
@@ -642,6 +644,15 @@ export declare function selectWorkItemStore(env?: NodeJS.ProcessEnv, opts?: {
  * throw, because a dispatch must not fail over a provenance label.
  */
 export declare function provenanceRecordingDispatcher(provenance: unknown, req: DispatchRequest, canRecord: boolean): unknown;
+/**
+ * The producer gate's dispatch with the dispatcher merged into its one provenance call. Extracted
+ * from openWorkItemBoundary so the wiring has a seam a test can hold: the gate must receive the
+ * recording wrapper (or the untouched service when the store cannot record), and the request is
+ * passed through unchanged (found in review of #586: removing the wiring survived every test).
+ */
+export declare function dispatchRecordingDispatcher<T>(gateDispatch: (issues: unknown, provenance: unknown, req: DispatchRequest) => T, issues: unknown, provenance: unknown, req: DispatchRequest, canRecord: boolean): T;
+/** Whether the migrated store can record a dispatcher identity (migration 017). */
+export declare function bindsDispatcherIdentity(db: Pick<DatabaseSync, 'prepare'>): boolean;
 /**
  * Open the canonical work store and build the boundary over the REAL producer
  * services, dynamic-imported at runtime from an explicit checkout.
