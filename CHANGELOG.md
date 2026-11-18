@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - One dispatcher value per dispatch, written to env and Substrate (SPECIALISTS-4503) (#584) ([82a5c22](https://github.com/xtrm-dev/specialists/commit/82a5c22d34d1385b5a5d97d631fa6ede9685ed18))
 - Record the dispatcher on the ExecutionBinding (SPECIALISTS-4506) ([600af9a](https://github.com/xtrm-dev/specialists/commit/600af9a54b36d7e613f9de4e946e9572d5571265))
 - The dispatcher wrapper hands the gate the whole provenance service (SPECIALISTS-4506) ([ed48e23](https://github.com/xtrm-dev/specialists/commit/ed48e23241984b80dfde5b198ae93caeae7f267d))
+- Accept the session ids Substrate accepts, and say when the remote path drops the dispatcher (SPECIALISTS-4506) ([fed5508](https://github.com/xtrm-dev/specialists/commit/fed55084ac83c646f87a85384aa0677ff0717612))
 
 ### Project maintenance
 - Make the NODE_ENV assertion prove the override (SPECIALISTS-4429) (#543) ([21be15b](https://github.com/xtrm-dev/specialists/commit/21be15b78a1e6eda9640dea37c350832012b1781))
@@ -57,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bump the actions-all group across 1 directory with 3 updates (#561) ([4eb1e50](https://github.com/xtrm-dev/specialists/commit/4eb1e50cd3b9a5d67b590004e7c24ba84749b132))
 - Read the activation env from the bash spawn hook in the three-sink test ([a213b1b](https://github.com/xtrm-dev/specialists/commit/a213b1b96620a1076b9f45d7d9e1e89c006f7c5c))
 - Rebuild the committed bundle with the pinned bun 1.4.2 (SPECIALISTS-4506) ([3c402db](https://github.com/xtrm-dev/specialists/commit/3c402db1fb75f78323b0dbfb54696a20f2ecf407))
+- Rebuild the committed bundle with the pinned bun 1.4.2 (SPECIALISTS-4506) ([441be0a](https://github.com/xtrm-dev/specialists/commit/441be0a24faffe1aee8931b89150c883fee58b7f))
 
 ## [4.2.0] - 2026-11-11
 
