@@ -5537,17 +5537,6 @@ describe('the role prompt reaches the model (HIRYUEN-774)', () => {
 describe('one dispatcher value reaches the ExecutionBinding too (SPECIALISTS-4506)', () => {
   const UUID = '3f7c1a1e-9b2d-4c5e-8f60-1a2b3c4d5e6f';
 
-  function bashEnvFrom(sdk: PiSdk): NodeJS.ProcessEnv {
-    const bashOptions = (sdk as unknown as { __bashOptions: unknown[] }).__bashOptions;
-    const withHook = bashOptions.filter((options) => options && typeof options === 'object') as Array<{
-      spawnHook: (context: { command: string; cwd: string; env: NodeJS.ProcessEnv }) => {
-        command: string; cwd: string; env: NodeJS.ProcessEnv;
-      };
-    }>;
-    expect(withHook.length).toBeGreaterThan(0);
-    return withHook[0]!.spawnHook({ command: 'true', cwd: '/tmp', env: { PATH: '/usr/bin' } }).env;
-  }
-
   async function dispatch(dispatcher: { participant?: string; sessionId?: string } | undefined) {
     process.env.SPECIALISTS_PERMISSION_GUARD = '1';
     const record: { createArgs?: Record<string, unknown> } = {};
@@ -5560,7 +5549,6 @@ describe('one dispatcher value reaches the ExecutionBinding too (SPECIALISTS-450
         return { name: 'bash', execute: async () => 'ran' };
       },
     } as unknown as PiSdk;
-    (sdk as unknown as { __bashOptions: unknown[] }).__bashOptions = bashOptions;
 
     const sink = collectingSink();
     const bindRequests: DispatchRequest[] = [];
@@ -5578,10 +5566,20 @@ describe('one dispatcher value reaches the ExecutionBinding too (SPECIALISTS-450
       ...(dispatcher ? { dispatcher } : {}),
       ...(dispatcher?.sessionId ? { coordinatorSessionId: dispatcher.sessionId } : {}),
     })).result;
+
+    // The identity reaches the child through the bash spawn hook; that env is the
+    // activation's env, so it is where the third sink is observed.
+    const withHook = bashOptions.filter((options) => options && typeof options === 'object') as Array<{
+      spawnHook: (context: { command: string; cwd: string; env: NodeJS.ProcessEnv }) => {
+        command: string; cwd: string; env: NodeJS.ProcessEnv;
+      };
+    }>;
+    expect(withHook.length).toBeGreaterThan(0);
+    const env = withHook[0]!.spawnHook({ command: 'true', cwd: '/tmp', env: { PATH: '/usr/bin' } }).env;
     const requestedBy = (sink.events.find((event) => event.name === 'activation_requested')?.payload as {
       requested_by?: string | null;
     } | undefined)?.requested_by;
-    return { env: bashEnvFrom(sdk), requestedBy, binding: bindRequests[0] };
+    return { env, requestedBy, binding: bindRequests[0] };
   }
 
   it('writes the same participant to the env, requested_by and the binding', async () => {
