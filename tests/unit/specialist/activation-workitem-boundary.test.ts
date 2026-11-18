@@ -707,6 +707,28 @@ describe('provenanceRecordingDispatcher — a substrate without the dispatcher i
   });
   afterEach(() => { resetRuntimeDiagnosticsSink(); });
 
+  // A real ProvenanceService is a class: dispatch reads this.*, and the gate (or a later version of it)
+  // may call its other methods. The arrow-function double above cannot see either.
+  class ClassService {
+    readonly calls: Array<Record<string, unknown>> = [];
+    private readonly tag = 'svc';
+    dispatch(_issueId: string, input: Record<string, unknown>) {
+      this.calls.push({ ...input, via: this.tag });
+      return { id: 'exb_1' };
+    }
+    allocate(ref: string) { return `${this.tag}:${ref}`; }
+  }
+
+  it('keeps every other method of the real service reachable and bound to it', () => {
+    const real = new ClassService();
+    const wrapped = provenanceRecordingDispatcher(real, request(), true) as ClassService;
+
+    wrapped.dispatch('iss_X', { ref: 'X' });
+
+    expect(real.calls).toEqual([expect.objectContaining({ via: 'svc', dispatcherParticipantId: 'sp-lead-1', dispatcherSessionId: UUID })]);
+    expect(wrapped.allocate('exb_1')).toBe('svc:exb_1');
+  });
+
   it('merges the dispatcher into the producer input once the store can record it', () => {
     const calls: Array<Record<string, unknown>> = [];
     const wrapped = provenanceRecordingDispatcher(service(calls), request(), true) as {

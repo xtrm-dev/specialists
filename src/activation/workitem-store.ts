@@ -1230,10 +1230,19 @@ export function provenanceRecordingDispatcher(
     }
     return provenance;
   }
-  return {
-    dispatch: (issueId: string, input: Record<string, unknown>, opts?: unknown) =>
-      (service.dispatch as DispatcherRecordingProvenance['dispatch'])(issueId, { ...input, ...fields }, opts),
-  };
+  // Only `dispatch` is replaced. Every other member of the real service stays reachable and bound to
+  // it, so a later Substrate whose gate makes a second provenance call cannot break at runtime
+  // (Substrate 0.4.0's gate makes exactly one, dispatch-gate.ts:170, but the object it is handed is
+  // the whole ProvenanceService, so the wrapper must not be narrower than that).
+  const dispatch = (issueId: string, input: Record<string, unknown>, opts?: unknown) =>
+    (service.dispatch as DispatcherRecordingProvenance['dispatch']).call(service, issueId, { ...input, ...fields }, opts);
+  return new Proxy(service as object, {
+    get(target, property) {
+      if (property === 'dispatch') return dispatch;
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
 }
 
 /** Whether the migrated store can record a dispatcher identity (migration 017). */
