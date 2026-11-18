@@ -27996,24 +27996,29 @@ function resolveProcessDispatcher(input = {}) {
   const warn = input.warn ?? warnDispatcherIdentity;
   const run = input.run ?? DEFAULT_RUN;
   const pid = input.pid ?? process.ppid;
+  const now = (input.now ?? Date.now)();
+  if (lookupFailedAt !== undefined && now - lookupFailedAt < LOOKUP_FAILURE_COOLDOWN_MS)
+    return identity;
+  const failed = (reason) => {
+    lookupFailedAt = now;
+    warnOnce2(warn, reason);
+    return identity;
+  };
   let result;
   try {
     result = run("xt", ["identity", "dispatcher", "--pid", String(pid), "--no-inherit", "--json"], { cwd: input.cwd, env, timeoutMs: input.timeoutMs ?? DISPATCHER_LOOKUP_TIMEOUT_MS });
   } catch (error) {
-    warnOnce2(warn, `lookup threw ${describeErrorClass2(error)}`);
-    return identity;
+    return failed(`lookup threw ${describeErrorClass2(error)}`);
   }
-  if (result.error || result.status !== 0) {
-    warnOnce2(warn, failureReason(result));
-    return identity;
-  }
+  if (result.error || result.status !== 0)
+    return failed(failureReason(result));
   let answer;
   try {
     answer = JSON.parse(result.stdout);
   } catch {
-    warnOnce2(warn, "returned unparseable JSON");
-    return identity;
+    return failed("returned unparseable JSON");
   }
+  lookupFailedAt = undefined;
   const parsed = answer ?? {};
   return {
     ...identity,
@@ -28073,7 +28078,7 @@ function bridgedDispatcherEnv(overlay) {
     ...Object.fromEntries(overlay.unset.map((key) => [key, ""]))
   };
 }
-var DISPATCHER_LOOKUP_TIMEOUT_MS = 3000, clean = (value) => {
+var DISPATCHER_LOOKUP_TIMEOUT_MS = 3000, LOOKUP_FAILURE_COOLDOWN_MS = 60000, lookupFailedAt, clean = (value) => {
   if (typeof value !== "string")
     return;
   const trimmed = value.trim();
@@ -93746,11 +93751,18 @@ function renderDispatchRejection(error) {
   const onDiskBuildId = readBuildId(DIST_LIB_PATH);
   return renderRejection({ reason: error.message, detail: error.detail, missing: error.detail.missing }, describeBuildIdentity(LOADED_BUILD_ID, onDiskBuildId), isBuildStale(LOADED_BUILD_ID, onDiskBuildId));
 }
+function warnRouteDropped(warn) {
+  if (routeDropWarningGiven)
+    return;
+  routeDropWarningGiven = true;
+  warn("the completion wake cannot be routed: neither a dispatcher participant nor a coordinator " + "session id is known for this dispatch; the result stays readable through specialist_status");
+}
 function resolveDispatcherOnce(lookup, explicitParticipant) {
   const resolved = resolveProcessDispatcher({
     env: lookup.env ?? process.env,
     pid: lookup.pid ?? process.ppid,
     ...lookup.run ? { run: lookup.run } : {},
+    ...lookup.now ? { now: lookup.now } : {},
     warn: lookup.warn ?? warnDispatcherIdentity
   });
   const explicit = (explicitParticipant ?? "").trim();
@@ -93850,6 +93862,8 @@ function createSpecialistDispatchTool(getHost, getPusher, dispatcherLookup = {})
             ...coordinatorSessionId ? { coordinatorSessionId } : {},
             coordinatorParticipantId: dispatcher.participant ?? "unknown"
           });
+        } else if (pusher) {
+          warnRouteDropped(dispatcherLookup.warn ?? warnDispatcherIdentity);
         }
         handle.result.then(async (result) => {
           if (!pusher)
@@ -93985,7 +93999,7 @@ function createSpecialistRetryTool(getHost, getPusher) {
     }
   };
 }
-var DIST_LIB_PATH, LOADED_BUILD_ID, fullFlag, specialistDispatchSchema, wakeNoticeGiven = false, specialistSteerSchema, specialistReplySchema, specialistStopSchema, specialistRetrySchema;
+var DIST_LIB_PATH, LOADED_BUILD_ID, fullFlag, specialistDispatchSchema, wakeNoticeGiven = false, routeDropWarningGiven = false, specialistSteerSchema, specialistReplySchema, specialistStopSchema, specialistRetrySchema;
 var init_activation_tool = __esm(() => {
   init_zod();
   init_channel();

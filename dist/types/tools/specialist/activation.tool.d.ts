@@ -214,6 +214,7 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
     pid?: number;
     run?: DispatcherRun;
     warn?: (message: string) => void;
+    now?: () => number;
 }): {
     name: "specialist_dispatch";
     description: string;

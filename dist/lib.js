@@ -18151,11 +18151,6 @@ function specialistHolderName(specialistName, jobId, pid = process.pid) {
 }
 
 // src/activation/dispatcher-identity.ts
-var DISPATCHER_ENV_KEYS = [
-  "XTRM_DISPATCHER_PARTICIPANT",
-  "XTRM_DISPATCHER_NAME",
-  "XTRM_DISPATCHER_ADDRESS"
-];
 var clean = (value) => {
   if (typeof value !== "string")
     return;
@@ -29372,7 +29367,6 @@ function createSpecialistLeaseReconcileTool(probe) {
 }
 export {
   BUILD_ID_BYTES,
-  DISPATCHER_ENV_KEYS,
   DISPATCH_REFUSAL_REASONS,
   DISPLAY_IDLE_AFTER_S,
   DISPLAY_SPINNER_FRAMES,

@@ -13,7 +13,11 @@
  *
  * - env: `XTRM_DISPATCHER_PARTICIPANT` (the dispatcher's own holder — a NEW key; `NAME`
  *   stays display-only and `ADDRESS` stays the reply address), written to the activation's
- *   spawn-hook overlay, the legacy `sp run` child env and the bridged child provider env;
+ *   spawn-hook overlay, the legacy `sp run` child env and the bridged child provider env.
+ *   `ADDRESS` is known only on the MCP path, where core's `xt identity dispatcher` supplies
+ *   it. The Pi extension and the legacy runner read their own env, which holds no own reply
+ *   address, so there it is DELETED rather than inherited: on those paths the child carries a
+ *   participant and a name but no reply address;
  * - Substrate: `requested_by` and `coordinatorSessionId`.
  *
  * Env is ONE HOP by design: a nested dispatch replaces the inherited value with the
@@ -32,6 +36,13 @@
 export declare const DISPATCHER_ENV_KEYS: readonly ["XTRM_DISPATCHER_PARTICIPANT", "XTRM_DISPATCHER_NAME", "XTRM_DISPATCHER_ADDRESS"];
 /** Bound on the one CLI lookup per dispatch. */
 export declare const DISPATCHER_LOOKUP_TIMEOUT_MS = 3000;
+/**
+ * After a failed lookup (missing or old xt, timeout, junk) the next lookups are skipped for
+ * this long, so a wedged install costs one bounded stall instead of one per dispatch. A
+ * success clears it. Found by the seconder on #584: the warning is process-wide-once, so the
+ * repeated stall would otherwise be invisible.
+ */
+export declare const LOOKUP_FAILURE_COOLDOWN_MS = 60000;
 /**
  * The dispatcher of one dispatch.
  *
@@ -69,6 +80,8 @@ export interface DispatcherLookupInput {
     run?: DispatcherRun;
     /** Lookup timeout. Default {@link DISPATCHER_LOOKUP_TIMEOUT_MS}. */
     timeoutMs?: number;
+    /** Clock for the failure cool-down. Injected in tests. */
+    now?: () => number;
     /** Warning sink, one reason line. Injected in tests. */
     warn?: (message: string) => void;
 }
@@ -81,7 +94,7 @@ export interface DispatcherEnvOverlay {
 }
 /** The launcher's warning channel: one prefixed stderr line, never a value. */
 export declare function warnDispatcherIdentity(message: string): void;
-/** Test seam: the next lookup may warn again. */
+/** Test seam: the next lookup may warn again and is no longer in the failure cool-down. */
 export declare function resetDispatcherWarning(): void;
 /**
  * Resolve the dispatcher of the Claude Code MCP server process.
