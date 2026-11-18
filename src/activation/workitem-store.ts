@@ -1192,6 +1192,11 @@ type DispatcherRecordingProvenance = {
 
 let dispatcherUnsupportedWarned = false;
 
+/** Test seam: the next dispatch against a pre-017 store may warn again. */
+export function resetDispatcherUnsupportedWarning(): void {
+  dispatcherUnsupportedWarned = false;
+}
+
 /**
  * The dispatcher fields merged into the binding write.
  *
@@ -1245,8 +1250,24 @@ export function provenanceRecordingDispatcher(
   });
 }
 
+/**
+ * The producer gate's dispatch with the dispatcher merged into its one provenance call. Extracted
+ * from openWorkItemBoundary so the wiring has a seam a test can hold: the gate must receive the
+ * recording wrapper (or the untouched service when the store cannot record), and the request is
+ * passed through unchanged (found in review of #586: removing the wiring survived every test).
+ */
+export function dispatchRecordingDispatcher<T>(
+  gateDispatch: (issues: unknown, provenance: unknown, req: DispatchRequest) => T,
+  issues: unknown,
+  provenance: unknown,
+  req: DispatchRequest,
+  canRecord: boolean,
+): T {
+  return gateDispatch(issues, provenanceRecordingDispatcher(provenance, req, canRecord), req);
+}
+
 /** Whether the migrated store can record a dispatcher identity (migration 017). */
-function bindsDispatcherIdentity(db: DatabaseSync): boolean {
+export function bindsDispatcherIdentity(db: Pick<DatabaseSync, 'prepare'>): boolean {
   try {
     const columns = db.prepare('PRAGMA table_info(execution_bindings)').all() as Array<{ name?: unknown }>;
     return columns.some((column) => column.name === 'dispatcher_participant_id');
@@ -1456,7 +1477,7 @@ export async function openWorkItemBoundary(opts: OpenWorkItemsOptions = {}): Pro
     gate: {
       check: async (i, r) => gateMod.checkDispatch(i, r),
       dispatch: async (i, p, r) =>
-        gateMod.dispatchToSpecialist(i, provenanceRecordingDispatcher(p, r, canRecordDispatcher), r),
+        dispatchRecordingDispatcher((a, b, c) => gateMod.dispatchToSpecialist(a, b, c), i, p, r, canRecordDispatcher),
     },
     // S1 settlement surface over the same live services: the Journal result
     // publication and WorkReceipt allocation the host performs automatically

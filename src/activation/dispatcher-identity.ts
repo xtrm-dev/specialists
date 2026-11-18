@@ -327,7 +327,7 @@ export function dispatcherBindingFields(
 function warnBindingOnce(warn: (message: string) => void, reason: string): void {
   if (warnedBindingReasons.has(reason)) return;
   warnedBindingReasons.add(reason);
-  warn(`${reason}; the binding records only the dispatcher value Substrate accepts`);
+  warn(`${reason}; the invalid value is dropped and the dispatch proceeds (a Substrate that cannot record a dispatcher records none)`);
 }
 
 /**

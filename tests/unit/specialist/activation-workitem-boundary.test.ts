@@ -13,6 +13,9 @@ import {
   openSubstrateDb,
   openWorkItemBoundary,
   provenanceRecordingDispatcher,
+  bindsDispatcherIdentity,
+  dispatchRecordingDispatcher,
+  resetDispatcherUnsupportedWarning,
   resolveSubstrateFromGlobalPrefix,
   resolveSubstrateModule,
   SUBSTRATE_REQUIRED_ISSUE_METHODS,
@@ -758,19 +761,91 @@ describe('provenanceRecordingDispatcher — a substrate without the dispatcher i
     expect(calls[0]).not.toHaveProperty('dispatcherSessionId');
   });
 
-  it('skips the fields and warns once when the store predates migration 017', () => {
+  it('skips the fields and warns once per process when the store predates migration 017', () => {
     const lines: string[] = [];
     setRuntimeDiagnosticsSink((line) => lines.push(line));
+    resetDispatcherUnsupportedWarning();
     const calls: Array<Record<string, unknown>> = [];
-    const wrapped = provenanceRecordingDispatcher(service(calls), request(), false) as {
+    // The warning fires when the wrapper decision is made, so two dispatches through ONE decision
+    // cannot see a missing once-guard: build the decision twice, as two dispatches do.
+    const first = provenanceRecordingDispatcher(service(calls), request(), false) as {
+      dispatch: (issueId: string, input: Record<string, unknown>) => unknown;
+    };
+    const second = provenanceRecordingDispatcher(service(calls), request(), false) as {
       dispatch: (issueId: string, input: Record<string, unknown>) => unknown;
     };
 
-    wrapped.dispatch('iss_X', { participantId: 'specialist::researcher' });
-    wrapped.dispatch('iss_X', { participantId: 'specialist::researcher' });
+    first.dispatch('iss_X', { participantId: 'specialist::researcher' });
+    second.dispatch('iss_X', { participantId: 'specialist::researcher' });
 
     expect(calls[0]).not.toHaveProperty('dispatcherParticipantId');
     expect(calls[1]).not.toHaveProperty('dispatcherParticipantId');
     expect(lines.filter((line) => line.includes('migration 017'))).toHaveLength(1);
+
+    resetDispatcherUnsupportedWarning();
+    provenanceRecordingDispatcher(service(calls), request(), false);
+    expect(lines.filter((line) => line.includes('migration 017'))).toHaveLength(2);
+  });
+
+  it('says nothing about migration 017 when no dispatcher value is known', () => {
+    const lines: string[] = [];
+    setRuntimeDiagnosticsSink((line) => lines.push(line));
+    resetDispatcherUnsupportedWarning();
+    provenanceRecordingDispatcher(service([]), { ref: 'X', holder: 'h' } as DispatchRequest, false);
+    expect(lines).toEqual([]);
+  });
+});
+
+// Found in review of #586 (Opus pr-reviewer, mutants M8 M9 M13 survived): the migration-017
+// detection and the gate wiring had no test at all.
+describe('bindsDispatcherIdentity: does the store have the migration 017 column (SPECIALISTS-4506)', () => {
+  const dbWith = (names: string[]) => ({ prepare: () => ({ all: () => names.map((name) => ({ name })) }) }) as never;
+
+  it('is true only when execution_bindings has dispatcher_participant_id', () => {
+    expect(bindsDispatcherIdentity(dbWith(['id', 'issue_id', 'dispatcher_participant_id', 'dispatcher_session_id']))).toBe(true);
+    expect(bindsDispatcherIdentity(dbWith(['id', 'issue_id', 'participant_id']))).toBe(false);
+    expect(bindsDispatcherIdentity(dbWith(['dispatcher_session_id']))).toBe(false);
+  });
+
+  it('asks the execution_bindings table and nothing else', () => {
+    const asked: string[] = [];
+    const db = { prepare: (sql: string) => { asked.push(sql); return { all: () => [] }; } } as never;
+    bindsDispatcherIdentity(db);
+    expect(asked).toEqual(['PRAGMA table_info(execution_bindings)']);
+  });
+
+  it('is false, never a throw, when the table cannot be read', () => {
+    const db = { prepare: () => { throw new Error('no such table'); } } as never;
+    expect(bindsDispatcherIdentity(db)).toBe(false);
+  });
+});
+
+describe('dispatchRecordingDispatcher: the producer gate receives the recording wrapper (SPECIALISTS-4506)', () => {
+  const UUID = '3f7c1a1e-9b2d-4c5e-8f60-1a2b3c4d5e6f';
+  class Svc {
+    readonly calls: Array<Record<string, unknown>> = [];
+    dispatch(_issueId: string, input: Record<string, unknown>) { this.calls.push(input); return { id: 'exb_1' }; }
+  }
+  const req = (): DispatchRequest => ({ ref: 'X', holder: 'h', dispatcherParticipantId: 'sp-lead-1', dispatcherSessionId: UUID });
+
+  it('hands the gate a provenance whose dispatch merges the fields, and the request unchanged', () => {
+    const svc = new Svc();
+    const seen: Array<{ provenance: unknown; req: DispatchRequest }> = [];
+    const gate = (_issues: unknown, provenance: unknown, r: DispatchRequest) => { seen.push({ provenance, req: r }); return 'bound'; };
+
+    expect(dispatchRecordingDispatcher(gate, null, svc, req(), true)).toBe('bound');
+    (seen[0]!.provenance as Svc).dispatch('iss_X', { participantId: 'p' });
+
+    expect(seen[0]!.provenance).not.toBe(svc);
+    expect(seen[0]!.req).toEqual(req());
+    expect(svc.calls[0]).toMatchObject({ participantId: 'p', dispatcherParticipantId: 'sp-lead-1', dispatcherSessionId: UUID });
+  });
+
+  it('hands the gate the untouched service when the store cannot record', () => {
+    resetDispatcherUnsupportedWarning();
+    const svc = new Svc();
+    let received: unknown;
+    dispatchRecordingDispatcher((_i, provenance) => { received = provenance; return null; }, null, svc, req(), false);
+    expect(received).toBe(svc);
   });
 });
