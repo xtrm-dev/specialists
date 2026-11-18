@@ -225,10 +225,14 @@ describe('dispatcher binding validators (SPECIALISTS-4506)', () => {
     }
   });
 
-  it('accepts a canonical lowercase UUID session id only', () => {
+  // Substrate's SESSION_ID_PATTERN: a canonical UUID (sb lowercases it first, so either case) or a
+  // tmux session id. This host accepts exactly that, so a value sb would record is never dropped here.
+  it('accepts what Substrate accepts as a session id: a UUID in either case, or a tmux id', () => {
     expect(isDispatcherSessionId(UUID)).toBe(true);
     expect(isDispatcherSessionId(` ${UUID} `)).toBe(true);
-    for (const session of [UUID.toUpperCase(), '$3', '0f7e7a52', 'not-a-uuid', '', null, 7]) {
+    expect(isDispatcherSessionId(UUID.toUpperCase())).toBe(true);
+    expect(isDispatcherSessionId('$3')).toBe(true);
+    for (const session of ['$', '$x', '3', '0f7e7a52', 'not-a-uuid', `${UUID}x`, '', null, 7]) {
       expect(isDispatcherSessionId(session)).toBe(false);
     }
   });
@@ -261,6 +265,6 @@ describe('dispatcher binding validators (SPECIALISTS-4506)', () => {
       (message) => sessionWarnings.push(message),
     )).toEqual({ dispatcherParticipantId: 'sp-lead-1' });
     expect(sessionWarnings).toHaveLength(1);
-    expect(sessionWarnings[0]).toContain('canonical lowercase UUID');
+    expect(sessionWarnings[0]).toContain('not a UUID or a tmux session id');
   });
 });

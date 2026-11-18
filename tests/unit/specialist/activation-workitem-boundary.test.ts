@@ -685,7 +685,7 @@ describe('bind records the dispatcher on the binding (SPECIALISTS-4506)', () => 
     expect(seen[0]?.dispatcherParticipantId).toBeNull();
     expect(seen[0]?.dispatcherSessionId).toBeNull();
     expect(lines.filter((line) => line.includes('not a Substrate-safe label'))).toHaveLength(1);
-    expect(lines.filter((line) => line.includes('canonical lowercase UUID'))).toHaveLength(1);
+    expect(lines.filter((line) => line.includes('not a UUID or a tmux session id'))).toHaveLength(1);
   });
 });
 

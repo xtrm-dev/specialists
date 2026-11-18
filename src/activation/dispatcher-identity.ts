@@ -56,10 +56,12 @@ export const DISPATCHER_LABEL_MAX_LENGTH = 128;
 const DISPATCHER_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/+-]*$/;
 
 /**
- * sb also accepts a tmux session id (`$3`); a Specialist dispatch only ever supplies the
- * canonical lowercase UUID, so this host validates the narrower shape.
+ * Substrate's session grammar (execution-context.ts SESSION_ID_PATTERN): a canonical UUID or a
+ * tmux session id (`$3`). sb lowercases a UUID before it validates, so either case is accepted
+ * there; this host accepts exactly what sb accepts, so a value sb would record is never dropped
+ * here (found by the seconder on #586: a stricter local grammar turned known values into absence).
  */
-const DISPATCHER_SESSION_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const DISPATCHER_SESSION_PATTERN = /^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|\$[0-9]+)$/;
 
 /** True when `value` is a label sb will accept as a dispatcher participant. */
 export function isDispatcherLabel(value: unknown): value is string {
@@ -68,7 +70,7 @@ export function isDispatcherLabel(value: unknown): value is string {
   return label.length > 0 && label.length <= DISPATCHER_LABEL_MAX_LENGTH && DISPATCHER_LABEL_PATTERN.test(label);
 }
 
-/** True when `value` is a canonical lowercase UUID sb will accept as a dispatcher session. */
+/** True when `value` is a UUID or tmux session id sb will accept as a dispatcher session. */
 export function isDispatcherSessionId(value: unknown): value is string {
   return typeof value === 'string' && DISPATCHER_SESSION_PATTERN.test(value.trim());
 }
@@ -317,7 +319,7 @@ export function dispatcherBindingFields(
   const sessionId = clean(identity?.sessionId);
   if (sessionId !== undefined) {
     if (isDispatcherSessionId(sessionId)) fields.dispatcherSessionId = sessionId;
-    else warnBindingOnce(warn, 'the dispatcher session is not a canonical lowercase UUID');
+    else warnBindingOnce(warn, 'the dispatcher session is not a UUID or a tmux session id');
   }
   return fields;
 }
