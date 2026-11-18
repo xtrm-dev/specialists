@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A lead-launched specialist exports its own role (CORE-2722) (#582) ([e6fa1c7](https://github.com/xtrm-dev/specialists/commit/e6fa1c7628d9d7b7753acf2349da70ab7b581e63))
 - A bridged activation's Claude Code child gets the activation identity (SPECIALISTS-4498) (#583) ([8d8fd3d](https://github.com/xtrm-dev/specialists/commit/8d8fd3d0a3dee0e1cd4f9095e53b18fb6044f3f7))
 - One dispatcher value per dispatch, written to env and Substrate (SPECIALISTS-4503) ([54ee58e](https://github.com/xtrm-dev/specialists/commit/54ee58edecc6c9c160897aebd1a6d10381c7e68d))
+- One resolver feeds both dispatcher sinks, and the tests that pin it (SPECIALISTS-4503) ([3a86577](https://github.com/xtrm-dev/specialists/commit/3a865779e68e154d8c77da7ff042a895684a0ab3))
 
 ### Project maintenance
 - Make the NODE_ENV assertion prove the override (SPECIALISTS-4429) (#543) ([21be15b](https://github.com/xtrm-dev/specialists/commit/21be15b78a1e6eda9640dea37c350832012b1781))
@@ -53,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Teach the operator allow list, not the removed two-switch route (SPECIALISTS-4447) (#577) ([346eea1](https://github.com/xtrm-dev/specialists/commit/346eea1d6a758e3386fe53b8384d8d83aeb41b01))
 - Bump the actions-all group across 1 directory with 3 updates (#561) ([4eb1e50](https://github.com/xtrm-dev/specialists/commit/4eb1e50cd3b9a5d67b590004e7c24ba84749b132))
 - Rebuild the committed bundle with the pinned bun 1.4.2 (SPECIALISTS-4503) ([12cf6e4](https://github.com/xtrm-dev/specialists/commit/12cf6e4ff018c2adf9b346af9172a16a4fbeb579))
+- Rebuild the committed bundle with the pinned bun 1.4.2 (SPECIALISTS-4503) ([a619467](https://github.com/xtrm-dev/specialists/commit/a619467b05019b3e67ee364936e878dadd058ac5))
 
 ## [4.2.0] - 2026-11-11
 
