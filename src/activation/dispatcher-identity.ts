@@ -217,6 +217,33 @@ export function dispatcherFromHostEnv(
 }
 
 /**
+ * The one value both sinks read, from one request.
+ *
+ * The dispatcher object is authoritative: its `participant` is the Substrate `requested_by` AND
+ * the env `XTRM_DISPATCHER_PARTICIPANT`. A host caller that passes only the legacy
+ * `requestedByParticipantId` gets that value in both places. Returning both from one function is
+ * what keeps the two sinks from disagreeing when a request carries both fields (found in review of
+ * #584: the env and Substrate halves used opposite precedence).
+ */
+export function resolveRequestDispatcher(request: {
+  dispatcher?: DispatcherIdentity;
+  requestedByParticipantId?: string;
+  coordinatorSessionId?: string;
+}): { dispatcher: DispatcherIdentity; requestedByParticipantId?: string; coordinatorSessionId?: string } {
+  const participant = clean(request.dispatcher?.participant) ?? clean(request.requestedByParticipantId);
+  const dispatcher: DispatcherIdentity = {
+    ...request.dispatcher,
+    ...(participant ? { participant } : {}),
+  };
+  const coordinatorSessionId = clean(request.coordinatorSessionId) ?? clean(dispatcher.sessionId);
+  return {
+    dispatcher,
+    ...(participant ? { requestedByParticipantId: participant } : {}),
+    ...(coordinatorSessionId ? { coordinatorSessionId } : {}),
+  };
+}
+
+/**
  * The env overlay for one dispatcher value.
  *
  * A key the dispatcher does not know is UNSET rather than inherited: the child's env

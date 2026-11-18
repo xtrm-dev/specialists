@@ -92,7 +92,7 @@ import {
 } from '../pi/identity-env.js';
 import { hasActivationEnv } from './activation-bash-env.js';
 import { bridgeGitBlockOmitted, scopeBridgedChildEnv } from './bridge-child-env.js';
-import { bridgedDispatcherEnv, dispatcherEnvOverlay, type DispatcherIdentity } from './dispatcher-identity.js';
+import { bridgedDispatcherEnv, dispatcherEnvOverlay, resolveRequestDispatcher } from './dispatcher-identity.js';
 import { formatResolvedToolContract, withDiscoveredExtensionTools, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 
 /**
@@ -1328,15 +1328,8 @@ export class NativeActivationHost {
     // information exists, feeds BOTH sinks — the Substrate lineage below and the activation
     // env. Direct host callers may pass only `requestedByParticipantId`; the participant then
     // falls back to it so the two sinks still cannot disagree.
-    const dispatcher: DispatcherIdentity = {
-      ...request.dispatcher,
-      ...(request.dispatcher?.participant ?? request.requestedByParticipantId
-        ? { participant: request.dispatcher?.participant ?? request.requestedByParticipantId }
-        : {}),
-    };
+    const { dispatcher, requestedByParticipantId, coordinatorSessionId } = resolveRequestDispatcher(request);
     const dispatcherEnv = dispatcherEnvOverlay(dispatcher);
-    const requestedByParticipantId = request.requestedByParticipantId ?? dispatcher.participant;
-    const coordinatorSessionId = request.coordinatorSessionId ?? dispatcher.sessionId;
 
     // The forensic event field keeps its storage name (bead_id column in
     // observability.db) but carries the ISSUE ref post-A7; storage-column

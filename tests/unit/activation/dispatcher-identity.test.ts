@@ -5,8 +5,7 @@ import {
   dispatcherFromHostEnv,
   resetDispatcherWarning,
   resolveProcessDispatcher,
-  DISPATCHER_ENV_KEYS,
-} from '../../../src/activation/dispatcher-identity.js';
+  DISPATCHER_ENV_KEYS, resolveRequestDispatcher } from '../../../src/activation/dispatcher-identity.js';
 
 const ENV = { SUBSTRATE_HOLDER: 'sp-lead-1', XTRM_AGENT_NAME: 'serving-lead' };
 
@@ -120,5 +119,41 @@ describe('dispatcherEnvOverlay', () => {
       XTRM_DISPATCHER_NAME: '',
       XTRM_DISPATCHER_ADDRESS: '',
     });
+  });
+});
+
+// Found in review of #584: the env and Substrate halves resolved the participant with opposite
+// precedence, so a request carrying both fields made them disagree. One function now returns both.
+describe('resolveRequestDispatcher: one value for both sinks (SPECIALISTS-4503)', () => {
+  const sinks = (request: Parameters<typeof resolveRequestDispatcher>[0]) => {
+    const { dispatcher, requestedByParticipantId } = resolveRequestDispatcher(request);
+    return { env: dispatcher.participant, substrate: requestedByParticipantId };
+  };
+
+  it('gives env and Substrate the same participant when the request carries both fields', () => {
+    const out = sinks({ requestedByParticipantId: 'coordinator', dispatcher: { participant: 'sp-lead-1' } });
+    expect(out.env).toBe('sp-lead-1');
+    expect(out.substrate).toBe(out.env);
+  });
+
+  it('uses the legacy requestedByParticipantId for both when no dispatcher participant exists', () => {
+    const out = sinks({ requestedByParticipantId: 'coordinator', dispatcher: { name: 'lead' } });
+    expect(out).toEqual({ env: 'coordinator', substrate: 'coordinator' });
+  });
+
+  it('uses the dispatcher participant for both when requestedByParticipantId is absent', () => {
+    expect(sinks({ dispatcher: { participant: 'sp-lead-1' } })).toEqual({ env: 'sp-lead-1', substrate: 'sp-lead-1' });
+  });
+
+  it('records no participant anywhere when none is known, and never invents one', () => {
+    const out = resolveRequestDispatcher({});
+    expect(out.dispatcher.participant).toBeUndefined();
+    expect(out.requestedByParticipantId).toBeUndefined();
+  });
+
+  it('takes the coordinator session from the request first, then from the dispatcher', () => {
+    expect(resolveRequestDispatcher({ coordinatorSessionId: 's-req', dispatcher: { sessionId: 's-disp' } }).coordinatorSessionId).toBe('s-req');
+    expect(resolveRequestDispatcher({ dispatcher: { sessionId: 's-disp' } }).coordinatorSessionId).toBe('s-disp');
+    expect(resolveRequestDispatcher({}).coordinatorSessionId).toBeUndefined();
   });
 });

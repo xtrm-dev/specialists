@@ -527,10 +527,13 @@ export function createSpecialistDispatchTool(
           }
         }
 
-        // SPECIALISTS-4503: one dispatcher value per dispatch, resolved AFTER every gate
-        // (a refused dispatch never spawns `xt`) and used by BOTH sinks — the request's
-        // Substrate fields and the activation env overlay. An explicit `requested_by`
-        // overrides the participant; the name/address still describe this process.
+        // SPECIALISTS-4503: one dispatcher value per dispatch, resolved AFTER this tool's own
+        // gates (a dispatch refused by them never spawns `xt`) and used by BOTH sinks — the
+        // request's Substrate fields and the activation env overlay. A dispatch that
+        // `host.start` itself refuses (admission, lease, model) happens after this one bounded
+        // lookup: it costs 0.15-0.2 s when `xt` is healthy and is capped at 3 s otherwise. An
+        // explicit `requested_by` overrides the participant; the name/address still describe
+        // this process.
         const dispatcher = resolveDispatcherOnce(dispatcherLookup, input.requested_by);
         const coordinatorSessionId = input.coordinator_session_id ?? dispatcher.sessionId;
         const handle = await getHost().start({
