@@ -27238,7 +27238,7 @@ class NativeActivationHost {
           name: "lease_uncertain",
           payload: {
             workspace: record.snapshot.workspace.worktreePath,
-            note: "abort did not finish within the stop bound; a tool call may still be writing the worktree, so the lease was not released"
+            note: "abort did not finish within the stop bound; a tool call may still be writing the worktree, so the lease was not released. The holder is this host process, so specialist_lease_reconcile refuses it until the host process exits."
           }
         });
       } else {
