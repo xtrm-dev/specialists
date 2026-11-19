@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { NativeActivationHost } from '../../../src/activation/native-host.js';
 import { createSpecialistDispatchTool, createSpecialistStopActivationTool } from '../../../src/tools/specialist/activation.tool.js';
 import { REQUIRED_SECTIONS } from '../../../src/activation/contract-sections.js';
-import { workspaceIdentityFor } from '../../../src/activation/workspace-lease.js';
+import { workspaceIdentityFor, inspect as inspectLease } from '../../../src/activation/workspace-lease.js';
 import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../src/activation/pi-sdk.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader } from '../../utils/pi-resource-loader-double.js';
 import { testWorkItems } from '../../utils/test-work-items.js';
@@ -61,6 +61,8 @@ function contractDescription(): string {
 interface SessionOptions {
   /** `abort()` never resolves, whatever the turn is doing — an abort that just will not return. */
   abortHangsForever?: boolean;
+  /** The turn never ends, even once its ask is cancelled — a tool that ignores the abort signal. */
+  turnStaysInFlight?: boolean;
 }
 
 function askBlockedSession(blocker: string, options: SessionOptions = {}) {
@@ -91,6 +93,7 @@ function askBlockedSession(blocker: string, options: SessionOptions = {}) {
           return result;
         });
       await turn;
+      if (options.turnStaysInFlight) await new Promise<never>(() => {});
       // The turn ends here rather than emitting settle events: what this test needs is the
       // session to be non-idle while the ask is outstanding, nothing more.
       session.isIdle = true;
@@ -286,18 +289,21 @@ describe('specialist_stop_activation with a pending ask (SPECIALISTS-4505)', () 
     expect(host.inspect(first)).toBeDefined();
   });
 
-  it('keeps a writer\'s lease and reports it uncertain when the abort hit the bound', async () => {
-    const { host, emitted } = hostWith('unused', { abortHangsForever: true, stopAbortTimeoutMs: 20, writer: true });
+  it('keeps a writer\'s lease held and reports it uncertain when the abort hit the bound', async () => {
+    const { host, emitted } = hostWith('unused', { abortHangsForever: true, turnStaysInFlight: true, stopAbortTimeoutMs: 20, writer: true });
     const activationId = await dispatchEscalated(host);
+    const workspace = host.inspect(activationId)!.workspace;
+    expect(inspectLease(workspace).state).toBe('held');
 
     const outcome = await host.stop(activationId, 'abort hangs');
 
     expect(outcome.abortTimedOut).toBe(true);
+    // The turn is still in flight, so nothing released the lease before the stop decided.
     const names = emitted.map((e) => e.name);
-    // The turn itself may have released at completion; what matters is the stop's own decision.
-    const afterTimeout = names.slice(names.indexOf('activation_abort_timeout'));
-    expect(afterTimeout).toContain('lease_uncertain');
-    expect(afterTimeout).not.toContain('lease_released');
+    expect(names).toContain('lease_uncertain');
+    expect(names).not.toContain('lease_released');
+    // The holder is this live host process: the lease is held, and reconcile cannot take it.
+    expect(inspectLease(workspace).state).toBe('held');
   });
 
   it('releases a writer\'s lease when the abort finished within the bound', async () => {

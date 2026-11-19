@@ -4148,9 +4148,12 @@ export class NativeActivationHost {
    * only, and both new kinds are listed in NATIVE_LIFECYCLE_OBSERVABILITY_GAPS. The stop
    * result is therefore the only record of which asks went unanswered.
    *
-   * A writer whose abort hit the bound keeps its lease and reports it uncertain: pi's
+   * A writer whose abort hit the bound keeps its lease and emits `lease_uncertain`: pi's
    * `dispose()` does not wait for a tool that ignores the abort signal, so that tool may
-   * still be writing the worktree. `specialist_lease_reconcile` resolves it with a stated basis.
+   * still be writing the worktree. The lease holder is this host process, which is alive, so
+   * `inspect` reports it `held` and `specialist_lease_reconcile` refuses it (`holder_is_live`).
+   * The workspace stays fenced for later writers until the host process exits. That is the
+   * safe direction; the remedy is a host restart, not a reconcile.
    */
   async stop(activationId: string, reason = 'operator request'): Promise<ActivationStopOutcome> {
     const record = this.registry.get(activationId);
@@ -4186,7 +4189,7 @@ export class NativeActivationHost {
           name: 'lease_uncertain',
           payload: {
             workspace: record.snapshot.workspace.worktreePath,
-            note: 'abort did not finish within the stop bound; a tool call may still be writing the worktree, so the lease was not released',
+            note: 'abort did not finish within the stop bound; a tool call may still be writing the worktree, so the lease was not released. The holder is this host process, so specialist_lease_reconcile refuses it until the host process exits.',
           },
         });
       } else {
