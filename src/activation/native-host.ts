@@ -1480,6 +1480,16 @@ export class NativeActivationHost {
     });
     if (!specialist) return reject('unknown_specialist');
 
+    // SPECIALISTS-4502: ONE holder for every Substrate-side identity of this activation. The
+    // shells have always carried the activation-scoped holder (CORE-2722), while the claim,
+    // the dispatch check and the bind carried the role-level `specialist::<name>` instead — so
+    // core's gh-pr-link saw an env holder that did not match the claim holder and skipped
+    // --participant, and the PR link could not be made. Computed ONCE, from the loaded
+    // specialist: the three Substrate sites must be the same string or the bind refuses with
+    // issue_binding_failed, and two name sources (metadata.name vs the lookup name) would
+    // silently diverge. `participantId` stays the role-level id for lineage, ask and settlement.
+    const activationHolder = specialistHolderName(specialist.specialist.metadata.name, activationId);
+
     const execution = specialist.specialist.execution;
     const tier = execution.permission_required ?? 'READ_ONLY';
     // Lease waiver (specialist `execution.lease_waiver`): a read-tier observer that must run
@@ -1607,7 +1617,7 @@ export class NativeActivationHost {
           title,
           kind,
           ...(parentId ? { parentId } : {}),
-          holder: participantId,
+          holder: activationHolder,
           activationId,
         });
         autoCreatedRef = created.ref;
@@ -1695,7 +1705,7 @@ export class NativeActivationHost {
       dispatchCheck = await workItems.check({
         ref: issueRef,
         specialist: request.specialist,
-        holder: participantId,
+        holder: activationHolder,
         // The landed producer gate fences claimed dispatch on holder +
         // activation at CHECK time (anti-steal); the read-only check must
         // carry the same identity the bind will pin, or live-held issues
@@ -2251,7 +2261,7 @@ export class NativeActivationHost {
     // the shim and not the real binary. The host's own PATH is untouched, which is the point
     // — the dispatcher's `gh` must resolve to the dispatcher's identity.
     const activationLaunchEnv = resolveAgentLaunchEnv({
-      holder: specialistHolderName(specialist.specialist.metadata.name, activationId),
+      holder: activationHolder,
       roleName: specialist.specialist.metadata.name,
       cwd: workspace.worktreePath,
       // The lookup runs in the host env, so `xt` resolves the role; only the ANSWER is
@@ -2646,7 +2656,7 @@ export class NativeActivationHost {
       binding = await workItems.bind({
         ref: issueRef,
         specialist: request.specialist,
-        holder: participantId,
+        holder: activationHolder,
         activationId,
         attemptId,
         sessionId: session.sessionId,
