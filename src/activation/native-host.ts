@@ -92,7 +92,12 @@ import {
 } from '../pi/identity-env.js';
 import { hasActivationEnv } from './activation-bash-env.js';
 import { bridgeGitBlockOmitted, scopeBridgedChildEnv } from './bridge-child-env.js';
-import { bridgedDispatcherEnv, dispatcherEnvOverlay, resolveRequestDispatcher } from './dispatcher-identity.js';
+import {
+  bridgedDispatcherEnv,
+  dispatcherEnvOverlay,
+  resolveRequestDispatcher,
+  sanitizeDispatcherValue,
+} from './dispatcher-identity.js';
 import { formatResolvedToolContract, withDiscoveredExtensionTools, type ResolvedToolContract } from '../specialist/resolved-tool-contract.js';
 
 /**
@@ -271,6 +276,17 @@ interface BackgroundTaskRef {
  */
 function normalizeToolDurationWarnMs(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * One value interpolated into a one-line durable evidence note (SPECIALISTS-4510).
+ *
+ * Control characters are stripped and the value is bounded, so no caller-supplied value can
+ * forge a second line in the note; absent becomes the caller's fallback word, never an empty
+ * gap that reads as a known-but-blank value.
+ */
+function evidenceValue(value: unknown, fallback: string): string {
+  return sanitizeDispatcherValue(value) ?? fallback;
 }
 
 /** One in-flight tool call watched for over-threshold duration, per activation. */
@@ -1598,17 +1614,21 @@ export class NativeActivationHost {
         // and title-source, written at creation so the auto-created issue records that
         // it came from an ad hoc dispatch. Degrades like the rest of the boundary —
         // a surface inert without Substrate never fails the dispatch.
+        //
+        // Every interpolated value is flattened through the one dispatcher sanitizer first:
+        // the note is a LINE-ORIENTED durable record, so a newline in any caller-supplied
+        // value would forge extra lines in it (SPECIALISTS-4510).
         try {
           await workItems.journal(created.ref, 'note', {
             participantId,
             activationId,
             summary:
               'ad-hoc dispatch evidence: '
-              + `surface=${request.surface ?? 'unknown'} `
-              + `specialist=${request.specialist} `
-              + `requested_by=${requestedByParticipantId ?? 'unknown'} `
-              + `parent_ref=${parentRef || 'none'} `
-              + `issue_kind=${kind} title=${titleSource}`,
+              + `surface=${evidenceValue(request.surface, 'unknown')} `
+              + `specialist=${evidenceValue(request.specialist, 'unknown')} `
+              + `requested_by=${evidenceValue(requestedByParticipantId, 'unknown')} `
+              + `parent_ref=${evidenceValue(parentRef, 'none')} `
+              + `issue_kind=${evidenceValue(kind, 'unknown')} title=${titleSource}`,
           });
         } catch {
           // Evidence is best-effort; the dispatch stands without it.

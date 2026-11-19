@@ -168,14 +168,6 @@ export interface RemoteProjectTarget {
   serverRoot: string | null;
 }
 
-/**
- * Build the work-item ports over a live service connection to the store-owning
- * machine.
- *
- * `remote` is the configured label (`ssh:<host>`), used only to say where the
- * failure happened; the connection itself is already open and is not this
- * function's to close.
- */
 let remoteDispatcherWarned = false;
 
 /** Test seam: the next remote dispatch may warn again. */
@@ -202,6 +194,14 @@ function warnRemoteDispatcherGap(req: DispatchRequest): void {
   );
 }
 
+/**
+ * Build the work-item ports over a live service connection to the store-owning
+ * machine.
+ *
+ * `remote` is the configured label (`ssh:<host>`), used only to say where the
+ * failure happened; the connection itself is already open and is not this
+ * function's to close.
+ */
 export function createRemoteWorkItemPorts(
   service: RemoteWorkItemService,
   opts: { remote: string; project?: RemoteProjectTarget },

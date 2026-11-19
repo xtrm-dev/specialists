@@ -523,6 +523,28 @@ describe('host: creation evidence journal note (XT-108)', () => {
     expect(handle.issueRef).toBeDefined();
     expect(ports.createdInputs).toHaveLength(1);
   });
+
+  // Audit of #584 (F1): the note is a line-oriented durable record and its values are
+  // caller-asserted, so a newline in one of them forged extra lines in it.
+  it('keeps the note on ONE line whatever the caller sends (SPECIALISTS-4510)', async () => {
+    const ports = makePorts();
+    const { host } = hostWith(ports.boundary, 'researcher', 'research');
+
+    await host.start({
+      specialist: 'researcher',
+      contract: INLINE_CONTRACT,
+      requestedByParticipantId: `${'a'.repeat(200_000)}\nsp-forged=1`,
+      surface: 'mcp\nsp-forged=3',
+    });
+
+    expect(ports.notes).toHaveLength(1);
+    const summary = String((ports.notes[0].input as { semantic: { summary: string } }).semantic.summary);
+    expect(summary).not.toMatch(/[\u0000-\u001f\u007f]/);
+    expect(summary.split('\n')).toHaveLength(1);
+    // An over-long participant is absent, never truncated into a different identity.
+    expect(summary).toContain('requested_by=unknown');
+    expect(summary).toContain('surface=mcpsp-forged=3');
+  });
 });
 
 describe('MCP adapter: parent_ref/kind plumbing carries the surface (XT-108)', () => {

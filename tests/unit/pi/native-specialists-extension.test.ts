@@ -375,8 +375,29 @@ describe('native-specialists extension (Pi coordinator surface)', () => {
     });
   });
 
-  it('thinking_override passes through on bead_id dispatch, omitted by default', async () => {
+  // Audit of #584 (F1): this path writes XTRM_DISPATCHER_PARTICIPANT as well, so both
+  // caller-supplied params are bounded here, at the tool boundary, exactly as on MCP.
+  it('bounds a hostile requested_by / coordinator_session_id at the Pi boundary (SPECIALISTS-4510)', async () => {
     const mod = await loadExtension();
+    const pi = makeFakePi();
+    const { host, calls } = makeFakeHost();
+    mod.default(pi, { createHost: () => host, env: { SUBSTRATE_HOLDER: 'sp-lead-1' } });
+
+    const out = resultText(await toolNamed(pi, 'specialist_dispatch').execute('tc1', {
+      specialist: 'explorer',
+      bead_id: 'bd-1',
+      requested_by: `${'a'.repeat(200_000)}\nsp-forged=1`,
+      coordinator_session_id: 'lead-pi-session\nsp-forged=2',
+    }));
+
+    expect(out.status).toBe('dispatched');
+    // The over-long label is absent — never truncated into a different identity — so the
+    // process's own participant is what the activation env and the record carry.
+    expect(calls.start[0]).toMatchObject({ requestedByParticipantId: 'sp-lead-1' });
+    expect(calls.start[0].coordinatorSessionId).toBe('lead-pi-sessionsp-forged=2');
+  });
+
+  it('thinking_override passes through on bead_id dispatch, omitted by default', async () => {    const mod = await loadExtension();
     const pi = makeFakePi();
     const { host, calls } = makeFakeHost();
     mod.default(pi, { createHost: () => host });

@@ -224,6 +224,16 @@ function hostWith(fixture: HostFixture = {}) {
   return { host, events, sessionsCreated, workspace, session, steered };
 }
 
+/** A host that only records the request: nothing here needs a real admission. */
+const stubHost = () => ({
+  start: vi.fn(async () => ({
+    activationId: 'act:once',
+    result: new Promise(() => {}),
+    stepContract: { rootWorkRef: 'ISSUE-1', inputs: [], outputs: [] },
+  })),
+  inspect: () => undefined,
+});
+
 describe('specialist_dispatch — the MCP dispatch path is the same admission path', () => {
   it('defaults the Substrate coordinator to the dispatcher value, never an adapter literal (SPECIALISTS-4503)', async () => {
     const started: Array<Record<string, unknown>> = [];
@@ -263,6 +273,10 @@ describe('specialist_dispatch — the MCP dispatch path is the same admission pa
   });
 
   describe('completion routing follows the dispatcher, not only its holder (SPECIALISTS-4503)', () => {
+    // A failed lookup cools down for 60 s process-wide, so each case starts from a clean slate:
+    // otherwise one deliberate failure would hide every later one's route.
+    beforeEach(() => { resetDispatcherWarning(); });
+
     function trackedDispatch(env: NodeJS.ProcessEnv, xtAnswer: { status: number; stdout: string }) {
       const track = vi.fn();
       const host = {
@@ -316,19 +330,30 @@ describe('specialist_dispatch — the MCP dispatch path is the same admission pa
       const wake = warn.mock.calls.map((c) => String(c[0])).filter((line) => line.includes('completion wake'));
       expect(wake).toHaveLength(1);
     });
+
+    // The negative half of the same rule: a dispatch that knows a SESSION still has a route, so
+    // warning about a dropped route there would be a false alarm on the normal lead path.
+    it('records no route-drop warning when a session id alone is known', async () => {
+      resetWakeNotice();
+      const warn = vi.fn();
+      const track = vi.fn();
+      const host = {
+        start: vi.fn(async () => ({ activationId: 'act:session', result: new Promise(() => {}), stepContract: { rootWorkRef: 'ISSUE-1', inputs: [], outputs: [] } })),
+        inspect: () => undefined,
+      } as never;
+      const tool = createSpecialistDispatchTool(() => host, () => ({ track }) as never, {
+        env: {}, pid: 1, run: () => ({ status: 0, stdout: JSON.stringify({ sessionId: 'pi-sess-1' }) }), warn,
+      });
+
+      await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1' });
+
+      expect(track).toHaveBeenCalledWith('act:session', { coordinatorSessionId: 'pi-sess-1', coordinatorParticipantId: 'unknown' });
+      expect(warn.mock.calls.map((c) => String(c[0])).filter((line) => line.includes('completion wake'))).toHaveLength(0);
+    });
   });
 
   describe('the one xt lookup per dispatch (SPECIALISTS-4503)', () => {
     beforeEach(() => { resetDispatcherWarning(); });
-
-    const stubHost = () => ({
-      start: vi.fn(async () => ({
-        activationId: 'act:once',
-        result: new Promise(() => {}),
-        stepContract: { rootWorkRef: 'ISSUE-1', inputs: [], outputs: [] },
-      })),
-      inspect: () => undefined,
-    });
 
     it('spawns xt exactly once per dispatch, for this process parent, without inheriting, and bounded', async () => {
       const run = vi.fn(() => ({ status: 0, stdout: JSON.stringify({ sessionId: 's1' }) }));
@@ -387,6 +412,78 @@ describe('specialist_dispatch — the MCP dispatch path is the same admission pa
       expect(host.start).toHaveBeenLastCalledWith(expect.objectContaining({ requestedByParticipantId: 'sp-lead-9' }));
       expect(warn).toHaveBeenCalledTimes(1);
       expect(String(warn.mock.calls[0]?.[0])).toContain('ETIMEDOUT');
+    });
+  });
+
+  // Audit of #584 (F1): `requested_by` is caller-asserted and reached the activation env and a
+  // durable evidence line as given. A dispatch must lose the LABEL, never the dispatch.
+  describe('a hostile requested_by loses the label, never the dispatch (SPECIALISTS-4510)', () => {
+    beforeEach(() => { resetDispatcherWarning(); });
+
+    const startRequest = (host: { start: { mock: { calls: unknown[][] } } }) =>
+      host.start.mock.calls.at(-1)?.[0] as { requestedByParticipantId?: string } | undefined;
+
+    for (const [shape, hostile] of [
+      ['200 KB', 'a'.repeat(200_000)],
+      ['a newline', 'sp-lead-1\nsp-forged=1'],
+      ['a NUL', 'sp-lead-1\u0000'],
+      ['an =', 'sp-lead-1=forged'],
+    ] as const) {
+      it(`bounds ${shape} to one line and finishes the dispatch`, async () => {
+        const host = stubHost();
+        const tool = createSpecialistDispatchTool(() => host as never, undefined, {
+          env: { SUBSTRATE_HOLDER: 'sp-holder-1' },
+          pid: 1,
+          run: () => ({ status: 0, stdout: '{}' }),
+          warn: () => undefined,
+        });
+
+        const out = await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1', requested_by: hostile }) as Record<string, unknown>;
+
+        expect(out.status).toBe('dispatched');
+        expect(host.start).toHaveBeenCalledOnce();
+        const participant = startRequest(host)?.requestedByParticipantId;
+        if (participant !== undefined) {
+          expect(participant).not.toMatch(/[\u0000-\u001f\u007f]/);
+          expect(participant).not.toContain('=');
+          expect(participant.length).toBeLessThanOrEqual(128);
+        }
+      });
+    }
+
+    it('warns once when it drops the value, and keeps the process participant', async () => {
+      const warn = vi.fn();
+      const host = stubHost();
+      const tool = createSpecialistDispatchTool(() => host as never, undefined, {
+        env: { SUBSTRATE_HOLDER: 'sp-holder-1' },
+        pid: 1,
+        run: () => ({ status: 0, stdout: '{}' }),
+        warn,
+      });
+
+      await tool.execute({ specialist: 'researcher', bead_id: 'ISSUE-1', requested_by: 'a'.repeat(200_000) });
+
+      expect(startRequest(host)?.requestedByParticipantId).toBe('sp-holder-1');
+      expect(warn.mock.calls.map((c) => String(c[0])).filter((line) => line.includes('Substrate-safe label'))).toHaveLength(1);
+    });
+
+    it('bounds an oversized coordinator_session_id and falls back to the dispatcher session', async () => {
+      const host = stubHost();
+      const tool = createSpecialistDispatchTool(() => host as never, undefined, {
+        env: { SUBSTRATE_HOLDER: 'sp-holder-1' },
+        pid: 1,
+        run: () => ({ status: 0, stdout: JSON.stringify({ sessionId: 'pi-sess-1' }) }),
+        warn: () => undefined,
+      });
+
+      await tool.execute({
+        specialist: 'researcher',
+        bead_id: 'ISSUE-1',
+        coordinator_session_id: `${'a'.repeat(200_000)}\nsp-forged=1`,
+      });
+
+      const request = host.start.mock.calls.at(-1)?.[0] as { coordinatorSessionId?: string };
+      expect(request.coordinatorSessionId).toBe('pi-sess-1');
     });
   });
 

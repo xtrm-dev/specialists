@@ -33,7 +33,7 @@
  * proceeds and Substrate records what was actually known rather than an adapter literal.
  */
 
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { runtimeWarn } from '../utils/runtime-diagnostics.js';
 
 /** The env keys that describe who dispatched the current process. */
@@ -45,6 +45,31 @@ export const DISPATCHER_ENV_KEYS = [
 
 /** Bound on the one CLI lookup per dispatch. */
 export const DISPATCHER_LOOKUP_TIMEOUT_MS = 3000;
+
+/**
+ * Hard ceiling on any single dispatcher value (SPECIALISTS-4510).
+ *
+ * Every one of them ends up in an env key the activation's shells inherit, and an argv+env
+ * total above the kernel's limit makes the WHOLE spawn fail with E2BIG: one oversized
+ * `requested_by` would make every shell of that activation fail (a self-DoS of the caller's
+ * own dispatch). They also end up in one durable evidence line. 512 leaves room for a `uds:`
+ * socket address and stays far under every exec limit.
+ */
+export const DISPATCHER_VALUE_MAX_LENGTH = 512;
+
+/** C0, DEL and C1: a newline here forges extra lines in the durable evidence note. */
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/g;
+
+/**
+ * One dispatcher value, or nothing: control characters are STRIPPED (never rendered) and an
+ * over-long value is DROPPED rather than truncated into a different identity. A value nobody
+ * can write down in full is not an identity, so truncating it would invent one.
+ */
+export function sanitizeDispatcherValue(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const stripped = value.replace(CONTROL_CHARACTERS, '').trim();
+  return stripped.length > 0 && stripped.length <= DISPATCHER_VALUE_MAX_LENGTH ? stripped : undefined;
+}
 
 /**
  * Substrate's dispatcher label grammar (XTRM-839): a shell-safe identifier of at most
@@ -75,6 +100,60 @@ export function isDispatcherSessionId(value: unknown): value is string {
   return typeof value === 'string' && DISPATCHER_SESSION_PATTERN.test(value.trim());
 }
 
+const LABEL_DROP_REASON =
+  'the dispatcher participant is not a Substrate-safe label (at most 128 shell-safe characters)';
+const SESSION_DROP_REASON = 'the dispatcher session is not a UUID or a tmux session id';
+
+/**
+ * Keep a bounded value that passes `isValid`, drop it with one warning otherwise.
+ *
+ * `raw` is inspected, not `value`: an over-long or control-character value is exactly what
+ * must be dropped LOUDLY, and sanitizing it first would erase the evidence that it arrived.
+ */
+function keepBoundValue(
+  raw: unknown,
+  isValid: (value: unknown) => boolean,
+  reason: string,
+  warn: (message: string) => void,
+): string | undefined {
+  const value = sanitizeDispatcherValue(raw);
+  if (value !== undefined && isValid(value)) return value;
+  // Absent is absence and never warns; a value that cannot be one is dropped once.
+  if (value !== undefined || (typeof raw === 'string' && raw.trim() !== '')) warnBindingOnce(warn, reason);
+  return undefined;
+}
+
+/**
+ * One dispatcher value, made safe for EVERY sink this host writes: the activation env keys, the
+ * durable evidence line and the Substrate binding (SPECIALISTS-4510).
+ *
+ * Control characters are stripped (a newline in `requested_by` forged extra lines in the
+ * evidence note) and every value is bounded (an oversized `requested_by` reached
+ * `XTRM_DISPATCHER_PARTICIPANT` and made every shell of that activation fail with E2BIG). The
+ * participant is additionally held to the label grammar sb records, so a value sb would refuse
+ * is never written as if it were one. An unusable value is DROPPED with one warning and the
+ * dispatch proceeds: fail-open for the dispatch, fail-closed for the record.
+ *
+ * The session id is sanitized but not grammar-checked: it is also the in-process key a
+ * completion wake is routed by, and a live session id sb will not bind still routes correctly.
+ * {@link dispatcherBindingFields} is where the sb grammar decides.
+ */
+export function normalizeDispatcherIdentity(
+  identity: { participant?: unknown; name?: unknown; address?: unknown; sessionId?: unknown } | undefined,
+  warn: (message: string) => void = warnDispatcherIdentity,
+): DispatcherIdentity {
+  const participant = keepBoundValue(identity?.participant, isDispatcherLabel, LABEL_DROP_REASON, warn);
+  const name = sanitizeDispatcherValue(identity?.name);
+  const address = sanitizeDispatcherValue(identity?.address);
+  const sessionId = sanitizeDispatcherValue(identity?.sessionId);
+  return {
+    ...(participant ? { participant } : {}),
+    ...(name ? { name } : {}),
+    ...(address ? { address } : {}),
+    ...(sessionId ? { sessionId } : {}),
+  };
+}
+
 /**
  * After a failed lookup (missing or old xt, timeout, junk) the next lookups are skipped for
  * this long, so a wedged install costs one bounded stall instead of one per dispatch. A
@@ -100,12 +179,26 @@ export interface DispatcherIdentity {
   sessionId?: string;
 }
 
-/** One `xt identity dispatcher --json` invocation. `error` mirrors spawnSync's field. */
+/** The outcome of one `xt identity dispatcher --json` invocation; `error` mirrors spawn's field. */
+export interface DispatcherRunResult {
+  status: number | null;
+  stdout: string;
+  stderr?: string;
+  error?: unknown;
+}
+
+/**
+ * One `xt identity dispatcher --json` invocation.
+ *
+ * ASYNC on purpose (SPECIALISTS-4510): the MCP server's event loop also hosts every running
+ * activation, and a synchronous spawn here froze them for up to the whole lookup bound. The
+ * seam is the same shape as identityEnvRun's, so a test injects a plain value run.
+ */
 export type DispatcherRun = (
   cmd: string,
   args: string[],
   opts: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number },
-) => { status: number | null; stdout: string; stderr?: string; error?: unknown };
+) => DispatcherRunResult | Promise<DispatcherRunResult>;
 
 export interface DispatcherLookupInput {
   /** The caller's own env. Its `SUBSTRATE_HOLDER` is the dispatcher participant. */
@@ -132,27 +225,39 @@ export interface DispatcherEnvOverlay {
   unset: readonly string[];
 }
 
-const clean = (value: unknown): string | undefined => {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-};
+const clean = sanitizeDispatcherValue;
 
-const DEFAULT_RUN: DispatcherRun = (cmd, args, opts) => {
-  const result = spawnSync(cmd, args, {
-    encoding: 'utf8',
-    cwd: opts.cwd,
-    env: opts.env,
-    timeout: opts.timeoutMs,
-    stdio: ['ignore', 'pipe', 'pipe'],
+/**
+ * The real lookup: one async child, settled on `exit` (or on the bound), never on `close` — a
+ * grandchild that inherits the pipes must not hold the dispatch past its bound.
+ *
+ * The bound kills with SIGKILL: an `xt` that ignores SIGTERM would otherwise outlive every
+ * timeout it is given. The promise is settled locally, so the caller is never waiting on a
+ * process it already stopped.
+ */
+export const defaultDispatcherRun: DispatcherRun = (cmd, args, opts) =>
+  new Promise<DispatcherRunResult>((resolve) => {
+    const timeoutMs = opts.timeoutMs ?? DISPATCHER_LOOKUP_TIMEOUT_MS;
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    let timer: NodeJS.Timeout | undefined;
+    const settle = (result: DispatcherRunResult): void => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(result);
+    };
+    const child = spawn(cmd, args, { cwd: opts.cwd, env: opts.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      settle({ status: null, stdout, stderr, error: new Error(`timed out after ${timeoutMs} ms`) });
+    }, timeoutMs);
+    child.stdout?.setEncoding('utf8').on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr?.setEncoding('utf8').on('data', (chunk: string) => { stderr += chunk; });
+    child.on('error', (error) => settle({ status: null, stdout, stderr, error }));
+    child.on('exit', (code) => settle({ status: code, stdout, stderr }));
   });
-  return {
-    status: result.status,
-    stdout: String(result.stdout ?? ''),
-    stderr: String(result.stderr ?? ''),
-    error: result.error,
-  };
-};
 
 /** The launcher's warning channel: one prefixed stderr line, never a value. */
 export function warnDispatcherIdentity(message: string): void {
@@ -192,29 +297,35 @@ function failureReason(result: { status: number | null; stderr?: string; error?:
  * cannot: the leading process's display name, reply address and session id.
  *
  * Never throws. On any lookup failure the participant/name already held in `env` survive
- * and one warning names the failure class.
+ * and one warning names the failure class. It AWAITS: this runs on the MCP server's event
+ * loop, which also hosts every running activation (SPECIALISTS-4510).
  */
-export function resolveProcessDispatcher(input: DispatcherLookupInput = {}): DispatcherIdentity {
+export async function resolveProcessDispatcher(input: DispatcherLookupInput = {}): Promise<DispatcherIdentity> {
   const env = input.env ?? process.env;
-  const identity: DispatcherIdentity = {
-    ...(clean(env.SUBSTRATE_HOLDER) ? { participant: clean(env.SUBSTRATE_HOLDER) as string } : {}),
-    ...(clean(env.XTRM_AGENT_NAME) ? { name: clean(env.XTRM_AGENT_NAME) as string } : {}),
-  };
   const warn = input.warn ?? warnDispatcherIdentity;
-  const run = input.run ?? DEFAULT_RUN;
+  const run = input.run ?? defaultDispatcherRun;
   const pid = input.pid ?? process.ppid;
-  const now = (input.now ?? Date.now)();
+  const clock = input.now ?? Date.now;
+  /** What the env alone proves, plus whatever a successful answer added. */
+  const known = (answer: { name?: unknown; address?: unknown; sessionId?: unknown } = {}): DispatcherIdentity =>
+    normalizeDispatcherIdentity({
+      participant: env.SUBSTRATE_HOLDER,
+      // An unusable answer falls back to the env instead of erasing what the env states.
+      name: clean(answer.name) ?? env.XTRM_AGENT_NAME,
+      address: answer.address,
+      sessionId: answer.sessionId,
+    }, warn);
   // In the cool-down after a failed lookup: do not spawn xt again, say nothing more.
-  if (lookupFailedAt !== undefined && now - lookupFailedAt < LOOKUP_FAILURE_COOLDOWN_MS) return identity;
+  if (lookupFailedAt !== undefined && clock() - lookupFailedAt < LOOKUP_FAILURE_COOLDOWN_MS) return known();
   const failed = (reason: string): DispatcherIdentity => {
-    lookupFailedAt = now;
+    lookupFailedAt = clock();
     warnOnce(warn, reason);
-    return identity;
+    return known();
   };
 
-  let result: ReturnType<DispatcherRun>;
+  let result: DispatcherRunResult;
   try {
-    result = run(
+    result = await run(
       'xt',
       ['identity', 'dispatcher', '--pid', String(pid), '--no-inherit', '--json'],
       { cwd: input.cwd, env, timeoutMs: input.timeoutMs ?? DISPATCHER_LOOKUP_TIMEOUT_MS },
@@ -231,13 +342,7 @@ export function resolveProcessDispatcher(input: DispatcherLookupInput = {}): Dis
     return failed('returned unparseable JSON');
   }
   lookupFailedAt = undefined;
-  const parsed = (answer ?? {}) as { name?: unknown; address?: unknown; sessionId?: unknown };
-  return {
-    ...identity,
-    ...(clean(parsed.name) ? { name: clean(parsed.name) as string } : {}),
-    ...(clean(parsed.address) ? { address: clean(parsed.address) as string } : {}),
-    ...(clean(parsed.sessionId) ? { sessionId: clean(parsed.sessionId) as string } : {}),
-  };
+  return known((answer ?? {}) as { name?: unknown; address?: unknown; sessionId?: unknown });
 }
 
 function warnOnce(warn: (message: string) => void, reason: string): void {
@@ -257,14 +362,11 @@ export function dispatcherFromHostEnv(
   env: NodeJS.ProcessEnv = process.env,
   sessionId?: string | null,
 ): DispatcherIdentity {
-  const participant = clean(env.SUBSTRATE_HOLDER);
-  const name = clean(env.XTRM_AGENT_NAME);
-  const session = clean(sessionId);
-  return {
-    ...(participant ? { participant } : {}),
-    ...(name ? { name } : {}),
-    ...(session ? { sessionId: session } : {}),
-  };
+  return normalizeDispatcherIdentity({
+    participant: env.SUBSTRATE_HOLDER,
+    name: env.XTRM_AGENT_NAME,
+    sessionId,
+  });
 }
 
 /**
@@ -281,15 +383,16 @@ export function resolveRequestDispatcher(request: {
   requestedByParticipantId?: string;
   coordinatorSessionId?: string;
 }): { dispatcher: DispatcherIdentity; requestedByParticipantId?: string; coordinatorSessionId?: string } {
-  const participant = clean(request.dispatcher?.participant) ?? clean(request.requestedByParticipantId);
-  const dispatcher: DispatcherIdentity = {
+  // Normalizing HERE is what keeps a caller-asserted value (a host call carries the fields
+  // straight through) from reaching the env, the evidence line or the binding unbounded.
+  const dispatcher = normalizeDispatcherIdentity({
     ...request.dispatcher,
-    ...(participant ? { participant } : {}),
-  };
-  const coordinatorSessionId = clean(request.coordinatorSessionId) ?? clean(dispatcher.sessionId);
+    participant: clean(request.dispatcher?.participant) ?? request.requestedByParticipantId,
+  });
+  const coordinatorSessionId = clean(request.coordinatorSessionId) ?? dispatcher.sessionId;
   return {
     dispatcher,
-    ...(participant ? { requestedByParticipantId: participant } : {}),
+    ...(dispatcher.participant ? { requestedByParticipantId: dispatcher.participant } : {}),
     ...(coordinatorSessionId ? { coordinatorSessionId } : {}),
   };
 }
@@ -305,22 +408,25 @@ export interface DispatcherBindingFields {
  * without refusing the dispatch. sb validates both at its write seam and writes NO binding
  * on a malformed value, so an invalid half is DROPPED here (one warning per reason) and the
  * dispatch proceeds. Absent stays absent — never a placeholder, never an env default.
+ *
+ * One validator for both halves of a dispatch (SPECIALISTS-4506, SPECIALISTS-4510): the env,
+ * the evidence line and this binding share {@link normalizeDispatcherIdentity}, so sb and the
+ * host cannot disagree about what a dispatcher value is.
  */
 export function dispatcherBindingFields(
   identity: { participant?: string; sessionId?: string } | undefined,
   warn: (message: string) => void = warnDispatcherIdentity,
 ): DispatcherBindingFields {
+  const safe = normalizeDispatcherIdentity(identity, warn);
   const fields: DispatcherBindingFields = {};
-  const participant = clean(identity?.participant);
-  if (participant !== undefined) {
-    if (isDispatcherLabel(participant)) fields.dispatcherParticipantId = participant;
-    else warnBindingOnce(warn, 'the dispatcher participant is not a Substrate-safe label (at most 128 shell-safe characters)');
-  }
-  const sessionId = clean(identity?.sessionId);
-  if (sessionId !== undefined) {
-    if (isDispatcherSessionId(sessionId)) fields.dispatcherSessionId = sessionId;
-    else warnBindingOnce(warn, 'the dispatcher session is not a UUID or a tmux session id');
-  }
+  if (safe.participant !== undefined) fields.dispatcherParticipantId = safe.participant;
+  const sessionId = keepBoundValue(
+    identity?.sessionId,
+    isDispatcherSessionId,
+    SESSION_DROP_REASON,
+    warn,
+  );
+  if (sessionId !== undefined) fields.dispatcherSessionId = sessionId;
   return fields;
 }
 
@@ -336,12 +442,19 @@ function warnBindingOnce(warn: (message: string) => void, reason: string): void 
  * A key the dispatcher does not know is UNSET rather than inherited: the child's env
  * describes exactly one hop, and leaving the host's value in place is how the grandparent
  * appeared as the dispatcher.
+ *
+ * Every value is normalized first, so this seam cannot be the one that lets an oversized or
+ * multi-line value into an activation's shells whatever the caller built the identity from.
  */
-export function dispatcherEnvOverlay(identity: DispatcherIdentity | undefined): DispatcherEnvOverlay {
+export function dispatcherEnvOverlay(
+  identity: DispatcherIdentity | undefined,
+  warn: (message: string) => void = warnDispatcherIdentity,
+): DispatcherEnvOverlay {
+  const safe = normalizeDispatcherIdentity(identity, warn);
   const known: Array<[typeof DISPATCHER_ENV_KEYS[number], string | undefined]> = [
-    ['XTRM_DISPATCHER_PARTICIPANT', clean(identity?.participant)],
-    ['XTRM_DISPATCHER_NAME', clean(identity?.name)],
-    ['XTRM_DISPATCHER_ADDRESS', clean(identity?.address)],
+    ['XTRM_DISPATCHER_PARTICIPANT', safe.participant],
+    ['XTRM_DISPATCHER_NAME', safe.name],
+    ['XTRM_DISPATCHER_ADDRESS', safe.address],
   ];
   const env: Record<string, string> = {};
   const unset: string[] = [];

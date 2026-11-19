@@ -84,6 +84,8 @@ import {
   buildFleetDisplay,
   validateBeforeRun,
   dispatcherFromHostEnv,
+  normalizeDispatcherIdentity,
+  sanitizeDispatcherValue,
 } from '../../../dist/lib.js';
 
 
@@ -2514,14 +2516,22 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
         // SPECIALISTS-4503: this extension runs INSIDE the dispatching lead, so its env
         // already names the dispatcher (own SUBSTRATE_HOLDER + agent name) and the live Pi
         // session supplies the coordinator session id. One value, used by both sinks.
+        //
+        // SPECIALISTS-4510: both caller-supplied params are bounded HERE, at the tool
+        // boundary — through the host's own sanitizer, not a second one. An unusable value is
+        // dropped with one warning and the dispatch proceeds: it reaches the activation env
+        // (an oversized one fails every shell with E2BIG) and a durable evidence line.
         const hostEnv = options.env ?? process.env;
         const held = liveContext();
-        const resolvedDispatcher = dispatcherFromHostEnv(hostEnv, held?.sessionManager.getSessionId());
+        const hostDispatcher = dispatcherFromHostEnv(hostEnv, held?.sessionManager.getSessionId());
         const explicitParticipant = String(params.requested_by ?? '').trim();
-        const dispatcher = explicitParticipant
-          ? { ...resolvedDispatcher, participant: explicitParticipant }
-          : resolvedDispatcher;
-        const coordinatorSessionId = params.coordinator_session_id ?? dispatcher.sessionId;
+        // An unusable override is dropped and the process's own participant stands: fail-open for
+        // the dispatch, and never a placeholder for the record.
+        const explicit = explicitParticipant
+          ? normalizeDispatcherIdentity({ participant: params.requested_by }).participant
+          : undefined;
+        const dispatcher = explicit ? { ...hostDispatcher, participant: explicit } : hostDispatcher;
+        const coordinatorSessionId = sanitizeDispatcherValue(params.coordinator_session_id) ?? dispatcher.sessionId;
 
         const handle = await h.start({
           specialist: params.specialist,
