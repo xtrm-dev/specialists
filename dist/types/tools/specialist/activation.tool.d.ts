@@ -688,6 +688,9 @@ export declare function createSpecialistStopActivationTool(getHost: () => Native
         error: string;
         activation_id: string;
     } | {
+        abort_timed_out?: boolean | undefined;
+        cancelled_asks?: string[] | undefined;
+        cancelled_asks_note?: string | undefined;
         status: "stopped";
         activation_id: string;
         error?: undefined;

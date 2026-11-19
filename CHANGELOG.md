@@ -33,8 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A lead-launched specialist exports its own role (CORE-2722) (#582) ([e6fa1c7](https://github.com/xtrm-dev/specialists/commit/e6fa1c7628d9d7b7753acf2349da70ab7b581e63))
 - A bridged activation's Claude Code child gets the activation identity (SPECIALISTS-4498) (#583) ([8d8fd3d](https://github.com/xtrm-dev/specialists/commit/8d8fd3d0a3dee0e1cd4f9095e53b18fb6044f3f7))
 - One dispatcher value per dispatch, written to env and Substrate (SPECIALISTS-4503) (#584) ([82a5c22](https://github.com/xtrm-dev/specialists/commit/82a5c22d34d1385b5a5d97d631fa6ede9685ed18))
+- Stop cancels a pending ask instead of waiting on it (SPECIALISTS-4505) ([9a0cc1c](https://github.com/xtrm-dev/specialists/commit/9a0cc1c50eb3abe6a3d51333a11c0841cba329d9))
 - Record the dispatcher on the ExecutionBinding (SPECIALISTS-4506) (#586) ([ed1e420](https://github.com/xtrm-dev/specialists/commit/ed1e42019c2c10a5956dcd63278136d23a874781))
-- One holder for the claim, the check, the bind and the shells (SPECIALISTS-4502) ([afdcadb](https://github.com/xtrm-dev/specialists/commit/afdcadb7196a21a930ef3916dfed781f9c422047))
+- Keep a timed-out writer's lease and correct the stop record claims (SPECIALISTS-4505) ([76e78f9](https://github.com/xtrm-dev/specialists/commit/76e78f96b95dde32d9fb103faf339d0500919b11))
+- Say that a kept writer lease needs a host restart, and test it for real (SPECIALISTS-4505) ([3fc7597](https://github.com/xtrm-dev/specialists/commit/3fc75971bf1119c188b40a1d048df3881b5dce2d))
 
 ### Project maintenance
 - Make the NODE_ENV assertion prove the override (SPECIALISTS-4429) (#543) ([21be15b](https://github.com/xtrm-dev/specialists/commit/21be15b78a1e6eda9640dea37c350832012b1781))
@@ -55,7 +57,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Create every scratch directory through tempDir so the CORE-2612 sweep can see it (SPECIALISTS-4474) (#576) ([7a95f4b](https://github.com/xtrm-dev/specialists/commit/7a95f4b18a5f1e8f18b6a01772825e496ef15b09))
 - Teach the operator allow list, not the removed two-switch route (SPECIALISTS-4447) (#577) ([346eea1](https://github.com/xtrm-dev/specialists/commit/346eea1d6a758e3386fe53b8384d8d83aeb41b01))
 - Bump the actions-all group across 1 directory with 3 updates (#561) ([4eb1e50](https://github.com/xtrm-dev/specialists/commit/4eb1e50cd3b9a5d67b590004e7c24ba84749b132))
-- Rebuild with the pinned bun 1.4.2 (SPECIALISTS-4502) ([72a716f](https://github.com/xtrm-dev/specialists/commit/72a716ff120b175a679c1703b1995dbde3408a23))
+- Rebuild with the pinned bun 1.4.2 (SPECIALISTS-4505) ([bf2aeae](https://github.com/xtrm-dev/specialists/commit/bf2aeaefd0d4a98d894bf89b0a72853c17c708d6))
+- Rebuild with the pinned bun 1.4.2 (SPECIALISTS-4505) ([d098817](https://github.com/xtrm-dev/specialists/commit/d098817ef3a27e52d6e9d89ca11c45befe3fdd9b))
+- Rebuild with the pinned bun 1.4.2 (SPECIALISTS-4505) ([3f5114f](https://github.com/xtrm-dev/specialists/commit/3f5114f3101c61e1d1782bea406312fd8652f36d))
 
 ## [4.2.0] - 2026-11-11
 
