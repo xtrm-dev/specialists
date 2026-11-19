@@ -18151,6 +18151,14 @@ function specialistHolderName(specialistName, jobId, pid = process.pid) {
 }
 
 // src/activation/dispatcher-identity.ts
+var DISPATCHER_VALUE_MAX_LENGTH = 512;
+var CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/g;
+function sanitizeDispatcherValue(value) {
+  if (typeof value !== "string")
+    return;
+  const stripped = value.replace(CONTROL_CHARACTERS, "").trim();
+  return stripped.length > 0 && stripped.length <= DISPATCHER_VALUE_MAX_LENGTH ? stripped : undefined;
+}
 var DISPATCHER_LABEL_MAX_LENGTH = 128;
 var DISPATCHER_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/+-]*$/;
 var DISPATCHER_SESSION_PATTERN = /^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|\$[0-9]+)$/;
@@ -18163,55 +18171,60 @@ function isDispatcherLabel(value) {
 function isDispatcherSessionId(value) {
   return typeof value === "string" && DISPATCHER_SESSION_PATTERN.test(value.trim());
 }
-var clean = (value) => {
-  if (typeof value !== "string")
-    return;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-};
+var LABEL_DROP_REASON = "the dispatcher participant is not a Substrate-safe label (at most 128 shell-safe characters)";
+var SESSION_DROP_REASON = "the dispatcher session is not a UUID or a tmux session id";
+function keepBoundValue(raw, isValid, reason, warn) {
+  const value = sanitizeDispatcherValue(raw);
+  if (value !== undefined && isValid(value))
+    return value;
+  if (value !== undefined || typeof raw === "string" && raw.trim() !== "")
+    warnBindingOnce(warn, reason);
+  return;
+}
+function normalizeDispatcherIdentity(identity, warn = warnDispatcherIdentity) {
+  const participant = keepBoundValue(identity?.participant, isDispatcherLabel, LABEL_DROP_REASON, warn);
+  const name = sanitizeDispatcherValue(identity?.name);
+  const address = sanitizeDispatcherValue(identity?.address);
+  const sessionId = sanitizeDispatcherValue(identity?.sessionId);
+  return {
+    ...participant ? { participant } : {},
+    ...name ? { name } : {},
+    ...address ? { address } : {},
+    ...sessionId ? { sessionId } : {}
+  };
+}
+var clean = sanitizeDispatcherValue;
 function warnDispatcherIdentity(message) {
   runtimeWarn("dispatcher-identity", `[specialists] dispatcher-identity: ${message}`);
 }
 var warnedBindingReasons = new Set;
 function dispatcherFromHostEnv(env = process.env, sessionId) {
-  const participant = clean(env.SUBSTRATE_HOLDER);
-  const name = clean(env.XTRM_AGENT_NAME);
-  const session = clean(sessionId);
-  return {
-    ...participant ? { participant } : {},
-    ...name ? { name } : {},
-    ...session ? { sessionId: session } : {}
-  };
+  return normalizeDispatcherIdentity({
+    participant: env.SUBSTRATE_HOLDER,
+    name: env.XTRM_AGENT_NAME,
+    sessionId
+  });
 }
 function resolveRequestDispatcher(request) {
-  const participant = clean(request.dispatcher?.participant) ?? clean(request.requestedByParticipantId);
-  const dispatcher = {
+  const dispatcher = normalizeDispatcherIdentity({
     ...request.dispatcher,
-    ...participant ? { participant } : {}
-  };
-  const coordinatorSessionId = clean(request.coordinatorSessionId) ?? clean(dispatcher.sessionId);
+    participant: clean(request.dispatcher?.participant) ?? request.requestedByParticipantId
+  });
+  const coordinatorSessionId = clean(request.coordinatorSessionId) ?? dispatcher.sessionId;
   return {
     dispatcher,
-    ...participant ? { requestedByParticipantId: participant } : {},
+    ...dispatcher.participant ? { requestedByParticipantId: dispatcher.participant } : {},
     ...coordinatorSessionId ? { coordinatorSessionId } : {}
   };
 }
 function dispatcherBindingFields(identity, warn = warnDispatcherIdentity) {
+  const safe = normalizeDispatcherIdentity(identity, warn);
   const fields = {};
-  const participant = clean(identity?.participant);
-  if (participant !== undefined) {
-    if (isDispatcherLabel(participant))
-      fields.dispatcherParticipantId = participant;
-    else
-      warnBindingOnce(warn, "the dispatcher participant is not a Substrate-safe label (at most 128 shell-safe characters)");
-  }
-  const sessionId = clean(identity?.sessionId);
-  if (sessionId !== undefined) {
-    if (isDispatcherSessionId(sessionId))
-      fields.dispatcherSessionId = sessionId;
-    else
-      warnBindingOnce(warn, "the dispatcher session is not a UUID or a tmux session id");
-  }
+  if (safe.participant !== undefined)
+    fields.dispatcherParticipantId = safe.participant;
+  const sessionId = keepBoundValue(identity?.sessionId, isDispatcherSessionId, SESSION_DROP_REASON, warn);
+  if (sessionId !== undefined)
+    fields.dispatcherSessionId = sessionId;
   return fields;
 }
 function warnBindingOnce(warn, reason) {
@@ -18220,11 +18233,12 @@ function warnBindingOnce(warn, reason) {
   warnedBindingReasons.add(reason);
   warn(`${reason}; the invalid value is dropped and the dispatch proceeds (a Substrate that cannot record a dispatcher records none)`);
 }
-function dispatcherEnvOverlay(identity) {
+function dispatcherEnvOverlay(identity, warn = warnDispatcherIdentity) {
+  const safe = normalizeDispatcherIdentity(identity, warn);
   const known = [
-    ["XTRM_DISPATCHER_PARTICIPANT", clean(identity?.participant)],
-    ["XTRM_DISPATCHER_NAME", clean(identity?.name)],
-    ["XTRM_DISPATCHER_ADDRESS", clean(identity?.address)]
+    ["XTRM_DISPATCHER_PARTICIPANT", safe.participant],
+    ["XTRM_DISPATCHER_NAME", safe.name],
+    ["XTRM_DISPATCHER_ADDRESS", safe.address]
   ];
   const env = {};
   const unset = [];
@@ -25149,6 +25163,9 @@ var BACKGROUND_TASK_MAX_HOLD_MS = 2 * 60 * 60 * 1000 + 60000;
 function normalizeToolDurationWarnMs(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
+function evidenceValue(value, fallback) {
+  return sanitizeDispatcherValue(value) ?? fallback;
+}
 var NON_LOCAL_EXTENSION_PREFIXES = ["npm:", "git:", "github:", "http:", "https:", "ssh:"];
 function isNonLocalExtensionSource(source) {
   return NON_LOCAL_EXTENSION_PREFIXES.some((prefix) => source.startsWith(prefix));
@@ -25621,7 +25638,7 @@ class NativeActivationHost {
           await workItems.journal(created.ref, "note", {
             participantId,
             activationId,
-            summary: "ad-hoc dispatch evidence: " + `surface=${request.surface ?? "unknown"} ` + `specialist=${request.specialist} ` + `requested_by=${requestedByParticipantId ?? "unknown"} ` + `parent_ref=${parentRef || "none"} ` + `issue_kind=${kind} title=${titleSource}`
+            summary: "ad-hoc dispatch evidence: " + `surface=${evidenceValue(request.surface, "unknown")} ` + `specialist=${evidenceValue(request.specialist, "unknown")} ` + `requested_by=${evidenceValue(requestedByParticipantId, "unknown")} ` + `parent_ref=${evidenceValue(parentRef, "none")} ` + `issue_kind=${evidenceValue(kind, "unknown")} title=${titleSource}`
           });
         } catch {}
       } catch (error) {
@@ -29548,6 +29565,7 @@ export {
   isForensicAgentInternal,
   isWorkspaceWriteTool,
   leaseScopeFor,
+  normalizeDispatcherIdentity,
   openSubstrateDb,
   openWorkItemBoundary,
   parseCompletionBody,
@@ -29570,6 +29588,7 @@ export {
   resolveRuntimeToolContract,
   resolveWorkItemDbPath,
   runScriptSpecialist as runScript,
+  sanitizeDispatcherValue,
   selectWorkItemStore,
   shortBuildId,
   specialistFeedLimitDescription,

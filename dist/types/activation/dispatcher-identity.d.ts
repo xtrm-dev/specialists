@@ -37,6 +37,22 @@ export declare const DISPATCHER_ENV_KEYS: readonly ["XTRM_DISPATCHER_PARTICIPANT
 /** Bound on the one CLI lookup per dispatch. */
 export declare const DISPATCHER_LOOKUP_TIMEOUT_MS = 3000;
 /**
+ * Hard ceiling on any single dispatcher value (SPECIALISTS-4510).
+ *
+ * Every one of them ends up in an env key the activation's shells inherit, and an argv+env
+ * total above the kernel's limit makes the WHOLE spawn fail with E2BIG: one oversized
+ * `requested_by` would make every shell of that activation fail (a self-DoS of the caller's
+ * own dispatch). They also end up in one durable evidence line. 512 leaves room for a `uds:`
+ * socket address and stays far under every exec limit.
+ */
+export declare const DISPATCHER_VALUE_MAX_LENGTH = 512;
+/**
+ * One dispatcher value, or nothing: control characters are STRIPPED (never rendered) and an
+ * over-long value is DROPPED rather than truncated into a different identity. A value nobody
+ * can write down in full is not an identity, so truncating it would invent one.
+ */
+export declare function sanitizeDispatcherValue(value: unknown): string | undefined;
+/**
  * Substrate's dispatcher label grammar (XTRM-839): a shell-safe identifier of at most
  * 128 characters, mirroring its `IDENTITY_LABEL_PATTERN` / `IDENTITY_LABEL_MAX_LENGTH`.
  * Mirrored here so the host drops a value sb would refuse instead of letting a malformed
@@ -47,6 +63,27 @@ export declare const DISPATCHER_LABEL_MAX_LENGTH = 128;
 export declare function isDispatcherLabel(value: unknown): value is string;
 /** True when `value` is a UUID or tmux session id sb will accept as a dispatcher session. */
 export declare function isDispatcherSessionId(value: unknown): value is string;
+/**
+ * One dispatcher value, made safe for EVERY sink this host writes: the activation env keys, the
+ * durable evidence line and the Substrate binding (SPECIALISTS-4510).
+ *
+ * Control characters are stripped (a newline in `requested_by` forged extra lines in the
+ * evidence note) and every value is bounded (an oversized `requested_by` reached
+ * `XTRM_DISPATCHER_PARTICIPANT` and made every shell of that activation fail with E2BIG). The
+ * participant is additionally held to the label grammar sb records, so a value sb would refuse
+ * is never written as if it were one. An unusable value is DROPPED with one warning and the
+ * dispatch proceeds: fail-open for the dispatch, fail-closed for the record.
+ *
+ * The session id is sanitized but not grammar-checked: it is also the in-process key a
+ * completion wake is routed by, and a live session id sb will not bind still routes correctly.
+ * {@link dispatcherBindingFields} is where the sb grammar decides.
+ */
+export declare function normalizeDispatcherIdentity(identity: {
+    participant?: unknown;
+    name?: unknown;
+    address?: unknown;
+    sessionId?: unknown;
+} | undefined, warn?: (message: string) => void): DispatcherIdentity;
 /**
  * After a failed lookup (missing or old xt, timeout, junk) the next lookups are skipped for
  * this long, so a wedged install costs one bounded stall instead of one per dispatch. A
@@ -69,17 +106,25 @@ export interface DispatcherIdentity {
     /** Coordinator session for the settlement leg, when the caller has one. */
     sessionId?: string;
 }
-/** One `xt identity dispatcher --json` invocation. `error` mirrors spawnSync's field. */
-export type DispatcherRun = (cmd: string, args: string[], opts: {
-    cwd?: string;
-    env?: NodeJS.ProcessEnv;
-    timeoutMs?: number;
-}) => {
+/** The outcome of one `xt identity dispatcher --json` invocation; `error` mirrors spawn's field. */
+export interface DispatcherRunResult {
     status: number | null;
     stdout: string;
     stderr?: string;
     error?: unknown;
-};
+}
+/**
+ * One `xt identity dispatcher --json` invocation.
+ *
+ * ASYNC on purpose (SPECIALISTS-4510): the MCP server's event loop also hosts every running
+ * activation, and a synchronous spawn here froze them for up to the whole lookup bound. The
+ * seam is the same shape as identityEnvRun's, so a test injects a plain value run.
+ */
+export type DispatcherRun = (cmd: string, args: string[], opts: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    timeoutMs?: number;
+}) => DispatcherRunResult | Promise<DispatcherRunResult>;
 export interface DispatcherLookupInput {
     /** The caller's own env. Its `SUBSTRATE_HOLDER` is the dispatcher participant. */
     env?: NodeJS.ProcessEnv;
@@ -103,6 +148,15 @@ export interface DispatcherEnvOverlay {
     /** Dispatcher keys to delete from whatever env the child would otherwise inherit. */
     unset: readonly string[];
 }
+/**
+ * The real lookup: one async child, settled on `exit` (or on the bound), never on `close` — a
+ * grandchild that inherits the pipes must not hold the dispatch past its bound.
+ *
+ * The bound kills with SIGKILL: an `xt` that ignores SIGTERM would otherwise outlive every
+ * timeout it is given. The promise is settled locally, so the caller is never waiting on a
+ * process it already stopped.
+ */
+export declare const defaultDispatcherRun: DispatcherRun;
 /** The launcher's warning channel: one prefixed stderr line, never a value. */
 export declare function warnDispatcherIdentity(message: string): void;
 /** Test seam: the next lookup may warn again and is no longer in the failure cool-down. */
@@ -115,9 +169,10 @@ export declare function resetDispatcherWarning(): void;
  * cannot: the leading process's display name, reply address and session id.
  *
  * Never throws. On any lookup failure the participant/name already held in `env` survive
- * and one warning names the failure class.
+ * and one warning names the failure class. It AWAITS: this runs on the MCP server's event
+ * loop, which also hosts every running activation (SPECIALISTS-4510).
  */
-export declare function resolveProcessDispatcher(input?: DispatcherLookupInput): DispatcherIdentity;
+export declare function resolveProcessDispatcher(input?: DispatcherLookupInput): Promise<DispatcherIdentity>;
 /**
  * Resolve the dispatcher from the host env — the Pi extension path.
  *
@@ -154,6 +209,10 @@ export interface DispatcherBindingFields {
  * without refusing the dispatch. sb validates both at its write seam and writes NO binding
  * on a malformed value, so an invalid half is DROPPED here (one warning per reason) and the
  * dispatch proceeds. Absent stays absent — never a placeholder, never an env default.
+ *
+ * One validator for both halves of a dispatch (SPECIALISTS-4506, SPECIALISTS-4510): the env,
+ * the evidence line and this binding share {@link normalizeDispatcherIdentity}, so sb and the
+ * host cannot disagree about what a dispatcher value is.
  */
 export declare function dispatcherBindingFields(identity: {
     participant?: string;
@@ -165,8 +224,11 @@ export declare function dispatcherBindingFields(identity: {
  * A key the dispatcher does not know is UNSET rather than inherited: the child's env
  * describes exactly one hop, and leaving the host's value in place is how the grandparent
  * appeared as the dispatcher.
+ *
+ * Every value is normalized first, so this seam cannot be the one that lets an oversized or
+ * multi-line value into an activation's shells whatever the caller built the identity from.
  */
-export declare function dispatcherEnvOverlay(identity: DispatcherIdentity | undefined): DispatcherEnvOverlay;
+export declare function dispatcherEnvOverlay(identity: DispatcherIdentity | undefined, warn?: (message: string) => void): DispatcherEnvOverlay;
 /**
  * The same overlay for the Claude Code bridge's provider env, where an empty value means
  * DELETE (`ccChildEnv`). Unknown keys must still clear the host's inherited value.

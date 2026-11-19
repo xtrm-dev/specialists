@@ -213,6 +213,7 @@ export declare function createSpecialistDispatchTool(getHost: () => NativeActiva
     env?: NodeJS.ProcessEnv;
     pid?: number;
     run?: DispatcherRun;
+    timeoutMs?: number;
     warn?: (message: string) => void;
     now?: () => number;
 }): {
