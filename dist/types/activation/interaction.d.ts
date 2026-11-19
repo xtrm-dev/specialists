@@ -146,7 +146,7 @@ export declare class InteractionTransport {
      *
      * This is not a silent drop: the cancellation is a real message in the log (so the
      * history shows how each ask ended) and the cancelled ids are returned to the caller,
-     * which records them durably. `pendingAsks()` is the only projection that forgets the ask.
+     * which reports them. `pendingAsks()` is the only projection that forgets the ask.
      */
     cancelAsks(activationId: ActivationId, reason: string): MessageId[];
     /** Unblock the asker and close the ask. Shared by an answer and a cancellation. */

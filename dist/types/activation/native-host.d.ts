@@ -944,15 +944,23 @@ export declare class NativeActivationHost {
      * the ask tool call, and `abort()` only returns once the session is idle, so a stop that
      * aborted first waited for an answer nobody was going to give and sat in `stopping` for
      * hours (SPECIALISTS-4505). Cancelling unblocks the child, the abort completes, and each
-     * cancellation is recorded as `activation_ask_cancelled` rather than dropped.
+     * cancellation is returned to the caller and emitted as `activation_ask_cancelled`.
+     *
+     * The emitted event is NOT persisted today: the forensic sink stores status transitions
+     * only, and both new kinds are listed in NATIVE_LIFECYCLE_OBSERVABILITY_GAPS. The stop
+     * result is therefore the only record of which asks went unanswered.
+     *
+     * A writer whose abort hit the bound keeps its lease and reports it uncertain: pi's
+     * `dispose()` does not wait for a tool that ignores the abort signal, so that tool may
+     * still be writing the worktree. `specialist_lease_reconcile` resolves it with a stated basis.
      */
     stop(activationId: string, reason?: string): Promise<ActivationStopOutcome>;
     /**
      * Cancel this activation's outstanding asks so a blocked child can be aborted.
      *
-     * The emission is what keeps the ask in the durable record: `pendingAsks()` stops
-     * projecting it the moment it is cancelled, so without a forensic row the only trace of
-     * the question would be the transport log inside this process.
+     * `pendingAsks()` stops projecting an ask the moment it is cancelled. The emission gives
+     * live forensic listeners the event; the stop result carries the ids back to the caller.
+     * Neither is persisted by the current status sink (see `stop`).
      */
     private cancelPendingAsks;
     /**

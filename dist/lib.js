@@ -27228,7 +27228,22 @@ class NativeActivationHost {
       record.session.dispose();
       record.snapshot.state = "stopped";
       this.forget(record.snapshot.activationId);
-      this.releaseIfWriter(record.snapshot, reason);
+      if (abortTimedOut && (record.snapshot.access === "write" || record.snapshot.leaseWaiver)) {
+        this.forensics.emit({
+          activationId,
+          attemptId: record.snapshot.attemptId,
+          participantId: record.snapshot.participantId,
+          specialist: record.snapshot.specialist,
+          beadId: record.snapshot.issueRef,
+          name: "lease_uncertain",
+          payload: {
+            workspace: record.snapshot.workspace.worktreePath,
+            note: "abort did not finish within the stop bound; a tool call may still be writing the worktree, so the lease was not released"
+          }
+        });
+      } else {
+        this.releaseIfWriter(record.snapshot, reason);
+      }
       this.forensics.emit({
         activationId,
         attemptId: record.snapshot.attemptId,

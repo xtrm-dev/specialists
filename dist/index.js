@@ -94069,7 +94069,7 @@ function createSpecialistStopActivationTool(getHost) {
         activation_id: input.activation_id,
         ...outcome.cancelledAskIds.length > 0 ? {
           cancelled_asks: outcome.cancelledAskIds,
-          cancelled_asks_note: "Cancelled by the stop so the activation could be disposed. These asks are " + "recorded as unanswered (activation_ask_cancelled) and can no longer be answered."
+          cancelled_asks_note: "Cancelled by the stop so the activation could be disposed. These asks went " + "unanswered and can no longer be answered; this result is the record of them."
         } : {},
         ...outcome.abortTimedOut ? { abort_timed_out: true } : {}
       };
@@ -98950,7 +98950,22 @@ class NativeActivationHost {
       record.session.dispose();
       record.snapshot.state = "stopped";
       this.forget(record.snapshot.activationId);
-      this.releaseIfWriter(record.snapshot, reason);
+      if (abortTimedOut && (record.snapshot.access === "write" || record.snapshot.leaseWaiver)) {
+        this.forensics.emit({
+          activationId,
+          attemptId: record.snapshot.attemptId,
+          participantId: record.snapshot.participantId,
+          specialist: record.snapshot.specialist,
+          beadId: record.snapshot.issueRef,
+          name: "lease_uncertain",
+          payload: {
+            workspace: record.snapshot.workspace.worktreePath,
+            note: "abort did not finish within the stop bound; a tool call may still be writing the worktree, so the lease was not released"
+          }
+        });
+      } else {
+        this.releaseIfWriter(record.snapshot, reason);
+      }
       this.forensics.emit({
         activationId,
         attemptId: record.snapshot.attemptId,
