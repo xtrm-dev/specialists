@@ -135,6 +135,22 @@ export declare class InteractionTransport {
     }): Promise<InteractionMessage>;
     /** Answer an outstanding ask. Correlation is by `inReplyTo` and nothing else. */
     private reply;
+    /**
+     * Resolve every outstanding ask for one activation as UNANSWERED.
+     *
+     * Needed because a blocked ask suspends the child INSIDE its tool call, and pi's
+     * `AgentSession.abort()` waits for the session to go idle — idle never arrives while a
+     * tool call is outstanding. That is a stop hanging in `stopping` for hours behind an
+     * escalation nobody answered. Resolving each waiter with the cancellation lets the
+     * abort finish.
+     *
+     * This is not a silent drop: the cancellation is a real message in the log (so the
+     * history shows how each ask ended) and the cancelled ids are returned to the caller,
+     * which reports them. `pendingAsks()` is the only projection that forgets the ask.
+     */
+    cancelAsks(activationId: ActivationId, reason: string): MessageId[];
+    /** Unblock the asker and close the ask. Shared by an answer and a cancellation. */
+    private settleAsk;
     /** Every ask still awaiting an answer, oldest first. */
     pendingAsks(participantId?: ParticipantId): PendingAsk[];
     /**

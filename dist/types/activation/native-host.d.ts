@@ -53,6 +53,22 @@ import { type SettlementStore } from './settlement-store.js';
 import { type AuthorityWriter } from './authority-store.js';
 import { type ActivationHandle, type ActivationRequest, type ActivationResult, type ActivationSnapshot, type LiveActivationStats, type WorkspaceIdentity } from './types.js';
 /**
+ * How long a stop waits for `abort()` before disposing anyway.
+ *
+ * `abort()` resolves when the session reaches idle, and any in-flight work that never
+ * returns holds it open. The pending ask — a tool call awaiting an answer that may never
+ * come — is the case that happened (a stop sat in `stopping` for ~3h). Cancelling the asks
+ * removes that cause; this bound is the guarantee that no other one can hold a stop open.
+ */
+export declare const STOP_ABORT_TIMEOUT_MS = 10000;
+/** What a stop did on the way to disposal. */
+export interface ActivationStopOutcome {
+    /** Asks cancelled so the blocked child could be aborted; empty when none were pending. */
+    cancelledAskIds: string[];
+    /** `abort()` exceeded the stop bound; disposal proceeded without it. */
+    abortTimedOut: boolean;
+}
+/**
  * True when an extension source cannot be handed to pi's in-process resource loader as a
  * path, and must instead be resolved by the pi CLI itself.
  *
@@ -481,6 +497,12 @@ export interface NativeActivationHostDeps {
      * tests inject a short bound to prove the failure path without waiting one out.
      */
     sessionStatsTimeoutMs?: number;
+    /**
+     * Bound on the `abort()` a stop performs before disposal. Defaults to
+     * {@link STOP_ABORT_TIMEOUT_MS}; tests inject a short bound to prove a stop cannot be
+     * held open by an abort that never returns.
+     */
+    stopAbortTimeoutMs?: number;
     /** Injected for tests; defaults to probing the `pi` binary on PATH. */
     piVersion?: string;
     /**
@@ -563,6 +585,7 @@ export declare class NativeActivationHost {
     private readonly backgroundPollMs;
     private readonly now;
     private readonly sessionStatsTimeoutMs?;
+    private readonly stopAbortTimeoutMs?;
     private readonly piVersion?;
     private readonly authority;
     private readonly settlements;
@@ -916,8 +939,41 @@ export declare class NativeActivationHost {
      * Explicitly stop and dispose an activation.
      *
      * This is the only ordinary path to disposal — settling is not one.
+     *
+     * Outstanding asks are CANCELLED first, never waited on: the child is suspended inside
+     * the ask tool call, and `abort()` only returns once the session is idle, so a stop that
+     * aborted first waited for an answer nobody was going to give and sat in `stopping` for
+     * hours (SPECIALISTS-4505). Cancelling unblocks the child, the abort completes, and each
+     * cancellation is returned to the caller and emitted as `activation_ask_cancelled`.
+     *
+     * The emitted event is NOT persisted today: the forensic sink stores status transitions
+     * only, and both new kinds are listed in NATIVE_LIFECYCLE_OBSERVABILITY_GAPS. The stop
+     * result is therefore the only record of which asks went unanswered.
+     *
+     * A writer whose abort hit the bound keeps its lease and emits `lease_uncertain`: pi's
+     * `dispose()` does not wait for a tool that ignores the abort signal, so that tool may
+     * still be writing the worktree. The lease holder is this host process, which is alive, so
+     * `inspect` reports it `held` and `specialist_lease_reconcile` refuses it (`holder_is_live`).
+     * The workspace stays fenced for later writers until the host process exits. That is the
+     * safe direction; the remedy is a host restart, not a reconcile.
      */
-    stop(activationId: string, reason?: string): Promise<void>;
+    stop(activationId: string, reason?: string): Promise<ActivationStopOutcome>;
+    /**
+     * Cancel this activation's outstanding asks so a blocked child can be aborted.
+     *
+     * `pendingAsks()` stops projecting an ask the moment it is cancelled. The emission gives
+     * live forensic listeners the event; the stop result carries the ids back to the caller.
+     * Neither is persisted by the current status sink (see `stop`).
+     */
+    private cancelPendingAsks;
+    /**
+     * Await `abort()`, but never past the stop bound.
+     *
+     * Returns whether the bound was hit. A timed-out abort keeps running; disposal has
+     * already taken the activation out of the fleet, so its late outcome is irrelevant — its
+     * rejection is observed here so it cannot surface as an unhandled rejection.
+     */
+    private abortWithin;
     /**
      * Steer a RUNNING activation mid-run with a new instruction, keeping its
      * session and context intact (SPECIALISTS-141).

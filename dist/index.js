@@ -94088,8 +94088,16 @@ function createSpecialistStopActivationTool(getHost) {
           activation_id: input.activation_id
         };
       }
-      await getHost().stop(input.activation_id, input.reason ?? "mcp operator request");
-      return { status: "stopped", activation_id: input.activation_id };
+      const outcome = await getHost().stop(input.activation_id, input.reason ?? "mcp operator request");
+      return {
+        status: "stopped",
+        activation_id: input.activation_id,
+        ...outcome.cancelledAskIds.length > 0 ? {
+          cancelled_asks: outcome.cancelledAskIds,
+          cancelled_asks_note: "Cancelled by the stop so the activation could be disposed. These asks went " + "unanswered and can no longer be answered; this result is the record of them."
+        } : {},
+        ...outcome.abortTimedOut ? { abort_timed_out: true } : {}
+      };
     }
   };
 }
@@ -95104,15 +95112,38 @@ class InteractionTransport {
       throw new UncorrelatedReplyError(target);
     const message = this.compose(input);
     this.log.push(message);
-    this.pending.delete(target);
-    const waiter = this.waiters.get(target);
-    if (waiter) {
-      this.waiters.delete(target);
-      waiter(message);
-    }
-    this.answered.set(target, message);
+    this.settleAsk(target, message);
     await this.attemptDelivery(message);
     return message;
+  }
+  cancelAsks(activationId, reason) {
+    const cancelled = [];
+    for (const ask of this.pendingAsks()) {
+      if (ask.message.activationId !== activationId)
+        continue;
+      const notice = this.compose({
+        kind: "reply",
+        from: ask.message.to,
+        to: ask.message.from,
+        activationId: ask.message.activationId,
+        attemptId: ask.message.attemptId,
+        body: `Cancelled: the activation was stopped (${reason}) before this ${ask.message.kind} was answered. No reply is possible.`,
+        inReplyTo: ask.message.messageId
+      });
+      this.log.push(notice);
+      this.settleAsk(ask.message.messageId, notice);
+      cancelled.push(ask.message.messageId);
+    }
+    return cancelled;
+  }
+  settleAsk(messageId, reply) {
+    this.pending.delete(messageId);
+    const waiter = this.waiters.get(messageId);
+    if (waiter) {
+      this.waiters.delete(messageId);
+      waiter(reply);
+    }
+    this.answered.set(messageId, reply);
   }
   pendingAsks(participantId) {
     const asks = [...this.pending.values()].filter((ask) => !participantId || ask.message.from === participantId || ask.message.to === participantId);
@@ -96146,6 +96177,8 @@ var init_native_activation_observability = __esm(() => {
     output_validation_passed: "Native result validation has no legacy timeline event kind.",
     output_validation_failed: "Native result validation has no legacy timeline event kind; it is a mid-settle signal, not a terminal failure, so it leaves no timeline row and moves no status \u2014 the outcome rides on the run_complete the settle emits next and on the settlement validation.",
     activation_disposed: "In-memory session disposal after a terminal event has no legacy timeline event.",
+    activation_ask_cancelled: "A stop resolves an unanswered ask so the blocked child can abort; the legacy timeline has no ask-cancellation event, and the ask itself was never a timeline row.",
+    activation_abort_timeout: "The stop bound expiring is a disposal-path diagnostic, not a legacy timeline event; the disposal it precedes is recorded by activation_disposed.",
     lease_released: "Workspace-lease teardown has no legacy timeline event.",
     lease_reconciled: "Lease reconciliation has no legacy timeline event.",
     clarification_requested: "Peer interaction has no legacy timeline event; interactions persist as files, not timeline rows.",
@@ -97166,6 +97199,7 @@ class NativeActivationHost {
   backgroundPollMs;
   now;
   sessionStatsTimeoutMs;
+  stopAbortTimeoutMs;
   piVersion;
   authority;
   settlements;
@@ -97196,6 +97230,7 @@ class NativeActivationHost {
     this.now = deps.now ?? (() => Date.now());
     this.wakeSettlement = deps.onWakeSettlement;
     this.sessionStatsTimeoutMs = deps.sessionStatsTimeoutMs;
+    this.stopAbortTimeoutMs = deps.stopAbortTimeoutMs;
     this.piVersion = deps.piVersion;
     this.authority = deps.authority ?? NULL_AUTHORITY_WRITER;
     this.settlements = deps.settlements ?? createFileSettlementStore(join64(this.cwd, ".specialists", "settlements"));
@@ -97734,6 +97769,8 @@ class NativeActivationHost {
       },
       onAnswered: (kind) => {
         const record = this.registry.get(activationId);
+        if (record?.snapshot.state === "stopping")
+          return;
         if (record)
           record.snapshot.state = "running";
         if (record)
@@ -98924,10 +98961,12 @@ class NativeActivationHost {
   async stop(activationId, reason = "operator request") {
     const record = this.registry.get(activationId);
     if (!record)
-      return;
+      return { cancelledAskIds: [], abortTimedOut: false };
     record.snapshot.state = "stopping";
+    const cancelledAskIds = this.cancelPendingAsks(record.snapshot, reason);
+    let abortTimedOut = false;
     try {
-      await record.session.abort();
+      abortTimedOut = await this.abortWithin(record.session, record.snapshot);
     } finally {
       this.stopToolDurationWatch(activationId);
       this.toolDurationWarnMsByActivation.delete(activationId);
@@ -98939,7 +98978,22 @@ class NativeActivationHost {
       record.session.dispose();
       record.snapshot.state = "stopped";
       this.forget(record.snapshot.activationId);
-      this.releaseIfWriter(record.snapshot, reason);
+      if (abortTimedOut && (record.snapshot.access === "write" || record.snapshot.leaseWaiver)) {
+        this.forensics.emit({
+          activationId,
+          attemptId: record.snapshot.attemptId,
+          participantId: record.snapshot.participantId,
+          specialist: record.snapshot.specialist,
+          beadId: record.snapshot.issueRef,
+          name: "lease_uncertain",
+          payload: {
+            workspace: record.snapshot.workspace.worktreePath,
+            note: "abort did not finish within the stop bound; a tool call may still be writing the worktree, so the lease was not released. The holder is this host process, so specialist_lease_reconcile refuses it until the host process exits."
+          }
+        });
+      } else {
+        this.releaseIfWriter(record.snapshot, reason);
+      }
       this.forensics.emit({
         activationId,
         attemptId: record.snapshot.attemptId,
@@ -98951,6 +99005,49 @@ class NativeActivationHost {
       });
       this.registry.remove(activationId);
     }
+    return { cancelledAskIds, abortTimedOut };
+  }
+  cancelPendingAsks(snapshot, reason) {
+    const cancelled = this.interactions.cancelAsks(snapshot.activationId, reason);
+    if (cancelled.length === 0)
+      return [];
+    for (const messageId of cancelled) {
+      this.forensics.emit({
+        activationId: snapshot.activationId,
+        attemptId: snapshot.attemptId,
+        participantId: snapshot.participantId,
+        specialist: snapshot.specialist,
+        beadId: snapshot.issueRef,
+        name: "activation_ask_cancelled",
+        payload: { message_id: messageId, reason }
+      });
+    }
+    this.wakeFleetWaiters();
+    return cancelled;
+  }
+  async abortWithin(session, snapshot) {
+    const abort = session.abort();
+    const timeoutMs = this.stopAbortTimeoutMs ?? STOP_ABORT_TIMEOUT_MS;
+    let timer;
+    const timedOut = new Promise((resolve) => {
+      timer = setTimeout(() => resolve(true), timeoutMs);
+    });
+    const hitBound = await Promise.race([abort.then(() => false), timedOut]).finally(() => {
+      clearTimeout(timer);
+      abort.catch(() => {});
+    });
+    if (hitBound) {
+      this.forensics.emit({
+        activationId: snapshot.activationId,
+        attemptId: snapshot.attemptId,
+        participantId: snapshot.participantId,
+        specialist: snapshot.specialist,
+        beadId: snapshot.issueRef,
+        name: "activation_abort_timeout",
+        payload: { timeout_ms: timeoutMs }
+      });
+    }
+    return hitBound;
   }
   async steer(activationId, message) {
     const record = this.registry.get(activationId);
@@ -99115,7 +99212,7 @@ function legacyOnlyConfigNotes(spec) {
   }
   return notes;
 }
-var HOST_ENV_SPAWNING_TOOLS, TOKEN_USAGE_KEYS, WRITE_TIERS, TOOL_DURATION_CHECK_INTERVAL_MS = 1e4, LIVE_BACKGROUND_STATUSES, TERMINAL_BACKGROUND_STATUSES, BACKGROUND_TASK_MAX_HOLD_MS, NON_LOCAL_EXTENSION_PREFIXES, defaultExtensionSourceResolutionEnv, EXTENSION_CLASS_SOURCES, BUILTIN_TOOL_SOURCES, EMPTY_DISCOVERY, FALLBACK_RETRYABLE_CLASSES, NULL_FORENSIC_SINK, gateExtensionProviders, provisionalModelPatterns;
+var HOST_ENV_SPAWNING_TOOLS, STOP_ABORT_TIMEOUT_MS = 1e4, TOKEN_USAGE_KEYS, WRITE_TIERS, TOOL_DURATION_CHECK_INTERVAL_MS = 1e4, LIVE_BACKGROUND_STATUSES, TERMINAL_BACKGROUND_STATUSES, BACKGROUND_TASK_MAX_HOLD_MS, NON_LOCAL_EXTENSION_PREFIXES, defaultExtensionSourceResolutionEnv, EXTENSION_CLASS_SOURCES, BUILTIN_TOOL_SOURCES, EMPTY_DISCOVERY, FALLBACK_RETRYABLE_CLASSES, NULL_FORENSIC_SINK, gateExtensionProviders, provisionalModelPatterns;
 var init_native_host = __esm(() => {
   init_loader();
   init_system_prompt();
