@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   bridgedDispatcherEnv,
+  dispatcherBindingFields,
+  isDispatcherLabel,
+  isDispatcherSessionId,
   dispatcherEnvOverlay,
   dispatcherFromHostEnv,
   resetDispatcherWarning,
@@ -204,5 +207,64 @@ describe('a failed xt lookup is not repeated for every dispatch (SPECIALISTS-450
     expect(lookup().sessionId).toBe('sess-1');  // cool-down over, succeeds
     lookup();                                  // success is not cached: xt is asked again
     expect(calls).toEqual(['bad', 'ok', 'ok']);
+  });
+});
+
+describe('dispatcher binding validators (SPECIALISTS-4506)', () => {
+  const UUID = '3f7c1a1e-9b2d-4c5e-8f60-1a2b3c4d5e6f';
+
+  beforeEach(() => { resetDispatcherWarning(); });
+
+  it('accepts the labels Substrate accepts and nothing else', () => {
+    for (const label of ['sp-lead-1', 'specialist::researcher', 'node::emitter::a.b_c+d@e/f', 'A'.repeat(128)]) {
+      expect(isDispatcherLabel(label)).toBe(true);
+    }
+    // sb trims before it validates, so surrounding whitespace is not a rejection.
+    for (const label of ['', '   ', '-lead', 'lead 1', 'lead;rm -rf /', 'A'.repeat(129), null, 7, undefined]) {
+      expect(isDispatcherLabel(label)).toBe(false);
+    }
+  });
+
+  // Substrate's SESSION_ID_PATTERN: a canonical UUID (sb lowercases it first, so either case) or a
+  // tmux session id. This host accepts exactly that, so a value sb would record is never dropped here.
+  it('accepts what Substrate accepts as a session id: a UUID in either case, or a tmux id', () => {
+    expect(isDispatcherSessionId(UUID)).toBe(true);
+    expect(isDispatcherSessionId(` ${UUID} `)).toBe(true);
+    expect(isDispatcherSessionId(UUID.toUpperCase())).toBe(true);
+    expect(isDispatcherSessionId('$3')).toBe(true);
+    for (const session of ['$', '$x', '3', '0f7e7a52', 'not-a-uuid', `${UUID}x`, '', null, 7]) {
+      expect(isDispatcherSessionId(session)).toBe(false);
+    }
+  });
+
+  it('keeps the values Substrate accepts, trimmed', () => {
+    expect(dispatcherBindingFields({ participant: ' sp-lead-1 ', sessionId: UUID }, () => undefined))
+      .toEqual({ dispatcherParticipantId: 'sp-lead-1', dispatcherSessionId: UUID });
+  });
+
+  it('records nothing when the dispatcher is unknown — absent, never a placeholder', () => {
+    expect(dispatcherBindingFields(undefined, () => undefined)).toEqual({});
+    expect(dispatcherBindingFields({}, () => undefined)).toEqual({});
+    expect(dispatcherBindingFields({ participant: '   ' }, () => undefined)).toEqual({});
+  });
+
+  it('drops an invalid half with one warning and keeps the valid one', () => {
+    const warnings: string[] = [];
+    const invalidParticipant = () => dispatcherBindingFields(
+      { participant: 'lead 1', sessionId: UUID },
+      (message) => warnings.push(message),
+    );
+    expect(invalidParticipant()).toEqual({ dispatcherSessionId: UUID });
+    invalidParticipant(); // the same reason does not warn twice
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('not a Substrate-safe label');
+
+    const sessionWarnings: string[] = [];
+    expect(dispatcherBindingFields(
+      { participant: 'sp-lead-1', sessionId: 'not-a-uuid' },
+      (message) => sessionWarnings.push(message),
+    )).toEqual({ dispatcherParticipantId: 'sp-lead-1' });
+    expect(sessionWarnings).toHaveLength(1);
+    expect(sessionWarnings[0]).toContain('not a UUID or a tmux session id');
   });
 });

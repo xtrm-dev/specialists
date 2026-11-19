@@ -37,6 +37,17 @@ export declare const DISPATCHER_ENV_KEYS: readonly ["XTRM_DISPATCHER_PARTICIPANT
 /** Bound on the one CLI lookup per dispatch. */
 export declare const DISPATCHER_LOOKUP_TIMEOUT_MS = 3000;
 /**
+ * Substrate's dispatcher label grammar (XTRM-839): a shell-safe identifier of at most
+ * 128 characters, mirroring its `IDENTITY_LABEL_PATTERN` / `IDENTITY_LABEL_MAX_LENGTH`.
+ * Mirrored here so the host drops a value sb would refuse instead of letting a malformed
+ * label fail the whole dispatch — sb writes NO binding on a bad value.
+ */
+export declare const DISPATCHER_LABEL_MAX_LENGTH = 128;
+/** True when `value` is a label sb will accept as a dispatcher participant. */
+export declare function isDispatcherLabel(value: unknown): value is string;
+/** True when `value` is a UUID or tmux session id sb will accept as a dispatcher session. */
+export declare function isDispatcherSessionId(value: unknown): value is string;
+/**
  * After a failed lookup (missing or old xt, timeout, junk) the next lookups are skipped for
  * this long, so a wedged install costs one bounded stall instead of one per dispatch. A
  * success clears it. Found by the seconder on #584: the warning is process-wide-once, so the
@@ -133,6 +144,21 @@ export declare function resolveRequestDispatcher(request: {
     requestedByParticipantId?: string;
     coordinatorSessionId?: string;
 };
+/** The ExecutionBinding half of one dispatcher value (XTRM-839). */
+export interface DispatcherBindingFields {
+    dispatcherParticipantId?: string;
+    dispatcherSessionId?: string;
+}
+/**
+ * The binding half of the one dispatcher value: what `sb provenance dispatch` can record
+ * without refusing the dispatch. sb validates both at its write seam and writes NO binding
+ * on a malformed value, so an invalid half is DROPPED here (one warning per reason) and the
+ * dispatch proceeds. Absent stays absent — never a placeholder, never an env default.
+ */
+export declare function dispatcherBindingFields(identity: {
+    participant?: string;
+    sessionId?: string;
+} | undefined, warn?: (message: string) => void): DispatcherBindingFields;
 /**
  * The env overlay for one dispatcher value.
  *

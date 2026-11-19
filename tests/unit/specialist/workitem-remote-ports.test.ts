@@ -14,7 +14,8 @@
 // The unreachable-remote test needs a real Substrate module tree, like substrate-parity and the
 // stale-store guard test: set XTRM_SUBSTRATE_DIR=<abs path to @jaggerxtrm/substrate>. The rest use
 // a structural fake and run everywhere.
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { resetRuntimeDiagnosticsSink, setRuntimeDiagnosticsSink } from '../../../src/utils/runtime-diagnostics.js';
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 
 import { join } from 'node:path';
@@ -28,6 +29,7 @@ import {
 } from '../../../src/activation/workitem-store.js';
 import {
   createRemoteWorkItemPorts,
+  resetRemoteDispatcherWarning,
   createReopeningService,
   type RemoteWorkItemService,
 } from '../../../src/activation/workitem-remote.js';
@@ -178,6 +180,37 @@ describe('one call per mutation, never retried', () => {
       ports.gate.dispatch(null, null, { ref: 'X', specialist: 's', holder: 'h' } as never),
     ).rejects.toThrow(/connection_lost/);
     expect(service.calls.map((entry) => entry.op)).toEqual(['gate.dispatch']);
+  });
+});
+
+describe('the remote gate and the dispatcher fields (SPECIALISTS-4506)', () => {
+  const lines: string[] = [];
+  beforeEach(() => {
+    lines.length = 0;
+    resetRemoteDispatcherWarning();
+    setRuntimeDiagnosticsSink((line) => { lines.push(line); });
+  });
+  afterEach(() => { resetRuntimeDiagnosticsSink(); });
+  const remoteGate = () => {
+    const service = fakeService((op) => (op === 'gate.dispatch' ? { binding: { id: 'exb_1' } } : undefined));
+    return { service, ports: createRemoteWorkItemPorts(service, { remote: 'ssh:server' }) };
+  };
+
+  it('says once that the remote binding records no dispatcher, and still dispatches', async () => {
+    const { service, ports } = remoteGate();
+    const req = { ref: 'X', specialist: 's', holder: 'h', dispatcherParticipantId: 'sp-lead-1' } as never;
+
+    await ports.gate.dispatch(null, null, req);
+    await ports.gate.dispatch(null, null, req);
+
+    expect(service.calls.map((entry) => entry.op)).toEqual(['gate.dispatch', 'gate.dispatch']);
+    expect(lines.filter((line) => line.includes('remote Substrate path cannot record the dispatcher'))).toHaveLength(1);
+  });
+
+  it('stays silent when no dispatcher value is known', async () => {
+    const { ports } = remoteGate();
+    await ports.gate.dispatch(null, null, { ref: 'X', specialist: 's', holder: 'h', dispatcherParticipantId: null, dispatcherSessionId: null } as never);
+    expect(lines).toEqual([]);
   });
 });
 

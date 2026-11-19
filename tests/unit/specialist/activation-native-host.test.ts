@@ -55,7 +55,7 @@ import type { PiSdk, PiAgentSessionLike, PiAgentSessionEvent } from '../../../sr
 import { createSpecialistStatusTool } from '../../../src/tools/specialist/specialist_status.tool.js';
 import { CircuitBreaker } from '../../../src/utils/circuitBreaker.js';
 import { FAKE_AGENT_DIR, FakeResourceLoader, PI_DEFAULT_PREAMBLE, piSessionSystemPrompt } from '../../utils/pi-resource-loader-double.js';
-import type { ResolvedContextView, SpecialistWorkItemBoundary, WorkItemView } from '../../../src/activation/workitem-store.js';
+import type { DispatchRequest, ResolvedContextView, SpecialistWorkItemBoundary, WorkItemView } from '../../../src/activation/workitem-store.js';
 import { tempDir } from '../../utils/temp-dir.js';
 
 /**
@@ -327,6 +327,8 @@ function fakeWorkItems(options: {
   contextError?: string;
   /** resolvedContextHash the binding records; defaults to 'context-test'; null = the binding carries none. */
   boundContextHash?: string | null;
+  /** The bind request this boundary was handed, so a test can read what the host sent. */
+  onBind?: (request: DispatchRequest) => void;
 } = {}): SpecialistWorkItemBoundary {
   const contract = {
     problem: 'The thing is unclear.',
@@ -367,7 +369,8 @@ function fakeWorkItems(options: {
       if (state !== 'ready' && state !== 'claimed') throw new Error(`dispatch rejected: issue is ${state}`);
       return { issueId: 'iss_test', revision: 1, contractHash: 'hash-test', report: { state, revision: 1, contractHash: 'hash-test', reasons: [] } as never };
     },
-    bind() {
+    bind(request: DispatchRequest) {
+      options.onBind?.(request);
       return {
         id: 'exb_test', issueId: 'iss_test', issueRevision: 1, contractHash: 'hash-test',
         ...(options.boundContextHash === null ? {} : { resolvedContextHash: options.boundContextHash ?? 'context-test' }),
@@ -5528,5 +5531,74 @@ describe('the role prompt reaches the model (HIRYUEN-774)', () => {
     }) as unknown as FakeResourceLoader).options;
     expect(options).not.toHaveProperty('systemPrompt');
     expect(options).not.toHaveProperty('appendSystemPrompt');
+  });
+});
+
+describe('one dispatcher value reaches the ExecutionBinding too (SPECIALISTS-4506)', () => {
+  const UUID = '3f7c1a1e-9b2d-4c5e-8f60-1a2b3c4d5e6f';
+
+  async function dispatch(dispatcher: { participant?: string; sessionId?: string } | undefined) {
+    process.env.SPECIALISTS_PERMISSION_GUARD = '1';
+    const record: { createArgs?: Record<string, unknown> } = {};
+    const session = fakeSession({});
+    const bashOptions: unknown[] = [];
+    const sdk = {
+      ...makeSdk(record, session),
+      createBashTool: (...factoryArgs: unknown[]) => {
+        bashOptions.push(factoryArgs[1]);
+        return { name: 'bash', execute: async () => 'ran' };
+      },
+    } as unknown as PiSdk;
+
+    const sink = collectingSink();
+    const bindRequests: DispatchRequest[] = [];
+    const host = new NativeActivationHost({
+      provisionWriterWorkspace: workspaceIdentityFor,
+      loader: loaderFor(readOnlySpec()),
+      workItems: fakeWorkItems({ onBind: (request) => bindRequests.push(request) }),
+      forensics: sink,
+      loadSdk: async () => sdk,
+      cwd: hostWorkspace(),
+    });
+    await (await host.start({
+      specialist: 'researcher',
+      issueRef: 'ISSUE-1',
+      ...(dispatcher ? { dispatcher } : {}),
+      ...(dispatcher?.sessionId ? { coordinatorSessionId: dispatcher.sessionId } : {}),
+    })).result;
+
+    // The identity reaches the child through the bash spawn hook; that env is the
+    // activation's env, so it is where the third sink is observed.
+    const withHook = bashOptions.filter((options) => options && typeof options === 'object') as Array<{
+      spawnHook: (context: { command: string; cwd: string; env: NodeJS.ProcessEnv }) => {
+        command: string; cwd: string; env: NodeJS.ProcessEnv;
+      };
+    }>;
+    expect(withHook.length).toBeGreaterThan(0);
+    const env = withHook[0]!.spawnHook({ command: 'true', cwd: '/tmp', env: { PATH: '/usr/bin' } }).env;
+    const requestedBy = (sink.events.find((event) => event.name === 'activation_requested')?.payload as {
+      requested_by?: string | null;
+    } | undefined)?.requested_by;
+    return { env, requestedBy, binding: bindRequests[0] };
+  }
+
+  it('writes the same participant to the env, requested_by and the binding', async () => {
+    const { env, requestedBy, binding } = await dispatch({ participant: 'sp-lead-1', sessionId: UUID });
+
+    expect(env.XTRM_DISPATCHER_PARTICIPANT).toBe('sp-lead-1');
+    expect(requestedBy).toBe('sp-lead-1');
+    expect(binding?.dispatcherParticipantId).toBe('sp-lead-1');
+    expect(binding?.dispatcherSessionId).toBe(UUID);
+    // One dispatch, one value: the three sinks cannot disagree.
+    expect(new Set([env.XTRM_DISPATCHER_PARTICIPANT, requestedBy, binding?.dispatcherParticipantId])).toEqual(new Set(['sp-lead-1']));
+  });
+
+  it('records nothing when the dispatcher is unknown — absent, never a placeholder', async () => {
+    const { env, requestedBy, binding } = await dispatch(undefined);
+
+    expect(env.XTRM_DISPATCHER_PARTICIPANT).toBeUndefined();
+    expect(requestedBy).toBeNull();
+    expect(binding?.dispatcherParticipantId).toBeUndefined();
+    expect(binding?.dispatcherSessionId).toBeUndefined();
   });
 });
