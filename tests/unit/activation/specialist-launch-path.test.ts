@@ -145,15 +145,47 @@ interface DispatchOptions {
   dispatcher?: DispatcherIdentity;
   /** `null` omits the legacy requested_by field, so the dispatcher is the only value. */
   requestedBy?: string | null;
+  /** Dispatch an inline contract instead of an existing Issue, so the path must CLAIM first. */
+  inline?: boolean;
+  /** The name the LOADER reports, which may differ from the requested specialist name. */
+  specialistName?: string;
 }
 
-async function dispatchOnce(options: DispatchOptions = {}): Promise<{ bashOptions: unknown[] }> {
+/** The holder each Substrate-side site of one dispatch was handed (SPECIALISTS-4502). */
+interface CapturedHolders {
+  inline?: string;
+  check?: string;
+  bind?: string;
+}
+
+async function dispatchOnce(options: DispatchOptions = {}): Promise<{
+  bashOptions: unknown[];
+  holders: CapturedHolders;
+  handle: Awaited<ReturnType<NativeActivationHost['start']>>;
+}> {
   const bashOptions: unknown[] = [];
+  const holders: CapturedHolders = {};
+  const boundary = testWorkItems({ description: BEAD.description });
+  const workItems: typeof boundary = {
+    ...boundary,
+    inlineCreate: (contract, opts) => {
+      holders.inline = opts?.holder;
+      return boundary.inlineCreate(contract, opts);
+    },
+    check: (req) => {
+      holders.check = req.holder;
+      return boundary.check(req);
+    },
+    bind: (req) => {
+      holders.bind = req.holder;
+      return boundary.bind(req);
+    },
+  };
   const host = new NativeActivationHost({
-    workItems: testWorkItems({ description: BEAD.description }),
+    workItems,
     loader: { get: async () => ({
       specialist: {
-        metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },
+        metadata: { name: options.specialistName ?? 'researcher', version: '1.0.0', description: 'd', category: 'c' },
         execution: {
           model: 'testprov/test-model',
           permission_required: 'READ_ONLY',
@@ -181,12 +213,13 @@ async function dispatchOnce(options: DispatchOptions = {}): Promise<{ bashOption
   });
   const requestedBy = options.requestedBy === undefined ? 'coordinator' : options.requestedBy;
   const handle = await host.start({
-    specialist: 'researcher', issueRef: 'ISSUE-1',
+    specialist: 'researcher',
+    ...(options.inline ? { contract: BEAD.description } : { issueRef: 'ISSUE-1' }),
     ...(requestedBy ? { requestedByParticipantId: requestedBy } : {}),
     ...(options.dispatcher ? { dispatcher: options.dispatcher } : {}),
   });
   await handle.result;
-  return { bashOptions };
+  return { bashOptions, holders, handle };
 }
 
 /**
@@ -518,6 +551,50 @@ describe('native launch path — a lead-launched Specialist exports its own role
     // The holder names the activation in attribution; the lead's agent name must not outrank it.
     expect(applied.env.XTRM_AGENT_NAME).toBe(applied.env.SUBSTRATE_HOLDER);
     expect(applied.env).not.toHaveProperty('XTRM_DISPATCHER_NAME');
+  });
+});
+
+describe('native launch path — one holder for the claim, the check, the bind and the shells (SPECIALISTS-4502)', () => {
+  /** The holder the activation's own shells carry: the shell half of the contract. */
+  const shellHolder = (bashOptions: unknown[]): string => {
+    const [hook] = hooks(bashOptions);
+    return String(hook!.spawnHook({ command: 'gh pr create --fill', cwd: '/w', env: {} }).env.SUBSTRATE_HOLDER);
+  };
+
+  it('claims, checks and binds an inline dispatch as the holder its shells carry', async () => {
+    // Core's gh-pr-link only sends --participant when the env holder equals the claim holder,
+    // so an inline Issue whose claim names `specialist::<name>` never gets its PR linked.
+    const { bashOptions, holders } = await dispatchOnce({ grantBash: true, inline: true });
+
+    const holder = shellHolder(bashOptions);
+    expect(holder).toMatch(/^sp-researcher-[A-Za-z0-9]+$/);
+    expect(holders.inline).toBe(holder);
+    expect(holders.check).toBe(holder);
+    expect(holders.bind).toBe(holder);
+  });
+
+  it('checks and binds an issue_ref dispatch as the holder its shells carry', async () => {
+    const { bashOptions, holders } = await dispatchOnce({ grantBash: true });
+
+    const holder = shellHolder(bashOptions);
+    expect(holders.inline).toBeUndefined();
+    expect(holders.check).toBe(holder);
+    expect(holders.bind).toBe(holder);
+  });
+
+  it('yields that one holder from the loaded specialist name, and keeps the forensic participant role-level', async () => {
+    // metadata.name differs from the requested (lookup) name: one name source, never two.
+    const { bashOptions, holders, handle } = await dispatchOnce({
+      grantBash: true, inline: true, specialistName: 'field-researcher',
+    });
+
+    const holder = shellHolder(bashOptions);
+    expect(holder).toMatch(/^sp-field-researcher-[A-Za-z0-9]+$/);
+    expect(holders.inline).toBe(holder);
+    expect(holders.check).toBe(holder);
+    expect(holders.bind).toBe(holder);
+    // Lineage, ask addressing and sp ps ownership stay on the role-level participant id.
+    expect(handle.participantId).toBe('specialist::researcher');
   });
 });
 

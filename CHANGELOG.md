@@ -34,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A bridged activation's Claude Code child gets the activation identity (SPECIALISTS-4498) (#583) ([8d8fd3d](https://github.com/xtrm-dev/specialists/commit/8d8fd3d0a3dee0e1cd4f9095e53b18fb6044f3f7))
 - One dispatcher value per dispatch, written to env and Substrate (SPECIALISTS-4503) (#584) ([82a5c22](https://github.com/xtrm-dev/specialists/commit/82a5c22d34d1385b5a5d97d631fa6ede9685ed18))
 - Record the dispatcher on the ExecutionBinding (SPECIALISTS-4506) (#586) ([ed1e420](https://github.com/xtrm-dev/specialists/commit/ed1e42019c2c10a5956dcd63278136d23a874781))
-- Bound and sanitize the dispatcher values, async lookup (SPECIALISTS-4510) ([8aabce4](https://github.com/xtrm-dev/specialists/commit/8aabce415d57e8a915ba62b109c6ec7013c6ce0d))
+- One holder for the claim, the check, the bind and the shells (SPECIALISTS-4502) ([afdcadb](https://github.com/xtrm-dev/specialists/commit/afdcadb7196a21a930ef3916dfed781f9c422047))
 - Stop cancels a pending ask instead of waiting on it (SPECIALISTS-4505) (#587) ([b630953](https://github.com/xtrm-dev/specialists/commit/b630953e5c9db81b79ff5022d2291a743c588c19))
 
 ### Project maintenance
@@ -56,8 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Create every scratch directory through tempDir so the CORE-2612 sweep can see it (SPECIALISTS-4474) (#576) ([7a95f4b](https://github.com/xtrm-dev/specialists/commit/7a95f4b18a5f1e8f18b6a01772825e496ef15b09))
 - Teach the operator allow list, not the removed two-switch route (SPECIALISTS-4447) (#577) ([346eea1](https://github.com/xtrm-dev/specialists/commit/346eea1d6a758e3386fe53b8384d8d83aeb41b01))
 - Bump the actions-all group across 1 directory with 3 updates (#561) ([4eb1e50](https://github.com/xtrm-dev/specialists/commit/4eb1e50cd3b9a5d67b590004e7c24ba84749b132))
-- Rebuild with the pinned bun 1.4.2 for SPECIALISTS-4510 ([e3abbd7](https://github.com/xtrm-dev/specialists/commit/e3abbd73034eda0b4e2880ae05c136007acc454b))
-- Rebuild with the pinned bun 1.4.2 after merging master (SPECIALISTS-4510) ([feee9f7](https://github.com/xtrm-dev/specialists/commit/feee9f774866957c96bfe835acb7c02b1309458d))
+- Rebuild with the pinned bun 1.4.2 (SPECIALISTS-4502) ([72a716f](https://github.com/xtrm-dev/specialists/commit/72a716ff120b175a679c1703b1995dbde3408a23))
+- Rebuild with the pinned bun 1.4.2 against the worktree's own install (SPECIALISTS-4502) ([c746156](https://github.com/xtrm-dev/specialists/commit/c746156dee87ff148c0b147c8bf018fa50b235ef))
 
 ## [4.2.0] - 2026-11-11
 

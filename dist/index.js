@@ -97309,6 +97309,7 @@ class NativeActivationHost {
     });
     if (!specialist)
       return reject("unknown_specialist");
+    const activationHolder = specialistHolderName(specialist.specialist.metadata.name, activationId);
     const execution = specialist.specialist.execution;
     const tier = execution.permission_required ?? "READ_ONLY";
     const leaseWaiver = execution.lease_waiver === true;
@@ -97385,7 +97386,7 @@ class NativeActivationHost {
           title,
           kind,
           ...parentId ? { parentId } : {},
-          holder: participantId,
+          holder: activationHolder,
           activationId
         });
         autoCreatedRef = created.ref;
@@ -97447,7 +97448,7 @@ class NativeActivationHost {
       dispatchCheck = await workItems.check({
         ref: issueRef,
         specialist: request.specialist,
-        holder: participantId,
+        holder: activationHolder,
         activationId,
         workspace: workspace.worktreePath
       });
@@ -97779,7 +97780,7 @@ class NativeActivationHost {
       }
     });
     const activationLaunchEnv = resolveAgentLaunchEnv({
-      holder: specialistHolderName(specialist.specialist.metadata.name, activationId),
+      holder: activationHolder,
       roleName: specialist.specialist.metadata.name,
       cwd: workspace.worktreePath,
       env: process.env,
@@ -97990,7 +97991,7 @@ class NativeActivationHost {
         binding = await workItems.bind({
           ref: issueRef,
           specialist: request.specialist,
-          holder: participantId,
+          holder: activationHolder,
           activationId,
           attemptId,
           sessionId: session.sessionId,
