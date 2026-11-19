@@ -240,7 +240,9 @@ describe('specialist_dispatch inline path — one gate, create only after it pas
     expect(workItems.inlineCreate).toHaveBeenCalledTimes(1);
     const [createdContract, createdOpts] = (workItems.inlineCreate as unknown as { mock: { calls: unknown[][] } }).mock.calls[0];
     expect(createdContract).toBe(INLINE_CONTRACT);
-    expect(createdOpts).toMatchObject({ holder: 'specialist::researcher' });
+    // SPECIALISTS-4502: the claim holder is the activation-scoped holder the shells carry
+    // (`sp-<name>-<activation>`), not the role-level participant id.
+    expect(createdOpts).toMatchObject({ holder: expect.stringMatching(/^sp-researcher-[A-Za-z0-9]+$/) });
     expect(typeof (createdOpts as { activationId?: unknown }).activationId).toBe('string');
     expect(out.status).toBe('dispatched');
     expect(out.bead_id).toBe('bd-inline-1');
