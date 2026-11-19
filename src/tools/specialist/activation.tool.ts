@@ -760,8 +760,23 @@ export function createSpecialistStopActivationTool(getHost: () => NativeActivati
           activation_id: input.activation_id,
         };
       }
-      await getHost().stop(input.activation_id, input.reason ?? 'mcp operator request');
-      return { status: 'stopped' as const, activation_id: input.activation_id };
+      const outcome = await getHost().stop(input.activation_id, input.reason ?? 'mcp operator request');
+      return {
+        status: 'stopped' as const,
+        activation_id: input.activation_id,
+        // An ask the stop had to cancel is named rather than dropped: the activation is
+        // disposed, so specialist_reply is no longer the way to resolve it — but the
+        // caller still learns which question went unanswered, and why.
+        ...(outcome.cancelledAskIds.length > 0
+          ? {
+            cancelled_asks: outcome.cancelledAskIds,
+            cancelled_asks_note:
+              'Cancelled by the stop so the activation could be disposed. These asks went '
+              + 'unanswered and can no longer be answered; this result is the record of them.',
+          }
+          : {}),
+        ...(outcome.abortTimedOut ? { abort_timed_out: true } : {}),
+      };
     },
   };
 }

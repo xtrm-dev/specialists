@@ -44,6 +44,8 @@ export declare const NATIVE_LIFECYCLE_OBSERVABILITY_GAPS: Readonly<{
     readonly output_validation_passed: "Native result validation has no legacy timeline event kind.";
     readonly output_validation_failed: "Native result validation has no legacy timeline event kind; it is a mid-settle signal, not a terminal failure, so it leaves no timeline row and moves no status — the outcome rides on the run_complete the settle emits next and on the settlement validation.";
     readonly activation_disposed: "In-memory session disposal after a terminal event has no legacy timeline event.";
+    readonly activation_ask_cancelled: "A stop resolves an unanswered ask so the blocked child can abort; the legacy timeline has no ask-cancellation event, and the ask itself was never a timeline row.";
+    readonly activation_abort_timeout: "The stop bound expiring is a disposal-path diagnostic, not a legacy timeline event; the disposal it precedes is recorded by activation_disposed.";
     readonly lease_released: "Workspace-lease teardown has no legacy timeline event.";
     readonly lease_reconciled: "Lease reconciliation has no legacy timeline event.";
     readonly clarification_requested: "Peer interaction has no legacy timeline event; interactions persist as files, not timeline rows.";

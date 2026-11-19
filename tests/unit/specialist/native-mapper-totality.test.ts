@@ -71,7 +71,9 @@ import { createObservabilitySqliteClientAtPath } from '../../../src/specialist/o
 // Hooks emits (pre_render/post_render/pre_execute/post_execute) are a different vocabulary
 // (src/specialist/hooks.ts) and never reach the forensic sink — excluded by design.
 export const NATIVE_EMIT_INVENTORY = Object.freeze([
+  'activation_abort_timeout',
   'activation_admitted',
+  'activation_ask_cancelled',
   'activation_completed',
   'activation_disposed',
   'activation_failed',

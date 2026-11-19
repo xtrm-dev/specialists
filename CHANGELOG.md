@@ -33,10 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A lead-launched specialist exports its own role (CORE-2722) (#582) ([e6fa1c7](https://github.com/xtrm-dev/specialists/commit/e6fa1c7628d9d7b7753acf2349da70ab7b581e63))
 - A bridged activation's Claude Code child gets the activation identity (SPECIALISTS-4498) (#583) ([8d8fd3d](https://github.com/xtrm-dev/specialists/commit/8d8fd3d0a3dee0e1cd4f9095e53b18fb6044f3f7))
 - One dispatcher value per dispatch, written to env and Substrate (SPECIALISTS-4503) (#584) ([82a5c22](https://github.com/xtrm-dev/specialists/commit/82a5c22d34d1385b5a5d97d631fa6ede9685ed18))
-- Record the dispatcher on the ExecutionBinding (SPECIALISTS-4506) ([600af9a](https://github.com/xtrm-dev/specialists/commit/600af9a54b36d7e613f9de4e946e9572d5571265))
-- The dispatcher wrapper hands the gate the whole provenance service (SPECIALISTS-4506) ([ed48e23](https://github.com/xtrm-dev/specialists/commit/ed48e23241984b80dfde5b198ae93caeae7f267d))
-- Accept the session ids Substrate accepts, and say when the remote path drops the dispatcher (SPECIALISTS-4506) ([fed5508](https://github.com/xtrm-dev/specialists/commit/fed55084ac83c646f87a85384aa0677ff0717612))
-- Pin the migration-017 detection, the gate wiring and the once-only warning (SPECIALISTS-4506) ([25ba6ae](https://github.com/xtrm-dev/specialists/commit/25ba6aeb380fb67a2616da3c2151f24be2ee845a))
+- Stop cancels a pending ask instead of waiting on it (SPECIALISTS-4505) ([9a0cc1c](https://github.com/xtrm-dev/specialists/commit/9a0cc1c50eb3abe6a3d51333a11c0841cba329d9))
+- Record the dispatcher on the ExecutionBinding (SPECIALISTS-4506) (#586) ([ed1e420](https://github.com/xtrm-dev/specialists/commit/ed1e42019c2c10a5956dcd63278136d23a874781))
+- Keep a timed-out writer's lease and correct the stop record claims (SPECIALISTS-4505) ([76e78f9](https://github.com/xtrm-dev/specialists/commit/76e78f96b95dde32d9fb103faf339d0500919b11))
+- Say that a kept writer lease needs a host restart, and test it for real (SPECIALISTS-4505) ([3fc7597](https://github.com/xtrm-dev/specialists/commit/3fc75971bf1119c188b40a1d048df3881b5dce2d))
 
 ### Project maintenance
 - Make the NODE_ENV assertion prove the override (SPECIALISTS-4429) (#543) ([21be15b](https://github.com/xtrm-dev/specialists/commit/21be15b78a1e6eda9640dea37c350832012b1781))
@@ -57,10 +57,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Create every scratch directory through tempDir so the CORE-2612 sweep can see it (SPECIALISTS-4474) (#576) ([7a95f4b](https://github.com/xtrm-dev/specialists/commit/7a95f4b18a5f1e8f18b6a01772825e496ef15b09))
 - Teach the operator allow list, not the removed two-switch route (SPECIALISTS-4447) (#577) ([346eea1](https://github.com/xtrm-dev/specialists/commit/346eea1d6a758e3386fe53b8384d8d83aeb41b01))
 - Bump the actions-all group across 1 directory with 3 updates (#561) ([4eb1e50](https://github.com/xtrm-dev/specialists/commit/4eb1e50cd3b9a5d67b590004e7c24ba84749b132))
-- Read the activation env from the bash spawn hook in the three-sink test ([a213b1b](https://github.com/xtrm-dev/specialists/commit/a213b1b96620a1076b9f45d7d9e1e89c006f7c5c))
-- Rebuild the committed bundle with the pinned bun 1.4.2 (SPECIALISTS-4506) ([3c402db](https://github.com/xtrm-dev/specialists/commit/3c402db1fb75f78323b0dbfb54696a20f2ecf407))
-- Rebuild the committed bundle with the pinned bun 1.4.2 (SPECIALISTS-4506) ([441be0a](https://github.com/xtrm-dev/specialists/commit/441be0a24faffe1aee8931b89150c883fee58b7f))
-- Rebuild the committed bundle with the pinned bun 1.4.2 (SPECIALISTS-4506) ([bfe1004](https://github.com/xtrm-dev/specialists/commit/bfe1004976fb4af5200bc7b5be984cbecbb4fef6))
+- Rebuild with the pinned bun 1.4.2 (SPECIALISTS-4505) ([bf2aeae](https://github.com/xtrm-dev/specialists/commit/bf2aeaefd0d4a98d894bf89b0a72853c17c708d6))
+- Rebuild with the pinned bun 1.4.2 (SPECIALISTS-4505) ([d098817](https://github.com/xtrm-dev/specialists/commit/d098817ef3a27e52d6e9d89ca11c45befe3fdd9b))
+- Rebuild with the pinned bun 1.4.2 (SPECIALISTS-4505) ([3f5114f](https://github.com/xtrm-dev/specialists/commit/3f5114f3101c61e1d1782bea406312fd8652f36d))
 
 ## [4.2.0] - 2026-11-11
 
