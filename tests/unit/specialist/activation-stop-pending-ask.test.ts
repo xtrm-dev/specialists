@@ -127,7 +127,7 @@ function askBlockedSession(blocker: string, options: SessionOptions = {}) {
   };
 }
 
-function hostWith(blocker: string, options: SessionOptions & { stopAbortTimeoutMs?: number } = {}) {
+function hostWith(blocker: string, options: SessionOptions & { stopAbortTimeoutMs?: number; writer?: boolean } = {}) {
   const workspace = tempDir('stop-pending-ask-ws-');
   const askSession = askBlockedSession(blocker, options);
   const emitted: Emitted[] = [];
@@ -158,7 +158,7 @@ function hostWith(blocker: string, options: SessionOptions & { stopAbortTimeoutM
           metadata: { name: 'researcher', version: '1.0.0', description: 'd', category: 'c' },
           execution: {
             model: 'testprov/test-model',
-            permission_required: 'READ_ONLY',
+            permission_required: options.writer ? 'MEDIUM' : 'READ_ONLY',
             response_format: 'text',
             output_type: 'research',
             bare: false,
@@ -224,7 +224,7 @@ describe('specialist_stop_activation with a pending ask (SPECIALISTS-4505)', () 
     expect(outcome.r).toMatchObject({ status: 'stopped', cancelled_asks: [pendingAsk] });
     expect(String((outcome.r as { cancelled_asks_note?: string }).cancelled_asks_note)).toContain('no longer be answered');
 
-    // Durable record: the cancellation is emitted, not dropped when it leaves `pendingAsks()`.
+    // The cancellation is emitted for live forensic listeners (the status sink does not persist it).
     const cancelled = emitted.filter((e) => e.name === 'activation_ask_cancelled');
     expect(cancelled).toHaveLength(1);
     expect(cancelled[0]).toMatchObject({
@@ -260,6 +260,55 @@ describe('specialist_stop_activation with a pending ask (SPECIALISTS-4505)', () 
     // A stop that could not abort is still a stop — and it says so, with the bound it used.
     expect(emitted.find((e) => e.name === 'activation_abort_timeout')?.payload).toMatchObject({ timeout_ms: 20 });
     expect(emitted.some((e) => e.name === 'activation_disposed')).toBe(true);
+  });
+
+  it('reports abort_timed_out through the stop tool when the bound is hit', async () => {
+    const { host } = hostWith('unused', { abortHangsForever: true, stopAbortTimeoutMs: 20 });
+    const activationId = await dispatchEscalated(host);
+    const stop = createSpecialistStopActivationTool(() => host);
+    const result = await stop.execute({ activation_id: activationId, reason: 'abort hangs' });
+    expect(result).toMatchObject({ status: 'stopped', abort_timed_out: true });
+  });
+
+  it('stops a second activation without touching the first one\'s pending ask', async () => {
+    const { host } = hostWith('first');
+    const first = await dispatchEscalated(host);
+    const dispatch = createSpecialistDispatchTool(() => host);
+    const second = String(((await dispatch.execute({ specialist: 'researcher', bead_id: 'ISSUE-2' })) as { activation_id: string }).activation_id);
+    await until(() => host.pendingAsks().length === 2);
+    const firstAsk = host.pendingAsks().find((a) => a.message.activationId === first)!.message.messageId;
+
+    const outcome = await host.stop(second, 'stop only the second');
+
+    expect(outcome.cancelledAskIds).toHaveLength(1);
+    expect(outcome.cancelledAskIds).not.toContain(firstAsk);
+    expect(host.pendingAsks().map((a) => a.message.messageId)).toEqual([firstAsk]);
+    expect(host.inspect(first)).toBeDefined();
+  });
+
+  it('keeps a writer\'s lease and reports it uncertain when the abort hit the bound', async () => {
+    const { host, emitted } = hostWith('unused', { abortHangsForever: true, stopAbortTimeoutMs: 20, writer: true });
+    const activationId = await dispatchEscalated(host);
+
+    const outcome = await host.stop(activationId, 'abort hangs');
+
+    expect(outcome.abortTimedOut).toBe(true);
+    const names = emitted.map((e) => e.name);
+    // The turn itself may have released at completion; what matters is the stop's own decision.
+    const afterTimeout = names.slice(names.indexOf('activation_abort_timeout'));
+    expect(afterTimeout).toContain('lease_uncertain');
+    expect(afterTimeout).not.toContain('lease_released');
+  });
+
+  it('releases a writer\'s lease when the abort finished within the bound', async () => {
+    const { host, emitted } = hostWith('unused', { writer: true });
+    const activationId = await dispatchEscalated(host);
+
+    await host.stop(activationId, 'ordinary stop');
+
+    const names = emitted.map((e) => e.name);
+    expect(names.slice(names.indexOf('activation_ask_cancelled'))).toContain('lease_released');
+    expect(names).not.toContain('lease_uncertain');
   });
 
   it('leaves an activation with no pending ask exactly as before — no cancellation, no timeout', async () => {

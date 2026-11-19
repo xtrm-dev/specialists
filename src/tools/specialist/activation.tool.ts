@@ -771,8 +771,8 @@ export function createSpecialistStopActivationTool(getHost: () => NativeActivati
           ? {
             cancelled_asks: outcome.cancelledAskIds,
             cancelled_asks_note:
-              'Cancelled by the stop so the activation could be disposed. These asks are '
-              + 'recorded as unanswered (activation_ask_cancelled) and can no longer be answered.',
+              'Cancelled by the stop so the activation could be disposed. These asks went '
+              + 'unanswered and can no longer be answered; this result is the record of them.',
           }
           : {}),
         ...(outcome.abortTimedOut ? { abort_timed_out: true } : {}),
