@@ -98,8 +98,11 @@ export type {
 } from './activation/interaction.js';
 
 // The dispatcher of one dispatch (SPECIALISTS-4503): the Pi extension resolves it from the
-// host env it already runs in, and hands the SAME value to the request/env sinks.
-export { dispatcherFromHostEnv } from './activation/dispatcher-identity.js';
+// host env it already runs in, and hands the SAME value to the request/env sinks. The
+// sanitizer and normalizer are exported too, so the extension bounds a caller-supplied
+// `requested_by`/`coordinator_session_id` with the host's own rule instead of a second one
+// (SPECIALISTS-4510).
+export { dispatcherFromHostEnv, normalizeDispatcherIdentity, sanitizeDispatcherValue, warnDispatcherIdentity } from './activation/dispatcher-identity.js';
 export type { DispatcherIdentity, DispatcherEnvOverlay } from './activation/dispatcher-identity.js';
 
 // Shared frontend projections (unitAI-rrdnt.33): the SAME snapshot→wire mapping both

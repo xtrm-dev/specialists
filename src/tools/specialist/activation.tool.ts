@@ -46,7 +46,9 @@ import { THINKING_LEVELS } from '../../activation/types.js';
 import type { ActivationSnapshot, ActivationTokenUsage } from '../../activation/types.js';
 import { DispatchRejectedError } from '../../activation/types.js';
 import {
+  normalizeDispatcherIdentity,
   resolveProcessDispatcher,
+  sanitizeDispatcherValue,
   warnDispatcherIdentity,
   type DispatcherIdentity,
   type DispatcherRun,
@@ -377,6 +379,10 @@ export const specialistDispatchSchema = z.object({
   thinking_override: z.enum(THINKING_LEVELS).optional().describe(
     SPECIALIST_DISPATCH_PARAMS.thinking_override,
   ),
+  // Both are caller-asserted attribution, so neither is validated by the schema: a refusal here
+  // would fail a dispatch over its own label. The values are bounded and stripped of control
+  // characters at the boundary instead, and an unusable one is dropped with one warning
+  // (SPECIALISTS-4510) — see resolveDispatcherOnce.
   requested_by: z.string().optional().describe(
     SPECIALIST_DISPATCH_RUNTIME_PARAMS.mcp.requested_by,
   ),
@@ -416,25 +422,36 @@ function warnRouteDropped(warn: (message: string) => void): void {
 /**
  * Resolve this process's dispatcher once per dispatch, honouring an explicit
  * `requested_by` override for the participant while keeping the process's name/address.
+ *
+ * AWAITED: the lookup spawns `xt` asynchronously, because the MCP server's event loop also
+ * hosts every running activation (SPECIALISTS-4510). The explicit value is caller-asserted, so
+ * it is held to the same grammar as every other dispatcher value: an unusable one is dropped
+ * with one warning and the dispatch proceeds with the process's own participant.
  */
-function resolveDispatcherOnce(
+async function resolveDispatcherOnce(
   lookup: {
     env?: NodeJS.ProcessEnv;
     pid?: number;
     run?: DispatcherRun;
+    timeoutMs?: number;
     warn?: (message: string) => void;
     now?: () => number;
   },
   explicitParticipant: string | undefined,
-): DispatcherIdentity {
-  const resolved = resolveProcessDispatcher({
+): Promise<DispatcherIdentity> {
+  const warn = lookup.warn ?? warnDispatcherIdentity;
+  const resolved = await resolveProcessDispatcher({
     env: lookup.env ?? process.env,
     pid: lookup.pid ?? process.ppid,
     ...(lookup.run ? { run: lookup.run } : {}),
+    ...(lookup.timeoutMs !== undefined ? { timeoutMs: lookup.timeoutMs } : {}),
     ...(lookup.now ? { now: lookup.now } : {}),
-    warn: lookup.warn ?? warnDispatcherIdentity,
+    warn,
   });
-  const explicit = (explicitParticipant ?? '').trim();
+  // Blank is absence, not an override: the process's own participant stays. An unusable
+  // override is dropped the same way — a dispatch never fails because of its label.
+  if ((explicitParticipant ?? '').trim() === '') return resolved;
+  const explicit = normalizeDispatcherIdentity({ participant: explicitParticipant }, warn).participant;
   return explicit ? { ...resolved, participant: explicit } : resolved;
 }
 
@@ -445,6 +462,7 @@ export function createSpecialistDispatchTool(
     env?: NodeJS.ProcessEnv;
     pid?: number;
     run?: DispatcherRun;
+    timeoutMs?: number;
     warn?: (message: string) => void;
     now?: () => number;
   } = {},
@@ -545,12 +563,21 @@ export function createSpecialistDispatchTool(
         // SPECIALISTS-4503: one dispatcher value per dispatch, resolved AFTER this tool's own
         // gates (a dispatch refused by them never spawns `xt`) and used by BOTH sinks — the
         // request's Substrate fields and the activation env overlay. A dispatch that
-        // `host.start` itself refuses (admission, lease, model) happens after this one bounded
-        // lookup: it costs 0.15-0.2 s when `xt` is healthy and is capped at 3 s otherwise. An
-        // explicit `requested_by` overrides the participant; the name/address still describe
-        // this process.
-        const dispatcher = resolveDispatcherOnce(dispatcherLookup, input.requested_by);
-        const coordinatorSessionId = input.coordinator_session_id ?? dispatcher.sessionId;
+        // `host.start` itself refuses (admission, lease, model) happens after this one lookup:
+        // it costs 0.15-0.2 s when `xt` is healthy, is capped at 3 s otherwise, and no longer
+        // blocks the event loop the running activations live on (SPECIALISTS-4510). An explicit
+        // `requested_by` overrides the participant; the name/address still describe this
+        // process. Both caller-supplied values are bounded here, at the tool boundary.
+        const dispatcher = await resolveDispatcherOnce(dispatcherLookup, input.requested_by);
+        const suppliedSession = sanitizeDispatcherValue(input.coordinator_session_id);
+        if (input.coordinator_session_id?.trim() && !suppliedSession) {
+          // Fail-open for the dispatch, but never silent: the caller's value was unusable and
+          // the process's own session now stands in for it.
+          (dispatcherLookup.warn ?? warnDispatcherIdentity)(
+            'coordinator_session_id is oversized or has no usable characters; using this process\'s session instead',
+          );
+        }
+        const coordinatorSessionId = suppliedSession ?? dispatcher.sessionId;
         const handle = await getHost().start({
           specialist: input.specialist,
           ...(issueRefValue ? { issueRef: issueRefValue } : {}),

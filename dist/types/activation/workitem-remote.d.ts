@@ -45,6 +45,14 @@ export interface RemoteProjectTarget {
 }
 /** Test seam: the next remote dispatch may warn again. */
 export declare function resetRemoteDispatcherWarning(): void;
+/**
+ * Build the work-item ports over a live service connection to the store-owning
+ * machine.
+ *
+ * `remote` is the configured label (`ssh:<host>`), used only to say where the
+ * failure happened; the connection itself is already open and is not this
+ * function's to close.
+ */
 export declare function createRemoteWorkItemPorts(service: RemoteWorkItemService, opts: {
     remote: string;
     project?: RemoteProjectTarget;
