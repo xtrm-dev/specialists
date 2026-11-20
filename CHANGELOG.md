@@ -64,6 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rebuild with the pinned bun 1.4.2 after merging master (SPECIALISTS-4510) ([feee9f7](https://github.com/xtrm-dev/specialists/commit/feee9f774866957c96bfe835acb7c02b1309458d))
 - Rebuild with the pinned bun 1.4.2 after merging master (SPECIALISTS-4510) ([7a50170](https://github.com/xtrm-dev/specialists/commit/7a50170809fbd2df68392cc26e55d0296bfd8af4))
 - Rebuild with the pinned bun 1.4.2 (SPECIALISTS-4510) ([ee75439](https://github.com/xtrm-dev/specialists/commit/ee75439e7b46a632e38a16462e65616a6411a8af))
+- Rebuild with the pinned bun 1.4.2, refresh changelog (SPECIALISTS-4510) ([ea9fefb](https://github.com/xtrm-dev/specialists/commit/ea9fefb68e2e1bc707cb3f90560f7cc0c5ad12c9))
 
 ## [4.2.0] - 2026-11-11
 
