@@ -402,6 +402,9 @@ describe('native-specialists extension (Pi coordinator surface)', () => {
     const pi = makeFakePi();
     const { host, calls } = makeFakeHost();
     mod.default(pi, { createHost: () => host, env: { SUBSTRATE_HOLDER: 'sp-lead-1' } });
+    // The single runtime-diagnostics sink (stderr by default), never a raw console line over the TUI.
+    const lines: string[] = [];
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: unknown) => { lines.push(String(chunk)); return true; }) as never);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       await toolNamed(pi, 'specialist_dispatch').execute('tc1', {
@@ -409,9 +412,11 @@ describe('native-specialists extension (Pi coordinator surface)', () => {
         bead_id: 'bd-1',
         coordinator_session_id: 'a'.repeat(200_000),
       });
-      expect(warn.mock.calls.filter((c) => String(c[0]).includes('coordinator_session_id'))).toHaveLength(1);
+      expect(lines.filter((l) => l.includes('coordinator_session_id'))).toHaveLength(1);
+      expect(warn).not.toHaveBeenCalled();
       expect(String(calls.start[0].coordinatorSessionId ?? '')).not.toContain('aaaa');
     } finally {
+      stderr.mockRestore();
       warn.mockRestore();
     }
   });

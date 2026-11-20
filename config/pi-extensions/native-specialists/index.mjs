@@ -86,6 +86,7 @@ import {
   dispatcherFromHostEnv,
   normalizeDispatcherIdentity,
   sanitizeDispatcherValue,
+  warnDispatcherIdentity,
 } from '../../../dist/lib.js';
 
 
@@ -2534,7 +2535,7 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
         const suppliedSession = sanitizeDispatcherValue(params.coordinator_session_id);
         if (String(params.coordinator_session_id ?? '').trim() && !suppliedSession) {
           // Dropped, never silent: the process's own session stands in for the caller's value.
-          console.warn("[specialists] dispatcher-identity: coordinator_session_id is oversized or has no usable characters; using this process's session instead");
+          warnDispatcherIdentity("coordinator_session_id is oversized or has no usable characters; using this process's session instead");
         }
         const coordinatorSessionId = suppliedSession ?? dispatcher.sessionId;
 

@@ -102,7 +102,7 @@ export type {
 // sanitizer and normalizer are exported too, so the extension bounds a caller-supplied
 // `requested_by`/`coordinator_session_id` with the host's own rule instead of a second one
 // (SPECIALISTS-4510).
-export { dispatcherFromHostEnv, normalizeDispatcherIdentity, sanitizeDispatcherValue } from './activation/dispatcher-identity.js';
+export { dispatcherFromHostEnv, normalizeDispatcherIdentity, sanitizeDispatcherValue, warnDispatcherIdentity } from './activation/dispatcher-identity.js';
 export type { DispatcherIdentity, DispatcherEnvOverlay } from './activation/dispatcher-identity.js';
 
 // Shared frontend projections (unitAI-rrdnt.33): the SAME snapshot→wire mapping both
