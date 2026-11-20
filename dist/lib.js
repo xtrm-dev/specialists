@@ -29694,5 +29694,6 @@ export {
   validateBeforeRun,
   validateContractText,
   validateLaunchOutcome,
-  verifyExactLineCitation
+  verifyExactLineCitation,
+  warnDispatcherIdentity
 };

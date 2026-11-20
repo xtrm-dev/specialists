@@ -17,7 +17,7 @@ export type { ContractTextValidation } from './activation/contract-sections.js';
 export { DispatchRejectedError, THINKING_LEVELS } from './activation/types.js';
 export type { ActivationId, ActivationRequest, ActivationResult, ActivationSnapshot, ActivationState, ActivationHandle, AttemptId, ParticipantId, PiSessionId, WorkspaceAccess, WorkspaceIdentity, } from './activation/types.js';
 export type { DeliveryState, InteractionKind, InteractionMessage, MessageId, PendingAsk, } from './activation/interaction.js';
-export { dispatcherFromHostEnv, normalizeDispatcherIdentity, sanitizeDispatcherValue } from './activation/dispatcher-identity.js';
+export { dispatcherFromHostEnv, normalizeDispatcherIdentity, sanitizeDispatcherValue, warnDispatcherIdentity } from './activation/dispatcher-identity.js';
 export type { DispatcherIdentity, DispatcherEnvOverlay } from './activation/dispatcher-identity.js';
 export { toActivationView, toActivationCompactView, toActivationResultView, toPendingAskView, toPendingAskCompactView } from './tools/specialist/activation.tool.js';
 export type { ActivationView, ActivationCompactView, ActivationResultView, PendingAskView, PendingAskCompactView } from './tools/specialist/activation.tool.js';

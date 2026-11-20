@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - One holder for the claim, the check, the bind and the shells (SPECIALISTS-4502) (#588) ([e540ef5](https://github.com/xtrm-dev/specialists/commit/e540ef5c4e5f5a7893eec1254a88b55e794c541d))
 - Warn on a dropped coordinator_session_id, kill-test the lookup bound, use tempDir (SPECIALISTS-4510) ([84e6d79](https://github.com/xtrm-dev/specialists/commit/84e6d79a516bb28764208ec0e8feeb513d665a4d))
 - Warn when the Pi path drops an unusable coordinator_session_id (SPECIALISTS-4510) ([28027ef](https://github.com/xtrm-dev/specialists/commit/28027efee806e9909dcb41adf61e4aea90614b57))
+- The Pi coordinator_session_id warning goes to the runtime diagnostics sink (SPECIALISTS-4510) ([228e3d6](https://github.com/xtrm-dev/specialists/commit/228e3d66469e4d4a45ad269814893f27de287c1a))
 
 ### Project maintenance
 - Make the NODE_ENV assertion prove the override (SPECIALISTS-4429) (#543) ([21be15b](https://github.com/xtrm-dev/specialists/commit/21be15b78a1e6eda9640dea37c350832012b1781))
