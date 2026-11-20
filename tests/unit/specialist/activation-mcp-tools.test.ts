@@ -469,11 +469,12 @@ describe('specialist_dispatch — the MCP dispatch path is the same admission pa
 
     it('bounds an oversized coordinator_session_id and falls back to the dispatcher session', async () => {
       const host = stubHost();
+      const warn = vi.fn();
       const tool = createSpecialistDispatchTool(() => host as never, undefined, {
         env: { SUBSTRATE_HOLDER: 'sp-holder-1' },
         pid: 1,
         run: () => ({ status: 0, stdout: JSON.stringify({ sessionId: 'pi-sess-1' }) }),
-        warn: () => undefined,
+        warn,
       });
 
       await tool.execute({
@@ -484,6 +485,7 @@ describe('specialist_dispatch — the MCP dispatch path is the same admission pa
 
       const request = host.start.mock.calls.at(-1)?.[0] as { coordinatorSessionId?: string };
       expect(request.coordinatorSessionId).toBe('pi-sess-1');
+      expect(warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('coordinator_session_id'))).toHaveLength(1);
     });
   });
 

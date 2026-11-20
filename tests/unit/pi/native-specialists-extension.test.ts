@@ -397,7 +397,8 @@ describe('native-specialists extension (Pi coordinator surface)', () => {
     expect(calls.start[0].coordinatorSessionId).toBe('lead-pi-sessionsp-forged=2');
   });
 
-  it('thinking_override passes through on bead_id dispatch, omitted by default', async () => {    const mod = await loadExtension();
+  it('thinking_override passes through on bead_id dispatch, omitted by default', async () => {
+    const mod = await loadExtension();
     const pi = makeFakePi();
     const { host, calls } = makeFakeHost();
     mod.default(pi, { createHost: () => host });

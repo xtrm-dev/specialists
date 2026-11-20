@@ -569,7 +569,15 @@ export function createSpecialistDispatchTool(
         // `requested_by` overrides the participant; the name/address still describe this
         // process. Both caller-supplied values are bounded here, at the tool boundary.
         const dispatcher = await resolveDispatcherOnce(dispatcherLookup, input.requested_by);
-        const coordinatorSessionId = sanitizeDispatcherValue(input.coordinator_session_id) ?? dispatcher.sessionId;
+        const suppliedSession = sanitizeDispatcherValue(input.coordinator_session_id);
+        if (input.coordinator_session_id?.trim() && !suppliedSession) {
+          // Fail-open for the dispatch, but never silent: the caller's value was unusable and
+          // the process's own session now stands in for it.
+          (dispatcherLookup.warn ?? warnDispatcherIdentity)(
+            'coordinator_session_id is oversized or has no usable characters; using this process\'s session instead',
+          );
+        }
+        const coordinatorSessionId = suppliedSession ?? dispatcher.sessionId;
         const handle = await getHost().start({
           specialist: input.specialist,
           ...(issueRefValue ? { issueRef: issueRefValue } : {}),

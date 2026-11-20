@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { delimiter, join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tempDir } from '../../utils/temp-dir.js';
 import {
   bridgedDispatcherEnv,
   defaultDispatcherRun,
@@ -376,6 +376,20 @@ describe('the lookup never blocks the event loop and never outlives its bound (S
     expect(ticks.length).toBeGreaterThan(2);
   });
 
+  it('kills a child that ignores SIGTERM, so it does not outlive the bound', async () => {
+    const result = await defaultDispatcherRun(
+      process.execPath,
+      ['-e', 'process.on("SIGTERM", () => {}); console.log(process.pid); setTimeout(() => {}, 30_000)'],
+      { timeoutMs: 600 },
+    );
+    const pid = Number.parseInt(result.stdout.trim(), 10);
+    expect(Number.isInteger(pid)).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    let alive = true;
+    try { process.kill(pid, 0); } catch { alive = false; }
+    expect(alive).toBe(false);
+  });
+
   it('ends a child that ignores SIGTERM at the bound instead of stalling on it', async () => {
     const started = Date.now();
     const result = await defaultDispatcherRun(
@@ -391,7 +405,7 @@ describe('the lookup never blocks the event loop and never outlives its bound (S
 
 describe('a dispatch answers while a stub xt sleeps 30 s (SPECIALISTS-4510)', () => {
   it('dispatches, keeps the loop serviced, and fails open on the slow lookup', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'xt-slow-'));
+    const dir = tempDir('xt-slow-');
     writeFileSync(join(dir, 'xt'), `#!${process.execPath}\nprocess.on('SIGTERM', () => {});\nsetTimeout(() => {}, 30_000);\n`);
     chmodSync(join(dir, 'xt'), 0o755);
     const host = {
