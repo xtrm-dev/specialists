@@ -184,12 +184,8 @@ describe('specialists plugin path discipline', () => {
       url: 'https://github.com/xtrm-dev/xtrm.git',
       path: 'packages/service-knowledge/plugin/service-knowledge',
     });
-    // Unlike skill-suggest (public xtrm-dev/core), this entry points at a PRIVATE repository from a
-    // public marketplace: an installing host without git access fails at clone time. The
-    // description must say so, because the failure happens inside Claude Code's clone step where
-    // the reason is not obvious.
-    expect(entry?.description).toContain('private');
-    expect(entry?.description).toContain('git access');
+    // xtrm-dev/xtrm is public, so no git-access caveat belongs in the description.
+    expect(entry?.description).not.toMatch(/private|git access/i);
   });
 
   it('versions every plugin with the package version so plugin update ships changes', () => {
