@@ -93965,7 +93965,11 @@ function createSpecialistDispatchTool(getHost, getPusher, dispatcherLookup = {})
           }
         }
         const dispatcher = await resolveDispatcherOnce(dispatcherLookup, input.requested_by);
-        const coordinatorSessionId = sanitizeDispatcherValue(input.coordinator_session_id) ?? dispatcher.sessionId;
+        const suppliedSession = sanitizeDispatcherValue(input.coordinator_session_id);
+        if (input.coordinator_session_id?.trim() && !suppliedSession) {
+          (dispatcherLookup.warn ?? warnDispatcherIdentity)("coordinator_session_id is oversized or has no usable characters; using this process's session instead");
+        }
+        const coordinatorSessionId = suppliedSession ?? dispatcher.sessionId;
         const handle = await getHost().start({
           specialist: input.specialist,
           ...issueRefValue ? { issueRef: issueRefValue } : {},
