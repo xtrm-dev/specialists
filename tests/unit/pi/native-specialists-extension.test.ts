@@ -397,6 +397,25 @@ describe('native-specialists extension (Pi coordinator surface)', () => {
     expect(calls.start[0].coordinatorSessionId).toBe('lead-pi-sessionsp-forged=2');
   });
 
+  it('warns when an oversized coordinator_session_id is dropped at the Pi boundary (SPECIALISTS-4510)', async () => {
+    const mod = await loadExtension();
+    const pi = makeFakePi();
+    const { host, calls } = makeFakeHost();
+    mod.default(pi, { createHost: () => host, env: { SUBSTRATE_HOLDER: 'sp-lead-1' } });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      await toolNamed(pi, 'specialist_dispatch').execute('tc1', {
+        specialist: 'explorer',
+        bead_id: 'bd-1',
+        coordinator_session_id: 'a'.repeat(200_000),
+      });
+      expect(warn.mock.calls.filter((c) => String(c[0]).includes('coordinator_session_id'))).toHaveLength(1);
+      expect(String(calls.start[0].coordinatorSessionId ?? '')).not.toContain('aaaa');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('thinking_override passes through on bead_id dispatch, omitted by default', async () => {
     const mod = await loadExtension();
     const pi = makeFakePi();

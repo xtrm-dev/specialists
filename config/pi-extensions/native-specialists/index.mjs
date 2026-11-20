@@ -2531,7 +2531,12 @@ export default function nativeSpecialistsExtension(pi, options = {}) {
           ? normalizeDispatcherIdentity({ participant: params.requested_by }).participant
           : undefined;
         const dispatcher = explicit ? { ...hostDispatcher, participant: explicit } : hostDispatcher;
-        const coordinatorSessionId = sanitizeDispatcherValue(params.coordinator_session_id) ?? dispatcher.sessionId;
+        const suppliedSession = sanitizeDispatcherValue(params.coordinator_session_id);
+        if (String(params.coordinator_session_id ?? '').trim() && !suppliedSession) {
+          // Dropped, never silent: the process's own session stands in for the caller's value.
+          console.warn("[specialists] dispatcher-identity: coordinator_session_id is oversized or has no usable characters; using this process's session instead");
+        }
+        const coordinatorSessionId = suppliedSession ?? dispatcher.sessionId;
 
         const handle = await h.start({
           specialist: params.specialist,
