@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bound and sanitize the dispatcher values, async lookup (SPECIALISTS-4510) ([8aabce4](https://github.com/xtrm-dev/specialists/commit/8aabce415d57e8a915ba62b109c6ec7013c6ce0d))
 - Stop cancels a pending ask instead of waiting on it (SPECIALISTS-4505) (#587) ([b630953](https://github.com/xtrm-dev/specialists/commit/b630953e5c9db81b79ff5022d2291a743c588c19))
 - One holder for the claim, the check, the bind and the shells (SPECIALISTS-4502) (#588) ([e540ef5](https://github.com/xtrm-dev/specialists/commit/e540ef5c4e5f5a7893eec1254a88b55e794c541d))
+- Warn on a dropped coordinator_session_id, kill-test the lookup bound, use tempDir (SPECIALISTS-4510) ([84e6d79](https://github.com/xtrm-dev/specialists/commit/84e6d79a516bb28764208ec0e8feeb513d665a4d))
 
 ### Project maintenance
 - Make the NODE_ENV assertion prove the override (SPECIALISTS-4429) (#543) ([21be15b](https://github.com/xtrm-dev/specialists/commit/21be15b78a1e6eda9640dea37c350832012b1781))
@@ -60,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rebuild with the pinned bun 1.4.2 for SPECIALISTS-4510 ([e3abbd7](https://github.com/xtrm-dev/specialists/commit/e3abbd73034eda0b4e2880ae05c136007acc454b))
 - Rebuild with the pinned bun 1.4.2 after merging master (SPECIALISTS-4510) ([feee9f7](https://github.com/xtrm-dev/specialists/commit/feee9f774866957c96bfe835acb7c02b1309458d))
 - Rebuild with the pinned bun 1.4.2 after merging master (SPECIALISTS-4510) ([7a50170](https://github.com/xtrm-dev/specialists/commit/7a50170809fbd2df68392cc26e55d0296bfd8af4))
+- Rebuild with the pinned bun 1.4.2 (SPECIALISTS-4510) ([ee75439](https://github.com/xtrm-dev/specialists/commit/ee75439e7b46a632e38a16462e65616a6411a8af))
 
 ## [4.2.0] - 2026-11-11
 
